@@ -65,6 +65,42 @@ describe("outcome categories", () => {
     ).toThrow(/duplicate scenario :id/);
   });
 
+  it("a present but malformed expectation is an infrastructure error, never a skipped check", () => {
+    const scenario = (given: string, action: string) =>
+      `{:scenarios [{:id :x :given {:role :implementer :issues [${given}]}
+        :expect {:actions [{:n 1 :kind :implement :rule "D-EASY" :band 4 ${action}}]}}]}`;
+    const issue = `{:n 1 :impact "L" :complexity "S"}`;
+    for (const [given, action, message] of [
+      [issue, `:facts [[:impact "WRONG"]]`, /:facts must be a map/],
+      [issue, `:facts {:impact [1]}`, /:facts keys must be keywords/],
+      [issue, `:overridden "D-ORDINARY"`, /:overridden must be a vector of strings/],
+      [issue, `:unlocks "1"`, /:unlocks must be a number/],
+      [`{:n 1 :labels "status:ready"}`, "", /:labels must be a vector of strings/],
+      [`{:n 1 :labels-complete "no"}`, "", /:labels-complete must be a boolean/],
+      [`{:n 1 :impact :L}`, "", /:impact must be a string/],
+    ] as const)
+      expect(() => loadScenarios(scenario(given, action), "malformed.edn")).toThrow(message);
+  });
+
+  it("a dependency on an issue missing from the scenario is an infrastructure error", () => {
+    expect(() =>
+      loadScenarios(
+        `{:scenarios [{:id :x :given {:role :implementer :issues [{:n 1 :blocks [2]}]} :expect {:actions []}}]}`,
+        "dangling.edn",
+      ),
+    ).toThrow(/issue 1 :blocks 2, which is not in :issues/);
+  });
+
+  it("supports EDN's \\r escape and rejects escapes outside the reader's subset", () => {
+    const docOf = (escaped: string) =>
+      loadScenarios(
+        `{:scenarios [{:id :x :doc "a${escaped}b" :given {:role :implementer} :expect {:actions []}}]}`,
+        "escape.edn",
+      )[0].doc;
+    expect(docOf("\\r")).toBe("a\rb");
+    expect(() => docOf("\\q")).toThrow(RuleInfrastructureError);
+  });
+
   it("reports the line of the failing scenario, not of the file", () => {
     const parsed = loadScenarios(
       "{:scenarios [\n\n {:id :third-line\n :given {:role :implementer} :expect {:actions []}}]}",

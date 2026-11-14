@@ -108,6 +108,31 @@ export function loadScenarios(source: string, file: string): Scenario[] {
     const bad = (detail: string): never => {
       throw new RuleInfrastructureError(where, detail);
     };
+    // A present but malformed field is an error; only an absent optional field is skipped, so a
+    // mistyped expectation can never silently turn into "not checked".
+    const isColl = (v: Edn | undefined) =>
+      Array.isArray(v) ||
+      (typeof v === "object" && v !== null && !(v instanceof Map) && "set" in v);
+    const strings = (m: Map<Edn, Edn>, key: string): string[] | undefined => {
+      const v = get(m, key);
+      if (v === undefined) return undefined;
+      if (!isColl(v) || !list(v).every((x) => typeof x === "string"))
+        bad(`:${key} must be a vector of strings`);
+      return list(v) as string[];
+    };
+    const numbers = (m: Map<Edn, Edn>, key: string): number[] | undefined => {
+      const v = get(m, key);
+      if (v === undefined) return undefined;
+      if (!isColl(v) || !list(v).every((x) => typeof x === "number"))
+        bad(`:${key} must be a vector of numbers`);
+      return list(v) as number[];
+    };
+    const optional = <T>(m: Map<Edn, Edn>, key: string, type: string): T | undefined => {
+      const v = get(m, key);
+      if (v === undefined) return undefined;
+      if (typeof v !== type) bad(`:${key} must be a ${type}`);
+      return v as T;
+    };
     if (!isMap(s)) return bad("scenario is not a map");
     if (where.scenario === "(no id)") bad("scenario has no :id");
     if (seen.has(where.scenario)) bad("duplicate scenario :id");
@@ -117,18 +142,24 @@ export function loadScenarios(source: string, file: string): Scenario[] {
     if (!isMap(given) || !isMap(expected)) return bad("scenario needs :given and :expect maps");
     const role = text(get(given, "role"));
     if (role !== "implementer" && role !== "designer") bad(`unsupported :role ${role}`);
+    if (get(given, "issues") !== undefined && !isColl(get(given, "issues")))
+      bad(":issues must be a vector of maps");
     const issues = list(get(given, "issues")).map((i): IssueFacts => {
       if (!isMap(i) || typeof get(i, "n") !== "number") return bad("each issue needs a numeric :n");
       return {
         n: get(i, "n") as number,
-        labels:
-          get(i, "labels") === undefined ? ["status:ready"] : list(get(i, "labels")).map(String),
-        labelsComplete: get(i, "labels-complete") !== false,
-        impact: text(get(i, "impact")) ?? null,
-        complexity: text(get(i, "complexity")) ?? null,
-        blocks: list(get(i, "blocks")).map(Number),
+        labels: strings(i, "labels") ?? ["status:ready"],
+        labelsComplete: optional<boolean>(i, "labels-complete", "boolean") ?? true,
+        impact: optional<string>(i, "impact", "string") ?? null,
+        complexity: optional<string>(i, "complexity", "string") ?? null,
+        blocks: numbers(i, "blocks") ?? [],
       };
     });
+    const known = new Set(issues.map((i) => i.n));
+    if (known.size !== issues.length) bad("duplicate issue :n");
+    for (const i of issues)
+      for (const d of i.blocks)
+        if (!known.has(d)) bad(`issue ${i.n} :blocks ${d}, which is not in :issues`);
     if (!Array.isArray(get(expected, "actions")))
       bad(":expect needs an exhaustive :actions vector");
     const actions = list(get(expected, "actions")).map((a): ExpectedAction => {
@@ -138,6 +169,12 @@ export function loadScenarios(source: string, file: string): Scenario[] {
         rule = text(get(a, "rule"));
       if (typeof get(a, "n") !== "number" || !kind || !rule || typeof get(a, "band") !== "number")
         bad("each expected action needs :n, :kind, :rule and :band");
+      if (facts !== undefined) {
+        if (!isMap(facts)) bad(":facts must be a map of binding to value");
+        for (const [k, v] of facts as Map<Edn, Edn>)
+          if (!text(k) || !["string", "number", "boolean"].includes(typeof v))
+            bad(":facts keys must be keywords and values strings, numbers or booleans");
+      }
       return {
         n: get(a, "n") as number,
         kind: kind!,
@@ -148,11 +185,12 @@ export function loadScenarios(source: string, file: string): Scenario[] {
               [...facts].map(([k, v]) => [text(k)!, v as string | number | boolean]),
             )
           : undefined,
-        overridden:
-          get(a, "overridden") === undefined ? undefined : list(get(a, "overridden")).map(String),
-        unlocks: get(a, "unlocks") as number | undefined,
+        overridden: strings(a, "overridden"),
+        unlocks: optional<number>(a, "unlocks", "number"),
       };
     });
+    if (get(expected, "denials") !== undefined && !isColl(get(expected, "denials")))
+      bad(':denials must be a set of [issue-number "RULE-ID"]');
     const denials = list(get(expected, "denials")).map((d) => {
       const [n, rule] = list(d);
       if (typeof n !== "number" || typeof rule !== "string")
@@ -268,8 +306,8 @@ export function snapshotOf(issues: IssueFacts[]): {
 
 /** Run the real evaluator; an evaluator exception is infrastructure, not a wrong decision. */
 export function evaluate(s: Scenario, issues = s.issues): DatalogResult {
-  const { snapshot, assessments } = snapshotOf(issues);
   try {
+    const { snapshot, assessments } = snapshotOf(issues);
     return evaluateDatalog(snapshot, assessments, {
       role: s.role,
       agent: s.agent,
@@ -278,7 +316,10 @@ export function evaluate(s: Scenario, issues = s.issues): DatalogResult {
       now: () => 0,
     });
   } catch (e) {
-    throw new RuleInfrastructureError(s.where, `evaluator failed: ${(e as Error).message}`);
+    throw new RuleInfrastructureError(
+      s.where,
+      `fixture or evaluator failed: ${(e as Error).message}`,
+    );
   }
 }
 

@@ -101,8 +101,12 @@ export function readEdn(text: string, file: string): Edn {
         if (i >= text.length) fail("unterminated string");
         if (text[i] === "\\") {
           i++;
-          s +=
-            ({ n: "\n", t: "\t", '"': '"', "\\": "\\" } as Record<string, string>)[text[i]] ?? "";
+          const escaped = (
+            { n: "\n", t: "\t", r: "\r", '"': '"', "\\": "\\" } as Record<string, string>
+          )[text[i]];
+          // EDN defines \t \r \n \\ and \"; anything else is outside this reader, not dropped.
+          if (escaped === undefined) fail(`unsupported string escape \\${text[i] ?? ""}`);
+          s += escaped;
         } else {
           if (text[i] === "\n") line++;
           s += text[i];

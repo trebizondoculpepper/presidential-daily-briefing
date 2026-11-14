@@ -8,7 +8,7 @@ Date: 2026-11-14. Source: `34110ed` (policy 1, DataScript 1.8.1, Vitest 5.1.0 vi
 
 No existing framework fits. Upstream DataScript tests itself with Clojure's `clojure.test` plus a hand-written JavaScript assertion harness. It ships no Datalog-native test facility and no way to run test definitions from Node. PlUnit is a sound reference if real Prolog is ever adopted, but it is not applicable to DataScript.
 
-A runnable example ([`examples/rule-testing/`](examples/rule-testing/)) shows the approach working against the real evaluator. It has seven native EDN scenarios, outcome-category self-tests and a metamorphic property: 17 tests in all. It caught two hand-made policy mutations as rule failures and one syntax break as an infrastructure error.
+A runnable example ([`examples/rule-testing/`](examples/rule-testing/)) shows the approach working against the real evaluator. It has seven native EDN scenarios, outcome-category self-tests and a metamorphic property: 20 tests in all. It caught two hand-made policy mutations as rule failures and one syntax break as an infrastructure error.
 
 This was a bounded research pass of about 45 minutes of agent time. It does not implement #348's rules component, a rules-only command, CI reporting (#394) or a coverage gate.
 
@@ -92,7 +92,7 @@ npx vp test run doc/reports/examples/rule-testing
 - [`edn.ts`](examples/rule-testing/edn.ts) is a minimal EDN-subset reader that records each map's source line. A production runner should use a maintained parser instead. [`edn-data`](https://github.com/jorinvo/edn-data) (MIT, no dependencies, active) returns plain JS data but no source positions. A scenario's line can then be recovered from its unique `:id`, which the runner already requires.
 - [`rule-testing.test.ts`](examples/rule-testing/rule-testing.test.ts) contains:
   - one test per scenario, named `id (file:line)`;
-  - self-tests showing that a wrong expectation is a `RuleDecisionFailure` and that broken EDN, an unsupported role or a duplicate ID is a `RuleInfrastructureError`;
+  - self-tests showing that a wrong expectation is a `RuleDecisionFailure`, and that broken EDN, an unsupported role, a duplicate ID, a malformed optional field (such as `:facts` that is not a map), a dependency on an absent issue or an unsupported string escape is a `RuleInfrastructureError`. A present but malformed expectation is never silently skipped;
   - the metamorphic property, run over every scenario.
 
 **Mutation results**, each made temporarily in `src/rules/datalog/policy.ts` and then reverted:
