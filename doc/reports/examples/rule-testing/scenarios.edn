@@ -1,0 +1,79 @@
+;; Native EDN rule scenarios for the #336 example (doc/reports/rule-testing-recommendation.md).
+;;
+;; Each scenario gives compact host facts and the complete expected decision: every action in
+;; order (subject, kind, winning rule, band), and optionally its explanation bindings, overridden
+;; rules and unlock count, plus the exact set of implementation denials. `:actions` is exhaustive:
+;; an extra or missing action is a rule failure.
+;;
+;; Expectations were written from the policy's stated intent and then checked against the
+;; current evaluator; they are characterisation tests of policy 1, not a new specification.
+{:suite "rule-testing-example"
+ :scenarios
+ [{:id :competing-assessment-priorities
+   :doc "Easy win beats boosted estimate, ordinary work and unfavorable work; overridden rules stay auditable."
+   :given {:role :implementer
+           :issues [{:n 1 :impact "L" :complexity "S"}
+                    {:n 2 :impact "L"}
+                    {:n 3 :impact "S" :complexity "XL"}]}
+   :expect {:actions [{:n 1 :kind :implement :rule "D-EASY" :band 4
+                       :facts {:impact "L" :complexity "S" :readiness "status:ready"}
+                       :overridden ["D-ORDINARY"]}
+                      {:n 2 :kind :estimate-complexity :rule "D-COMPLEXITY-BOOST" :band 5
+                       :facts {:complexity "unknown" :complexityState "unassessed"}
+                       :overridden ["D-COMPLEXITY"]}
+                      {:n 2 :kind :implement :rule "D-ORDINARY" :band 6}
+                      {:n 3 :kind :implement :rule "D-UNFAVORABLE" :band 7
+                       :overridden ["D-ORDINARY"]}]
+            :denials #{}}}
+
+  {:id :missing-versus-false-evidence
+   :doc "A known prerequisite label denies pickup; an unread label page is unknown and asks for inspection."
+   :given {:role :implementer
+           :issues [{:n 1 :labels ["status:ready" "question"] :impact "M" :complexity "M"}
+                    {:n 2 :labels-complete false :impact "M" :complexity "M"}]}
+   :expect {:actions [{:n 2 :kind :inspect :rule "D-INSPECT" :band 6
+                       :facts {:labelsComplete false :uncertainty "labels incomplete"}}]
+            :denials #{[1 "D-DENY-PREREQUISITE"]
+                       [2 "D-DENY-LABELS-UNKNOWN"]
+                       [2 "D-DENY-PLATFORM"]}}}
+
+  {:id :conflicting-owner-labels
+   :doc "Two agent: labels deny pickup to everyone, while a listed owner may still continue."
+   :given {:role :implementer
+           :agent "a"
+           :issues [{:n 1 :labels ["status:ready" "agent:a" "agent:b"] :impact "M" :complexity "M"}]}
+   :expect {:actions [{:n 1 :kind :continue-implementation :rule "D-OWN" :band 6}]
+            :denials #{[1 "D-DENY-CLAIM"]}}}
+
+  {:id :platform-mismatch
+   :doc "A platform-restricted ticket is not offered to a different platform."
+   :given {:role :implementer
+           :platform "claude-code"
+           :issues [{:n 1 :labels ["status:ready" "platform:codex"] :impact "M" :complexity "M"}]}
+   :expect {:actions []
+            :denials #{[1 "D-DENY-PLATFORM"]}}}
+
+  {:id :platform-match
+   :doc "The same ticket is ordinary implementation for the named platform."
+   :given {:role :implementer
+           :platform "codex"
+           :issues [{:n 1 :labels ["status:ready" "platform:codex"] :impact "M" :complexity "M"}]}
+   :expect {:actions [{:n 1 :kind :implement :rule "D-ORDINARY" :band 6 :unlocks 0}]
+            :denials #{}}}
+
+  {:id :direct-dependency-unlock
+   :doc "A blocker whose only dependent is otherwise ready unlocks exactly one; the dependent is denied."
+   :given {:role :implementer
+           :issues [{:n 1 :impact "M" :complexity "M" :blocks [2]}
+                    {:n 2 :impact "M" :complexity "M"}]}
+   :expect {:actions [{:n 1 :kind :implement :rule "D-ORDINARY" :band 6 :unlocks 1}]
+            :denials #{[2 "D-DENY-BLOCKER"]}}}
+
+  {:id :addressed-attention-first
+   :doc "Work addressed to the agent comes first even when the ticket is parked."
+   :given {:role :implementer
+           :agent "me"
+           :issues [{:n 1 :labels ["status:parked" "attention:me"] :impact "M" :complexity "M"}]}
+   :expect {:actions [{:n 1 :kind :addressed-response :rule "D-ATTENTION" :band 1
+                       :facts {:addressedAgent "me"}}]
+            :denials #{}}}]}
