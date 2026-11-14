@@ -95,11 +95,13 @@ export function detectHarness(env: Environment): HarnessDetection {
 /**
  * Map MCP client metadata to a harness/entry. The Ori server prefix is matched before any
  * embedded generic name, so `ori-claude-helper` is the Ori server entry `ori.claude-helper`,
- * never Claude. Other client names are unknown: no other client name is verified.
+ * never Claude. The exact verified Codex client name selects the Codex harness; callers
+ * must apply its shared ambiguity rules before reading the codex entry.
  */
 export function detectClientEntry(
   clientName: string,
 ): { readonly harness: HarnessId; readonly entry: string } | null {
+  if (clientName === "codex-mcp-client") return { harness: "codex", entry: "codex" };
   if (!clientName.startsWith(ORI_CLIENT_PREFIX)) return null;
   const server = clientName.slice(ORI_CLIENT_PREFIX.length);
   if (server === "") return null;
