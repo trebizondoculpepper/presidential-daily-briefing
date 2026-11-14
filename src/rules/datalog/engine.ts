@@ -13,18 +13,7 @@ import { rulesHashOf } from "./hash.js";
 /** The validated policy artifact written by `npm run rules:build` from policy/*.edn. */
 // Validated by the build and by `rules:build --check` in npm run check; JSON types are too wide.
 const bundle = bundleJson as unknown as PolicyBundle;
-const {
-  definitions,
-  clauses,
-  schema,
-  constants,
-  keyQueries,
-  queries,
-  commonWitnesses,
-  eligibilityWitnesses,
-  sortClauses,
-  policyVersion,
-} = bundle;
+const { policyVersion } = bundle;
 
 export const rulesHash = rulesHashOf(bundle);
 export { policyVersion };
@@ -97,14 +86,31 @@ export function compareKeys(a: readonly Value[], b: readonly Value[]): number {
   }
   return a.length - b.length;
 }
-// Bundle queries are canonical EDN printed by the build, so ":in $ %" has exactly this spelling.
-const query = (db: Db, q: string) => (q.includes(":in $ %") ? ds.q(q, db, clauses) : ds.q(q, db));
+export interface PolicyOptions {
+  signal?: AbortSignal;
+  /**
+   * A policy bundle to evaluate instead of the shipped one. The rules-only test runner passes a
+   * bundle built in memory from policy/*.edn, so source edits are tested without a build step.
+   */
+  policy?: PolicyBundle;
+}
 
-export function evaluatePolicy(
-  input: PolicyFacts,
-  options: { signal?: AbortSignal } = {},
-): PolicyResult {
+export function evaluatePolicy(input: PolicyFacts, options: PolicyOptions = {}): PolicyResult {
   options.signal?.throwIfAborted();
+  const policy = options.policy ?? bundle;
+  const {
+    definitions,
+    clauses,
+    schema,
+    constants,
+    keyQueries,
+    queries,
+    commonWitnesses,
+    eligibilityWitnesses,
+    sortClauses,
+  } = policy;
+  // Bundle queries are canonical EDN printed by the build, so ":in $ %" has exactly this spelling.
+  const query = (db: Db, q: string) => (q.includes(":in $ %") ? ds.q(q, db, clauses) : ds.q(q, db));
   if (!["implementer", "designer"].includes(input.viewer.role))
     throw new DatalogError("unsupported-role", "use --role implementer or --role designer");
   for (const [entity] of input.datoms)
@@ -263,5 +269,11 @@ export function evaluatePolicy(
       };
     });
   options.signal?.throwIfAborted();
-  return { policyVersion, rulesHash, decisions, denials, datoms: facts.length };
+  return {
+    policyVersion: policy.policyVersion,
+    rulesHash: options.policy ? rulesHashOf(policy) : rulesHash,
+    decisions,
+    denials,
+    datoms: facts.length,
+  };
 }
