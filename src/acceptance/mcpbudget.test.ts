@@ -8,14 +8,14 @@
 import { Client } from "@modelcontextprotocol/client";
 import { InMemoryTransport } from "@modelcontextprotocol/server";
 import { describe, expect, it } from "vite-plus/test";
-import { main } from "./cli.js";
-import { boundedEnvelope, budgetBytes, budgetErrorCode, resultBytes } from "./mcp/bounded.js";
-import { boundedResult } from "./mcp/bounded.js";
-import { flattenRelationships } from "./mcp/views.js";
-import { parityDifference, parsePath } from "./mcp/parity.js";
-import { createServer } from "./mcp.js";
-import type { McpRuntime } from "./mcp.js";
-import type { DependencyReport } from "./github/dependencies.js";
+import { main } from "../cli.js";
+import { boundedEnvelope, budgetBytes, budgetErrorCode, resultBytes } from "../mcp/bounded.js";
+import { boundedResult } from "../mcp/bounded.js";
+import { flattenRelationships } from "../mcp/views.js";
+import { parityDifference, parsePath } from "../mcp/parity.js";
+import { createServer } from "../mcp.js";
+import type { McpRuntime } from "../mcp.js";
+import type { DependencyReport } from "../github/dependencies.js";
 
 const repo = "example/large";
 const time = "2026-11-12T10:00:00.000Z";
