@@ -1,0 +1,45 @@
+;; Named queries the engine runs, in phase order. Queries with ":in $ %" receive rules.edn,
+;; except :q4, which receives the ordering rules. :key-queries add one sort-key attribute each.
+;; :match and :witness are templates: the build appends a decision's :when clauses, or one
+;; witness's clauses, to their :where, so the engine runs complete queries.
+{:q0
+ [:find ?t ?r :where [?t "matched" ?r] [?t "matched" ?o] [?r "kind" ?k] [?o "kind" ?k] [?r "rule" ?rid] [?o "rule" ?oid] (or-join [?rid ?oid ?r ?o] (and [?r "band" ?b] [?o "band" ?b] [?r "preference" ?p] [?o "preference" ?p] [(< ?o ?r)]) (and [?r "band" ?b] [?o "band" ?b] [?r "preference" ?p] [?o "preference" ?op] [(< ?op ?p)]) (and [(= ?rid "D-ORDINARY")] [(= ?oid "D-EASY")]) (and [(= ?rid "D-ORDINARY")] [(= ?oid "D-UNFAVORABLE")]) (and [(= ?rid "D-OWN")] [(= ?oid "D-OWN-EASY")]) (and [(= ?rid "D-OWN")] [(= ?oid "D-OWN-UNFAVORABLE")]))]
+ :q1
+ [:find ?t ?d :in $ % :where [?t "dependent" ?d] (otherwise ?d) [?d "native-complete" true] [?d "open-blockers" 1] [?d "blocker" ?t] (open ?t)]
+ :q2
+ [:find ?t (count-distinct ?d) :where [?t "unlocks-dependent" ?d]]
+ :q3
+ [:find ?t :where [?t "kind" _] (not [?t "unlock-count" _])]
+ :q4
+ [:find ?t ?r ?b ?g ?p ?u ?un ?own ?inc ?created ?n ?target ?kind :in $ % :where (keys ?t ?r ?b ?g ?p ?u ?un ?own ?inc ?created) [?t "number" ?n] [?t "target" ?target] [?r "kind" ?kind]]
+ :q5
+ [:find ?id :in $ ?t :where [?t "overridden" ?r] [?r "rule" ?id]]
+ :q6
+ [:find ?n :in $ ?t :where [?t "unlock-count" ?n]]
+ :q7
+ [:find ?reason :in $ ?t :where [?t "unlock-unknown" ?reason]]
+ :unknown-unlocks
+ [:find ?t ?reason :in $ % :where [?t "kind" "issue"] (or-join [?t ?reason] (and [?t "blocking-complete" false] [(str "direct dependent coverage incomplete") ?reason]) (and [?t "dependent" ?d] [?d "state" "OPEN"] (not [?d "kind" "issue"]) [(str "dependent absent from collected repository") ?reason]) (and [?t "dependent" ?d] [?d "state" "OPEN"] [?d "native-complete" false] [(str "dependent native evidence incomplete") ?reason]) (and [?t "dependent" ?d] [?d "state" "OPEN"] (uncertain ?d) [(str "dependent eligibility evidence incomplete") ?reason]))]
+ :active-dependents
+ [:find ?t ?d :in $ % :where [?t "dependent" ?d] (open ?d) (or-join [?d] (claimed ?d) (has-closing ?d))]
+ :denials
+ [:find ?t ?r :in $ % :where (implementation-permit ?t) (implementation-deny ?t ?r)]
+ :other-claims
+ [:find ?t ?other :in $ % :where [?t "kind" "issue"] (own-issue ?other) [(not= ?t ?other)]]
+ :active-count
+ [:find ?t (count-distinct ?d) :where [?t "active-dependent" ?d]]
+ :missing-active-count
+ [:find ?t :where [?t "kind" _] (not [?t "active-count" _])]
+ :match
+ [:find ?t :in $ % :where (foreground ?t)]
+ :witness
+ [:find ?value :in $ % ?t :where]
+ :key-queries
+ [["own-key"
+   [:find ?t ?k :in $ % :where [?t "kind" _] (or-join [?t ?k] (and (mine ?t) [(- 0 1) ?k]) (and (not (mine ?t)) [(+ 0 0) ?k]))]]
+  ["linked-key"
+   [:find ?t ?k :in $ % :where [?t "kind" _] (or-join [?t ?k] (and (mine-linked ?t) [(- 0 1) ?k]) (and (not (mine-linked ?t)) [(+ 0 0) ?k]))]]
+  ["incomplete-key"
+   [:find ?t ?k :where [?t "kind" _] (or-join [?t ?k] (and [?t "label" "status:incomplete"] [(- 0 1) ?k]) (and (not [?t "label" "status:incomplete"]) [(+ 0 0) ?k]))]]
+  ["urgency-key"
+   [:find ?t ?k :where [?t "kind" _] (or-join [?t ?k] (and [?t "label" "urgency:high"] (not [?t "label" "urgency:low"]) [(+ 0 0) ?k]) (and [?t "label" "urgency:low"] (not [?t "label" "urgency:high"]) [(+ 1 1) ?k]) (and (not [?t "label" "urgency:high"]) (not [?t "label" "urgency:low"]) [(+ 0 1) ?k]) (and [?t "label" "urgency:high"] [?t "label" "urgency:low"] [(+ 0 1) ?k]))]]]}

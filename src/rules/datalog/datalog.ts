@@ -1,7 +1,6 @@
 /** Read-only opt-in evaluator. No legacy eligibility, classifier, candidate builder or sorter. */
 import ds from "datascript";
 import type { Datom, Value, Db } from "datascript";
-import { createHash } from "node:crypto";
 import type { Snapshot, Issue, PullRequest } from "../../github/types.js";
 import type { SubjectAssessments } from "../../briefing/assessments.js";
 import type {
@@ -12,26 +11,26 @@ import type {
   Band,
 } from "../../briefing/blended.js";
 import type { PickupOrder } from "../../briefing/ranking.js";
-import {
+import bundleJson from "./policy.generated.json" with { type: "json" };
+import type { PolicyBundle } from "./bundle.js";
+import { rulesHashOf } from "./hash.js";
+import { commandTemplates, commandKinds } from "./commands.js";
+
+/** The validated policy artifact written by `npm run rules:build` from policy/*.edn. */
+// Validated by the build and by `rules:build --check` in npm run check; JSON types are too wide.
+const bundle = bundleJson as unknown as PolicyBundle;
+const {
   definitions,
   clauses,
   schema,
   constants,
-  comparison,
   keyQueries,
   queries,
-  unknownUnlocks,
-  activeDependents,
-  denialsQuery,
-  commandTemplates,
-  commandKinds,
-  otherClaimsQuery,
-  witnessClauses,
   commonWitnesses,
   eligibilityWitnesses,
   sortClauses,
   policyVersion,
-} from "./policy.js";
+} = bundle;
 
 export interface DatalogOptions {
   role: BlendedRole;
@@ -79,27 +78,7 @@ export class DatalogError extends Error {
     super(`${code}: ${detail}. Roll back: pdb config set briefing.engine typescript`);
   }
 }
-const artifact = {
-  policyVersion,
-  schema,
-  constants,
-  clauses,
-  definitions,
-  comparison,
-  sortClauses,
-  keyQueries,
-  queries,
-  unknownUnlocks,
-  activeDependents,
-  denialsQuery,
-  commandTemplates,
-  commandKinds,
-  otherClaimsQuery,
-  witnessClauses,
-  commonWitnesses,
-  eligibilityWitnesses,
-};
-export const rulesHash = createHash("sha256").update(JSON.stringify(artifact)).digest("hex");
+export const rulesHash = rulesHashOf(bundle);
 /**
  * Codex review-state markers as raw facts. Kept local, not imported, so the lazily loaded
  * evaluator stays one self-contained chunk; reviewevidence.ts holds the TypeScript-engine twin
@@ -302,13 +281,13 @@ export function evaluateDatalog(
     return ds.init_db(facts, fullSchema);
   };
   let db = database();
-  const denials = query(db, denialsQuery).map(([id, rule]) => ({
+  const denials = query(db, queries.denials).map(([id, rule]) => ({
     target: objects.get(Number(id))?.url ?? "",
     ruleId: String(rule),
   }));
   // Each root query derives a relation; the host only transacts the returned tuples.
   for (const [i, r] of definitions.entries()) {
-    const rows = query(db, `[:find ?t :in $ % :where (foreground ?t) ${r.clauses}]`);
+    const rows = query(db, r.query);
     for (const [t] of rows) facts.push([Number(t), "matched", 10 + i]);
     options.signal?.throwIfAborted();
   }
@@ -327,20 +306,21 @@ export function evaluateDatalog(
   });
   const countQ = queries.q2;
   const counts = ds.q(countQ, db);
-  for (const [t, reason] of query(db, unknownUnlocks))
+  for (const [t, reason] of query(db, queries["unknown-unlocks"]))
     facts.push([Number(t), "unlock-unknown", reason]);
   for (const [t, n] of counts) facts.push([Number(t), "unlock-count", n]);
   for (const [t] of ds.q(queries.q3, database())) facts.push([Number(t), "unlock-count", 0]);
   db = database();
-  for (const [t, d] of query(db, activeDependents)) facts.push([Number(t), "active-dependent", d]);
+  for (const [t, d] of query(db, queries["active-dependents"]))
+    facts.push([Number(t), "active-dependent", d]);
   db = ds.init_db(facts, {
     ...fullSchema,
     "active-dependent": { ":db/cardinality": ":db.cardinality/many" },
   });
-  for (const [t, n] of ds.q('[:find ?t (count-distinct ?d) :where [?t "active-dependent" ?d]]', db))
+  for (const [t, n] of ds.q(queries["active-count"], db))
     facts.push([Number(t), "active-count", n]);
   db = database();
-  for (const [t] of ds.q('[:find ?t :where [?t "kind" _] (not [?t "active-count" _])]', db))
+  for (const [t] of ds.q(queries["missing-active-count"], db))
     facts.push([Number(t), "active-count", 0]);
   // Boolean/order keys are inferred from the raw relations, not precomputed by an adapter.
   db = database();
@@ -373,10 +353,10 @@ export function evaluateDatalog(
       const selectedWitnesses = {
         ...commonWitnesses,
         ...eligibilityWitnesses,
-        ...witnessClauses[definition.id],
+        ...definition.witnesses,
       };
-      for (const [key, clause] of Object.entries(selectedWitnesses)) {
-        const values = ds.q(`[:find ?value :in $ % ?t :where ${clause}]`, db, clauses, t).flat();
+      for (const [key, witnessQuery] of Object.entries(selectedWitnesses)) {
+        const values = ds.q(witnessQuery, db, clauses, t).flat();
         if (values.length === 1) bindings[key] = values[0];
         else if (values.length > 1) {
           const sorted = values.map(String).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
@@ -407,7 +387,7 @@ export function evaluateDatalog(
       );
       let thenCommand: string | null = null;
       if (definition.kind === "implement") {
-        const others = query(db, otherClaimsQuery)
+        const others = query(db, queries["other-claims"])
           .filter(([id]) => Number(id) === Number(t))
           .map(([, id]) => objects.get(Number(id))!.number);
         nextCommand = fillCommand("claim");
