@@ -39,7 +39,7 @@ import {
   withDeliveryCompleteness,
   teamResponsibilities,
   teamResponsibilityLines,
-} from "./deliveryread.js";
+} from "./workflow/deliveryread.js";
 import {
   applyPlan,
   claimPolicy,
