@@ -1,0 +1,521 @@
+/**
+ * `pdb serve`: a foreground local HTTP server (doc/design/serve.md, #373).
+ *
+ * This module owns the lifecycle: startup selection and authentication context, the
+ * `node:http` listener with its DNS-rebinding guard, the banner, signal handling and graceful
+ * shutdown. Every outside boundary (gh, clock, output, signals, exit) is injected so tests run
+ * on an ephemeral port without GitHub.
+ */
+import { execFile } from "node:child_process";
+import { createServer as createHttpServer } from "node:http";
+import type { IncomingMessage, Server, ServerResponse } from "node:http";
+import type { AddressInfo } from "node:net";
+import { isIP } from "node:net";
+import { promisify } from "node:util";
+import { currentRepository } from "./github/github.js";
+import { systemClock } from "./mcp/polling.js";
+import type { Clock } from "./mcp/polling.js";
+import { installedVersion } from "./updates/updates.js";
+import {
+  allowedHostnames,
+  errorDocument,
+  guardRequest,
+  HttpFailure,
+  sendJson,
+} from "./serve/http.js";
+import {
+  EXIT_FORCED,
+  EXIT_PORT,
+  EXIT_USAGE,
+  HEADERS_TIMEOUT_MS,
+  isLoopback,
+  serveArguments,
+  serveHelp,
+  ServeUsageError,
+  SHUTDOWN_GRACE_MS,
+} from "./serve/options.js";
+import type { ServeOptions } from "./serve/options.js";
+
+export { serveHelp } from "./serve/options.js";
+
+/** The gh account every collection runs as: host and login only, never a token. */
+export interface AuthContext {
+  host: string;
+  login: string;
+}
+
+/** Process signals the server listens to; tests pass an EventEmitter. */
+export interface SignalSource {
+  on(signal: string, listener: () => void): unknown;
+  off(signal: string, listener: () => void): unknown;
+}
+
+/** Injected boundaries of `pdb serve`. */
+export interface ServeRuntime {
+  /** Resolve a local checkout to its owner/name (startup only). */
+  currentRepository: (cwd?: string, signal?: AbortSignal) => Promise<string>;
+  /** The gh host and login (startup, and before live collections at most once per TTL). */
+  authContext: (signal?: AbortSignal) => Promise<AuthContext>;
+  clock: Clock;
+  stdout: (text: string) => void;
+  stderr: (text: string) => void;
+  signals: SignalSource;
+  /** Immediate exit for a second signal during shutdown. */
+  exit: (code: number) => void;
+  version: () => Promise<string | null>;
+  platform: NodeJS.Platform;
+}
+
+const execute = promisify(execFile);
+
+/** Production authentication context: `gh api user` through the argument-array runner. */
+export async function ghAuthContext(signal?: AbortSignal): Promise<AuthContext> {
+  const { stdout } = await execute("gh", ["api", "user"], { timeout: 30_000, signal });
+  const login: unknown = (JSON.parse(stdout) as { login?: unknown }).login;
+  if (typeof login !== "string" || !/^[\w.-]+$/.test(login))
+    throw new Error("gh api user returned no login.");
+  // GH_HOST selects the host gh talks to; without it gh uses github.com.
+  const host = process.env.GH_HOST?.trim() || "github.com";
+  return { host, login };
+}
+
+export const defaultServeRuntime = (): ServeRuntime => ({
+  currentRepository,
+  authContext: ghAuthContext,
+  clock: systemClock,
+  stdout: (text) => process.stdout.write(text),
+  stderr: (text) => process.stderr.write(text),
+  signals: process,
+  exit: (code) => process.exit(code),
+  version: async () => (await installedVersion()).version,
+  platform: process.platform,
+});
+
+/** A startup failure with its exit status (2 usage, 3 port, 1 otherwise). */
+export class ServeStartupError extends Error {
+  constructor(
+    readonly exitCode: number,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+/** One repository of the served set, with the checkout that configures it, if any. */
+export interface ServedRepository {
+  repository: string;
+  project?: string;
+}
+
+/** Facts fixed at startup, shown by /api/v1/status. */
+export interface ServerFacts {
+  version: string | null;
+  startedAt: Date;
+  url: string;
+  exposed: boolean;
+  served: ServedRepository[];
+  ttlMs: number;
+  auth: AuthContext;
+}
+
+/** Per-request context handed to routes. */
+export interface RequestContext {
+  request: IncomingMessage;
+  response: ServerResponse;
+  url: URL;
+  /** Aborted when the client disconnects or the server shuts down. */
+  signal: AbortSignal;
+  /** Set by a data route to the cache source it served ("live", "cached", "stale"). */
+  source?: string;
+}
+
+/** A route set; returns false when it does not own the path. */
+export type Routes = (context: RequestContext) => Promise<boolean>;
+
+/** Cache counters for status; the read API (PR 2 of #373) supplies the real cache. */
+export interface StatusSource {
+  cache(): Record<string, number>;
+  repositories(): Record<string, { observedAt: string | null; lastError: unknown }>;
+}
+
+const emptyStatus: StatusSource = {
+  cache: () => ({
+    entries: 0,
+    approxBytes: 0,
+    hits: 0,
+    misses: 0,
+    coalesced: 0,
+    evictions: 0,
+    inflight: 0,
+  }),
+  repositories: () => ({}),
+};
+
+/** Extension points for later slices: data routes, MCP and status counters. */
+export interface ServeExtensions {
+  routes?: (facts: ServerFacts) => Routes;
+  status?: StatusSource;
+  /** Close long-lived resources (MCP sessions) during shutdown. */
+  close?: () => Promise<void>;
+}
+
+/** A listening server. */
+export interface RunningServer {
+  facts: ServerFacts;
+  port: number;
+  /** Graceful shutdown; resolves once every connection is closed. Idempotent. */
+  close(): Promise<void>;
+  /** Resolves when shutdown completes. */
+  closed: Promise<void>;
+  shuttingDown(): boolean;
+}
+
+/** Resolve the served set: every --repo, then each --project's repository, deduplicated. */
+async function servedSet(
+  options: ServeOptions,
+  runtime: ServeRuntime,
+): Promise<ServedRepository[]> {
+  const served = new Map<string, ServedRepository>();
+  for (const repository of options.repos)
+    if (!served.has(repository.toLowerCase())) served.set(repository.toLowerCase(), { repository });
+  for (const project of options.projects) {
+    let repository: string;
+    try {
+      repository = (await runtime.currentRepository(project)).trim();
+    } catch {
+      throw new ServeStartupError(
+        EXIT_USAGE,
+        `--project ${project} does not resolve to a GitHub repository; check the path and gh authentication.`,
+      );
+    }
+    if (!/^[\w.-]+\/[\w.-]+$/.test(repository))
+      throw new ServeStartupError(
+        EXIT_USAGE,
+        `--project ${project} does not resolve to a GitHub repository.`,
+      );
+    const existing = served.get(repository.toLowerCase());
+    if (existing?.project && existing.project !== project)
+      throw new ServeStartupError(
+        EXIT_USAGE,
+        `--project ${project} and --project ${existing.project} are both ${repository}; pass one.`,
+      );
+    served.set(repository.toLowerCase(), {
+      repository: existing?.repository ?? repository,
+      project,
+    });
+  }
+  return [...served.values()];
+}
+
+const urlHost = (host: string): string => (isIP(host) === 6 ? `[${host}]` : host);
+
+const placeholder = (facts: ServerFacts): string => `<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>pdb serve</title></head>
+<body>
+<h1>pdb serve</h1>
+<p>The dashboard arrives in #374. This server answers the JSON API and HTTP MCP.</p>
+<ul>
+<li><a href="/api/v1/status">/api/v1/status</a></li>
+<li>MCP endpoint: <code>${facts.url}mcp</code></li>
+</ul>
+</body>
+</html>
+`;
+
+/**
+ * Start the server: resolve selection and authentication, bind, and return the running
+ * server. No GitHub data is collected at startup.
+ */
+export async function startServe(
+  options: ServeOptions,
+  runtime: ServeRuntime,
+  extensions: ServeExtensions = {},
+): Promise<RunningServer> {
+  const served = await servedSet(options, runtime);
+  let auth: AuthContext;
+  try {
+    auth = await runtime.authContext();
+  } catch {
+    throw new ServeStartupError(
+      1,
+      "cannot read the GitHub login from gh; run gh auth login (check with gh auth status) and retry.",
+    );
+  }
+  // "localhost" binds the IPv4 loopback address only, so the URL is stable on every platform.
+  const bindHost = options.host === "localhost" ? "127.0.0.1" : options.host;
+  const lifecycle = new AbortController();
+  let shutting = false;
+  const status = extensions.status ?? emptyStatus;
+  let routes: Routes = async () => false;
+  let allowed: string[] = [];
+  let port = 0;
+  // Filled in once listening; routes are only reached after that.
+  const facts: ServerFacts = {
+    version: await runtime.version(),
+    startedAt: runtime.clock.now(),
+    url: "",
+    exposed: !isLoopback(options.host),
+    served,
+    ttlMs: options.ttlMs,
+    auth,
+  };
+
+  const statusDocument = () => ({
+    schemaVersion: 1,
+    kind: "serve-status",
+    version: facts.version,
+    startedAt: facts.startedAt.toISOString(),
+    url: facts.url,
+    exposed: facts.exposed,
+    repositories: served.map((entry) => {
+      const known = status.repositories()[entry.repository.toLowerCase()];
+      return {
+        repository: entry.repository,
+        default: served.length === 1,
+        localProject: entry.project !== undefined,
+        observedAt: known?.observedAt ?? null,
+        lastError: known?.lastError ?? null,
+      };
+    }),
+    ttlSeconds: options.ttlMs / 1000,
+    auth: { host: facts.auth.host, login: facts.auth.login },
+    cache: status.cache(),
+  });
+
+  const handle = async (request: IncomingMessage, response: ServerResponse): Promise<void> => {
+    const started = Date.now();
+    const disconnected = new AbortController();
+    response.on("close", () => {
+      if (!response.writableFinished) disconnected.abort();
+    });
+    const context: RequestContext = {
+      request,
+      response,
+      // Placeholder until the target is validated below.
+      url: new URL("http://localhost/"),
+      signal: AbortSignal.any([lifecycle.signal, disconnected.signal]),
+    };
+    let pathForLog = "(invalid)";
+    response.on("finish", () =>
+      // Path only: query values may carry local paths or agent names. Never headers.
+      runtime.stderr(
+        `${request.method ?? "?"} ${pathForLog} ${response.statusCode} ${context.source ?? "-"} ${Date.now() - started}ms\n`,
+      ),
+    );
+    try {
+      // Origin-form targets only: an absolute-form target ("GET http://evil/ HTTP/1.1") could
+      // otherwise disagree with the Host header the guard checked.
+      const target = request.url ?? "";
+      if (!target.startsWith("/") || target.startsWith("//"))
+        throw new HttpFailure(400, "INVALID_ARGUMENT", "Request target must be a path.");
+      const guarded = guardRequest(request.headers, allowed, port);
+      if (guarded) throw guarded;
+      context.url = new URL(target, `http://${urlHost(bindHost)}:${port}`);
+      pathForLog = context.url.pathname;
+      const path = context.url.pathname;
+      if (shutting) {
+        sendJson(
+          response,
+          503,
+          path === "/healthz"
+            ? { ok: false }
+            : errorDocument({
+                code: "SHUTTING_DOWN",
+                message: "pdb serve is shutting down.",
+                next: [],
+              }),
+          { connection: "close" },
+        );
+        return;
+      }
+      const getOnly = (): void => {
+        if (request.method !== "GET" && request.method !== "HEAD")
+          throw new HttpFailure(405, "METHOD_NOT_ALLOWED", "Use GET.", [], { allow: "GET, HEAD" });
+        if (context.url.search)
+          throw new HttpFailure(400, "INVALID_ARGUMENT", `${path} takes no query parameters.`);
+      };
+      if (path === "/healthz") {
+        getOnly();
+        sendJson(response, 200, { ok: true });
+        return;
+      }
+      if (path === "/api/v1/status") {
+        getOnly();
+        sendJson(response, 200, statusDocument());
+        return;
+      }
+      if (path === "/") {
+        getOnly();
+        response.writeHead(200, {
+          "content-type": "text/html; charset=utf-8",
+          "cache-control": "no-store",
+          "x-content-type-options": "nosniff",
+          "content-security-policy": "default-src 'none'",
+        });
+        response.end(placeholder(facts));
+        return;
+      }
+      if (await routes(context)) return;
+      throw new HttpFailure(404, "NOT_FOUND", `No route ${path}.`, ["GET /api/v1/status"]);
+    } catch (error) {
+      if (response.headersSent) {
+        response.destroy();
+        return;
+      }
+      if (error instanceof HttpFailure)
+        sendJson(
+          response,
+          error.status,
+          errorDocument({ code: error.code, message: error.message, next: error.next }),
+          error.headers,
+        );
+      else {
+        // Unexpected: report a sanitized message only; the details stay out of the response.
+        runtime.stderr(`pdb serve: internal error on ${pathForLog}\n`);
+        sendJson(
+          response,
+          500,
+          errorDocument({ code: "INTERNAL", message: "Internal error.", next: [] }),
+        );
+      }
+    }
+  };
+
+  const server: Server = createHttpServer({ headersTimeout: HEADERS_TIMEOUT_MS }, (req, res) => {
+    void handle(req, res);
+  });
+  try {
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen({ port: options.port, host: bindHost }, () => {
+        server.off("error", reject);
+        resolve();
+      });
+    });
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "EADDRINUSE")
+      throw new ServeStartupError(
+        EXIT_PORT,
+        `port ${options.port} on ${options.host} is already in use; is another pdb serve running? Stop it or pass --port N (0 picks a free port).`,
+      );
+    if (code === "EACCES")
+      throw new ServeStartupError(
+        EXIT_PORT,
+        `port ${options.port} on ${options.host} is not permitted; pass --port N above 1023 (0 picks a free port).`,
+      );
+    if (code === "EADDRNOTAVAIL")
+      throw new ServeStartupError(1, `${options.host} is not an address of this machine.`);
+    throw new ServeStartupError(1, `cannot listen on ${options.host}: ${code ?? "unknown error"}.`);
+  }
+  port = (server.address() as AddressInfo).port;
+  allowed = allowedHostnames(bindHost);
+  facts.url = `http://${urlHost(bindHost)}:${port}/`;
+  routes = extensions.routes?.(facts) ?? routes;
+
+  let closing: Promise<void> | null = null;
+  let finish!: () => void;
+  const closed = new Promise<void>((resolve) => (finish = resolve));
+  const close = (): Promise<void> => {
+    closing ??= (async () => {
+      shutting = true;
+      // Stop accepting, then abort every in-flight collection (terminating gh children).
+      const stopped = new Promise<void>((resolve) => server.close(() => resolve()));
+      lifecycle.abort(new Error("pdb serve is shutting down."));
+      // A failure here must not block shutdown, but it is reported, never swallowed.
+      await extensions
+        .close?.()
+        .catch(() => runtime.stderr("pdb serve: closing sessions failed.\n"));
+      server.closeIdleConnections();
+      let timer: unknown;
+      const grace = new Promise<void>((resolve) => {
+        timer = runtime.clock.setTimeout(resolve, SHUTDOWN_GRACE_MS);
+      });
+      await Promise.race([stopped, grace]);
+      runtime.clock.clearTimeout(timer);
+      // Responses still open after the grace period are cut off.
+      server.closeAllConnections();
+      await stopped;
+      finish();
+    })();
+    return closing;
+  };
+  return { facts, port, close, closed, shuttingDown: () => shutting };
+}
+
+/** The banner: one fact per line on stdout; the first line is stable and machine-parsable. */
+export function banner(facts: ServerFacts): string {
+  const repositories = facts.served
+    .map((s) => (facts.served.length === 1 ? `${s.repository} (default)` : s.repository))
+    .join(", ");
+  return [
+    `pdb serve ${facts.version ?? "(unknown version)"} listening on ${facts.url}`,
+    `  repositories: ${repositories}`,
+    `  cache: memory only, ttl ${facts.ttlMs / 60_000}m; restart clears it`,
+    `  mcp: ${facts.url}mcp`,
+    "  stop: Ctrl-C",
+    "",
+  ].join("\n");
+}
+
+/** Remote-exposure warning (stderr), from the security contract. */
+export const remoteWarning = (url: string): string =>
+  `WARNING: pdb serve is reachable from other machines at ${url}. It has no authentication; anyone who can reach it can read private repository data that your gh login can see.\n`;
+
+/**
+ * Signals that start a graceful shutdown. Windows delivers SIGINT for Ctrl-C and SIGBREAK for
+ * Ctrl-Break in the console; a kill from another process cannot be caught there.
+ */
+export const shutdownSignals = (platform: NodeJS.Platform): string[] =>
+  platform === "win32" ? ["SIGINT", "SIGTERM", "SIGBREAK"] : ["SIGINT", "SIGTERM"];
+
+/** Run `pdb serve` until a signal stops it; returns the exit status. */
+export async function runServe(
+  args: string[],
+  runtime: ServeRuntime = defaultServeRuntime(),
+  extensions: (options: ServeOptions, runtime: ServeRuntime) => ServeExtensions = () => ({}),
+): Promise<number> {
+  let options: ServeOptions & { help?: boolean };
+  try {
+    options = serveArguments(args);
+  } catch (error) {
+    if (!(error instanceof ServeUsageError)) throw error;
+    runtime.stderr(`pdb serve: ${error.message}\n`);
+    return EXIT_USAGE;
+  }
+  if (options.help) {
+    runtime.stdout(serveHelp);
+    return 0;
+  }
+  let running: RunningServer;
+  try {
+    running = await startServe(options, runtime, extensions(options, runtime));
+  } catch (error) {
+    if (!(error instanceof ServeStartupError)) throw error;
+    runtime.stderr(`pdb serve: ${error.message}\n`);
+    return error.exitCode;
+  }
+  let signalled = 0;
+  const onSignal = () => {
+    signalled++;
+    if (signalled > 1) {
+      runtime.stderr("pdb serve: second signal; exiting now.\n");
+      runtime.exit(EXIT_FORCED);
+      return;
+    }
+    runtime.stderr("pdb serve: shutting down (Ctrl-C again to exit now).\n");
+    void running.close();
+  };
+  const signals = shutdownSignals(runtime.platform);
+  for (const signal of signals) runtime.signals.on(signal, onSignal);
+  runtime.stdout(banner(running.facts));
+  if (running.facts.exposed) runtime.stderr(remoteWarning(running.facts.url));
+  try {
+    await running.closed;
+  } finally {
+    for (const signal of signals) runtime.signals.off(signal, onSignal);
+  }
+  runtime.stderr("pdb serve: stopped.\n");
+  return 0;
+}

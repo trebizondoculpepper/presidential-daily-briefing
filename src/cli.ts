@@ -102,6 +102,8 @@ import type { LocalDoctorRuntime } from "./config/localdoctor.js";
 import type { GhRun } from "./github/dependencies.js";
 import type { Query, Rest } from "./github/github.js";
 import type { Snapshot } from "./github/types.js";
+import { runServe } from "./serve.js";
+import type { ServeRuntime } from "./serve.js";
 
 /** Parsed `deps` arguments: help, a migration plan, a native change, or a read. */
 export type DepsArguments =
@@ -146,6 +148,8 @@ export interface Runtime {
   guide?: GuideRuntime;
   /** Checkpoint/cache files for `briefing` (#170); tests inject failures per phase. */
   briefingFiles?: BriefingFiles;
+  /** Listener, gh login, clock, output and signals for `serve` (#373). */
+  serve?: ServeRuntime;
 }
 
 type Output = (text: string) => Promise<void>;
@@ -186,6 +190,8 @@ Rollback: pdb config set briefing.engine typescript.
                         the issue as completed; never reopens or merges (complete --help)
   needs-human N --agent NAME --designer NAME --why TEXT --question TEXT... [--dry-run]
                         Record questions for a designer and mark the ticket decision-needed
+  serve --repo owner/name | --project PATH [--port N]  Foreground local HTTP server: read-only
+                        JSON API and HTTP MCP over a short-lived memory cache (serve --help)
   team [--stale-hours N]  Read-only: each agent's claims, linked PRs, activity and warnings
   who N [--stale-hours N]  Read-only: who is working on ticket N? Claims, PRs, activity,
                         handoff evidence and contradictions in one operation
@@ -625,7 +631,9 @@ export async function main(
   const eligible =
     !rest.includes("--help") &&
     !(rest[0] === "config" && rest[1] === "help") &&
-    rest[0] !== "process";
+    rest[0] !== "process" &&
+    // A foreground server prints its banner first and runs until stopped; no advisory.
+    rest[0] !== "serve";
   const pending = eligible
     ? Promise.resolve()
         .then(() => check({ offline: rest.includes("--offline"), optOut }))
@@ -653,6 +661,7 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
       ...runtime,
       files: runtime.briefingFiles ?? { atomicJson, cachedSnapshot, checkpointSince },
     });
+  if (args[0] === "serve") return runServe(args.slice(1), runtime.serve);
   if (args[0] === "config") return runConfig(args.slice(1), output, runtime.config);
   if (args[0] === "doctor") {
     const { values } = parseArgs({

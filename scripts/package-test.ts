@@ -8,7 +8,7 @@
  * working directories: help, invalid arguments, and the credential-free offline smoke checks.
  * Direct source or dist execution alone is not enough (#11).
  */
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
@@ -82,6 +82,8 @@ const issue = (number, labels, createdAt) => ({
   blockedBy: page([]), blocking: page([]), labels: page(labels.map((name) => ({ name }))), comments: page([]),
 });
 const args = process.argv.slice(2);
+// pdb serve reads the login once at startup (doc/design/serve.md); no token is involved.
+if (args[0] === "api" && args[1] === "user") { process.stdout.write(JSON.stringify({ login: "package-test" })); process.exit(0); }
 if (args[0] !== "api" || args[1] !== "graphql") { process.stderr.write("unsupported"); process.exit(1); }
 const query = (args.find((a) => a.startsWith("query=")) || "");
 const issues = query.includes("issues(first") ? [
@@ -92,6 +94,56 @@ const issues = query.includes("issues(first") ? [
 ] : [];
 process.stdout.write(JSON.stringify({ data: { repository: { issues: page(issues), pullRequests: page([]) } } }));
 `;
+
+/**
+ * Packaged `pdb serve` smoke (doc/design/serve.md, test 9): the installed bin starts on an
+ * ephemeral port, prints the stable "listening on URL" line first, answers /healthz and
+ * /api/v1/status, and exits 0 after SIGTERM within the shutdown window. POSIX only: Windows
+ * cannot deliver a catchable SIGTERM from another process (see pdb serve --help).
+ */
+async function serveSmoke(bin: string, env: NodeJS.ProcessEnv, cwd: string): Promise<string> {
+  const child = spawn(bin, ["serve", "--repo", "example/parity", "--port", "0"], {
+    cwd,
+    env,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let stdout = "";
+  let stderr = "";
+  child.stdout.setEncoding("utf8").on("data", (text: string) => (stdout += text));
+  child.stderr.setEncoding("utf8").on("data", (text: string) => (stderr += text));
+  const exited = new Promise<number | null>((done) => child.once("exit", (code) => done(code)));
+  try {
+    const deadline = Date.now() + 20_000;
+    while (!stdout.includes("\n")) {
+      if (Date.now() > deadline || child.exitCode !== null)
+        throw new Error(`pdb serve printed no banner. stderr: ${stderr}`);
+      await new Promise((done) => setTimeout(done, 50));
+    }
+    const first = stdout.split("\n")[0]!;
+    const url = /listening on (http:\/\/127\.0\.0\.1:\d+\/)$/.exec(first)?.[1];
+    if (!url) throw new Error(`Unexpected first banner line: ${first}`);
+    const health = await fetch(`${url}healthz`);
+    if (health.status !== 200 || JSON.stringify(await health.json()) !== '{"ok":true}')
+      throw new Error("Installed pdb serve /healthz did not answer ok.");
+    const status = (await (await fetch(`${url}api/v1/status`)).json()) as {
+      kind?: string;
+      auth?: { login?: string };
+    };
+    if (status.kind !== "serve-status" || status.auth?.login !== "package-test")
+      throw new Error(`Installed pdb serve status is wrong: ${JSON.stringify(status)}`);
+    const t0 = Date.now();
+    child.kill("SIGTERM");
+    const code = await Promise.race([
+      exited,
+      new Promise<"timeout">((done) => setTimeout(() => done("timeout"), 8_000)),
+    ]);
+    if (code !== 0)
+      throw new Error(`Installed pdb serve exited ${String(code)} after SIGTERM, not 0.`);
+    return `${first} (stopped in ${Date.now() - t0}ms)`;
+  } finally {
+    if (child.exitCode === null) child.kill("SIGKILL");
+  }
+}
 const parityFields = [
   "actions",
   "role",
@@ -381,9 +433,29 @@ try {
   const mcpCommand = windows
     ? { command: process.execPath, args: [join(packageDir, "dist", "mcp.mjs")] }
     : { command: mcpBin, args: [] };
+  // pdb serve (#373): argument handling of the installed bin, on every platform.
+  const serveUsage = await run(windows ? `"${bin}"` : bin, ["serve"], { shell: windows }).then(
+    () => null,
+    (error: { code?: unknown; stderr?: unknown }) => error,
+  );
+  if (
+    serveUsage?.code !== 2 ||
+    !String(serveUsage.stderr).includes("pdb serve needs --repo owner/name")
+  )
+    throw new Error(
+      `Installed pdb serve without a repository exited ${JSON.stringify(serveUsage?.code ?? 0)}, not 2.`,
+    );
+  const serveHelpText = await run(windows ? `"${bin}"` : bin, ["serve", "--help"], {
+    shell: windows,
+  });
+  if (!serveHelpText.stdout.startsWith("Usage: pdb serve"))
+    throw new Error("Installed pdb serve printed no help.");
+  console.log("ok   installed pdb serve validates arguments (exit 2) and prints help");
   if (windows)
     // execFile("gh") resolves only gh.exe on Windows, so a script stand-in cannot be found.
-    console.log("skip installed blended-queue parity with a fake gh (not supported on Windows)");
+    console.log(
+      "skip installed blended-queue parity and pdb serve smoke with a fake gh (not supported on Windows)",
+    );
   else {
     // A checkout of the fixture repository, so repository configuration resolves (absent).
     const checkout = join(work, "parity-checkout");
@@ -401,6 +473,7 @@ try {
       PATH: `${fakeDir}${delimiter}${process.env.PATH ?? ""}`,
       PDB_NO_UPDATE_CHECK: "1",
     };
+    console.log(`ok   installed pdb serve: ${await serveSmoke(bin, env, checkout)}`);
     const want: Record<string, string> = {
       implementer: "estimate-complexity",
       designer: "assess-impact",
