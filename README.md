@@ -148,7 +148,7 @@ The first stdout line is `pdb serve VERSION listening on http://127.0.0.1:4372/`
 
 Every data route wraps the unchanged CLI JSON in an envelope with `selection` and `freshness` (`source` is `live`, `cached` or `stale`, with `observedAt` and `ageSeconds`). `refresh=true` on any read bypasses a fresh entry. If GitHub fails, a result observed within the last 30 minutes is served as `stale` and `incomplete`, never as complete; otherwise the route answers 502 with the CLI command that inspects the same read. MCP results carry the same block as `freshness.cache`.
 
-HTTP MCP configuration (not yet verified with a real client; the recorded Claude Code check is pending, so treat this as an example):
+HTTP MCP configuration (verified with Claude Code 2.1.325 on macOS; see [doc/reports/serve-http-mcp-acceptance.md](doc/reports/serve-http-mcp-acceptance.md)):
 
 ```sh
 claude mcp add --transport http pdb http://127.0.0.1:4372/mcp
