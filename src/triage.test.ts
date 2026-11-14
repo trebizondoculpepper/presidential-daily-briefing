@@ -54,7 +54,7 @@ import {
   type ConfigSchema,
   type GitRunner,
 } from "./config/config.js";
-import { briefing, dependencyDone, textReport } from "./briefing.js";
+import { briefing, dependencyDone, textReport } from "./briefing/briefing.js";
 import {
   commandRegistry,
   compactGuide,
@@ -62,8 +62,8 @@ import {
   MAX_GUIDE_CODE_POINTS,
   mutatingCommands,
   policyVersion,
-} from "./process.js";
-import { closingPrEvidence, pickupEligibility, pickupPolicy } from "./ranking.js";
+} from "./briefing/process.js";
+import { closingPrEvidence, pickupEligibility, pickupPolicy } from "./briefing/ranking.js";
 import { complexityGuidance } from "./estimation/complexity.js";
 import { parseLabelProvenance, provenanceComment } from "./estimation/estimate.js";
 import type { LabelEstimateProvenance } from "./estimation/estimate.js";
@@ -592,7 +592,7 @@ esac
         );
         expect(JSON.parse(stdout).repository).toBe(repo);
         expect((await readFile(log, "utf8")).trim().split("\n")).toEqual(["repo", "api", "api"]);
-        for (const name of ["cli", "github/github", "briefing"]) {
+        for (const name of ["cli", "github/github", "briefing/briefing"]) {
           const code = await readFile(new URL(`./${name}.ts`, import.meta.url), "utf8");
           expect(code).not.toMatch(/(?:from|import)\s+["'][^"']+\.ts["']/);
         }
@@ -605,7 +605,7 @@ esac
 
 describe("compact briefing contract", () => {
   it("omits empty sections and zero counters from text while preserving structured metadata", async () => {
-    const { compactBriefing, compactText } = await import("./compact.js");
+    const { compactBriefing, compactText } = await import("./briefing/compact.js");
     const data = snapshot([], []),
       expanded = briefing(data, { limit: 10 }, new Date(time));
     const report = compactBriefing(data, { limit: 10 }, expanded);
@@ -620,7 +620,7 @@ describe("compact briefing contract", () => {
   });
 
   it("deduplicates targets, separates parked questions and preserves full detail", async () => {
-    const { compactBriefing, compactText, sourceContext } = await import("./compact.js");
+    const { compactBriefing, compactText, sourceContext } = await import("./briefing/compact.js");
     const parked = issue(7, ["status:parked", "question"]);
     const mine = issue(8, ["agent:reader"]);
     mine.lastEditedAt = "2026-11-12T12:00:00Z";
@@ -643,7 +643,7 @@ describe("compact briefing contract", () => {
     expect(compactText(noDetail, 600)).toContain("omitted");
   });
   it("keeps real estimation warnings visible even with no estimate candidates", async () => {
-    const { compactBriefing, compactText } = await import("./compact.js");
+    const { compactBriefing, compactText } = await import("./briefing/compact.js");
     const data = snapshot([], []);
     const base = compactBriefing(
       data,
@@ -3756,7 +3756,7 @@ describe("post-write ownership check with incomplete labels", () => {
 
 describe("designer groups: decision needed vs agreed-needs-documentation (#40)", () => {
   it("groups explicit markers separately with source reasons; unknown without one", async () => {
-    const { compactBriefing, compactText } = await import("./compact.js");
+    const { compactBriefing, compactText } = await import("./briefing/compact.js");
     const decide = issue(40, ["design:decision-needed"]);
     decide.comments = page([
       {
@@ -4145,7 +4145,7 @@ describe("transferred issue inspection (#39, doc/design/diagnostics.md)", () => 
 
 describe("addressed attention for --agent (#3, doc/design/briefings.md)", () => {
   it("orders attention to the viewer first, then owned work, then pickup; never a claim", async () => {
-    const { compactBriefing, compactText } = await import("./compact.js");
+    const { compactBriefing, compactText } = await import("./briefing/compact.js");
     const addressed = issue(20, ["status:parked", "attention:reader", "origin:farhad", "agent:bo"]);
     const other = issue(21, ["attention:someone"]);
     const mine = issue(22, ["agent:reader"]);
@@ -4164,7 +4164,7 @@ describe("addressed attention for --agent (#3, doc/design/briefings.md)", () => 
     expect(compact.sections.addressed.items).not.toContain(other.url);
   });
   it("says addressed filtering is unavailable without --agent", async () => {
-    const { compactBriefing } = await import("./compact.js");
+    const { compactBriefing } = await import("./briefing/compact.js");
     const data = snapshot([issue(20, ["attention:reader"])], []);
     const compact = compactBriefing(
       data,
@@ -4244,7 +4244,7 @@ describe("next-action ranking (#45, doc/design/briefings.md acceptance examples)
     return item;
   };
   const compact = async (data: Snapshot, options: Parameters<typeof briefing>[1]) => {
-    const { compactBriefing } = await import("./compact.js");
+    const { compactBriefing } = await import("./briefing/compact.js");
     const expanded = briefing(data, { ...options, limit: 1000 }, new Date(time));
     return compactBriefing(data, options, expanded);
   };
@@ -4390,7 +4390,7 @@ describe("next-action ranking (#45, doc/design/briefings.md acceptance examples)
     blocks(one, [c]);
     const data = snapshot([none, two, one, unready, a, b, c], []);
     const targets = [none.url, two.url, one.url];
-    const { compactBriefing } = await import("./compact.js");
+    const { compactBriefing } = await import("./briefing/compact.js");
     const role = compactBriefing(
       data,
       { limit: 20, agent: "reader", role: "designer" },
@@ -7437,7 +7437,7 @@ describe("role-shaped briefings (#1, doc/design/briefings.md)", () => {
     data: Snapshot,
     options: { limit: number; agent?: string; role?: string; platform?: string },
   ) => {
-    const { compactBriefing } = await import("./compact.js");
+    const { compactBriefing } = await import("./briefing/compact.js");
     const expanded = briefing(data, { ...options, limit: 1000 }, new Date(time));
     return compactBriefing(data, options, expanded);
   };
@@ -7648,7 +7648,7 @@ describe("role-shaped briefings (#1, doc/design/briefings.md)", () => {
     expect(numbers(a.role!.next)).toContain(100);
   });
   it("applies the parked guard centrally to every foreground role section", async () => {
-    const { roleView, sectionSelectors } = await import("./roles.js");
+    const { roleView, sectionSelectors } = await import("./briefing/roles.js");
     const parked = issue(102, ["agent:reader", "status:parked"]);
     const data = snapshot([parked], []);
     const r = await compact(data, { limit: 10, agent: "reader" });
@@ -7656,7 +7656,7 @@ describe("role-shaped briefings (#1, doc/design/briefings.md)", () => {
     sectionSelectors.set("own-work-unguarded", ({ byUrl }) =>
       [...byUrl.keys()].map((url) => ({ url, reason: "test" })),
     );
-    const { roleRegistry } = await import("./roles.js");
+    const { roleRegistry } = await import("./briefing/roles.js");
     roleRegistry.set("probe", {
       question: "probe",
       sections: [{ section: "own-work-unguarded", title: "PROBE", budget: 5 }],
@@ -7837,7 +7837,7 @@ describe("role-shaped briefings (#1, doc/design/briefings.md)", () => {
     }
   });
   it("renders the role in text and rejects unknown roles", async () => {
-    const { compactText } = await import("./compact.js");
+    const { compactText } = await import("./briefing/compact.js");
     const r = await compact(snapshot([issue(60)], []), { limit: 5, role: "implementer" });
     const text = compactText(r);
     expect(text).toMatch(/Role implementer: What action advances implementation most\?/);

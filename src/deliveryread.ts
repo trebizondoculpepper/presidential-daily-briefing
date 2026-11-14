@@ -21,7 +21,7 @@ import type {
 } from "./workflow/deliverydoctor.js";
 import type { MemberState, TicketDelivery } from "./workflow/completion.js";
 import type { Issue, PullRequest, Snapshot } from "./github/types.js";
-import { prChecks, workflow } from "./briefing.js";
+import { prChecks, workflow } from "./briefing/briefing.js";
 import type { PrStatusReport } from "./workflow/prstatus.js";
 import { codexMarker, headCodexFindings, headReviewed } from "./workflow/reviewevidence.js";
 

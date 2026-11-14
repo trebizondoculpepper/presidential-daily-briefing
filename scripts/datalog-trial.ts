@@ -5,13 +5,13 @@ import { parseArgs } from "node:util";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { cachedSnapshot } from "../src/cli.js";
-import { readSnapshotAssessments } from "../src/assessments.js";
+import { readSnapshotAssessments } from "../src/briefing/assessments.js";
 import { collectLabelEstimationInput, metricStatus } from "../src/estimation/complexitylabels.js";
 import { impactMetric } from "../src/estimation/metrics.js";
 import { markerTrust } from "../src/workflow/delivery.js";
 import { ghRest, permissionLookup } from "../src/github/github.js";
-import { briefing } from "../src/briefing.js";
-import { compactBriefing } from "../src/compact.js";
+import { briefing } from "../src/briefing/briefing.js";
+import { compactBriefing } from "../src/briefing/compact.js";
 import { evaluateDatalog } from "../src/rules/datalog/datalog.js";
 const { values } = parseArgs({
   options: {

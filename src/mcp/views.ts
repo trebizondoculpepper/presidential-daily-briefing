@@ -3,9 +3,9 @@
  * "Implementation decisions"). Each builder selects fields from the existing versioned report,
  * names its prunable lists in pruning order and renders minimal text from returned rows only.
  */
-import { catchUpLimits, catchUpText } from "../catchup.js";
+import { catchUpLimits, catchUpText } from "../briefing/catchup.js";
 import { dependencyFacts } from "../github/dependencies.js";
-import type { CatchUpReport } from "../catchup.js";
+import type { CatchUpReport } from "../briefing/catchup.js";
 import { warningsList } from "./bounded.js";
 import type { BoundedView, Next, PrunableList, Selection } from "./bounded.js";
 

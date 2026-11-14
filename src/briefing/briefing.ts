@@ -1,5 +1,5 @@
 /** Registered workflow rules. GitHub facts are evidence, not natural-language decisions. */
-import { dependencyDrift, dependencyFacts, nativeKnown, pickable } from "./github/dependencies.js";
+import { dependencyDrift, dependencyFacts, nativeKnown, pickable } from "../github/dependencies.js";
 import {
   compareImpact,
   impactLookup,
@@ -8,13 +8,13 @@ import {
   urgencyBand,
 } from "./ranking.js";
 import type { PickupOrder } from "./ranking.js";
-import { estimationText } from "./estimation/estimation.js";
+import { estimationText } from "../estimation/estimation.js";
 import { assessmentsText } from "./assessments.js";
 import type { SubjectAssessments } from "./assessments.js";
-import { labelEstimationReport } from "./estimation/complexitylabels.js";
-import type { LabelEstimationInput } from "./estimation/complexitylabels.js";
-import type { Action, Dependency, Issue, PullRequest, Snapshot } from "./github/types.js";
-import { headReviewed } from "./workflow/reviewevidence.js";
+import { labelEstimationReport } from "../estimation/complexitylabels.js";
+import type { LabelEstimationInput } from "../estimation/complexitylabels.js";
+import type { Action, Dependency, Issue, PullRequest, Snapshot } from "../github/types.js";
+import { headReviewed } from "../workflow/reviewevidence.js";
 
 export { urgencyBand };
 /** Briefing default for stale-claim signals (doc/design/briefings.md): two days. */
