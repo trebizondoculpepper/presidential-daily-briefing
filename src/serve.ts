@@ -12,7 +12,7 @@ import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { isIP } from "node:net";
 import { promisify } from "node:util";
-import { currentRepository } from "./github/github.js";
+import { AuthenticationError, currentRepository, ghQueryFailure } from "./github/github.js";
 import { systemClock } from "./mcp/polling.js";
 import type { Clock } from "./mcp/polling.js";
 import { installedVersion } from "./updates/updates.js";
@@ -74,7 +74,14 @@ const execute = promisify(execFile);
 
 /** Production authentication context: `gh api user` through the argument-array runner. */
 export async function ghAuthContext(signal?: AbortSignal): Promise<AuthContext> {
-  const { stdout } = await execute("gh", ["api", "user"], { timeout: 30_000, signal });
+  let stdout: string;
+  try {
+    ({ stdout } = await execute("gh", ["api", "user"], { timeout: 30_000, signal }));
+  } catch (error) {
+    signal?.throwIfAborted();
+    // Typed: an authentication failure, a rate limit, or anything else (outage, timeout, 5xx).
+    throw ghQueryFailure(error);
+  }
   const login: unknown = (JSON.parse(stdout) as { login?: unknown }).login;
   if (typeof login !== "string" || !/^[\w.-]+$/.test(login))
     throw new Error("gh api user returned no login.");
@@ -243,10 +250,12 @@ export async function startServe(
   let auth: AuthContext;
   try {
     auth = await runtime.authContext();
-  } catch {
+  } catch (error) {
     throw new ServeStartupError(
       1,
-      "cannot read the GitHub login from gh; run gh auth login (check with gh auth status) and retry.",
+      error instanceof AuthenticationError
+        ? "cannot read the GitHub login from gh; run gh auth login (check with gh auth status) and retry."
+        : "cannot read the GitHub login from gh (GitHub or the network did not answer); check the connection and gh auth status, then retry.",
     );
   }
   // "localhost" binds the IPv4 loopback address only, so the URL is stable on every platform.

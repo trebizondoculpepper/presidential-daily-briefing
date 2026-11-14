@@ -9,7 +9,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { main } from "../cli.js";
 import { TOML_CONFIG_PATH } from "../config/config.js";
 import type { ConfigFileSystem, GitRunner } from "../config/config.js";
-import { collect, IssueUnavailable } from "../github/github.js";
+import { collect, ghQueryFailure, IssueUnavailable } from "../github/github.js";
 import { dependencyReport } from "../github/dependencies.js";
 import type { Query } from "../github/github.js";
 import { RateLimitError } from "../github/dependencies.js";
@@ -26,7 +26,7 @@ import {
   servedOnlyRest,
 } from "./api.js";
 import type { ServeReadRuntime } from "./api.js";
-import { ServeCache } from "./cache.js";
+import { classifyFailure, ServeCache } from "./cache.js";
 import { serveArguments } from "./options.js";
 
 const repo = "example/parity";
@@ -570,6 +570,71 @@ describe("pdb serve never reads an unserved repository (#373 review)", () => {
       status: 200,
       body: {},
     });
+  });
+});
+
+describe("pdb serve classifies GitHub failures by structured signals (#373 review)", () => {
+  // gh's sanitized message mentions "gh auth status" on every failure; only types decide.
+  const failures: [string, unknown, string][] = [
+    [
+      "network outage",
+      { code: 1, stderr: "error connecting to api.github.com\ncheck your internet connection" },
+      "GITHUB_UNAVAILABLE",
+    ],
+    ["timeout", { code: null, killed: true, signal: "SIGTERM", stderr: "" }, "GITHUB_UNAVAILABLE"],
+    [
+      "HTTP 502",
+      { code: 1, stderr: "gh: HTTP 502: Bad Gateway (https://api.github.com/graphql)" },
+      "GITHUB_UNAVAILABLE",
+    ],
+    [
+      "HTTP 401",
+      { code: 1, stderr: "gh: HTTP 401: Bad credentials (https://api.github.com/graphql)" },
+      "GITHUB_AUTH",
+    ],
+    [
+      "gh not logged in (exit 4)",
+      { code: 4, stderr: "To get started with GitHub CLI, please run:  gh auth login" },
+      "GITHUB_AUTH",
+    ],
+    [
+      "rate limit",
+      { code: 1, stderr: "gh: HTTP 403: API rate limit exceeded\nRetry-After: 30" },
+      "GITHUB_RATE_LIMITED",
+    ],
+  ];
+  for (const [name, execError, code] of failures)
+    it(`${name} is ${code}`, () => {
+      const thrown = ghQueryFailure(execError);
+      expect(thrown.message).not.toContain("Bad credentials");
+      expect(classifyFailure(thrown, start).code).toBe(code);
+    });
+
+  it("an outage reaches clients as GITHUB_UNAVAILABLE and keeps auth handling out of it", async () => {
+    const s = await setup(["--repo", repo], {
+      collect: async () => {
+        throw ghQueryFailure({ code: 1, stderr: "gh: HTTP 503: Service Unavailable" });
+      },
+    });
+    try {
+      const reply = await call(s.running.port, "/api/v1/briefing");
+      expect(reply.status).toBe(502);
+      expect(reply.json.error.code).toBe("GITHUB_UNAVAILABLE");
+    } finally {
+      await s.close();
+    }
+    const auth = await setup(["--repo", repo], {
+      collect: async () => {
+        throw ghQueryFailure({ code: 1, stderr: "gh: HTTP 401: Bad credentials" });
+      },
+    });
+    try {
+      expect((await call(auth.running.port, "/api/v1/briefing")).json.error.code).toBe(
+        "GITHUB_AUTH",
+      );
+    } finally {
+      await auth.close();
+    }
   });
 });
 
