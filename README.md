@@ -127,6 +127,39 @@ Generic stdio configuration (install globally first; nothing registers a host au
 
 Claude Code (temporary workaround for #266, kept until the bounded results pass the real-client retest): with older releases, the default `triage_briefing`, `triage_issue` and `triage_dependencies` results can exceed Claude Code's default MCP output limit of 25,000 tokens ([Claude Code documentation](https://code.claude.com/docs/en/mcp#mcp-output-limits-and-warnings), accessed 14 November 2026). Start Claude Code with a larger limit, for example `MAX_MCP_OUTPUT_TOKENS=60000 claude`. This is interim only; the fix is the bounded response contract in [doc/design/mcp-bounded-results.md](doc/design/mcp-bounded-results.md).
 
+## Local server: `pdb serve`
+
+`pdb serve` runs a foreground local HTTP server from the same package: a read-only JSON API and HTTP MCP over one short-lived memory cache, so several agents on one machine share collected GitHub facts instead of each collecting them. It uses your authenticated `gh`, writes nothing to disk and never changes GitHub. Stop it with Ctrl-C; a restart clears the cache.
+
+```sh
+pdb serve --project /absolute/project/path        # or --repo owner/name; both repeatable
+pdb serve --repo owner/name --port 0 --ttl 10m   # 0 picks a free port; TTL 1m to 10m, default 5m
+```
+
+The first stdout line is `pdb serve VERSION listening on http://127.0.0.1:4372/`. At least one `--repo` or `--project` is required: the working directory is never used to choose a repository. It listens on 127.0.0.1 only unless `--host` names another address together with `--allow-remote`, which prints a warning: there is no authentication, and anyone who can reach the server can read what your gh login can see. Loopback binding does not keep out other users of the same machine. Requests whose `Host` or `Origin` does not name this server are refused (DNS-rebinding protection), and a busy port exits 3 instead of picking another one.
+
+| Route                                                                        | Result                                                                                 |
+| ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `GET /api/v1/briefing?role=implementer`                                      | The CLI's `--json` briefing (`agent`, `role`, `order`, `since`, `limit` as on the CLI) |
+| `GET /api/v1/issues/N`, `/issues/N/deps`, `/issues/N/who`, `/prs/N`, `/team` | The CLI's `--issue N`, `deps N`, `who N`, `pr N`, `team` JSON                          |
+| `POST /api/v1/refresh` with `{"repo": "owner/name"}`                         | Drops cached entries; the next read collects live                                      |
+| `GET /api/v1/status`, `GET /healthz`                                         | Server status and cache counters; liveness                                             |
+| `/mcp`                                                                       | HTTP MCP: the same four read-only tools as `pdb-mcp`                                   |
+
+Every data route wraps the unchanged CLI JSON in an envelope with `selection` and `freshness` (`source` is `live`, `cached` or `stale`, with `observedAt` and `ageSeconds`). `refresh=true` on any read bypasses a fresh entry. If GitHub fails, a result observed within the last 30 minutes is served as `stale` and `incomplete`, never as complete; otherwise the route answers 502 with the CLI command that inspects the same read. MCP results carry the same block as `freshness.cache`.
+
+HTTP MCP configuration (not yet verified with a real client; the recorded Claude Code check is pending, so treat this as an example):
+
+```sh
+claude mcp add --transport http pdb http://127.0.0.1:4372/mcp
+```
+
+```json
+{ "type": "http", "url": "http://127.0.0.1:4372/mcp" }
+```
+
+`pdb-mcp` over stdio is unchanged and needs no server. Contract: [doc/design/serve.md](doc/design/serve.md).
+
 ## Repository settings and sizing
 
 Use the configuration commands from the target checkout instead of editing configuration files directly:
