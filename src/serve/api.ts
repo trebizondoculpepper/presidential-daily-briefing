@@ -63,6 +63,35 @@ export interface ServeReadRuntime {
   projectRuntime?: (project: string | undefined) => Pick<ReadRuntime, "estimation" | "guide">;
 }
 
+/** The stand-in checkout root of a repository served without a local project. */
+export const NO_PROJECT_ROOT = "<no local project>";
+
+const refuseWrite = async (): Promise<never> => {
+  throw new Error("pdb serve never writes local configuration.");
+};
+
+/**
+ * Configuration readers for a repository served only by --repo: they see an empty checkout of
+ * exactly that repository, so every setting takes its default. Without them the estimation and
+ * workflow-guide readers fall back to the process working directory, which #271 forbids: the
+ * directory pdb serve was started in says nothing about the requested repository.
+ */
+export function noLocalProject(repository: string): Pick<ReadRuntime, "estimation" | "guide"> {
+  const git: GitRunner = async (args) =>
+    args[0] === "rev-parse"
+      ? `${NO_PROJECT_ROOT}\n`
+      : `origin\thttps://github.com/${repository}.git (fetch)\n`;
+  const fs: ConfigFileSystem = {
+    readText: async () => null,
+    writeText: refuseWrite,
+    rename: refuseWrite,
+    remove: refuseWrite,
+    makeDirectory: refuseWrite,
+  };
+  const readers = { cwd: NO_PROJECT_ROOT, git, fs };
+  return { estimation: readers, guide: readers };
+}
+
 type View = "briefing" | "issue" | "dependencies" | "pull-request" | "who" | "team";
 type Status = "complete" | "incomplete" | "error";
 
@@ -264,15 +293,19 @@ export function readApi(
   const known = localPaths(...options.projects);
   const redact = <T>(value: T): T => redactPaths(value, known);
 
-  const readRuntime = (project: string | undefined): ReadRuntime => ({
+  const readRuntime = (project: string | undefined, repository: string): ReadRuntime => ({
     collect: cachedCollect,
     dependencyReport: cachedDependencies,
     rest: memoRest,
     queryWith: memoQueryWith,
     now: runtime.now,
     redactDiagnostic: redactLocalText,
-    ...(runtime.projectRuntime?.(project) ??
-      (project ? { estimation: { cwd: project }, guide: { cwd: project } } : {})),
+    ...(project
+      ? (runtime.projectRuntime?.(project) ?? {
+          estimation: { cwd: project },
+          guide: { cwd: project },
+        })
+      : noLocalProject(repository)),
   });
 
   const boundaries = (repository: string, signal: AbortSignal): DeliveryBoundaries =>
@@ -459,7 +492,7 @@ export function readApi(
         (!sincePattern.test(sinceText) || !Number.isFinite(Date.parse(sinceText)))
       )
         throw invalid("since must be an ISO timestamp with a time and timezone.");
-      const read = await readBriefing(readRuntime(served.project), {
+      const read = await readBriefing(readRuntime(served.project, served.repository), {
         repository: served.repository,
         agent: selection.agent ?? undefined,
         issue,
@@ -646,15 +679,18 @@ export function readApi(
               follow &&
               Number.isSafeInteger(Number(diagnosis.destination.number))
             ) {
-              const destination = await readBriefing(readRuntime(undefined), {
-                repository: diagnosis.destination.repository,
-                agent: chosen?.agent ?? undefined,
-                issue: Number(diagnosis.destination.number),
-                limit: 10,
-                maxChars: 10000,
-                order: "impact",
-                signal: context.signal,
-              });
+              const destination = await readBriefing(
+                readRuntime(undefined, diagnosis.destination.repository),
+                {
+                  repository: diagnosis.destination.repository,
+                  agent: chosen?.agent ?? undefined,
+                  issue: Number(diagnosis.destination.number),
+                  limit: 10,
+                  maxChars: 10000,
+                  order: "impact",
+                  signal: context.signal,
+                },
+              );
               if (destination.kind === "report")
                 return {
                   status: destination.complete ? "complete" : "incomplete",

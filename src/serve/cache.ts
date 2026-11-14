@@ -385,11 +385,13 @@ export class ServeCache {
   }
 
   /** Re-read the login before live work at most once per TTL; a change clears the cache. */
-  private async checkAuth(signal: AbortSignal): Promise<void> {
+  private async checkAuth(): Promise<void> {
     if (this.now() - this.authCheckedAt < this.ttlMs) return;
+    // Shared by every collection that needs it, so it takes no caller's signal: one cancelled
+    // request must not fail another's check (gh's own timeout bounds it).
     this.authCheck ??= (async () => {
       try {
-        const auth = await this.options.authContext(signal);
+        const auth = await this.options.authContext();
         this.authCheckedAt = this.now();
         if (auth.host !== this.auth.host || auth.login !== this.auth.login) {
           this.auth = auth;
@@ -398,7 +400,6 @@ export class ServeCache {
           this.options.onAuthChange?.(auth);
         }
       } catch {
-        if (signal.aborted) throw abortError(signal);
         throw new CollectionError(
           "GITHUB_AUTH",
           "The gh login could not be read. Run gh auth status, then retry.",
@@ -408,6 +409,15 @@ export class ServeCache {
       }
     })();
     return this.authCheck;
+  }
+
+  private noteRateLimit(failure: CollectionError): void {
+    if (failure.code !== "GITHUB_RATE_LIMITED" || !failure.resetAt) return;
+    const until = Date.parse(failure.resetAt);
+    if (until > this.cooldownUntil) {
+      this.cooldownUntil = until;
+      this.cooldownError = failure;
+    }
   }
 
   private startCollection<T>(
@@ -423,11 +433,16 @@ export class ServeCache {
     flight.promise = (async () => {
       await this.acquire(controller.signal);
       try {
-        await this.checkAuth(controller.signal);
-        const value = await produce(controller.signal);
-        // The login may have changed while this collection waited (checkAuth): its facts
-        // belong to the current authentication context, never to the one it was queued under.
+        // A cooldown that began while this read was queued applies to it too.
+        if (this.cooldownUntil > this.now() && this.cooldownError) throw this.cooldownError;
+        await this.checkAuth();
+        // The login these facts are collected under. If it changes before the collection
+        // finishes (another collection noticed gh auth switch), the result is still returned
+        // to this flight's own waiters, whose key names the old login, but never stored where
+        // the new login's reads would find it.
+        const collectedAs = this.auth;
         const storeKey = this.keyOf(cacheKey);
+        const value = await produce(controller.signal);
         const entry: Entry = {
           key: storeKey,
           repository: repository.toLowerCase(),
@@ -442,6 +457,7 @@ export class ServeCache {
         // Never overwrite newer facts, and never insert across a refresh that came later.
         if (
           !this.closed &&
+          this.auth === collectedAs &&
           this.epochOf(repository) === epoch &&
           (!current || current.generation < generation)
         ) {
@@ -458,6 +474,10 @@ export class ServeCache {
       } catch (error) {
         // A failed collection aborts sibling requests still paginating.
         controller.abort();
+        // Start a rate-limit cooldown before this slot is released, so a read queued behind
+        // this one sees it (the waiters' own handling runs only after the release).
+        if (!(error instanceof IssueUnavailable))
+          this.noteRateLimit(classifyFailure(error, this.now()));
         throw error;
       } finally {
         this.release();
@@ -548,10 +568,7 @@ export class ServeCache {
       // An unavailable issue is a result (its diagnosis), not a failure: never stale.
       if (error instanceof IssueUnavailable) throw error;
       const failure = classifyFailure(error, this.now());
-      if (failure.code === "GITHUB_RATE_LIMITED" && failure.resetAt) {
-        this.cooldownUntil = Date.parse(failure.resetAt);
-        this.cooldownError = failure;
-      }
+      this.noteRateLimit(failure);
       this.lastSeen.set(cacheKey.repository.toLowerCase(), {
         observedAt: this.lastSeen.get(cacheKey.repository.toLowerCase())?.observedAt ?? null,
         lastError: { code: failure.code, at: new Date(this.now()).toISOString() },
