@@ -14,6 +14,7 @@ import {
   runAll,
   junit,
   exitCode,
+  main,
   scenarioDir,
   RuleDecisionFailure,
   RuleInfrastructureError,
@@ -116,6 +117,26 @@ describe("rule runner outcome categories (#348)", () => {
     expect(both.map((o) => o.status)).toEqual(["RuleDecisionFailure", "RuleInfrastructureError"]);
     expect(exitCode(both)).toBe(2);
     expect(runAll({ listScenarios: () => [] })[0].status).toBe("RuleInfrastructureError");
+  });
+
+  it("reports an unwritable JUnit path as an infrastructure error with exit 2", () => {
+    const errors: string[] = [];
+    const deps = {
+      run: () => [{ name: "a", file: "x.edn", status: "passed" as const, message: "" }],
+      out: () => {},
+      err: (t: string) => errors.push(t),
+      writeFile: () => {
+        throw new Error("ENOENT: no such file or directory, open 'missing/dir/r.xml'");
+      },
+    };
+    expect(main(["--junit", join("missing", "dir", "r.xml")], deps)).toBe(2);
+    expect(errors.join("")).toMatch(
+      /^RuleInfrastructureError: could not write the JUnit report to .*r\.xml: ENOENT/,
+    );
+    let written = "";
+    expect(main(["--junit", "r.xml"], { ...deps, writeFile: (_, t) => (written = t) })).toBe(0);
+    expect(written).toContain('tests="1" failures="0" errors="0"');
+    expect(main(["--junit"], deps)).toBe(2);
   });
 
   it("writes JUnit with failures and errors kept apart by element and type", () => {
