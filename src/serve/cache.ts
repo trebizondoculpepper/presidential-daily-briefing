@@ -10,7 +10,7 @@
  * background: an idle server makes no GitHub requests.
  */
 import { AsyncLocalStorage } from "node:async_hooks";
-import { IssueUnavailable, SubjectUnavailable } from "../github/github.js";
+import { AuthenticationError, IssueUnavailable, SubjectUnavailable } from "../github/github.js";
 
 /** A read refused because it names a repository outside the served set (#373). */
 export class UnservedRepository extends Error {
@@ -156,8 +156,9 @@ export function classifyFailure(error: unknown, now: number): CollectionError {
       resetAt,
     );
   }
-  const message = typeof record.message === "string" ? record.message : "";
-  if (/\bauth|401|credential|token/i.test(message))
+  // Typed signals only: gh's general advice mentions authentication on every failure, so
+  // message text would turn outages, timeouts and 5xx answers into auth failures.
+  if (error instanceof AuthenticationError)
     return new CollectionError(
       "GITHUB_AUTH",
       "GitHub refused the gh login. Check gh auth status, then retry.",
@@ -414,11 +415,14 @@ export class ServeCache {
           for (const key of this.entries.keys()) this.remove(key);
           this.options.onAuthChange?.(auth);
         }
-      } catch {
-        throw new CollectionError(
-          "GITHUB_AUTH",
-          "The gh login could not be read. Run gh auth status, then retry.",
-        );
+      } catch (error) {
+        // Only a real authentication failure is GITHUB_AUTH; an outage stays unavailable.
+        if (error instanceof AuthenticationError)
+          throw new CollectionError(
+            "GITHUB_AUTH",
+            "The gh login could not be read. Run gh auth status, then retry.",
+          );
+        throw classifyFailure(error, this.now());
       } finally {
         this.authCheck = null;
       }

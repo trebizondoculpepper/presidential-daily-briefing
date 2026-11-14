@@ -78,12 +78,7 @@ export const ghQueryWith =
       // only errors are NOT_FOUND is a valid answer ("no such issue"): callers see null fields.
       const answer = graphqlAnswer(prop(error, "stdout"));
       if (answer) return answer;
-      const limited = rateLimitFailure(prop(error, "stderr"), prop(error, "stdout"));
-      if (limited) throw limited;
-      // Do not echo subprocess arguments, stderr, credentials or private API response bodies.
-      throw new Error(
-        "GitHub query failed. Check gh auth status, repository access and API rate limits.",
-      );
+      throw ghQueryFailure(error);
     }
     const parsed: unknown = JSON.parse(stdout);
     const errors = prop(parsed, "errors");
@@ -122,6 +117,33 @@ export function rateLimitFailure(stderr: unknown, stdout: unknown): RateLimitErr
     resetAt: reset ? new Date(Number(reset[1]) * 1000).toISOString() : null,
   });
 }
+/**
+ * gh could not authenticate: it exited with its documented authentication-required status (4),
+ * or GitHub answered HTTP 401. Network failures, timeouts and 5xx answers are never this.
+ */
+export class AuthenticationError extends Error {
+  readonly authentication = true;
+}
+
+/**
+ * The sanitized error for a failed `gh api graphql` run, decided from structured signals only:
+ * the rate-limit discriminator, gh's exit status and the HTTP status gh reports. The message
+ * keeps its general advice; callers must classify by type, never by message text.
+ */
+export function ghQueryFailure(error: unknown): Error {
+  const limited = rateLimitFailure(prop(error, "stderr"), prop(error, "stdout"));
+  if (limited) return limited;
+  const httpStatus = /\bHTTP (\d{3})\b/.exec(text(prop(error, "stderr")))?.[1];
+  if (prop(error, "code") === 4 || httpStatus === "401")
+    return new AuthenticationError(
+      "GitHub refused the gh login. Run gh auth status (or gh auth login), then retry.",
+    );
+  // Do not echo subprocess arguments, stderr, credentials or private API response bodies.
+  return new Error(
+    "GitHub query failed. Check gh auth status, repository access and API rate limits.",
+  );
+}
+
 /** Uncancellable production GraphQL boundary used by the CLI. */
 export const ghQuery: Query = ghQueryWith();
 /** Data from a GraphQL response whose errors are all NOT_FOUND, else null. */
