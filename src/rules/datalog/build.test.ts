@@ -157,4 +157,28 @@ describe("rules build (#348)", () => {
     expect(problems).toHaveLength(1);
     expect(problems[0]).toMatch(/^queries\.edn :q2: unsupported query input/);
   });
+
+  it("fails the build when a query the engine runs is renamed or removed", () => {
+    const renamed = editing("queries.edn", (t) =>
+      t.replace(" :active-count\n", " :active-counts\n"),
+    );
+    expect(problemsOf(() => buildPolicy(renamed))).toEqual([
+      "queries.edn: missing :active-count, which the engine runs",
+      "queries.edn: :active-counts is never run by the engine",
+    ]);
+    const bundle = readSources();
+    const { denials: _, ...queries } = bundle.queries;
+    expect(
+      problemsOf(() =>
+        validateBundle({
+          ...bundle,
+          queries: queries as typeof bundle.queries,
+          keyQueries: bundle.keyQueries.filter(([name]) => name !== "urgency-key"),
+        }),
+      ),
+    ).toEqual([
+      "queries.edn: missing :denials, which the engine runs",
+      'queries.edn :key-queries: need exactly one "urgency-key", which ordering.edn reads',
+    ]);
+  });
 });
