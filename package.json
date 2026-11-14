@@ -29,7 +29,7 @@
   "scripts": {
     "triage": "tsx src/cli.ts",
     "build": "vp pack src/cli.ts --format esm --out-dir dist && vp pack src/mcp.ts --format esm --out-dir dist --no-clean",
-    "check": "vp check && tsc -p doc/reports/examples",
+    "check": "vp check && tsc -p doc/reports/examples && tsx src/rules/datalog/build.ts --check",
     "lint": "vp lint",
     "fmt": "vp fmt",
     "test": "vp test run",
@@ -40,7 +40,8 @@
     "release": "tsx scripts/release.ts",
     "make-prerelease": "tsx scripts/make-prerelease.ts",
     "mcp": "tsx src/mcp.ts",
-    "pdb": "tsx src/cli.ts"
+    "pdb": "tsx src/cli.ts",
+    "rules:build": "tsx src/rules/datalog/build.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/server": "2.4.0",
@@ -52,6 +53,7 @@
   "devDependencies": {
     "@modelcontextprotocol/client": "2.4.0",
     "@types/node": "^26.6.6",
+    "edn-data": "1.2.2",
     "tsx": "^4.23.15",
     "typescript": "~7.0.2",
     "vite": "npm:@voidzero-dev/vite-plus-core@1.5.0",
