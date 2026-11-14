@@ -47,7 +47,7 @@ npm run pdb -- deps 42 --repo owner/repo --tree
 npm run check                                 # vp check (format, lint, type check) + examples tsc
 npm run fmt                                   # apply formatting
 npm test                                      # vp test run (Vitest)
-npx vp test run src/triage.test.ts -t "name"  # one file / one test by name
+npx vp test run src/workflow/claims.test.ts -t "name"  # one file / one test by name
 npm run build                                 # vp pack -> dist/cli.mjs
 node dist/cli.mjs --help                      # quick CLI smoke test
 npm run smoke                                 # credential-free exit-code smoke of dist/cli.mjs
@@ -80,7 +80,7 @@ The DataScript policy lives in `src/rules/datalog/policy/*.edn` (DataScript Data
 
 3. `npm run rules:build`, then the full checks. If decisions change on purpose, regenerate the golden parity file (`PDB_PARITY_REGENERATE=1 npx vp test run src/rules/datalog/parity.test.ts`) and state the change and the new rules hash in the PR.
 
-Without `--repo`, the target repository is resolved by `gh repo view` from the current working directory. The runtime uses only Node built-ins and `gh`; shared GitHub fact types live in `src/github/types.d.ts`; `tsconfig.json` (strict) covers `src/` and `scripts/`, and `doc/reports/examples/tsconfig.json` covers the rules examples. Tests are in `src/triage.test.ts`; one test fakes `gh` with a POSIX shell script and is skipped on Windows. The CLI and tooling target the current Node LTS, Node 26+ (`engines`, doc/design/runtime.md). CI runs the checks, tests, build, smoke tests and package test with Node 26 on Ubuntu and Windows (required) and, on trial, runs the built and source CLI, smoke tests and package test on FreeBSD in a VM (Vite+ has no FreeBSD binding, so check/test/build run on the Linux host; non-blocking: not part of `verify`, and may be removed if it proves problematic); macOS is not run unless explicitly requested, as it is expected to match Linux. The single `verify` job passes only when every Ubuntu/Windows matrix job passes, and is the check to require. Line endings are LF everywhere.
+Without `--repo`, the target repository is resolved by `gh repo view` from the current working directory. The runtime uses only Node built-ins and `gh`; shared GitHub fact types live in `src/github/types.d.ts`; `tsconfig.json` (strict) covers `src/` and `scripts/`, and `doc/reports/examples/tsconfig.json` covers the rules examples. Tests sit beside the code they cover (`src/<area>/*.test.ts`), with shared fixtures in `src/testing/` and cross-feature suites in `src/acceptance/` (doc/design/source-layout.md); the `gh` wrapper tests in `src/github/github.test.ts` fake `gh` with a POSIX shell script and are skipped on Windows. The CLI and tooling target the current Node LTS, Node 26+ (`engines`, doc/design/runtime.md). CI runs the checks, tests, build, smoke tests and package test with Node 26 on Ubuntu and Windows (required) and, on trial, runs the built and source CLI, smoke tests and package test on FreeBSD in a VM (Vite+ has no FreeBSD binding, so check/test/build run on the Linux host; non-blocking: not part of `verify`, and may be removed if it proves problematic); macOS is not run unless explicitly requested, as it is expected to match Linux. The single `verify` job passes only when every Ubuntu/Windows matrix job passes, and is the check to require. Line endings are LF everywhere.
 
 ## Choosing work
 
