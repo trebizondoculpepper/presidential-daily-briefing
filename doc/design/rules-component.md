@@ -1,6 +1,6 @@
 # Rules component: native EDN sources, build and test boundary
 
-Status: architecture contract for #348. Migration steps 1–4 are implemented: the policy lives in `src/rules/datalog/policy/*.edn` and `policy.ts` is gone. The inventory below describes the code before extraction. Implementation follows in the small PRs listed under "Migration plan". It refines, and does not replace, the owner decisions in [local service and isolated rule testing](local-service-and-rule-testing.md) and the engine contract in [Datalog decisions and explanations](datalog-live-experiment.md). Source placement follows [source layout by capability](source-layout.md) (#335).
+Status: architecture contract for #348. Migration steps 1–5 are implemented: the policy lives in `src/rules/datalog/policy/*.edn` and `policy.ts` is gone. The inventory below describes the code before extraction. Implementation follows in the small PRs listed under "Migration plan". It refines, and does not replace, the owner decisions in [local service and isolated rule testing](local-service-and-rule-testing.md) and the engine contract in [Datalog decisions and explanations](datalog-live-experiment.md). Source placement follows [source layout by capability](source-layout.md) (#335).
 
 ## Summary
 
@@ -49,7 +49,7 @@ The component is everything under `src/rules/datalog/` except the adapter:
 | Type shim              | `src/rules/datalog/datascript.d.ts`       | Unchanged                                                                   |
 | Host adapter (outside) | `src/rules/datalog/adapter.ts`            | `Snapshot` + assessments + viewer → `PolicyFacts`; result → `RankedActions` |
 
-The adapter sits in the same directory so the move stays local, but it is host integration rather than part of the component. Rule tests never import it. Only the adapter and `service.ts` import `github/types.ts`, `assessments.ts`, `blended.ts` or `ranking.ts`. The engine, build and runner import none of them, and a test enforces this.
+`datalog.ts` remains as a re-export of the adapter so the lazily loaded chunk keeps its `dist/datalog-*.mjs` name; `service.ts`, the tests and `scripts/datalog-trial.ts` import it unchanged. The adapter sits in the same directory so the move stays local, but it is host integration rather than part of the component. Rule tests never import it. Only the adapter and `service.ts` import `github/types.ts`, `assessments.ts`, `blended.ts` or `ranking.ts`. The engine, build and runner import none of them, and a test enforces this.
 
 ### Public interface
 
