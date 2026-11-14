@@ -75,6 +75,16 @@ authenticated gh and Node 26+. Never changes GitHub. Stop it with Ctrl-C.
   --entry KEY           Without an agent, use [agents.KEY] of the project's agent-inbox.toml
   --harness NAME        Without an agent or --entry, select that harness's entry
   --help                Show usage
+Routes (read-only; every data route accepts repo=owner/name and refresh=true):
+  GET  /api/v1/briefing?role=implementer  CLI --json briefing (agent, role, order, since, limit)
+  GET  /api/v1/issues/N[/deps|/who]       CLI --issue N, deps N, who N JSON
+  GET  /api/v1/prs/N[?history=true]       CLI pr N JSON;  GET /api/v1/team  CLI team JSON
+  POST /api/v1/refresh {"repo":"owner/name"}  Drop cached entries; the next read collects live
+  GET  /api/v1/status, /healthz           Status and cache counters; liveness
+  /mcp                                    HTTP MCP: the four pdb-mcp read-only tools
+Results carry freshness (live, cached or stale); a stale result is always incomplete.
+HTTP MCP example (not yet verified with a real client):
+  claude mcp add --transport http pdb http://127.0.0.1:${DEFAULT_PORT}/mcp
 The first stdout line is "pdb serve VERSION listening on URL"; request logs go to stderr.
 Loopback binding does not keep out other users of the same machine; there is no token.
 On Windows, Ctrl-C and Ctrl-Break stop the server gracefully; ending it from another process
