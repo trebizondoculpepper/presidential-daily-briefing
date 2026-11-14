@@ -1,0 +1,443 @@
+{
+  "policyVersion": 1,
+  "schema": {
+    "label": {
+      ":db/cardinality": ":db.cardinality/many"
+    },
+    "owner": {
+      ":db/cardinality": ":db.cardinality/many"
+    },
+    "responsible": {
+      ":db/cardinality": ":db.cardinality/many"
+    },
+    "platform": {
+      ":db/cardinality": ":db.cardinality/many"
+    },
+    "attention": {
+      ":db/cardinality": ":db.cardinality/many"
+    },
+    "blocker": {
+      ":db/cardinality": ":db.cardinality/many"
+    },
+    "dependent": {
+      ":db/cardinality": ":db.cardinality/many"
+    },
+    "closes": {
+      ":db/cardinality": ":db.cardinality/many"
+    },
+    "closing": {
+      ":db/cardinality": ":db.cardinality/many"
+    },
+    "check": {
+      ":db/cardinality": ":db.cardinality/many"
+    },
+    "review": {
+      ":db/cardinality": ":db.cardinality/many"
+    },
+    "receipt": {
+      ":db/cardinality": ":db.cardinality/many"
+    },
+    "thread": {
+      ":db/cardinality": ":db.cardinality/many"
+    },
+    "matched": {
+      ":db/cardinality": ":db.cardinality/many"
+    },
+    "overridden": {
+      ":db/cardinality": ":db.cardinality/many"
+    },
+    "unlocks-dependent": {
+      ":db/cardinality": ":db.cardinality/many"
+    },
+    "permit": {
+      ":db/cardinality": ":db.cardinality/many"
+    },
+    "deny": {
+      ":db/cardinality": ":db.cardinality/many"
+    },
+    "unknown": {
+      ":db/cardinality": ":db.cardinality/many"
+    },
+    "unlock-unknown": {
+      ":db/cardinality": ":db.cardinality/many"
+    }
+  },
+  "constants": {
+    "small": ["XS", "S"],
+    "large": ["L", "XL", "XXL"],
+    "needs-assessment": ["unassessed", "stale"],
+    "bad-assessment": ["invalid", "conflict"],
+    "prerequisite": [
+      "status:needs-design",
+      "question",
+      "design:decision-needed",
+      "status:blocked",
+      "status:parked"
+    ],
+    "design-label": ["documentation", "status:needs-design"],
+    "failure": [
+      "FAILURE",
+      "ERROR",
+      "TIMED_OUT",
+      "CANCELLED",
+      "ACTION_REQUIRED",
+      "STARTUP_FAILURE",
+      "STALE"
+    ],
+    "pending": ["PENDING", "QUEUED", "IN_PROGRESS", "WAITING", "REQUESTED", "EXPECTED"],
+    "known-check": [
+      "SUCCESS",
+      "NEUTRAL",
+      "SKIPPED",
+      "FAILURE",
+      "ERROR",
+      "TIMED_OUT",
+      "CANCELLED",
+      "ACTION_REQUIRED",
+      "STARTUP_FAILURE",
+      "STALE",
+      "PENDING",
+      "QUEUED",
+      "IN_PROGRESS",
+      "WAITING",
+      "REQUESTED",
+      "EXPECTED"
+    ],
+    "merge-state": ["CLEAN", "HAS_HOOKS", "UNSTABLE"],
+    "refresh-state": ["BEHIND", "UNKNOWN"],
+    "unknown-mergeable": ["UNKNOWN"],
+    "readiness": ["status:ready", "status:incomplete"]
+  },
+  "clauses": "[\n[(issue ?t) [?t \"kind\" \"issue\"]]\n[(pr ?t) [?t \"kind\" \"pr\"]]\n[(open ?t) [?t \"state\" \"OPEN\"]]\n[(claimed ?t) [?t \"owner\" ?a]]\n[(mine ?t) [1 \"agent\" ?a] [?t \"owner\" ?a]]\n[(mine-linked ?t) (mine ?t)]\n[(mine-linked ?t) [1 \"agent\" ?a] [?t \"responsible\" ?a]]\n[(mine-linked ?t) [?t \"closes\" ?i] (mine ?i)]\n[(addressed ?t) [1 \"agent\" ?a] [?t \"attention\" ?a]]\n[(parked ?t) [?t \"label\" \"status:parked\"]]\n[(foreground ?t) (open ?t) (not (parked ?t))]\n[(foreground ?t) (open ?t) (addressed ?t)]\n[(own-issue ?t) (issue ?t) (open ?t) (mine ?t)]\n[(platform-ok ?t) [?t \"labels-complete\" true] (not [?t \"platform\" _])]\n[(platform-ok ?t) [1 \"platform\" ?p] [?t \"platform\" ?p]]\n[(platform-unknown ?t) [?t \"platform\" _] [1 \"platform\" \"\"]]\n[(available ?t) [?t \"label\" \"status:ready\"]]\n[(available ?t) [?t \"label\" \"status:incomplete\"]]\n[(prerequisite ?t) [?t \"label\" ?l] [1 \"prerequisite\" ?l]]\n[(has-closing ?t) [?t \"closing\" ?p]]\n[(has-closing ?t) [?p \"closes\" ?t] (open ?p)]\n[(closing-complete ?t) [?t \"reverse-complete\" true]]\n[(closing-complete ?t) [?t \"kind\" _] [1 \"forward-complete\" true]]\n[(otherwise ?t) (issue ?t) (open ?t) (available ?t) [?t \"labels-complete\" true] (platform-ok ?t) (closing-complete ?t) (not (claimed ?t)) (not (has-closing ?t)) (not (prerequisite ?t))]\n[(blocked ?t) [?t \"open-blockers\" ?n] [(> ?n 0)]]\n[(blocked ?t) [?t \"blocker\" ?i] [?i \"state\" \"OPEN\"]]\n[(implementation-permit ?t) (issue ?t) (open ?t) (available ?t)]\n[(implementation-deny ?t ?r) (issue ?t) (claimed ?t) [(str \"D-DENY-CLAIM\") ?r]]\n[(implementation-deny ?t ?r) (issue ?t) (prerequisite ?t) [(str \"D-DENY-PREREQUISITE\") ?r]]\n[(implementation-deny ?t ?r) (issue ?t) (has-closing ?t) [(str \"D-DENY-OPEN-PR\") ?r]]\n[(implementation-deny ?t ?r) (issue ?t) (blocked ?t) [(str \"D-DENY-BLOCKER\") ?r]]\n[(implementation-deny ?t ?r) (issue ?t) [?t \"labels-complete\" false] [(str \"D-DENY-LABELS-UNKNOWN\") ?r]]\n[(implementation-deny ?t ?r) (issue ?t) [?t \"native-complete\" false] [(str \"D-DENY-NATIVE-UNKNOWN\") ?r]]\n[(implementation-deny ?t ?r) (issue ?t) (not (closing-complete ?t)) [(str \"D-DENY-CLOSING-UNKNOWN\") ?r]]\n[(implementation-deny ?t ?r) (issue ?t) (not (platform-ok ?t)) [(str \"D-DENY-PLATFORM\") ?r]]\n[(implementation-denied ?t) (implementation-deny ?t ?r)]\n[(eligible ?t) (implementation-permit ?t) (not (implementation-denied ?t))]\n[(design-eligible ?t) (issue ?t) (open ?t) [?t \"label\" \"status:needs-design\"] [?t \"labels-complete\" true] (platform-ok ?t) (closing-complete ?t) (not (claimed ?t)) (not (has-closing ?t)) (not [?t \"label\" \"design:decision-needed\"])]\n[(possible ?t) (available ?t) (not (claimed ?t)) (not (prerequisite ?t)) (not (blocked ?t)) (not (has-closing ?t))]\n[(possible ?t) [1 \"role\" \"designer\"] [?t \"label\" \"status:needs-design\"] (not (claimed ?t)) (not (has-closing ?t))]\n[(uncertain ?t) [?t \"labels-complete\" false]]\n[(uncertain ?t) [?t \"native-complete\" false]]\n[(uncertain ?t) [?t \"kind\" _] (not (closing-complete ?t))]\n[(uncertain ?t) (platform-unknown ?t)]\n[(large-impact ?t) [?t \"impact-state\" \"current\"] [?t \"impact-size\" ?s] [1 \"large\" ?s]]\n[(small-complexity ?t) [?t \"complexity-state\" \"current\"] [?t \"complexity-size\" ?s] [1 \"small\" ?s]]\n[(easy ?t) (large-impact ?t) (small-complexity ?t)]\n[(unfavorable ?t) [?t \"impact-state\" \"current\"] [?t \"impact-size\" ?i] [1 \"small\" ?i] [?t \"complexity-state\" \"current\"] [?t \"complexity-size\" ?c] [1 \"large\" ?c]]\n[(needs-complexity ?t) [?t \"complexity-state\" ?s] [1 \"needs-assessment\" ?s]]\n[(needs-impact ?t) [?t \"impact-state\" ?s] [1 \"needs-assessment\" ?s]]\n[(bad-complexity ?t) [?t \"complexity-state\" ?s] [1 \"bad-assessment\" ?s]]\n[(bad-impact ?t) [?t \"impact-state\" ?s] [1 \"bad-assessment\" ?s]]\n[(design-pr ?t) (pr ?t) [?t \"label\" ?l] [1 \"design-label\" ?l]]\n[(design-pr ?t) (pr ?t) [?t \"closes\" ?i] [?i \"label\" ?l] [1 \"design-label\" ?l]]\n[(pr-failure ?t) [?t \"check\" ?c] [?c \"outcome\" ?o] [1 \"failure\" ?o]]\n[(pr-pending ?t) [?t \"check\" ?c] [?c \"outcome\" ?o] [1 \"pending\" ?o]]\n[(pr-unknown ?t) [?t \"check\" ?c] [?c \"outcome\" ?o] (not [1 \"known-check\" ?o])]\n[(pr-review ?t) [?t \"review-decision\" \"CHANGES_REQUESTED\"]]\n[(pr-review ?t) [?t \"thread\" ?c] [?c \"resolved\" false]]\n[(verified ?t) [?t \"check\" ?c] [?c \"name\" \"verify\"] [?c \"outcome\" \"SUCCESS\"]]\n[(clean-pr ?t) (pr ?t) [?t \"pr-complete\" true] [?t \"draft\" false] [?t \"mergeable\" \"MERGEABLE\"] [?t \"merge-state\" ?m] [1 \"merge-state\" ?m] (verified ?t) (not (pr-failure ?t)) (not (pr-pending ?t)) (not (pr-unknown ?t)) (not (pr-review ?t))]\n[(head-reviewed ?t) [?t \"head\" ?h] [?t \"review\" ?r] [?r \"review-state\" \"APPROVED\"] [?r \"review-commit\" ?h]]\n[(head-reviewed ?t) [?t \"head\" ?h] [?t \"receipt\" ?c] [?c \"receipt-commit\" ?h] [?c \"receipt-status\" \"completed\"] [?c \"receipt-findings\" false]]\n[(head-findings ?t) [?t \"head\" ?h] [?t \"receipt\" ?c] [?c \"receipt-commit\" ?h] [?c \"receipt-findings\" true]]\n[(accepted-pr ?t) (head-reviewed ?t) (not (head-findings ?t)) [?t \"pr-complete\" true] [?t \"draft\" false] (verified ?t) (not (pr-failure ?t)) (not (pr-pending ?t)) (not (pr-unknown ?t)) (not (pr-review ?t)) (not [?t \"mergeable\" \"CONFLICTING\"])]\n[(refresh-needed ?t) [?t \"mergeable\" ?m] [1 \"unknown-mergeable\" ?m]]\n[(refresh-needed ?t) [?t \"merge-state\" ?m] [1 \"refresh-state\" ?m]]\n[(integrate-pr ?t) (accepted-pr ?t) (refresh-needed ?t)]\n[(follow-up ?t) (pr-failure ?t)]\n[(follow-up ?t) (pr-review ?t)]\n[(follow-up ?t) (pr ?t) [?t \"mergeable\" \"CONFLICTING\"]]\n[(follow-up ?t) (clean-pr ?t)]\n[(follow-up ?t) (integrate-pr ?t)]\n[(own-follow-up ?t) (mine-linked ?t) (follow-up ?t)]\n[(pr-action ?t) (pr ?t) [1 \"role\" \"implementer\"]]\n[(pr-action ?t) [1 \"role\" \"designer\"] (design-pr ?t) (mine-linked ?t)]\n]",
+  "definitions": [
+    {
+      "id": "D-ATTENTION",
+      "kind": "addressed-response",
+      "band": 1,
+      "preference": 0,
+      "clauses": "(addressed ?t)",
+      "why": "Explicitly addressed to you; respond before clearing attention.",
+      "codes": ["addressed"]
+    },
+    {
+      "id": "D-PR-FAIL",
+      "kind": "pr-follow-up",
+      "band": 2,
+      "preference": 0,
+      "clauses": "(pr-action ?t) (pr-failure ?t)",
+      "why": "PR checks failed at head {head}; inspect and repair before merge.",
+      "codes": ["pr-follow-up", "pr-failed-checks"]
+    },
+    {
+      "id": "D-PR-REVIEW",
+      "kind": "pr-follow-up",
+      "band": 2,
+      "preference": 0,
+      "clauses": "(pr-action ?t) (pr-review ?t)",
+      "why": "PR has unresolved review findings at head {head}.",
+      "codes": ["pr-follow-up", "pr-review-findings"]
+    },
+    {
+      "id": "D-PR-CONFLICT",
+      "kind": "pr-follow-up",
+      "band": 2,
+      "preference": 1,
+      "clauses": "(pr-action ?t) [?t \"mergeable\" \"CONFLICTING\"]",
+      "why": "PR has merge conflicts at head {head}.",
+      "codes": ["pr-follow-up", "pr-conflicts"]
+    },
+    {
+      "id": "D-PR-MERGE",
+      "kind": "pr-follow-up",
+      "band": 2,
+      "preference": 2,
+      "clauses": "(pr-action ?t) (clean-pr ?t)",
+      "why": "Current verify passes at head {head}; inspect the diff and review evidence, then consider merge.",
+      "codes": ["pr-follow-up", "pr-inspect-merge"]
+    },
+    {
+      "id": "D-PR-INTEGRATE",
+      "kind": "pr-follow-up",
+      "band": 2,
+      "preference": 3,
+      "clauses": "(pr-action ?t) (integrate-pr ?t)",
+      "why": "Accepted at head {head} (verify passed, head reviewed, no fetched findings) but merge state is {mergeState}, mergeable {mergeable}; refresh mergeability or update the branch, then recheck before considering merge.",
+      "codes": ["pr-follow-up", "pr-integrate"]
+    },
+    {
+      "id": "D-DECIDE",
+      "kind": "decide",
+      "band": 3,
+      "preference": 0,
+      "clauses": "[1 \"role\" \"designer\"] [?t \"label\" \"design:decision-needed\"]",
+      "why": "Resolve the recorded design decision before implementation proceeds.",
+      "codes": ["designer-duty"]
+    },
+    {
+      "id": "D-DOCUMENT",
+      "kind": "document",
+      "band": 3,
+      "preference": 1,
+      "clauses": "[1 \"role\" \"designer\"] [?t \"label\" \"design:documentation-needed\"]",
+      "why": "An agreed decision needs documentation before implementation.",
+      "codes": ["designer-duty"]
+    },
+    {
+      "id": "D-DESIGN-REVIEW",
+      "kind": "design-review",
+      "band": 3,
+      "preference": 2,
+      "clauses": "[1 \"role\" \"designer\"] (design-pr ?t) (not (own-follow-up ?t))",
+      "why": "Review the design/documentation PR at head {head}.",
+      "codes": ["designer-duty"]
+    },
+    {
+      "id": "D-EASY",
+      "kind": "implement",
+      "band": 4,
+      "preference": 0,
+      "clauses": "[1 \"role\" \"implementer\"] (eligible ?t) (easy ?t) [1 \"order\" \"impact\"]",
+      "why": "Known easy win: impact {impact}, complexity {complexity}.",
+      "codes": ["easy-win"]
+    },
+    {
+      "id": "D-OWN-EASY",
+      "kind": "continue-implementation",
+      "band": 4,
+      "preference": 0,
+      "clauses": "[1 \"role\" \"implementer\"] (own-issue ?t) (easy ?t)",
+      "why": "Continue your known easy win: impact {impact}, complexity {complexity}.",
+      "codes": ["easy-win", "own-claim"]
+    },
+    {
+      "id": "D-COMPLEXITY-BOOST",
+      "kind": "estimate-complexity",
+      "band": 5,
+      "preference": 0,
+      "clauses": "[1 \"role\" \"implementer\"] (issue ?t) (needs-complexity ?t) (large-impact ?t)",
+      "why": "High impact {impact}, but effort is {complexityState}; estimate it to test implementation value.",
+      "codes": ["assessment", "cross-role-boost"]
+    },
+    {
+      "id": "D-COMPLEXITY",
+      "kind": "estimate-complexity",
+      "band": 5,
+      "preference": 1,
+      "clauses": "[1 \"role\" \"implementer\"] (issue ?t) (needs-complexity ?t)",
+      "why": "Effort is {complexityState}; sizing improves the evidence for choosing work.",
+      "codes": ["assessment"]
+    },
+    {
+      "id": "D-IMPACT-BOOST",
+      "kind": "assess-impact",
+      "band": 5,
+      "preference": 0,
+      "clauses": "[1 \"role\" \"designer\"] (issue ?t) (needs-impact ?t) (small-complexity ?t)",
+      "why": "Complexity {complexity} is small, but benefit is {impactState}; assess impact to test for an easy win.",
+      "codes": ["assessment", "cross-role-boost"]
+    },
+    {
+      "id": "D-IMPACT",
+      "kind": "assess-impact",
+      "band": 5,
+      "preference": 1,
+      "clauses": "[1 \"role\" \"designer\"] (issue ?t) (needs-impact ?t)",
+      "why": "Benefit is {impactState}; assess it before comparing implementation value.",
+      "codes": ["assessment"]
+    },
+    {
+      "id": "D-BAD-COMPLEXITY",
+      "kind": "inspect-assessment",
+      "band": 5,
+      "preference": 1,
+      "clauses": "[1 \"role\" \"implementer\"] (issue ?t) (bad-complexity ?t)",
+      "why": "Complexity evidence is {complexityState}; inspect and correct the labels or provenance.",
+      "codes": ["assessment", "inspection"]
+    },
+    {
+      "id": "D-BAD-IMPACT",
+      "kind": "inspect-assessment",
+      "band": 5,
+      "preference": 1,
+      "clauses": "[1 \"role\" \"designer\"] (issue ?t) (bad-impact ?t)",
+      "why": "Impact evidence is {impactState}; inspect and correct the labels or provenance.",
+      "codes": ["assessment", "inspection"]
+    },
+    {
+      "id": "D-ORDINARY",
+      "kind": "implement",
+      "band": 6,
+      "preference": 0,
+      "clauses": "[1 \"role\" \"implementer\"] (eligible ?t)",
+      "why": "Eligible implementation: impact {impact} ({impactState}), complexity {complexity} ({complexityState}).",
+      "codes": ["ordinary"]
+    },
+    {
+      "id": "D-OWN",
+      "kind": "continue-implementation",
+      "band": 6,
+      "preference": 0,
+      "clauses": "[1 \"role\" \"implementer\"] (own-issue ?t)",
+      "why": "Continue your active claim; impact {impact}, complexity {complexity}.",
+      "codes": ["ordinary", "own-claim"]
+    },
+    {
+      "id": "D-DESIGN",
+      "kind": "design",
+      "band": 6,
+      "preference": 0,
+      "clauses": "[1 \"role\" \"designer\"] (design-eligible ?t)",
+      "why": "A design contract is missing. Impact {impact}, complexity {complexity}.",
+      "codes": ["ordinary"]
+    },
+    {
+      "id": "D-UNFAVORABLE",
+      "kind": "implement",
+      "band": 7,
+      "preference": 0,
+      "clauses": "[1 \"role\" \"implementer\"] (eligible ?t) (unfavorable ?t) [1 \"order\" \"impact\"]",
+      "why": "High effort for limited benefit: impact {impact}, complexity {complexity}; reconsider or split.",
+      "codes": ["unfavorable"]
+    },
+    {
+      "id": "D-OWN-UNFAVORABLE",
+      "kind": "continue-implementation",
+      "band": 7,
+      "preference": 0,
+      "clauses": "[1 \"role\" \"implementer\"] (own-issue ?t) (unfavorable ?t)",
+      "why": "Your active work has impact {impact} and complexity {complexity}; reconsider or split before continuing.",
+      "codes": ["unfavorable", "own-claim"]
+    },
+    {
+      "id": "D-INSPECT",
+      "kind": "inspect",
+      "band": 6,
+      "preference": 0,
+      "clauses": "(issue ?t) (possible ?t) (uncertain ?t)",
+      "why": "Eligibility is unproven: inspect incomplete evidence or state the required platform.",
+      "codes": ["ordinary", "inspection"]
+    }
+  ],
+  "comparison": [
+    "band",
+    "group",
+    "primary",
+    "urgency",
+    "unlocks",
+    "own",
+    "incomplete",
+    "created",
+    "number",
+    "target",
+    "kind"
+  ],
+  "sortClauses": "[\n[(selected ?t ?r) [?t \"matched\" ?r] (not [?t \"overridden\" ?r])]\n[(age ?t ?r ?created) [?r \"kind\" \"implement\"] [1 \"order\" \"oldest\"] [?t \"created\" ?created]]\n[(age ?t ?r ?created) [?r \"kind\" \"implement\"] [1 \"order\" \"newest\"] [?t \"created\" ?c] [(- 0 ?c) ?created]]\n[(keys ?t ?r ?b ?g ?p ?u ?un ?own ?inc ?created) (selected ?t ?r) [?r \"band\" ?b] [(<= ?b 3)] (fixed-key ?t ?r ?b ?g ?p) [(+ 0 0) ?u] [(+ 0 0) ?un] [(+ 0 0) ?own] [(+ 0 0) ?inc] [?t \"number\" ?created]]\n[(fixed-key ?t ?r ?b ?g ?p) [?t \"kind\" _] [?r \"band\" ?b] [(= ?b 1)] [(+ 0 0) ?g] [(+ 0 0) ?p]]\n[(fixed-key ?t ?r ?b ?g ?p) [?t \"linked-key\" ?g] [?r \"band\" ?b] [(= ?b 2)] [?r \"preference\" ?p]]\n[(fixed-key ?t ?r ?b ?g ?p) [?r \"band\" ?b] [(= ?b 3)] [?r \"preference\" ?g] [?t \"active-count\" ?n] [(- 0 ?n) ?p]]\n[(keys ?t ?r ?b ?g ?p ?u ?un ?own ?inc ?created) (selected ?t ?r) [?r \"band\" ?b] [(> ?b 3)] (age ?t ?r ?created) [(+ 0 1) ?g] [(+ 0 0) ?p] [(+ 0 0) ?u] [(+ 0 0) ?un] [(+ 0 0) ?own] [(+ 0 0) ?inc]]\n[(keys ?t ?r ?b ?g ?p ?u ?un ?own ?inc ?created) (selected ?t ?r) [?r \"band\" ?b] [(> ?b 3)] (not (age ?t ?r _)) [(+ 0 0) ?g] [?r \"preference\" ?p] [?t \"urgency-key\" ?u] [?t \"own-key\" ?own] [?t \"incomplete-key\" ?inc] [?t \"created\" ?created] [?r \"kind\" ?k] (or-join [?t ?k ?un] (and [1 \"assessment-kind\" ?k] [(+ 0 0) ?un]) (and (not [1 \"assessment-kind\" ?k]) [?t \"unlock-count\" ?n] [(- 0 ?n) ?un]))]\n]",
+  "keyQueries": [
+    [
+      "own-key",
+      "[:find ?t ?k :in $ % :where [?t \"kind\" _] (or-join [?t ?k] (and (mine ?t) [(- 0 1) ?k]) (and (not (mine ?t)) [(+ 0 0) ?k]))]"
+    ],
+    [
+      "linked-key",
+      "[:find ?t ?k :in $ % :where [?t \"kind\" _] (or-join [?t ?k] (and (mine-linked ?t) [(- 0 1) ?k]) (and (not (mine-linked ?t)) [(+ 0 0) ?k]))]"
+    ],
+    [
+      "incomplete-key",
+      "[:find ?t ?k :where [?t \"kind\" _] (or-join [?t ?k] (and [?t \"label\" \"status:incomplete\"] [(- 0 1) ?k]) (and (not [?t \"label\" \"status:incomplete\"]) [(+ 0 0) ?k]))]"
+    ],
+    [
+      "urgency-key",
+      "[:find ?t ?k :where [?t \"kind\" _] (or-join [?t ?k] (and [?t \"label\" \"urgency:high\"] (not [?t \"label\" \"urgency:low\"]) [(+ 0 0) ?k]) (and [?t \"label\" \"urgency:low\"] (not [?t \"label\" \"urgency:high\"]) [(+ 1 1) ?k]) (and (not [?t \"label\" \"urgency:high\"]) (not [?t \"label\" \"urgency:low\"]) [(+ 0 1) ?k]) (and [?t \"label\" \"urgency:high\"] [?t \"label\" \"urgency:low\"] [(+ 0 1) ?k]))]"
+    ]
+  ],
+  "queries": {
+    "q0": "[:find ?t ?r :where [?t \"matched\" ?r] [?t \"matched\" ?o] [?r \"kind\" ?k] [?o \"kind\" ?k] [?r \"rule\" ?rid] [?o \"rule\" ?oid] (or-join [?rid ?oid ?r ?o] (and [?r \"band\" ?b] [?o \"band\" ?b] [?r \"preference\" ?p] [?o \"preference\" ?p] [(< ?o ?r)]) (and [?r \"band\" ?b] [?o \"band\" ?b] [?r \"preference\" ?p] [?o \"preference\" ?op] [(< ?op ?p)]) (and [(= ?rid \"D-ORDINARY\")] [(= ?oid \"D-EASY\")]) (and [(= ?rid \"D-ORDINARY\")] [(= ?oid \"D-UNFAVORABLE\")]) (and [(= ?rid \"D-OWN\")] [(= ?oid \"D-OWN-EASY\")]) (and [(= ?rid \"D-OWN\")] [(= ?oid \"D-OWN-UNFAVORABLE\")]))]",
+    "q1": "[:find ?t ?d :in $ % :where [?t \"dependent\" ?d] (otherwise ?d) [?d \"native-complete\" true] [?d \"open-blockers\" 1] [?d \"blocker\" ?t] (open ?t)]",
+    "q2": "[:find ?t (count-distinct ?d) :where [?t \"unlocks-dependent\" ?d]]",
+    "q3": "[:find ?t :where [?t \"kind\" _] (not [?t \"unlock-count\" _])]",
+    "q4": "[:find ?t ?r ?b ?g ?p ?u ?un ?own ?inc ?created ?n ?target ?kind :in $ % :where (keys ?t ?r ?b ?g ?p ?u ?un ?own ?inc ?created) [?t \"number\" ?n] [?t \"target\" ?target] [?r \"kind\" ?kind]]",
+    "q5": "[:find ?id :in $ ?t :where [?t \"overridden\" ?r] [?r \"rule\" ?id]]",
+    "q6": "[:find ?n :in $ ?t :where [?t \"unlock-count\" ?n]]",
+    "q7": "[:find ?reason :in $ ?t :where [?t \"unlock-unknown\" ?reason]]"
+  },
+  "unknownUnlocks": "[:find ?t ?reason :in $ % :where [?t \"kind\" \"issue\"] (or-join [?t ?reason] (and [?t \"blocking-complete\" false] [(str \"direct dependent coverage incomplete\") ?reason]) (and [?t \"dependent\" ?d] [?d \"state\" \"OPEN\"] (not [?d \"kind\" \"issue\"]) [(str \"dependent absent from collected repository\") ?reason]) (and [?t \"dependent\" ?d] [?d \"state\" \"OPEN\"] [?d \"native-complete\" false] [(str \"dependent native evidence incomplete\") ?reason]) (and [?t \"dependent\" ?d] [?d \"state\" \"OPEN\"] (uncertain ?d) [(str \"dependent eligibility evidence incomplete\") ?reason]))]",
+  "activeDependents": "[:find ?t ?d :in $ % :where [?t \"dependent\" ?d] (open ?d) (or-join [?d] (claimed ?d) (has-closing ?d))]",
+  "denialsQuery": "[:find ?t ?r :in $ % :where (implementation-permit ?t) (implementation-deny ?t ?r)]",
+  "commandTemplates": {
+    "detail": "pdb --repo {repo} --issue {number} --json",
+    "pr": "pdb pr {number} --repo {repo}",
+    "claim": "pdb claim {number} --repo {repo} --agent {agent}{platformFlag}",
+    "release": "pdb release {other} --repo {repo} --agent {agent} --as incomplete --note TEXT",
+    "complexity": "pdb estimate {number} --metric complexity --size SIZE --rationale TEXT --repo {repo}",
+    "impact": "pdb estimate {number} --metric impact --size SIZE --rationale TEXT --repo {repo}"
+  },
+  "commandKinds": {
+    "estimate-complexity": "complexity",
+    "assess-impact": "impact",
+    "pr-follow-up": "pr",
+    "design-review": "pr",
+    "addressed-response": "detail",
+    "decide": "detail",
+    "document": "detail",
+    "continue-implementation": "detail",
+    "design": "detail",
+    "inspect": "detail",
+    "inspect-assessment": "detail"
+  },
+  "otherClaimsQuery": "[:find ?t ?other :in $ % :where [?t \"kind\" \"issue\"] (own-issue ?other) [(not= ?t ?other)]]",
+  "witnessClauses": {
+    "D-ATTENTION": {
+      "addressedAgent": "[1 \"agent\" ?value] [?t \"attention\" ?value]"
+    },
+    "D-PR-FAIL": {
+      "failedChecks": "[?t \"check\" ?c] [?c \"name\" ?name] [?c \"outcome\" ?o] [1 \"failure\" ?o] [(str ?name \":\" ?o) ?value]"
+    },
+    "D-PR-REVIEW": {
+      "reviewDecision": "[?t \"review-decision\" ?value]",
+      "unresolvedThreads": "[?t \"thread\" ?c] [?c \"resolved\" false] [(str \"unresolved\") ?value]"
+    },
+    "D-PR-CONFLICT": {
+      "mergeable": "[?t \"mergeable\" ?value]"
+    },
+    "D-PR-INTEGRATE": {
+      "mergeable": "[?t \"mergeable\" ?value]",
+      "mergeState": "[?t \"merge-state\" ?value]",
+      "verify": "[?t \"check\" ?c] [?c \"name\" \"verify\"] [?c \"outcome\" ?value]"
+    },
+    "D-PR-MERGE": {
+      "verify": "[?t \"check\" ?c] [?c \"name\" \"verify\"] [?c \"outcome\" ?value]",
+      "complete": "[?t \"pr-complete\" ?value]",
+      "draft": "[?t \"draft\" ?value]",
+      "mergeState": "[?t \"merge-state\" ?value]"
+    },
+    "D-DECIDE": {
+      "decisionLabel": "[?t \"label\" \"design:decision-needed\"] [(str \"design:decision-needed\") ?value]"
+    },
+    "D-DOCUMENT": {
+      "documentationLabel": "[?t \"label\" \"design:documentation-needed\"] [(str \"design:documentation-needed\") ?value]"
+    },
+    "D-DESIGN-REVIEW": {
+      "designEvidence": "(or-join [?t ?value] (and [?t \"label\" ?value] [1 \"design-label\" ?value]) (and [?t \"closes\" ?i] [?i \"label\" ?value] [1 \"design-label\" ?value]))"
+    },
+    "D-DESIGN": {
+      "designLabel": "[?t \"label\" \"status:needs-design\"] [(str \"status:needs-design\") ?value]"
+    },
+    "D-INSPECT": {
+      "uncertainty": "(or-join [?t ?value] (and [?t \"labels-complete\" false] [(str \"labels incomplete\") ?value]) (and [?t \"native-complete\" false] [(str \"native dependencies incomplete\") ?value]) (and (not (closing-complete ?t)) [(str \"closing PR evidence incomplete\") ?value]) (and (platform-unknown ?t) [(str \"viewer platform unknown\") ?value]))"
+    }
+  },
+  "commonWitnesses": {
+    "impact": "[?t \"impact-size\" ?value]",
+    "complexity": "[?t \"complexity-size\" ?value]",
+    "impactState": "[?t \"impact-state\" ?value]",
+    "complexityState": "[?t \"complexity-state\" ?value]",
+    "head": "[?t \"head\" ?value]",
+    "responsible": "[?t \"responsible\" ?value]"
+  },
+  "eligibilityWitnesses": {
+    "labelsComplete": "[?t \"labels-complete\" ?value]",
+    "nativeComplete": "[?t \"native-complete\" ?value]",
+    "openBlockers": "[?t \"open-blockers\" ?value]",
+    "readiness": "[?t \"label\" ?value] [1 \"readiness\" ?value]"
+  }
+}
