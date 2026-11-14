@@ -7,7 +7,7 @@ import {
   forbidSubprocesses,
   SYNTHETIC_ROOT,
 } from "../scripts/benchmark-isolation.js";
-import { resolveGuideSetting } from "./process.js";
+import { resolveGuideSetting } from "./briefing/process.js";
 import { collectLabelEstimationInput } from "./estimation/complexitylabels.js";
 
 describe("benchmark isolation (scripts/mcp-benchmark.ts)", () => {

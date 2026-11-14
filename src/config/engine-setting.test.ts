@@ -5,7 +5,7 @@ import { describe, it, expect } from "vite-plus/test";
 import { parseConfig, settingFor } from "./config.js";
 import { resolveEngineSetting } from "./engine-setting.js";
 import { emptyFileSystem, fakeGit, SYNTHETIC_ROOT } from "../../scripts/benchmark-isolation.js";
-import { presentBriefing, readBriefing } from "../service.js";
+import { presentBriefing, readBriefing } from "../briefing/service.js";
 import { main } from "../cli.js";
 import { dependencyReport } from "../github/dependencies.js";
 import type { Issue, Snapshot } from "../github/types.js";

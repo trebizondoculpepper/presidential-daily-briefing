@@ -5,8 +5,8 @@
  */
 import { join } from "node:path";
 import { describe, expect, it } from "vite-plus/test";
-import { readAssessment } from "../assessments.js";
-import type { AssessmentSubject } from "../assessments.js";
+import { readAssessment } from "../briefing/assessments.js";
+import type { AssessmentSubject } from "../briefing/assessments.js";
 import type { Comment } from "../workflow/claims.js";
 import {
   classifyMetricLabels,

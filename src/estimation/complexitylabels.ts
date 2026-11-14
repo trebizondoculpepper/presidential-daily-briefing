@@ -32,7 +32,7 @@ import {
 import type { ConfigFileSystem, GitRunner } from "../config/config.js";
 import { sizeReport } from "./estimation.js";
 import type { EstimationFinding, EstimationReport, SizeReading, SizeSource } from "./estimation.js";
-import type { PickupContext } from "../ranking.js";
+import type { PickupContext } from "../briefing/ranking.js";
 import type { Issue } from "../github/types.js";
 
 export const COMPLEXITY_LABEL_PREFIX = complexityMetric.labelPrefix;

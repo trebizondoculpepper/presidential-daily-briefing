@@ -14,7 +14,7 @@ import type { Clock, Collect, DomainEvent } from "./polling.js";
 import { bindPolling, boundedEnvelope, createServer, envelope, mcpArguments } from "../mcp.js";
 import { budgetBytes } from "./bounded.js";
 import { RateLimitError } from "../github/dependencies.js";
-import { closingPrEvidence } from "../ranking.js";
+import { closingPrEvidence } from "../briefing/ranking.js";
 import { rateLimitFailure } from "../github/github.js";
 import type { McpRuntime } from "../mcp.js";
 import type { Issue, Page, PullRequest, Snapshot } from "../github/types.js";

@@ -11,7 +11,7 @@ import { Client } from "@modelcontextprotocol/client";
 import { InMemoryTransport } from "@modelcontextprotocol/server";
 import { describe, expect, it } from "vite-plus/test";
 import { main } from "./cli.js";
-import type { CompactBriefing } from "./compact.js";
+import type { CompactBriefing } from "./briefing/compact.js";
 import { TOML_CONFIG_PATH } from "./config/config.js";
 import type { ConfigFileSystem, GitRunner } from "./config/config.js";
 import { deliveryMarker } from "./workflow/delivery.js";

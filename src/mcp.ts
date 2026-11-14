@@ -15,9 +15,9 @@ import * as z from "zod";
 import { collect, currentRepository, ghQueryWith, ghRest } from "./github/github.js";
 import { dependencyReport } from "./github/dependencies.js";
 import { impactGuidanceSummary } from "./estimation/impact.js";
-import { readBriefing, readDependencies } from "./service.js";
-import { catchUp, catchUpLimits } from "./catchup.js";
-import { collectBriefing, WindowRefusal } from "./catchupcli.js";
+import { readBriefing, readDependencies } from "./briefing/service.js";
+import { catchUp, catchUpLimits } from "./briefing/catchup.js";
+import { collectBriefing, WindowRefusal } from "./briefing/catchupcli.js";
 import { parseDuration } from "./github/changes.js";
 import {
   eventsReport,
@@ -29,7 +29,7 @@ import {
   Watcher,
 } from "./mcp/polling.js";
 import type { Clock } from "./mcp/polling.js";
-import type { ReadRuntime } from "./service.js";
+import type { ReadRuntime } from "./briefing/service.js";
 import type { ConfigFileSystem, GitRunner } from "./config/config.js";
 import { validateHarness } from "./config/harness.js";
 import type { Environment } from "./config/harness.js";
@@ -58,8 +58,8 @@ import {
 } from "./mcp/views.js";
 import type { ViewBase } from "./mcp/views.js";
 import { installedVersion } from "./updates/updates.js";
-import { pickupOrders } from "./ranking.js";
-import { roleNames } from "./roles.js";
+import { pickupOrders } from "./briefing/ranking.js";
+import { roleNames } from "./briefing/roles.js";
 
 /** Startup selection. Client roots remain a separately tested follow-up (#25). */
 export interface McpOptions {

@@ -22,7 +22,7 @@ import {
   ghRun,
   planDependencyChange,
 } from "./github/dependencies.js";
-import { roleNames, roleRegistry } from "./roles.js";
+import { roleNames, roleRegistry } from "./briefing/roles.js";
 import { prStatusText, pullRequestStatus } from "./workflow/prstatus.js";
 import { pullRequestReviewHistory, reviewHistoryText } from "./workflow/reviewhistory.js";
 import { doctorStaleHours, ticketDoctor, ticketDoctorText } from "./workflow/ticketdoctor.js";
@@ -53,9 +53,9 @@ import { installedVersion, optOutEnv, legacyOptOutEnv, updateAdvisory } from "./
 import { defaultStaleHours, teamText, teamView } from "./workflow/team.js";
 import { ticketOwnership, ticketOwnershipText } from "./workflow/who.js";
 import { migrationPlanText, planMigration } from "./github/migration.js";
-import { presentBriefing, unavailableText } from "./service.js";
-import { runBriefing } from "./catchupcli.js";
-import type { BriefingFiles } from "./catchupcli.js";
+import { presentBriefing, unavailableText } from "./briefing/service.js";
+import { runBriefing } from "./briefing/catchupcli.js";
+import type { BriefingFiles } from "./briefing/catchupcli.js";
 import {
   briefingProcess,
   fullGuideJson,
@@ -65,10 +65,10 @@ import {
   mutatingCommands,
   PROCESS_COMMAND,
   resolveGuideSetting,
-} from "./process.js";
-import type { GuideRuntime } from "./process.js";
-import { pickupOrders } from "./ranking.js";
-import type { PickupOrder } from "./ranking.js";
+} from "./briefing/process.js";
+import type { GuideRuntime } from "./briefing/process.js";
+import { pickupOrders } from "./briefing/ranking.js";
+import type { PickupOrder } from "./briefing/ranking.js";
 import { complexityGuidanceJson, complexityGuidanceText } from "./estimation/complexity.js";
 import { impactGuidanceJson, impactGuidanceText } from "./estimation/impact.js";
 import { runConfig } from "./config/configcli.js";

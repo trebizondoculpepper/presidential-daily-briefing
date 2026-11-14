@@ -39,7 +39,7 @@ Every complexity mechanism has an impact counterpart. The implementation general
 | `complexity.enabled` (`src/config/config.ts`)                                            | `impact.enabled`                                                                    | Same registered-key mechanism                            |
 | CLI/MCP help from one guidance definition                                                | Same renderer, second definition                                                    | Unchanged pattern                                        |
 
-Not reused: `immediateUnlocks`, `UnlockImpact`, `compareImpact` and `--order impact` in `src/ranking.ts`. Those compute dependency-unlock utility, which is a different fact (next section).
+Not reused: `immediateUnlocks`, `UnlockImpact`, `compareImpact` and `--order impact` in `src/briefing/ranking.ts`. Those compute dependency-unlock utility, which is a different fact (next section).
 
 ## Terminology: three different things
 
