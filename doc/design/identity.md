@@ -30,6 +30,16 @@ Maintain a tested detector registry, not scattered guesses. The inspected source
 
 For MCP, explicit project/repository/agent/entry selection works without client roots. Project selection precedes identity lookup; verified client metadata can identify a harness but not a unique agent. Ori-prefixed per-server names must be matched before embedded generic harness names, with separate persistent identities for distinct configured server entries. Ori shell detection must be verified against actual supported signals; absence does not justify guessing from daemon cwd or an inherited parent marker. Missing/ambiguous identity permits unfocused reads with a notice; writes to per-agent settings require a resolved entry or explicit selection.
 
+## Codex MCP client metadata (#402)
+
+The real Codex CLI/app-server 0.169.0 acceptance run in [the Codex report](../reports/agent-platforms/codex-mcp-acceptance.md) verified the exact initialization `clientInfo.name` `codex-mcp-client`. Register that exact, case-sensitive name as evidence of the Codex harness for read-only MCP identity resolution. Do not match titles, substrings, prefixes such as `codex-mcp-client-extra`, or unverified aliases such as `codex`. Client metadata is workflow selection context, never authentication, permission or evidence of live presence.
+
+Precedence stays tool `agent`, startup `--agent`, explicit `--entry`, explicit `--harness`, verified client metadata, then verified environment detection. An explicit selection wins even when it disagrees with client metadata. A recognized client's metadata selects its harness before inherited environment markers; unknown names keep the existing environment fallback. Project/repository agreement is checked before any local lookup.
+
+Unlike Ori's per-server entry name, `codex-mcp-client` identifies only the harness. Resolve it through the same Codex entry rules as `--harness codex`: select `[agents.codex]` only when no other `codex.*` entry exists. Several logical entries require explicit `--entry`; a sole `codex.review` is not a substitute for `codex`. Return the persisted name and `triage_role` with identity source `client` on success. Missing file/entry/name, malformed configuration and ambiguity retain unfocused read diagnostics; never initialize or rewrite identity during an MCP read. Preserve Ori's per-server matching, including `ori-codex-mcp-client` as `ori.codex-mcp-client`.
+
+Implementation acceptance: injected tests must cover exact/near-miss names, ambiguity, missing Codex versus unrelated entries, explicit overrides, inherited environment markers, project mismatch, and read-only filesystem behavior. Retest the installed archive through the real Codex client with `--project` alone and disposable identity, including ambiguous entries and explicit entry recovery. This contract authorizes the bounded #402 implementation; the earlier report remains historical evidence until a retest records the result.
+
 ## Configuration command boundary
 
 Reuse the merged `config get`, `set`, `list` and `help` layer; agents do not edit files directly. Add registered per-agent settings `identity.name` and `identity.triage_role`, routed to the selected table's `name` and `triage_role` keys. Example planned commands:
