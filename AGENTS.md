@@ -17,7 +17,7 @@ Prefer TOML for project-owned configuration. The local root-level `agent-inbox.t
 ## Architecture and scope
 
 - Run the TypeScript CLI from source with `npm run pdb` (tsx); use Vite+ for checks/tests/builds.
-- `github/github.ts` collects GitHub facts through existing authenticated `gh`, without a shell or new credentials. `github/dependencies.ts` owns native dependency queries and `deps add`/`remove`; `github/migration.ts` owns the read-only `deps migrate --plan` report (automatic apply is deferred, #48); `workflow/claims.ts` owns `claim` and `needs-human`; `workflow/delivery.ts` owns delivery records and their fold, `workflow/deliverables.ts` the `deliverables` commands (#189), and `workflow/completion.ts` the live delivery evidence, the pure completion evaluator and `complete` (#191). `workflow/team.ts` owns the read-only `team` view; `workflow/prstatus.ts` owns the read-only `pr N` progress report; `workflow/ticketdoctor.ts` owns the read-only `ticket-doctor` scan; `updates/updates.ts` owns the npm version check (#51); `rules/datalog/` holds the Datalog policy and evaluator; `mcp/polling.ts` the MCP event polling; `briefing/briefing.ts` owns registered workflow rules/policy, `briefing/compact.ts` presentation and `cli.ts` argument/filesystem orchestration.
+- `github/github.ts` collects GitHub facts through existing authenticated `gh`, without a shell or new credentials. `github/dependencies.ts` owns native dependency queries and `deps add`/`remove`; `github/migration.ts` owns the read-only `deps migrate --plan` report (automatic apply is deferred, #48); `workflow/claims.ts` owns `claim` and `needs-human`; `workflow/delivery.ts` owns delivery records and their fold, `workflow/deliverables.ts` the `deliverables` commands (#189), and `workflow/completion.ts` the live delivery evidence, the pure completion evaluator and `complete` (#191). `workflow/team.ts` owns the read-only `team` view; `workflow/prstatus.ts` owns the read-only `pr N` progress report; `workflow/ticketdoctor.ts` owns the read-only `ticket-doctor` scan; `updates/updates.ts` owns the npm version check (#51); `rules/datalog/` holds the Datalog policy as native EDN (`policy/*.edn`), its build, the pure engine (`engine.ts`), the host adapter (`adapter.ts`) and the EDN rule scenarios (`scenarios/*.edn`), see doc/design/rules-component.md; `mcp/polling.ts` the MCP event polling; `briefing/briefing.ts` owns registered workflow rules/policy, `briefing/compact.ts` presentation and `cli.ts` argument/filesystem orchestration.
 - Keep repository identities opaque. Extend registered workflow/rule/role handlers and declarative policy, not issue-number, named-agent or repository special cases.
 - Preserve schema versions, explicit freshness/completeness, full intake, offline/checkpoint safety and useful omission notices. Missing evidence is not approval.
 - Read the applicable contract in `doc/` before behavior changes. Record changed architectural contracts in a separate docs PR before implementation; existing accurate merged contracts can be reused.
@@ -53,7 +53,32 @@ node dist/cli.mjs --help                      # quick CLI smoke test
 npm run smoke                                 # credential-free exit-code smoke of dist/cli.mjs
 npx tsx scripts/smoke.ts src/cli.ts           # same smoke against the TypeScript source
 npm run package-test                          # pack, install globally into a temp prefix, smoke
+npm run rules:build                           # validate policy/*.edn, write policy.generated.json
+npm run rules:test [-- --junit PATH]          # rules-only: run scenarios/*.edn against the engine
 ```
+
+## Editing the rules
+
+The DataScript policy lives in `src/rules/datalog/policy/*.edn` (DataScript Datalog, not Prolog). Edit those files, never `policy.generated.json`, which `npm run rules:build` writes and `npm run check` verifies is current. Each decision rule is one map in `decisions.edn` holding its ID, band, `:when` clauses, `:why` text and evidence witnesses; attributes are strings, not keywords. Then:
+
+1. `npm run rules:test` runs every scenario in `src/rules/datalog/scenarios/*.edn` against the engine in seconds, without GitHub or the CLI. Exit 1 means a scenario's expected decision differs (`RuleDecisionFailure`); exit 2 means a source, scenario or the evaluator is broken (`RuleInfrastructureError`).
+2. Add or update a scenario for the behaviour you changed. A scenario gives engine facts and the complete expected result:
+
+   ```clojure
+   {:id "easy-win" :doc "An eligible L/S ticket is a known easy win."
+    :viewer {:role "implementer"}
+    :facts [{:e 1 "forward-complete" true}
+            {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "t1" "created" 1
+                    "label" "status:ready" "labels-complete" true "native-complete" true
+                    "reverse-complete" true "blocking-complete" true "open-blockers" 0
+                    "impact-state" "current" "impact-size" "L"
+                    "complexity-state" "current" "complexity-size" "S"}]
+    :expect {:actions [{:subject 100 :rule "D-EASY" :kind "implement" :band 4
+                        :why "Known easy win: impact L, complexity S."}]
+             :denials #{}}}
+   ```
+
+3. `npm run rules:build`, then the full checks. If decisions change on purpose, regenerate the golden parity file (`PDB_PARITY_REGENERATE=1 npx vp test run src/rules/datalog/parity.test.ts`) and state the change and the new rules hash in the PR.
 
 Without `--repo`, the target repository is resolved by `gh repo view` from the current working directory. The runtime uses only Node built-ins and `gh`; shared GitHub fact types live in `src/github/types.d.ts`; `tsconfig.json` (strict) covers `src/` and `scripts/`, and `doc/reports/examples/tsconfig.json` covers the rules examples. Tests are in `src/triage.test.ts`; one test fakes `gh` with a POSIX shell script and is skipped on Windows. The CLI and tooling target the current Node LTS, Node 26+ (`engines`, doc/design/runtime.md). CI runs the checks, tests, build, smoke tests and package test with Node 26 on Ubuntu and Windows (required) and, on trial, runs the built and source CLI, smoke tests and package test on FreeBSD in a VM (Vite+ has no FreeBSD binding, so check/test/build run on the Linux host; non-blocking: not part of `verify`, and may be removed if it proves problematic); macOS is not run unless explicitly requested, as it is expected to match Linux. The single `verify` job passes only when every Ubuntu/Windows matrix job passes, and is the check to require. Line endings are LF everywhere.
 

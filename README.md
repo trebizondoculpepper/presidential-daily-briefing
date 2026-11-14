@@ -154,6 +154,8 @@ npm test
 npm run build
 ```
 
+The workflow rules are native DataScript EDN files in `src/rules/datalog/policy/`. After editing them, run `npm run rules:test` for a fast rules-only check against the EDN scenarios in `src/rules/datalog/scenarios/`, then `npm run rules:build` and the full checks. [AGENTS.md](AGENTS.md#editing-the-rules) has a worked example and [the rules component contract](doc/design/rules-component.md) the details.
+
 Read [CONTRIBUTING.md](CONTRIBUTING.md) for contribution requirements and the [design index](doc/design/README.md) for architectural contracts and planned capabilities. Tests use injected boundaries and fixtures rather than live GitHub credentials.
 
 ## License
