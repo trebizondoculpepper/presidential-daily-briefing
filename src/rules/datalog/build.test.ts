@@ -1,6 +1,13 @@
 import { describe, it, expect } from "vite-plus/test";
 import { readFileSync } from "node:fs";
-import { buildPolicy, currentSources, serialize, artifactPath, PolicyBuildError } from "./build.js";
+import {
+  buildPolicy,
+  currentSources,
+  serialize,
+  artifactPath,
+  PolicyBuildError,
+  queryInputs,
+} from "./build.js";
 import { readOne, EdnSourceError } from "./edn.js";
 
 const problemsOf = (fn: () => unknown): string[] => {
@@ -67,5 +74,53 @@ describe("rules build (#348)", () => {
       buildPolicy({ ...sources, witnessClauses: { ...sources.witnessClauses, "D-GONE": {} } }),
     );
     expect(problems).toEqual(["witnessClauses.D-GONE: no rule with this ID"]);
+  });
+
+  it("reads query inputs from the parsed :in clause, whatever the whitespace or comments", () => {
+    const inputs = (q: string) => queryInputs(readOne(q, "q.edn"));
+    expect(inputs("[:find ?t :in $ % :where [?t _ _]]")).toEqual(["$", "%"]);
+    expect(inputs("[:find ?t :in  $\t%\n  ?t :where [?t _ _]]")).toEqual(["$", "%", "?t"]);
+    expect(inputs("[:find ?t :in $ ; the database\n % ; the rules\n :where [?t _ _]]")).toEqual([
+      "$",
+      "%",
+    ]);
+    expect(inputs("[:find ?t :where [?t _ _]]")).toEqual(["$"]);
+    expect(inputs("{:find [?t] :in [$ %] :where [[?t _ _]]}")).toEqual(["$", "%"]);
+  });
+
+  it("builds and checks queries whose :in spans lines and comments", () => {
+    const sources = currentSources();
+    const spaced = (q: string) => q.replace(":in $ %", ":in\n  $ ; database\n  %  ; rules\n ");
+    expect(() =>
+      buildPolicy({
+        ...sources,
+        queries: { ...sources.queries, q1: spaced(sources.queries.q1) },
+        keyQueries: sources.keyQueries.map(([k, q]) => [k, spaced(q)]),
+        unknownUnlocks: spaced(sources.unknownUnlocks),
+      }),
+    ).not.toThrow();
+    // The rules input is still recognised, so an undefined rule is still caught.
+    const problems = problemsOf(() =>
+      buildPolicy({
+        ...sources,
+        queries: {
+          ...sources.queries,
+          q1: "[:find ?t :in\n $ ;db\n %\n :where (no-such-rule ?t)]",
+        },
+      }),
+    );
+    expect(problems).toEqual(["queries.q1: unknown rule 'no-such-rule'"]);
+  });
+
+  it("rejects query inputs the build cannot supply", () => {
+    const sources = currentSources();
+    const problems = problemsOf(() =>
+      buildPolicy({
+        ...sources,
+        queries: { ...sources.queries, q2: "[:find ?t :in $ [?x ...] :where [?t _ ?x]]" },
+      }),
+    );
+    expect(problems).toHaveLength(1);
+    expect(problems[0]).toMatch(/^queries\.q2: unsupported query input/);
   });
 });
