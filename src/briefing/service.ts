@@ -14,8 +14,8 @@ import type { EngineSetting, DecisionEngineMetadata } from "../config/engine-set
 import { collect, IssueUnavailable, permissionLookup } from "../github/github.js";
 import type { IssueDiagnosis, Query, Rest } from "../github/github.js";
 import { diagnoseDelivery } from "../workflow/deliverydoctor.js";
-import { deliveryRead } from "../deliveryread.js";
-import type { DeliveryRead } from "../deliveryread.js";
+import { deliveryRead } from "../workflow/deliveryread.js";
+import type { DeliveryRead } from "../workflow/deliveryread.js";
 import { markerTrust } from "../workflow/delivery.js";
 import { readSnapshotResponsibility } from "../workflow/responsibility.js";
 import type { TrustDecision } from "../workflow/delivery.js";

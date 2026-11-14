@@ -29,7 +29,7 @@ import {
   teamResponsibilities,
   teamResponsibilityLines,
   withDeliveryCompleteness,
-} from "../deliveryread.js";
+} from "./deliveryread.js";
 import { readBriefing } from "../briefing/service.js";
 import type { PrStatusReport } from "./prstatus.js";
 import type { TeamAgent } from "./team.js";

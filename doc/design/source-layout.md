@@ -33,59 +33,60 @@ The owner called the rules area "the Prolog area". The implementation is Datalog
 
 ## Module mapping
 
-| Current file          | Destination                      | Notes                                                                                |
-| --------------------- | -------------------------------- | ------------------------------------------------------------------------------------ |
-| `cli.ts`              | `cli.ts` (unchanged)             | Entry point                                                                          |
-| `mcp.ts`              | `mcp.ts` (unchanged)             | Entry point                                                                          |
-| `language-policy.ts`  | `language-policy.ts` (unchanged) | Repository policy                                                                    |
-| `github.ts`           | `github/github.ts`               |                                                                                      |
-| `changes.ts`          | `github/changes.ts`              |                                                                                      |
-| `dependencies.ts`     | `github/dependencies.ts`         | In a cycle with `github.ts`; both stay in one directory                              |
-| `migration.ts`        | `github/migration.ts`            | `deps migrate --plan`                                                                |
-| `types.d.ts`          | `github/types.d.ts`              | Shared GitHub fact types                                                             |
-| `briefing.ts`         | `briefing/briefing.ts`           |                                                                                      |
-| `compact.ts`          | `briefing/compact.ts`            |                                                                                      |
-| `ranking.ts`          | `briefing/ranking.ts`            |                                                                                      |
-| `roles.ts`            | `briefing/roles.ts`              |                                                                                      |
-| `assessments.ts`      | `briefing/assessments.ts`        |                                                                                      |
-| `blended.ts`          | `briefing/blended.ts`            | TypeScript blended queue; the Datalog engine is in `rules/datalog/`                  |
-| `catchup.ts`          | `briefing/catchup.ts`            |                                                                                      |
-| `catchupcli.ts`       | `briefing/catchupcli.ts`         |                                                                                      |
-| `process.ts`          | `briefing/process.ts`            | Workflow guide generated from registered policy (#71)                                |
-| `service.ts`          | `briefing/service.ts`            | Shared CLI/MCP read service                                                          |
-| `claims.ts`           | `workflow/claims.ts`             |                                                                                      |
-| `delivery.ts`         | `workflow/delivery.ts`           |                                                                                      |
-| `deliverables.ts`     | `workflow/deliverables.ts`       |                                                                                      |
-| `completion.ts`       | `workflow/completion.ts`         |                                                                                      |
-| `responsibility.ts`   | `workflow/responsibility.ts`     |                                                                                      |
-| `prstatus.ts`         | `workflow/prstatus.ts`           |                                                                                      |
-| `reviewevidence.ts`   | `workflow/reviewevidence.ts`     | Beside `prstatus.ts`, which it imports types from                                    |
-| `reviewhistory.ts`    | `workflow/reviewhistory.ts`      |                                                                                      |
-| `team.ts`             | `workflow/team.ts`               |                                                                                      |
-| `who.ts`              | `workflow/who.ts`                |                                                                                      |
-| `ticketdoctor.ts`     | `workflow/ticketdoctor.ts`       |                                                                                      |
-| `doctorplans.ts`      | `workflow/doctorplans.ts`        | Ticket Doctor repair plans                                                           |
-| `deliverydoctor.ts`   | `workflow/deliverydoctor.ts`     | Delivery-aware Ticket Doctor facts (#192)                                            |
-| `estimate.ts`         | `estimation/estimate.ts`         |                                                                                      |
-| `estimation.ts`       | `estimation/estimation.ts`       |                                                                                      |
-| `complexity.ts`       | `estimation/complexity.ts`       |                                                                                      |
-| `complexitylabels.ts` | `estimation/complexitylabels.ts` |                                                                                      |
-| `impact.ts`           | `estimation/impact.ts`           |                                                                                      |
-| `metrics.ts`          | `estimation/metrics.ts`          |                                                                                      |
-| `config.ts`           | `config/config.ts`               |                                                                                      |
-| `configcli.ts`        | `config/configcli.ts`            |                                                                                      |
-| `identity.ts`         | `config/identity.ts`             |                                                                                      |
-| `readidentity.ts`     | `config/readidentity.ts`         |                                                                                      |
-| `harness.ts`          | `config/harness.ts`              |                                                                                      |
-| `localdoctor.ts`      | `config/localdoctor.ts`          |                                                                                      |
-| `engine-setting.ts`   | `config/engine-setting.ts`       |                                                                                      |
-| `filelock.ts`         | `config/filelock.ts`             | Also used by `updates/updatecache.ts`; `updates → config` is an acceptable direction |
-| `updates.ts`          | `updates/updates.ts`             |                                                                                      |
-| `updatecache.ts`      | `updates/updatecache.ts`         |                                                                                      |
-| `polling.ts`          | `mcp/polling.ts`                 |                                                                                      |
-| `datalog.ts`          | `rules/datalog/datalog.ts`       | Evaluator boundary                                                                   |
-| `datalog-policy.ts`   | `rules/datalog/policy.ts`        | The rules themselves                                                                 |
-| `datascript.d.ts`     | `rules/datalog/datascript.d.ts`  |                                                                                      |
+| Current file          | Destination                      | Notes                                                                                      |
+| --------------------- | -------------------------------- | ------------------------------------------------------------------------------------------ |
+| `cli.ts`              | `cli.ts` (unchanged)             | Entry point                                                                                |
+| `mcp.ts`              | `mcp.ts` (unchanged)             | Entry point                                                                                |
+| `language-policy.ts`  | `language-policy.ts` (unchanged) | Repository policy                                                                          |
+| `github.ts`           | `github/github.ts`               |                                                                                            |
+| `changes.ts`          | `github/changes.ts`              |                                                                                            |
+| `dependencies.ts`     | `github/dependencies.ts`         | In a cycle with `github.ts`; both stay in one directory                                    |
+| `migration.ts`        | `github/migration.ts`            | `deps migrate --plan`                                                                      |
+| `types.d.ts`          | `github/types.d.ts`              | Shared GitHub fact types                                                                   |
+| `briefing.ts`         | `briefing/briefing.ts`           |                                                                                            |
+| `compact.ts`          | `briefing/compact.ts`            |                                                                                            |
+| `ranking.ts`          | `briefing/ranking.ts`            |                                                                                            |
+| `roles.ts`            | `briefing/roles.ts`              |                                                                                            |
+| `assessments.ts`      | `briefing/assessments.ts`        |                                                                                            |
+| `blended.ts`          | `briefing/blended.ts`            | TypeScript blended queue; the Datalog engine is in `rules/datalog/`                        |
+| `catchup.ts`          | `briefing/catchup.ts`            |                                                                                            |
+| `catchupcli.ts`       | `briefing/catchupcli.ts`         |                                                                                            |
+| `process.ts`          | `briefing/process.ts`            | Workflow guide generated from registered policy (#71)                                      |
+| `service.ts`          | `briefing/service.ts`            | Shared CLI/MCP read service                                                                |
+| `claims.ts`           | `workflow/claims.ts`             |                                                                                            |
+| `delivery.ts`         | `workflow/delivery.ts`           |                                                                                            |
+| `deliverables.ts`     | `workflow/deliverables.ts`       |                                                                                            |
+| `completion.ts`       | `workflow/completion.ts`         |                                                                                            |
+| `responsibility.ts`   | `workflow/responsibility.ts`     |                                                                                            |
+| `prstatus.ts`         | `workflow/prstatus.ts`           |                                                                                            |
+| `reviewevidence.ts`   | `workflow/reviewevidence.ts`     | Beside `prstatus.ts`, which it imports types from                                          |
+| `reviewhistory.ts`    | `workflow/reviewhistory.ts`      |                                                                                            |
+| `team.ts`             | `workflow/team.ts`               |                                                                                            |
+| `who.ts`              | `workflow/who.ts`                |                                                                                            |
+| `ticketdoctor.ts`     | `workflow/ticketdoctor.ts`       |                                                                                            |
+| `doctorplans.ts`      | `workflow/doctorplans.ts`        | Ticket Doctor repair plans                                                                 |
+| `deliverydoctor.ts`   | `workflow/deliverydoctor.ts`     | Delivery-aware Ticket Doctor facts (#192)                                                  |
+| `deliveryread.ts`     | `workflow/deliveryread.ts`       | Delivery read surfaces (#192); added after the mapping, placed by "Where new files belong" |
+| `estimate.ts`         | `estimation/estimate.ts`         |                                                                                            |
+| `estimation.ts`       | `estimation/estimation.ts`       |                                                                                            |
+| `complexity.ts`       | `estimation/complexity.ts`       |                                                                                            |
+| `complexitylabels.ts` | `estimation/complexitylabels.ts` |                                                                                            |
+| `impact.ts`           | `estimation/impact.ts`           |                                                                                            |
+| `metrics.ts`          | `estimation/metrics.ts`          |                                                                                            |
+| `config.ts`           | `config/config.ts`               |                                                                                            |
+| `configcli.ts`        | `config/configcli.ts`            |                                                                                            |
+| `identity.ts`         | `config/identity.ts`             |                                                                                            |
+| `readidentity.ts`     | `config/readidentity.ts`         |                                                                                            |
+| `harness.ts`          | `config/harness.ts`              |                                                                                            |
+| `localdoctor.ts`      | `config/localdoctor.ts`          |                                                                                            |
+| `engine-setting.ts`   | `config/engine-setting.ts`       |                                                                                            |
+| `filelock.ts`         | `config/filelock.ts`             | Also used by `updates/updatecache.ts`; `updates → config` is an acceptable direction       |
+| `updates.ts`          | `updates/updates.ts`             |                                                                                            |
+| `updatecache.ts`      | `updates/updatecache.ts`         |                                                                                            |
+| `polling.ts`          | `mcp/polling.ts`                 |                                                                                            |
+| `datalog.ts`          | `rules/datalog/datalog.ts`       | Evaluator boundary                                                                         |
+| `datalog-policy.ts`   | `rules/datalog/policy.ts`        | The rules themselves                                                                       |
+| `datascript.d.ts`     | `rules/datalog/datascript.d.ts`  |                                                                                            |
 
 ## Test mapping
 
@@ -108,6 +109,7 @@ Existing test files move with their subject:
 | `mcpparity.test.ts`           | `acceptance/mcpparity.test.ts`           |
 | `rename.test.ts`              | `acceptance/rename.test.ts`              |
 | `benchmark-isolation.test.ts` | `acceptance/benchmark-isolation.test.ts` |
+| `mcpbudget.test.ts`           | `acceptance/mcpbudget.test.ts`           |
 
 `triage.test.ts` is split by top-level suite (line numbers as of `7384969`). A suite that is too broad for one file moves as a whole first and is split later; it is never rewritten during the move.
 
