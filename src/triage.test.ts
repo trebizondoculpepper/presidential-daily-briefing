@@ -127,10 +127,11 @@ import {
   resolveWindow,
   snapshotChangeEvidence,
 } from "./github/changes.js";
-import type { Issue, Page, PullRequest, Snapshot } from "./github/types.js";
+import type { Issue, PullRequest, Snapshot } from "./github/types.js";
+import { by, clock, issue, page, pr, repo, snapshot, time } from "./testing/snapshots.js";
+import { graphQuery, permissions } from "./testing/fakegh.js";
+import { brief } from "./testing/briefing.js";
 
-const repo = "example/project";
-const time = "2026-11-12T10:00:00.000Z";
 /** Split a command as a POSIX shell would: single quotes, whitespace, and `#` comments. */
 const shellWords = (command: string): string[] => {
   const words: string[] = [];
@@ -154,65 +155,6 @@ const shellWords = (command: string): string[] => {
   if (word !== null) words.push(word);
   return words;
 };
-const page = <T>(nodes: T[], more = false, cursor: string | null = null): Page<T> => ({
-  nodes,
-  pageInfo: { hasNextPage: more, endCursor: cursor },
-});
-const issue = (number = 1, labels = ["status:ready"]): Issue => ({
-  number,
-  title: `Ticket ${number}`,
-  body: "Use [design](doc/game-architecture.md).",
-  url: `https://github.com/${repo}/issues/${number}`,
-  state: "OPEN",
-  stateReason: null,
-  createdAt: time,
-  updatedAt: time,
-  issueDependenciesSummary: { blockedBy: 0, totalBlockedBy: 0, blocking: 0, totalBlocking: 0 },
-  blockedBy: page([]),
-  blocking: page([]),
-  labels: page(labels.map((name) => ({ name }))),
-  comments: page([]),
-});
-const pr = (): PullRequest => ({
-  ...issue(4, []),
-  url: `https://github.com/${repo}/pull/4`,
-  headRefOid: "abc123",
-  headRefName: "feature",
-  baseRefName: "main",
-  isDraft: false,
-  mergeable: "MERGEABLE",
-  mergeStateStatus: "CLEAN",
-  reviewDecision: null,
-  closingIssuesReferences: page([{ number: 1, url: issue().url }]),
-  reviewThreads: page([]),
-  reviews: page([]),
-  commits: {
-    nodes: [
-      {
-        commit: {
-          statusCheckRollup: {
-            state: "SUCCESS",
-            contexts: page([{ name: "verify", status: "COMPLETED", conclusion: "SUCCESS" }]),
-          },
-        },
-      },
-    ],
-  },
-});
-const snapshot = (issues = [issue()], prs: PullRequest[] = [pr()]): Snapshot => ({
-  schemaVersion: 1,
-  repository: repo,
-  startedAt: time,
-  fetchedAt: time,
-  issues,
-  pullRequests: prs,
-  dependencies: [],
-  changed: [],
-  since: null,
-  warnings: [],
-  rateLimit: null,
-});
-const brief = (data: Snapshot) => briefing(data, { limit: 100 }, new Date(time));
 
 describe("paginated facts and explicit dependency scope", () => {
   it("walks all cursors and rejects repeating cursors", async () => {
@@ -684,93 +626,6 @@ describe("compact briefing contract", () => {
     ).rejects.toThrow("failed");
   });
 });
-
-/** A fake repository of native edges served through the injected gh query boundary. */
-type Graph = {
-  states?: Record<number, { state?: string; stateReason?: string | null; body?: string }>;
-  pullRequests?: Record<number, number[]>;
-  edges: [blocked: number, blocker: number][];
-  pageSize?: number;
-};
-const graphQuery = (graph: Graph) => {
-  const calls: { number: number; cursor?: string }[] = [];
-  const url = (n: number) => `https://github.com/${repo}/issues/${n}`;
-  const state = (n: number) => graph.states?.[n]?.state ?? "OPEN";
-  const blockersOf = (n: number) => graph.edges.filter(([a]) => a === n).map(([, b]) => b);
-  const dependantsOf = (n: number) => graph.edges.filter(([, b]) => b === n).map(([a]) => a);
-  const summary = (n: number) => ({
-    blockedBy: blockersOf(n).filter((b) => state(b) === "OPEN").length,
-    totalBlockedBy: blockersOf(n).length,
-    blocking: dependantsOf(n).filter(() => state(n) === "OPEN").length,
-    totalBlocking: dependantsOf(n).length,
-  });
-  const node = (n: number) => ({
-    number: n,
-    title: `Ticket ${n}`,
-    state: state(n),
-    stateReason: graph.states?.[n]?.stateReason ?? null,
-    url: url(n),
-    repository: { nameWithOwner: repo },
-    issueDependenciesSummary: summary(n),
-  });
-  const size = graph.pageSize ?? 100;
-  const connection = (numbers: number[], cursor?: string) => {
-    const start = cursor ? Number(cursor) : 0;
-    const more = start + size < numbers.length;
-    return page(
-      numbers.slice(start, start + size).map(node),
-      more,
-      more ? String(start + size) : null,
-    );
-  };
-  const query: Query = async (source, variables) => {
-    const number = Number(variables.number);
-    const cursor = variables.cursor as string | undefined;
-    calls.push({ number, cursor });
-    if (source.includes("issueOrPullRequest")) {
-      if (graph.pullRequests?.[number])
-        return {
-          repository: {
-            issueOrPullRequest: {
-              __typename: "PullRequest",
-              number,
-              url: `https://github.com/${repo}/pull/${number}`,
-              closingIssuesReferences: page(graph.pullRequests[number].map((n) => ({ number: n }))),
-            },
-          },
-        };
-      const known = number in (graph.states ?? {}) || graph.edges.flat().includes(number);
-      return {
-        repository: {
-          issueOrPullRequest: known
-            ? { __typename: "Issue", number, url: url(number), state: state(number) }
-            : null,
-        },
-      };
-    }
-    if (!(number in (graph.states ?? {})) && !graph.edges.flat().includes(number))
-      return { repository: { issue: null } };
-    if (cursor) {
-      const field = /blockedBy\(first:100,after/.test(source) ? "blockedBy" : "blocking";
-      const numbers = field === "blockedBy" ? blockersOf(number) : dependantsOf(number);
-      return { repository: { issue: { [field]: connection(numbers, cursor) } } };
-    }
-    return {
-      repository: {
-        issue: {
-          ...node(number),
-          body: graph.states?.[number]?.body ?? "",
-          updatedAt: time,
-          labels: page([]),
-          blockedBy: connection(blockersOf(number)),
-          blocking: connection(dependantsOf(number)),
-        },
-      },
-    };
-  };
-  return { query, calls, url };
-};
-const clock = () => new Date(time);
 
 describe("native dependency read command", () => {
   it("follows nested blockedBy and blocking pages until the summary totals match", async () => {
@@ -1598,23 +1453,6 @@ describe("help names the installed command (#53)", () => {
     }
   });
 });
-
-/** Comment author and edit evidence (#212): an unedited comment by a user. */
-const by = (login = "kavya") => ({
-  author: { __typename: "User", login },
-  lastEditedAt: null as string | null,
-  includesCreatedEdit: false,
-  editor: null as { __typename: string; login: string } | null,
-});
-/** An injected per-test permission lookup: never live; write unless the table says otherwise. */
-const permissions = (table: Record<string, RepositoryPermission> = {}) => {
-  const calls: string[] = [];
-  const lookup: PermissionLookup = async (login) => {
-    calls.push(login);
-    return table[login] ?? "write";
-  };
-  return Object.assign(lookup, { calls });
-};
 
 describe("claim and needs-human (doc/design/workflow.md)", () => {
   type Ticket = {
