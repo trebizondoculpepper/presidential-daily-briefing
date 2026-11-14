@@ -83,7 +83,7 @@ Routes (read-only; every data route accepts repo=owner/name and refresh=true):
   GET  /api/v1/status, /healthz           Status and cache counters; liveness
   /mcp                                    HTTP MCP: the four pdb-mcp read-only tools
 Results carry freshness (live, cached or stale); a stale result is always incomplete.
-HTTP MCP example (not yet verified with a real client):
+HTTP MCP example (verified with Claude Code; doc/reports/serve-http-mcp-acceptance.md):
   claude mcp add --transport http pdb http://127.0.0.1:${DEFAULT_PORT}/mcp
 The first stdout line is "pdb serve VERSION listening on URL"; request logs go to stderr.
 Loopback binding does not keep out other users of the same machine; there is no token.
