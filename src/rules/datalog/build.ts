@@ -17,7 +17,8 @@ import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
 import { readOne, printEdn } from "./edn.js";
 import { commandKinds } from "./commands.js";
-import type { PolicyBundle, DecisionRule } from "./bundle.js";
+import { requiredQueries, requiredKeyQueries } from "./bundle.js";
+import type { PolicyBundle, DecisionRule, RequiredQuery } from "./bundle.js";
 import { rulesHashOf } from "./hash.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -303,7 +304,8 @@ export function readSources(
             k,
             printEdn(vector(v, `policy/queries.edn :${k}`), `policy/queries.edn :${k}`),
           ]),
-      ),
+        // validateBundle checks that exactly the required names are present.
+      ) as Record<RequiredQuery, string>,
       keyQueries: vector(queryForm.get("key-queries"), "policy/queries.edn :key-queries").map(
         (pair, i) => {
           const where = `policy/queries.edn :key-queries[${i}]`;
@@ -396,6 +398,23 @@ export function validateBundle(bundle: PolicyBundle): PolicyBundle {
     check(`schema.edn :common-witnesses "${k}"`, q, bundle.clauses);
   for (const [k, q] of Object.entries(bundle.eligibilityWitnesses))
     check(`schema.edn :eligibility-witnesses "${k}"`, q, bundle.clauses);
+
+  // The engine reads queries by name; a missing or renamed one must fail here, not at runtime.
+  const names: readonly string[] = requiredQueries;
+  for (const name of requiredQueries)
+    if (!(name in bundle.queries))
+      problems.push(`queries.edn: missing :${name}, which the engine runs`);
+  for (const name of Object.keys(bundle.queries))
+    if (!names.includes(name)) problems.push(`queries.edn: :${name} is never run by the engine`);
+  const keyNames = bundle.keyQueries.map(([name]) => name);
+  for (const name of requiredKeyQueries)
+    if (keyNames.filter((k) => k === name).length !== 1)
+      problems.push(
+        `queries.edn :key-queries: need exactly one "${name}", which ordering.edn reads`,
+      );
+  for (const name of keyNames)
+    if (!(requiredKeyQueries as readonly string[]).includes(name))
+      problems.push(`queries.edn :key-queries: "${name}" is never read by ordering.edn`);
 
   const ids = new Set<string>();
   for (const [i, d] of bundle.definitions.entries()) {
