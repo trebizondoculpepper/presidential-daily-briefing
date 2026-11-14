@@ -1040,6 +1040,36 @@ describe("pdb serve cache: only definitive values, nothing outlives close (#373 
     cache.close();
   });
 
+  it("memoised reads leave no abort listeners behind on the cache lifetime", async () => {
+    const cache = fresh();
+    const key = { repository: "o/r", collector: "c", coverage: {} };
+    const baseline = cache.lifetimeListeners();
+    await cache.track(false, async () => {
+      await cache.read(key, async () => "snapshot");
+      for (let i = 0; i < 500; i++) {
+        // Distinct keys: every one is a miss; failures and non-definitive answers too.
+        await cache.memo(`q${i}`, async () => ({ status: 200, body: i }), definitiveRest);
+        await cache.memo(`r${i}`, async () => ({ status: 503, body: i }), definitiveRest);
+        await cache
+          .memo(
+            `e${i}`,
+            async () => Promise.reject(new Error("gh failed")),
+            () => true,
+          )
+          .catch(() => undefined);
+      }
+    });
+    expect(cache.lifetimeListeners()).toBe(baseline);
+    // Collections and their waiters clean up too.
+    const signal = new AbortController().signal;
+    const { getEventListeners } = await import("node:events");
+    for (let i = 0; i < 200; i++)
+      await cache.read({ ...key, coverage: { n: i } }, async () => i, signal);
+    expect(getEventListeners(signal, "abort")).toHaveLength(0);
+    expect(cache.lifetimeListeners()).toBe(baseline);
+    cache.close();
+  });
+
   it("does not store a value its producer marks as not definitive", async () => {
     const cache = fresh();
     const key = { repository: "o/r", collector: "pr", coverage: { n: 1 } };

@@ -10,6 +10,7 @@
  * background: an idle server makes no GitHub requests.
  */
 import { AsyncLocalStorage } from "node:async_hooks";
+import { getEventListeners } from "node:events";
 import { AuthenticationError, IssueUnavailable, SubjectUnavailable } from "../github/github.js";
 
 /** A read refused because it names a repository outside the served set (#373). */
@@ -202,6 +203,11 @@ export class ServeCache {
   >();
   readonly counters = { hits: 0, misses: 0, coalesced: 0, evictions: 0 };
 
+  /** Abort listeners currently registered on the cache-lifetime signal (leak tests). */
+  lifetimeListeners(): number {
+    return getEventListeners(this.lifetime.signal, "abort").length;
+  }
+
   constructor(private readonly options: CacheOptions) {
     this.ttlMs = options.ttlMs;
     this.staleWindowMs = options.staleWindowMs ?? STALE_WINDOW_MS;
@@ -276,16 +282,24 @@ export class ServeCache {
     // close() rejects a pending memoised read at once; the request's own signal (which serve's
     // shutdown aborts) stops the gh child behind it.
     const lifetime = this.lifetime.signal;
+    // The listener is removed as soon as the read settles, so a long-running server does not
+    // accumulate one per memoised read on the lifetime signal.
     const bounded = lifetime.aborted
       ? Promise.reject(abortError(lifetime))
-      : Promise.race([
-          call(),
-          new Promise<never>((_done, reject) =>
-            lifetime.addEventListener("abort", () => reject(abortError(lifetime)), {
-              once: true,
-            }),
-          ),
-        ]);
+      : new Promise<T>((resolve, reject) => {
+          const onClose = () => reject(abortError(lifetime));
+          lifetime.addEventListener("abort", onClose, { once: true });
+          call().then(
+            (value) => {
+              lifetime.removeEventListener("abort", onClose);
+              resolve(value);
+            },
+            (error: unknown) => {
+              lifetime.removeEventListener("abort", onClose);
+              reject(error);
+            },
+          );
+        });
     const promise = bounded.then((value) => {
       if (!keep(value)) entry.memo.delete(key);
       else if (this.entries.get(entry.key) === entry) {
