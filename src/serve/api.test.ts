@@ -698,6 +698,26 @@ describe("pdb serve cache races (#373)", () => {
     cache.close();
   });
 
+  it("an already cancelled read never starts a collection", async () => {
+    const cache = makeCache(new ManualClock(), () => "old");
+    const gone = new AbortController();
+    gone.abort();
+    let started = false;
+    await expect(
+      cache.read(
+        { repository: "o/r", collector: "c", coverage: {} },
+        async () => {
+          started = true;
+          return "x";
+        },
+        gone.signal,
+      ),
+    ).rejects.toThrow();
+    expect(started).toBe(false);
+    expect(cache.status()).toMatchObject({ entries: 0, inflight: 0, misses: 0 });
+    cache.close();
+  });
+
   it("a refresh during a collection keeps that result out of the cache", async () => {
     const clock = new ManualClock();
     const cache = makeCache(clock, () => "old");

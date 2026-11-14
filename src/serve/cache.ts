@@ -531,6 +531,8 @@ export class ServeCache {
     signal?: AbortSignal,
   ): Promise<T> {
     if (this.closed) throw new CollectionError("GITHUB_UNAVAILABLE", "pdb serve is shutting down.");
+    // A caller already gone never starts (or counts against) a collection.
+    if (signal?.aborted) throw abortError(signal);
     const scope = this.scope.getStore();
     const refresh = scope?.refresh ?? false;
     const key = this.keyOf(cacheKey);
