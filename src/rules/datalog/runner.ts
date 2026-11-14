@@ -383,24 +383,47 @@ export const exitCode = (outcomes: Outcome[]): number =>
       ? 1
       : 0;
 
-function main(argv: string[]): number {
+export interface MainDeps {
+  run: () => Outcome[];
+  out: (text: string) => void;
+  err: (text: string) => void;
+  writeFile: (path: string, text: string) => void;
+}
+const defaultDeps: MainDeps = {
+  run: () => runAll(),
+  out: (text) => process.stdout.write(text),
+  err: (text) => process.stderr.write(text),
+  writeFile: (path, text) => writeFileSync(path, text),
+};
+
+/** The rules:test command. Returns the exit code; never throws for a report it cannot write. */
+export function main(argv: string[], deps: MainDeps = defaultDeps): number {
   const at = argv.indexOf("--junit");
   if (at >= 0 && !argv[at + 1]) {
-    process.stderr.write("--junit needs a file path.\n");
+    deps.err("--junit needs a file path.\n");
     return 2;
   }
-  const outcomes = runAll();
+  const outcomes = deps.run();
   for (const o of outcomes)
-    process.stdout.write(
+    deps.out(
       o.status === "passed"
         ? `ok    ${o.name}\n`
         : `FAIL  ${o.name} [${o.status}]\n${o.message.replace(/^/gm, "      ")}\n`,
     );
   const count = (s: Outcome["status"]) => outcomes.filter((o) => o.status === s).length;
-  process.stdout.write(
+  deps.out(
     `\n${count("passed")} passed, ${count("RuleDecisionFailure")} rule failures, ${count("RuleInfrastructureError")} infrastructure errors\n`,
   );
-  if (at >= 0) writeFileSync(argv[at + 1], junit(outcomes));
+  if (at >= 0)
+    try {
+      deps.writeFile(argv[at + 1], junit(outcomes));
+    } catch (error) {
+      // A missing report must never look like a pass: this is an infrastructure error.
+      deps.err(
+        `RuleInfrastructureError: could not write the JUnit report to ${argv[at + 1]}: ${error instanceof Error ? error.message : String(error)}\n`,
+      );
+      return 2;
+    }
   return exitCode(outcomes);
 }
 
