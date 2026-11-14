@@ -16,7 +16,7 @@ import { AuthenticationError, currentRepository, ghQueryFailure } from "./github
 import { systemClock } from "./mcp/polling.js";
 import type { Clock } from "./mcp/polling.js";
 import { installedVersion } from "./updates/updates.js";
-import { defaultReadRuntime, readServices } from "./serve/api.js";
+import { defaultReadRuntime, readServices } from "./serve/services.js";
 import type { ServeReadRuntime } from "./serve/api.js";
 import {
   allowedHostnames,
