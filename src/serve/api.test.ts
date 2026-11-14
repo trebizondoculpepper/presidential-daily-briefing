@@ -5,7 +5,7 @@
 import { EventEmitter } from "node:events";
 import { request } from "node:http";
 import { join, resolve } from "node:path";
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 import { main } from "../cli.js";
 import { TOML_CONFIG_PATH } from "../config/config.js";
 import type { ConfigFileSystem, GitRunner } from "../config/config.js";
@@ -17,6 +17,7 @@ import type { Clock } from "../mcp/polling.js";
 import { startServe } from "../serve.js";
 import type { RunningServer, ServeRuntime } from "../serve.js";
 import { readServices } from "./api.js";
+import { NO_PROJECT_ROOT, noLocalProject } from "./api.js";
 import type { ServeReadRuntime } from "./api.js";
 import { ServeCache } from "./cache.js";
 import { serveArguments } from "./options.js";
@@ -83,7 +84,12 @@ class ManualClock implements Clock {
 interface Setup {
   running: RunningServer;
   clock: ManualClock;
-  calls: { collect: { repository: string; options: unknown }[]; deps: number; auth: number };
+  calls: {
+    collect: { repository: string; options: unknown }[];
+    deps: number;
+    auth: number;
+    projectRuntime: (string | undefined)[];
+  };
   stderr: string[];
   close: () => Promise<void>;
 }
@@ -97,7 +103,7 @@ async function setup(
   } = {},
 ): Promise<Setup> {
   const clock = new ManualClock();
-  const calls: Setup["calls"] = { collect: [], deps: 0, auth: 0 };
+  const calls: Setup["calls"] = { collect: [], deps: 0, auth: 0, projectRuntime: [] };
   const stderr: string[] = [];
   const serve: ServeRuntime = {
     currentRepository: async () => repo,
@@ -137,10 +143,13 @@ async function setup(
     env: {},
     git,
     fs: files,
-    projectRuntime: () => ({
-      estimation: { fs: files, git, cwd: root },
-      guide: { fs: files, git, cwd: root },
-    }),
+    projectRuntime: (project) => {
+      calls.projectRuntime.push(project);
+      return {
+        estimation: { fs: files, git, cwd: root },
+        guide: { fs: files, git, cwd: root },
+      };
+    },
   };
   const options = serveArguments(["--port", "0", ...args]);
   const running = await startServe(options, serve, readServices(options, serve, read));
@@ -385,6 +394,35 @@ describe("pdb serve identity selection (#373)", () => {
   });
 });
 
+describe("pdb serve without a local project (#271)", () => {
+  it("never reads configuration from the working directory for a --repo-only repository", async () => {
+    const s = await setup(["--repo", repo]);
+    const cwd = vi.spyOn(process, "cwd");
+    try {
+      for (const path of ["/api/v1/briefing?role=implementer", "/api/v1/issues/1"]) {
+        const reply = await call(s.running.port, path);
+        expect(reply.status, path).toBe(200);
+      }
+      expect(cwd).not.toHaveBeenCalled();
+      expect(s.calls.projectRuntime).toEqual([]);
+    } finally {
+      cwd.mockRestore();
+      await s.close();
+    }
+  });
+
+  it("presents an empty checkout of exactly that repository, read-only", async () => {
+    const readers = noLocalProject("owner/name");
+    const git = readers.estimation!.git!;
+    expect(await git(["rev-parse", "--show-toplevel"], NO_PROJECT_ROOT)).toBe(
+      `${NO_PROJECT_ROOT}\n`,
+    );
+    expect(await git(["remote", "-v"], NO_PROJECT_ROOT)).toContain("github.com/owner/name.git");
+    expect(await readers.guide!.fs!.readText(join(NO_PROJECT_ROOT, TOML_CONFIG_PATH))).toBeNull();
+    await expect(readers.guide!.fs!.writeText("x", "y")).rejects.toThrow(/never writes/);
+  });
+});
+
 describe("pdb serve cache (#373)", () => {
   it("serves a fresh entry from cache, collects again after the TTL, and reports freshness", async () => {
     const s = await setup();
@@ -563,6 +601,115 @@ describe("pdb serve cache (#373)", () => {
     } finally {
       await s.close();
     }
+  });
+});
+
+describe("pdb serve cache races (#373)", () => {
+  const makeCache = (clock: ManualClock, login: () => string, maxConcurrent = 4) =>
+    new ServeCache({
+      ttlMs: 300_000,
+      clock,
+      authContext: async () => ({ host: "h", login: login() }),
+      initialAuth: { host: "h", login: "old" },
+      maxConcurrent,
+    });
+
+  it("never stores a collection that ran under a login that changed before it finished", async () => {
+    const clock = new ManualClock();
+    let login = "old";
+    const cache = makeCache(clock, () => login);
+    let finish!: (value: string) => void;
+    const slow = cache.read(
+      { repository: "o/r", collector: "c", coverage: { n: 1 } },
+      () => new Promise<string>((done) => (finish = done)),
+    );
+    await until(() => finish !== undefined);
+    // Another collection notices gh auth switch while the first is still running.
+    clock.advance(301_000);
+    login = "new";
+    await cache.read({ repository: "o/r", collector: "c", coverage: { n: 2 } }, async () => "b");
+    finish("collected-as-old");
+    // Its own waiter still gets what it asked for...
+    expect(await slow).toBe("collected-as-old");
+    // ...but a read under the new login does not see it.
+    let produced = 0;
+    expect(
+      await cache.read({ repository: "o/r", collector: "c", coverage: { n: 1 } }, async () => {
+        produced++;
+        return "collected-as-new";
+      }),
+    ).toBe("collected-as-new");
+    expect(produced).toBe(1);
+    cache.close();
+  });
+
+  it("a queued read does not start once a rate-limit cooldown has begun", async () => {
+    const clock = new ManualClock();
+    const cache = makeCache(clock, () => "old", 1);
+    let fail!: (error: unknown) => void;
+    const first = cache.read(
+      { repository: "o/r", collector: "c", coverage: { n: 1 } },
+      () => new Promise<string>((_done, reject) => (fail = reject)),
+    );
+    let started = false;
+    const queued = cache.read(
+      { repository: "o/r", collector: "c", coverage: { n: 2 } },
+      async () => {
+        started = true;
+        return "never";
+      },
+    );
+    await until(() => fail !== undefined);
+    fail(new RateLimitError("rate limited", { retryAfterSeconds: 60 }));
+    await expect(first).rejects.toMatchObject({ code: "GITHUB_RATE_LIMITED" });
+    await expect(queued).rejects.toMatchObject({ code: "GITHUB_RATE_LIMITED" });
+    expect(started).toBe(false);
+    cache.close();
+  });
+
+  it("one cancelled caller does not fail another collection's shared login check", async () => {
+    const clock = new ManualClock();
+    let release!: () => void;
+    const gate = new Promise<void>((done) => (release = done));
+    const cache = new ServeCache({
+      ttlMs: 300_000,
+      clock,
+      authContext: async () => {
+        await gate;
+        return { host: "h", login: "old" };
+      },
+      initialAuth: { host: "h", login: "old" },
+    });
+    clock.advance(301_000);
+    const a = new AbortController();
+    const cancelled = cache.read(
+      { repository: "o/r", collector: "c", coverage: { n: 1 } },
+      async () => "a",
+      a.signal,
+    );
+    const kept = cache.read(
+      { repository: "o/r", collector: "c", coverage: { n: 2 } },
+      async () => "b",
+    );
+    a.abort();
+    await expect(cancelled).rejects.toThrow();
+    release();
+    expect(await kept).toBe("b");
+    cache.close();
+  });
+
+  it("a refresh during a collection keeps that result out of the cache", async () => {
+    const clock = new ManualClock();
+    const cache = makeCache(clock, () => "old");
+    let finish!: (value: string) => void;
+    const key = { repository: "o/r", collector: "c", coverage: {} };
+    const pending = cache.read(key, () => new Promise<string>((done) => (finish = done)));
+    await until(() => finish !== undefined);
+    expect(cache.refresh("o/r")).toBe(0);
+    finish("before-refresh");
+    expect(await pending).toBe("before-refresh");
+    expect(cache.status().entries).toBe(0);
+    cache.close();
   });
 });
 
