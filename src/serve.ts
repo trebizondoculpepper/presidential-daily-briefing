@@ -16,6 +16,8 @@ import { currentRepository } from "./github/github.js";
 import { systemClock } from "./mcp/polling.js";
 import type { Clock } from "./mcp/polling.js";
 import { installedVersion } from "./updates/updates.js";
+import { defaultReadRuntime, readServices } from "./serve/api.js";
+import type { ServeReadRuntime } from "./serve/api.js";
 import {
   allowedHostnames,
   errorDocument,
@@ -64,6 +66,8 @@ export interface ServeRuntime {
   exit: (code: number) => void;
   version: () => Promise<string | null>;
   platform: NodeJS.Platform;
+  /** GitHub read boundaries for the data routes; absent means the production gh runners. */
+  read?: ServeReadRuntime;
 }
 
 const execute = promisify(execFile);
@@ -151,13 +155,16 @@ const emptyStatus: StatusSource = {
   repositories: () => ({}),
 };
 
-/** Extension points for later slices: data routes, MCP and status counters. */
-export interface ServeExtensions {
-  routes?: (facts: ServerFacts) => Routes;
+/** Services built once the server is listening: data routes, MCP and status counters. */
+export interface ServeServices {
+  routes?: Routes;
   status?: StatusSource;
-  /** Close long-lived resources (MCP sessions) during shutdown. */
+  /** Close long-lived resources (in-flight collections, MCP sessions) during shutdown. */
   close?: () => Promise<void>;
 }
+
+/** Builds the services from the startup facts (bound URL, served set, auth context). */
+export type ServeExtensions = (facts: ServerFacts) => ServeServices;
 
 /** A listening server. */
 export interface RunningServer {
@@ -230,7 +237,7 @@ const placeholder = (facts: ServerFacts): string => `<!doctype html>
 export async function startServe(
   options: ServeOptions,
   runtime: ServeRuntime,
-  extensions: ServeExtensions = {},
+  extensions: ServeExtensions = () => ({}),
 ): Promise<RunningServer> {
   const served = await servedSet(options, runtime);
   let auth: AuthContext;
@@ -246,7 +253,7 @@ export async function startServe(
   const bindHost = options.host === "localhost" ? "127.0.0.1" : options.host;
   const lifecycle = new AbortController();
   let shutting = false;
-  const status = extensions.status ?? emptyStatus;
+  let status = emptyStatus;
   let routes: Routes = async () => false;
   let allowed: string[] = [];
   let port = 0;
@@ -412,7 +419,9 @@ export async function startServe(
   port = (server.address() as AddressInfo).port;
   allowed = allowedHostnames(bindHost);
   facts.url = `http://${urlHost(bindHost)}:${port}/`;
-  routes = extensions.routes?.(facts) ?? routes;
+  const services = extensions(facts);
+  routes = services.routes ?? routes;
+  status = services.status ?? status;
 
   let closing: Promise<void> | null = null;
   let finish!: () => void;
@@ -424,9 +433,7 @@ export async function startServe(
       const stopped = new Promise<void>((resolve) => server.close(() => resolve()));
       lifecycle.abort(new Error("pdb serve is shutting down."));
       // A failure here must not block shutdown, but it is reported, never swallowed.
-      await extensions
-        .close?.()
-        .catch(() => runtime.stderr("pdb serve: closing sessions failed.\n"));
+      await services.close?.().catch(() => runtime.stderr("pdb serve: closing sessions failed.\n"));
       server.closeIdleConnections();
       let timer: unknown;
       const grace = new Promise<void>((resolve) => {
@@ -474,7 +481,8 @@ export const shutdownSignals = (platform: NodeJS.Platform): string[] =>
 export async function runServe(
   args: string[],
   runtime: ServeRuntime = defaultServeRuntime(),
-  extensions: (options: ServeOptions, runtime: ServeRuntime) => ServeExtensions = () => ({}),
+  extensions: (options: ServeOptions, runtime: ServeRuntime) => ServeExtensions = (o, r) =>
+    readServices(o, r, r.read ?? defaultReadRuntime(r)),
 ): Promise<number> {
   let options: ServeOptions & { help?: boolean };
   try {
