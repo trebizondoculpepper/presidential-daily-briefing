@@ -110,6 +110,13 @@ export function evaluatePolicy(
   for (const [entity] of input.datoms)
     if (entity !== 1 && entity < firstSubjectId)
       throw new DatalogError("invalid-facts", `entity ${entity} is reserved for the policy`);
+  // Subjects are the entities with a "kind" fact; the same limit the adapter applies first.
+  const subjects = new Set(input.datoms.filter(([, a]) => a === "kind").map(([e]) => e));
+  if (subjects.size > maxSubjects)
+    throw new DatalogError(
+      "experimental-scope-exceeded",
+      `at most ${maxSubjects} subjects are supported`,
+    );
   const facts: Datom[] = [
     [1, "role", input.viewer.role],
     [1, "agent", input.viewer.agent],

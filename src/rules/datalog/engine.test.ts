@@ -2,7 +2,7 @@ import { describe, it, expect } from "vite-plus/test";
 import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { evaluatePolicy, DatalogError, firstSubjectId } from "./engine.js";
+import { evaluatePolicy, DatalogError, firstSubjectId, maxSubjects } from "./engine.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -78,5 +78,19 @@ describe("engine boundary (#348)", () => {
     expect(() => evaluatePolicy({ viewer: { ...viewer, role: "owner" }, datoms: [] })).toThrow(
       "unsupported-role",
     );
+  });
+
+  it("enforces the subject limit itself, exactly as the adapter does", () => {
+    const viewer = { role: "implementer", agent: "", platform: "", order: "impact" };
+    const subjects = (n: number) =>
+      Array.from({ length: n }, (_, i): [number, string, string] => [
+        firstSubjectId + i,
+        "kind",
+        "issue",
+      ]);
+    expect(() => evaluatePolicy({ viewer, datoms: subjects(maxSubjects + 1) })).toThrow(
+      "experimental-scope-exceeded: at most 500 subjects are supported",
+    );
+    expect(() => evaluatePolicy({ viewer, datoms: subjects(maxSubjects) })).not.toThrow();
   });
 });
