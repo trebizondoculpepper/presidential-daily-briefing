@@ -10,6 +10,7 @@ import { main } from "../cli.js";
 import { TOML_CONFIG_PATH } from "../config/config.js";
 import type { ConfigFileSystem, GitRunner } from "../config/config.js";
 import { collect, IssueUnavailable } from "../github/github.js";
+import { dependencyReport } from "../github/dependencies.js";
 import type { Query } from "../github/github.js";
 import { RateLimitError } from "../github/dependencies.js";
 import type { Issue, Page, Snapshot } from "../github/types.js";
@@ -17,7 +18,13 @@ import type { Clock } from "../mcp/polling.js";
 import { startServe } from "../serve.js";
 import type { RunningServer, ServeRuntime } from "../serve.js";
 import { readServices } from "./api.js";
-import { NO_PROJECT_ROOT, noLocalProject } from "./api.js";
+import {
+  NO_PROJECT_ROOT,
+  noLocalProject,
+  queryRepository,
+  servedOnlyQuery,
+  servedOnlyRest,
+} from "./api.js";
 import type { ServeReadRuntime } from "./api.js";
 import { ServeCache } from "./cache.js";
 import { serveArguments } from "./options.js";
@@ -100,6 +107,7 @@ async function setup(
     collect?: ServeReadRuntime["collect"];
     authContext?: ServeRuntime["authContext"];
     queryWith?: ServeReadRuntime["queryWith"];
+    dependencyReport?: ServeReadRuntime["dependencyReport"];
   } = {},
 ): Promise<Setup> {
   const clock = new ManualClock();
@@ -129,6 +137,8 @@ async function setup(
       return (overrides.collect ?? base)(repository, options);
     },
     dependencyReport: async (repository, number, options) => {
+      if (overrides.dependencyReport)
+        return overrides.dependencyReport(repository, number, options);
       calls.deps++;
       return {
         schemaVersion: 1,
@@ -420,6 +430,181 @@ describe("pdb serve without a local project (#271)", () => {
     expect(await git(["remote", "-v"], NO_PROJECT_ROOT)).toContain("github.com/owner/name.git");
     expect(await readers.guide!.fs!.readText(join(NO_PROJECT_ROOT, TOML_CONFIG_PATH))).toBeNull();
     await expect(readers.guide!.fs!.writeText("x", "y")).rejects.toThrow(/never writes/);
+  });
+});
+
+const moved = (destination: string) => async () => {
+  throw new IssueUnavailable({
+    repository: repo,
+    number: 7,
+    url: url(7),
+    state: "moved",
+    detail: "Transferred.",
+    next: "Follow it.",
+    destination: {
+      repository: destination,
+      number: 3,
+      url: `https://github.com/${destination}/issues/3`,
+    },
+  } as never);
+};
+
+describe("pdb serve never reads an unserved repository (#373 review)", () => {
+  it("does not follow a transfer into a repository it does not serve", async () => {
+    const s = await setup(["--repo", repo], {
+      collect: async (repository, options) =>
+        repository === repo ? moved("someone/else")() : collect(repository, options, query),
+    });
+    try {
+      const reply = await call(s.running.port, "/api/v1/issues/7?includeTransferred=true");
+      expect(reply.status).toBe(200);
+      expect(reply.json).toMatchObject({
+        status: "incomplete",
+        result: { kind: "issue-unavailable", state: "moved" },
+      });
+      expect(reply.json.warnings[0]).toContain("someone/else is not served");
+      expect(s.calls.collect.map((c) => c.repository)).toEqual([repo]);
+    } finally {
+      await s.close();
+    }
+  });
+
+  it("follows a transfer into another served repository", async () => {
+    const s = await setup(["--repo", repo, "--repo", "example/second"], {
+      collect: async (repository, options) =>
+        repository === repo
+          ? moved("example/second")()
+          : collect(repository, options, query, () => new Date(start)),
+    });
+    try {
+      const reply = await call(
+        s.running.port,
+        `/api/v1/issues/7?repo=${repo}&includeTransferred=true`,
+      );
+      expect(reply.json.result.transferredFrom).toMatchObject({ state: "moved" });
+      expect(s.calls.collect.map((c) => c.repository)).toEqual([repo, "example/second"]);
+    } finally {
+      await s.close();
+    }
+  });
+
+  it("does not walk dependency edges into unserved repositories, and says so", async () => {
+    const asked: string[] = [];
+    const node = (owner: string, number: number, blockedBy: unknown[]) => ({
+      number,
+      title: `T${number}`,
+      body: "",
+      url: `https://github.com/${owner}/issues/${number}`,
+      state: "OPEN",
+      stateReason: null,
+      updatedAt: "2026-11-12T09:00:00Z",
+      labels: page([]),
+      issueDependenciesSummary: {
+        blockedBy: blockedBy.length,
+        totalBlockedBy: blockedBy.length,
+        blocking: 0,
+        totalBlocking: 0,
+      },
+      blockedBy: page(blockedBy),
+      blocking: page([]),
+    });
+    const edge = (owner: string, number: number) => ({
+      number,
+      title: `T${number}`,
+      url: `https://github.com/${owner}/issues/${number}`,
+      state: "OPEN",
+      repository: { nameWithOwner: owner },
+      issueDependenciesSummary: { blockedBy: 0, totalBlockedBy: 0, blocking: 0, totalBlocking: 0 },
+    });
+    const depQuery: Query = async (_source, variables) => {
+      const owner = `${String(variables.owner)}/${String(variables.name)}`;
+      asked.push(owner);
+      return {
+        repository: {
+          issue:
+            owner === repo
+              ? node(repo, Number(variables.number), [edge("someone/else", 9)])
+              : node(owner, Number(variables.number), []),
+        },
+      };
+    };
+    const s = await setup(["--repo", repo], {
+      dependencyReport: (repository, number, options) =>
+        dependencyReport(repository, number, options, depQuery),
+    });
+    try {
+      const reply = await call(s.running.port, "/api/v1/issues/1/deps?tree=true");
+      expect(reply.status).toBe(200);
+      expect(reply.json.status).toBe("incomplete");
+      expect(reply.json.result.unfollowed).toEqual([{ repository: "someone/else", number: 9 }]);
+      expect(reply.json.warnings[0]).toContain("someone/else#9");
+      expect(asked).toEqual([repo]);
+    } finally {
+      await s.close();
+    }
+  });
+
+  it("refuses GraphQL and REST reads of unserved repositories before gh runs", async () => {
+    const served = (r: string) => r.toLowerCase() === repo;
+    let ran = 0;
+    const guarded = servedOnlyQuery(
+      () => async () => {
+        ran++;
+        return {};
+      },
+      served,
+    )();
+    await expect(guarded("q", { owner: "someone", name: "else", number: 1 })).rejects.toThrow(
+      /not served/,
+    );
+    await expect(guarded("q", { url: "https://github.com/someone/else/pull/2" })).rejects.toThrow(
+      /not served/,
+    );
+    await guarded("q", { owner: "Example", name: "Parity", number: 1 });
+    await guarded("q", { number: 1 });
+    expect(ran).toBe(2);
+    expect(queryRepository({ url: "https://github.com/a/b" })).toBe("a/b");
+    const rest = servedOnlyRest(async () => ({ status: 200, body: {} }), served);
+    expect(await rest("repos/someone/else/compare/a...b")).toEqual({ status: null, body: null });
+    expect(await rest(`repos/${repo}/collaborators/x/permission`)).toEqual({
+      status: 200,
+      body: {},
+    });
+  });
+});
+
+describe("pdb serve maps domain errors (#373 review)", () => {
+  it("who answers an unavailable issue with its diagnosis, not a 500", async () => {
+    const s = await setup(["--repo", repo], { collect: moved("someone/else") });
+    try {
+      const reply = await call(s.running.port, "/api/v1/issues/7/who");
+      expect(reply.status).toBe(200);
+      expect(reply.json).toMatchObject({
+        view: "who",
+        status: "incomplete",
+        result: { kind: "issue-unavailable", state: "moved" },
+      });
+    } finally {
+      await s.close();
+    }
+  });
+
+  it("an unknown pull request is 404 NOT_FOUND, never stale or a GitHub failure", async () => {
+    const s = await setup(["--repo", repo], {
+      queryWith: () => async () => ({ repository: { pullRequest: null } }),
+    });
+    try {
+      for (const path of ["/api/v1/prs/99", "/api/v1/prs/99?history=true"]) {
+        const reply = await call(s.running.port, path);
+        expect(reply.status, path).toBe(404);
+        expect(reply.json.error, path).toMatchObject({ code: "NOT_FOUND" });
+        expect(reply.json.error.message).toContain("Pull request #99 is unavailable");
+      }
+      const status = await call(s.running.port, "/api/v1/status");
+      expect(status.json.repositories[0].lastError).toBeNull();
+    } finally {
+      await s.close();
+    }
   });
 });
 
@@ -715,6 +900,27 @@ describe("pdb serve cache races (#373)", () => {
     ).rejects.toThrow();
     expect(started).toBe(false);
     expect(cache.status()).toMatchObject({ entries: 0, inflight: 0, misses: 0 });
+    cache.close();
+  });
+
+  it("after a refresh, new reads never join a collection that started before it", async () => {
+    const cache = makeCache(new ManualClock(), () => "old");
+    const key = { repository: "o/r", collector: "c", coverage: {} };
+    let finishOld!: (value: string) => void;
+    const before = cache.read(key, () => new Promise<string>((done) => (finishOld = done)));
+    await until(() => finishOld !== undefined);
+    cache.refresh("o/r");
+    let produced = 0;
+    const after = cache.read(key, async () => {
+      produced++;
+      return "after-refresh";
+    });
+    expect(await after).toBe("after-refresh");
+    expect(produced).toBe(1);
+    finishOld("before-refresh");
+    expect(await before).toBe("before-refresh");
+    // The post-refresh result is the one cached.
+    expect(await cache.read(key, async () => "unused")).toBe("after-refresh");
     cache.close();
   });
 
