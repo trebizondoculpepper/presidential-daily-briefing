@@ -1,6 +1,6 @@
 # Rules component: native EDN sources, build and test boundary
 
-Status: architecture contract for #348. Migration steps 1–6 are implemented: the policy lives in `src/rules/datalog/policy/*.edn` and `policy.ts` is gone. The inventory below describes the code before extraction. Implementation follows in the small PRs listed under "Migration plan". It refines, and does not replace, the owner decisions in [local service and isolated rule testing](local-service-and-rule-testing.md) and the engine contract in [Datalog decisions and explanations](datalog-live-experiment.md). Source placement follows [source layout by capability](source-layout.md) (#335).
+Status: architecture contract for #348. All migration steps are implemented: the policy lives in `src/rules/datalog/policy/*.edn` and `policy.ts` is gone. The inventory below describes the code before extraction. Implementation follows in the small PRs listed under "Migration plan". It refines, and does not replace, the owner decisions in [local service and isolated rule testing](local-service-and-rule-testing.md) and the engine contract in [Datalog decisions and explanations](datalog-live-experiment.md). Source placement follows [source layout by capability](source-layout.md) (#335).
 
 ## Summary
 
