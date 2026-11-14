@@ -1,0 +1,214 @@
+;; Decision rules: one map per rule keeps its ID, ordering, selection clauses, explanation and
+;; evidence bindings together. Vector order is the rule index (10 + position), so moving a rule is
+;; a policy change. Each {placeholder} in :why must name a witness: common, eligibility or :witnesses.
+;; :denials documents every denial rule ID that rules.edn derives through implementation-deny.
+{:decisions
+ [{:id "D-ATTENTION"
+   :kind "addressed-response"
+   :band 1
+   :preference 0
+   :when [(addressed ?t)]
+   :why "Explicitly addressed to you; respond before clearing attention."
+   :codes ["addressed"]
+   :witnesses {"addressedAgent" [[1 "agent" ?value] [?t "attention" ?value]]}}
+
+  {:id "D-PR-FAIL"
+   :kind "pr-follow-up"
+   :band 2
+   :preference 0
+   :when [(pr-action ?t) (pr-failure ?t)]
+   :why "PR checks failed at head {head}; inspect and repair before merge."
+   :codes ["pr-follow-up" "pr-failed-checks"]
+   :witnesses {"failedChecks" [[?t "check" ?c] [?c "name" ?name] [?c "outcome" ?o] [1 "failure" ?o] [(str ?name ":" ?o) ?value]]}}
+
+  {:id "D-PR-REVIEW"
+   :kind "pr-follow-up"
+   :band 2
+   :preference 0
+   :when [(pr-action ?t) (pr-review ?t)]
+   :why "PR has unresolved review findings at head {head}."
+   :codes ["pr-follow-up" "pr-review-findings"]
+   :witnesses {"reviewDecision" [[?t "review-decision" ?value]]
+                 "unresolvedThreads" [[?t "thread" ?c] [?c "resolved" false] [(str "unresolved") ?value]]}}
+
+  {:id "D-PR-CONFLICT"
+   :kind "pr-follow-up"
+   :band 2
+   :preference 1
+   :when [(pr-action ?t) [?t "mergeable" "CONFLICTING"]]
+   :why "PR has merge conflicts at head {head}."
+   :codes ["pr-follow-up" "pr-conflicts"]
+   :witnesses {"mergeable" [[?t "mergeable" ?value]]}}
+
+  {:id "D-PR-MERGE"
+   :kind "pr-follow-up"
+   :band 2
+   :preference 2
+   :when [(pr-action ?t) (clean-pr ?t)]
+   :why "Current verify passes at head {head}; inspect the diff and review evidence, then consider merge."
+   :codes ["pr-follow-up" "pr-inspect-merge"]
+   :witnesses {"verify" [[?t "check" ?c] [?c "name" "verify"] [?c "outcome" ?value]]
+                 "complete" [[?t "pr-complete" ?value]]
+                 "draft" [[?t "draft" ?value]]
+                 "mergeState" [[?t "merge-state" ?value]]}}
+
+  {:id "D-PR-INTEGRATE"
+   :kind "pr-follow-up"
+   :band 2
+   :preference 3
+   :when [(pr-action ?t) (integrate-pr ?t)]
+   :why "Accepted at head {head} (verify passed, head reviewed, no fetched findings) but merge state is {mergeState}, mergeable {mergeable}; refresh mergeability or update the branch, then recheck before considering merge."
+   :codes ["pr-follow-up" "pr-integrate"]
+   :witnesses {"mergeable" [[?t "mergeable" ?value]]
+                 "mergeState" [[?t "merge-state" ?value]]
+                 "verify" [[?t "check" ?c] [?c "name" "verify"] [?c "outcome" ?value]]}}
+
+  {:id "D-DECIDE"
+   :kind "decide"
+   :band 3
+   :preference 0
+   :when [[1 "role" "designer"] [?t "label" "design:decision-needed"]]
+   :why "Resolve the recorded design decision before implementation proceeds."
+   :codes ["designer-duty"]
+   :witnesses {"decisionLabel" [[?t "label" "design:decision-needed"] [(str "design:decision-needed") ?value]]}}
+
+  {:id "D-DOCUMENT"
+   :kind "document"
+   :band 3
+   :preference 1
+   :when [[1 "role" "designer"] [?t "label" "design:documentation-needed"]]
+   :why "An agreed decision needs documentation before implementation."
+   :codes ["designer-duty"]
+   :witnesses {"documentationLabel" [[?t "label" "design:documentation-needed"] [(str "design:documentation-needed") ?value]]}}
+
+  {:id "D-DESIGN-REVIEW"
+   :kind "design-review"
+   :band 3
+   :preference 2
+   :when [[1 "role" "designer"] (design-pr ?t) (not (own-follow-up ?t))]
+   :why "Review the design/documentation PR at head {head}."
+   :codes ["designer-duty"]
+   :witnesses {"designEvidence" [(or-join [?t ?value] (and [?t "label" ?value] [1 "design-label" ?value]) (and [?t "closes" ?i] [?i "label" ?value] [1 "design-label" ?value]))]}}
+
+  {:id "D-EASY"
+   :kind "implement"
+   :band 4
+   :preference 0
+   :when [[1 "role" "implementer"] (eligible ?t) (easy ?t) [1 "order" "impact"]]
+   :why "Known easy win: impact {impact}, complexity {complexity}."
+   :codes ["easy-win"]}
+
+  {:id "D-OWN-EASY"
+   :kind "continue-implementation"
+   :band 4
+   :preference 0
+   :when [[1 "role" "implementer"] (own-issue ?t) (easy ?t)]
+   :why "Continue your known easy win: impact {impact}, complexity {complexity}."
+   :codes ["easy-win" "own-claim"]}
+
+  {:id "D-COMPLEXITY-BOOST"
+   :kind "estimate-complexity"
+   :band 5
+   :preference 0
+   :when [[1 "role" "implementer"] (issue ?t) (needs-complexity ?t) (large-impact ?t)]
+   :why "High impact {impact}, but effort is {complexityState}; estimate it to test implementation value."
+   :codes ["assessment" "cross-role-boost"]}
+
+  {:id "D-COMPLEXITY"
+   :kind "estimate-complexity"
+   :band 5
+   :preference 1
+   :when [[1 "role" "implementer"] (issue ?t) (needs-complexity ?t)]
+   :why "Effort is {complexityState}; sizing improves the evidence for choosing work."
+   :codes ["assessment"]}
+
+  {:id "D-IMPACT-BOOST"
+   :kind "assess-impact"
+   :band 5
+   :preference 0
+   :when [[1 "role" "designer"] (issue ?t) (needs-impact ?t) (small-complexity ?t)]
+   :why "Complexity {complexity} is small, but benefit is {impactState}; assess impact to test for an easy win."
+   :codes ["assessment" "cross-role-boost"]}
+
+  {:id "D-IMPACT"
+   :kind "assess-impact"
+   :band 5
+   :preference 1
+   :when [[1 "role" "designer"] (issue ?t) (needs-impact ?t)]
+   :why "Benefit is {impactState}; assess it before comparing implementation value."
+   :codes ["assessment"]}
+
+  {:id "D-BAD-COMPLEXITY"
+   :kind "inspect-assessment"
+   :band 5
+   :preference 1
+   :when [[1 "role" "implementer"] (issue ?t) (bad-complexity ?t)]
+   :why "Complexity evidence is {complexityState}; inspect and correct the labels or provenance."
+   :codes ["assessment" "inspection"]}
+
+  {:id "D-BAD-IMPACT"
+   :kind "inspect-assessment"
+   :band 5
+   :preference 1
+   :when [[1 "role" "designer"] (issue ?t) (bad-impact ?t)]
+   :why "Impact evidence is {impactState}; inspect and correct the labels or provenance."
+   :codes ["assessment" "inspection"]}
+
+  {:id "D-ORDINARY"
+   :kind "implement"
+   :band 6
+   :preference 0
+   :when [[1 "role" "implementer"] (eligible ?t)]
+   :why "Eligible implementation: impact {impact} ({impactState}), complexity {complexity} ({complexityState})."
+   :codes ["ordinary"]}
+
+  {:id "D-OWN"
+   :kind "continue-implementation"
+   :band 6
+   :preference 0
+   :when [[1 "role" "implementer"] (own-issue ?t)]
+   :why "Continue your active claim; impact {impact}, complexity {complexity}."
+   :codes ["ordinary" "own-claim"]}
+
+  {:id "D-DESIGN"
+   :kind "design"
+   :band 6
+   :preference 0
+   :when [[1 "role" "designer"] (design-eligible ?t)]
+   :why "A design contract is missing. Impact {impact}, complexity {complexity}."
+   :codes ["ordinary"]
+   :witnesses {"designLabel" [[?t "label" "status:needs-design"] [(str "status:needs-design") ?value]]}}
+
+  {:id "D-UNFAVORABLE"
+   :kind "implement"
+   :band 7
+   :preference 0
+   :when [[1 "role" "implementer"] (eligible ?t) (unfavorable ?t) [1 "order" "impact"]]
+   :why "High effort for limited benefit: impact {impact}, complexity {complexity}; reconsider or split."
+   :codes ["unfavorable"]}
+
+  {:id "D-OWN-UNFAVORABLE"
+   :kind "continue-implementation"
+   :band 7
+   :preference 0
+   :when [[1 "role" "implementer"] (own-issue ?t) (unfavorable ?t)]
+   :why "Your active work has impact {impact} and complexity {complexity}; reconsider or split before continuing."
+   :codes ["unfavorable" "own-claim"]}
+
+  {:id "D-INSPECT"
+   :kind "inspect"
+   :band 6
+   :preference 0
+   :when [(issue ?t) (possible ?t) (uncertain ?t)]
+   :why "Eligibility is unproven: inspect incomplete evidence or state the required platform."
+   :codes ["ordinary" "inspection"]
+   :witnesses {"uncertainty" [(or-join [?t ?value] (and [?t "labels-complete" false] [(str "labels incomplete") ?value]) (and [?t "native-complete" false] [(str "native dependencies incomplete") ?value]) (and (not (closing-complete ?t)) [(str "closing PR evidence incomplete") ?value]) (and (platform-unknown ?t) [(str "viewer platform unknown") ?value]))]}}]
+ :denials
+ {"D-DENY-CLAIM" "Someone already claims the ticket."
+  "D-DENY-PREREQUISITE" "A prerequisite label (design, question, blocked or parked) is present."
+  "D-DENY-OPEN-PR" "An open pull request already closes the ticket."
+  "D-DENY-BLOCKER" "A native blocker is still open."
+  "D-DENY-LABELS-UNKNOWN" "Label evidence is incomplete."
+  "D-DENY-NATIVE-UNKNOWN" "Native dependency evidence is incomplete."
+  "D-DENY-CLOSING-UNKNOWN" "Closing pull request evidence is incomplete."
+  "D-DENY-PLATFORM" "The ticket names a platform the viewer is not known to run on."}}

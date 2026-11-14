@@ -1,14 +1,17 @@
 import { describe, it, expect } from "vite-plus/test";
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   buildPolicy,
-  currentSources,
+  readSources,
+  validateBundle,
   serialize,
   artifactPath,
+  policyDir,
   PolicyBuildError,
   queryInputs,
 } from "./build.js";
-import { readOne, EdnSourceError } from "./edn.js";
+import { readOne, printEdn, EdnSourceError } from "./edn.js";
 
 const problemsOf = (fn: () => unknown): string[] => {
   try {
@@ -19,11 +22,18 @@ const problemsOf = (fn: () => unknown): string[] => {
   }
   return [];
 };
+const source = (file: string) => readFileSync(join(policyDir, file), "utf8");
+/** Reads the real sources with one file's text replaced. */
+const editing =
+  (file: string, edit: (text: string) => string) =>
+  (name: string): string =>
+    name === file ? edit(source(name)) : source(name);
 
 describe("rules build (#348)", () => {
-  it("accepts the current policy and the committed artifact is current", () => {
-    const artifact = buildPolicy(currentSources());
+  it("builds the EDN sources and the committed artifact is current", () => {
+    const artifact = buildPolicy();
     expect(JSON.parse(readFileSync(artifactPath, "utf8"))).toEqual(JSON.parse(serialize(artifact)));
+    expect(artifact.definitions).toHaveLength(23);
   });
 
   it("rejects a second top-level form that DataScript would silently ignore", () => {
@@ -31,6 +41,9 @@ describe("rules build (#348)", () => {
       "expected exactly one top-level form, found 2",
     );
     expect(() => readOne("  ; only a comment\n", "x.edn")).toThrow("found 0");
+    expect(
+      problemsOf(() => readSources(editing("rules.edn", (t) => `${t}\n[(extra ?t)]\n`))),
+    ).toEqual(["policy/rules.edn:1:1: expected exactly one top-level form, found 2"]);
   });
 
   it("locates unbalanced and unterminated sources", () => {
@@ -48,32 +61,59 @@ describe("rules build (#348)", () => {
     expect(readOne('[(str "a ] \\" (") ?r] ; ) ]', "q.edn")).toBeTruthy();
   });
 
-  it("reports every problem at once: unknown predicates, unbound explanations, duplicates", () => {
-    const sources = currentSources();
-    const [first, second] = sources.definitions;
-    const problems = problemsOf(() =>
-      buildPolicy({
-        ...sources,
-        definitions: [
-          { ...first, clauses: "(no-such-predicate ?t)" },
-          { ...second, id: first.id, why: "Missing {nothing}." },
-          ...sources.definitions.slice(2),
-        ],
-        queries: { ...sources.queries, q2: "[:find ?t :where [?t" },
-      }),
+  it("prints canonical EDN and refuses values it cannot represent faithfully", () => {
+    expect(
+      printEdn(readOne('[:find ?t :where [?t "kind" _] (not [?t "x" 1])] ; c', "q"), "q"),
+    ).toBe('[:find ?t :where [?t "kind" _] (not [?t "x" 1])]');
+    expect(() => printEdn(readOne('[#inst "2026-01-01"]', "q"), "q")).toThrow(
+      "unsupported EDN value",
     );
-    expect(problems.some((p) => p.endsWith("unknown rule 'no-such-predicate'"))).toBe(true);
-    expect(problems.some((p) => p.includes("duplicate rule ID"))).toBe(true);
-    expect(problems.some((p) => p.includes("{nothing} has no witness binding"))).toBe(true);
-    expect(problems.some((p) => p.startsWith("queries.q2: queries.q2:1:"))).toBe(true);
+    expect(() => printEdn(readOne("[1.5]", "q"), "q")).toThrow("unsupported number");
   });
 
-  it("rejects witnesses for rules that do not exist", () => {
-    const sources = currentSources();
+  it("rejects unknown and missing keys instead of ignoring a typo", () => {
+    expect(
+      problemsOf(() =>
+        readSources(editing("decisions.edn", (t) => t.replace("\n   :why", "\n   :wyh"))),
+      ),
+    ).toEqual(["policy/decisions.edn :decisions[0]: unknown key :wyh"]);
+    expect(
+      problemsOf(() =>
+        readSources(editing("schema.edn", (t) => t.replace(":policy-version 1", ""))),
+      ),
+    ).toEqual(["policy/schema.edn: missing :policy-version"]);
+  });
+
+  it("reports every validation problem at once", () => {
+    const bundle = readSources();
+    const [first, second] = bundle.definitions;
     const problems = problemsOf(() =>
-      buildPolicy({ ...sources, witnessClauses: { ...sources.witnessClauses, "D-GONE": {} } }),
+      validateBundle({
+        ...bundle,
+        definitions: [
+          { ...first, query: "[:find ?t :in $ % :where (no-such-predicate ?t)]" },
+          { ...second, id: first.id, why: "Missing {nothing}." },
+          ...bundle.definitions.slice(2),
+        ],
+        denials: { ...bundle.denials, "D-DENY-GONE": "No rule derives this." },
+        queries: { ...bundle.queries, q2: "[:find ?t :where [?t" },
+      }),
     );
-    expect(problems).toEqual(["witnessClauses.D-GONE: no rule with this ID"]);
+    expect(problems).toEqual([
+      "queries.edn :q2: queries.edn :q2:1:18: '[' is never closed",
+      "decisions.edn D-ATTENTION (position 0) :when: unknown rule 'no-such-predicate'",
+      "decisions.edn D-ATTENTION (position 1): duplicate rule ID",
+      "decisions.edn D-ATTENTION (position 1): why placeholder {nothing} has no witness binding",
+      "decisions.edn :denials: D-DENY-GONE is never derived by rules.edn",
+    ]);
+  });
+
+  it("requires every derived denial to be documented", () => {
+    const bundle = readSources();
+    const { "D-DENY-BLOCKER": _, ...denials } = bundle.denials;
+    expect(problemsOf(() => validateBundle({ ...bundle, denials }))).toEqual([
+      "decisions.edn :denials: D-DENY-BLOCKER is derived but undocumented",
+    ]);
   });
 
   it("reads query inputs from the parsed :in clause, whatever the whitespace or comments", () => {
@@ -88,39 +128,57 @@ describe("rules build (#348)", () => {
     expect(inputs("{:find [?t] :in [$ %] :where [[?t _ _]]}")).toEqual(["$", "%"]);
   });
 
-  it("builds and checks queries whose :in spans lines and comments", () => {
-    const sources = currentSources();
-    const spaced = (q: string) => q.replace(":in $ %", ":in\n  $ ; database\n  %  ; rules\n ");
-    expect(() =>
-      buildPolicy({
-        ...sources,
-        queries: { ...sources.queries, q1: spaced(sources.queries.q1) },
-        keyQueries: sources.keyQueries.map(([k, q]) => [k, spaced(q)]),
-        unknownUnlocks: spaced(sources.unknownUnlocks),
-      }),
-    ).not.toThrow();
-    // The rules input is still recognised, so an undefined rule is still caught.
-    const problems = problemsOf(() =>
-      buildPolicy({
-        ...sources,
-        queries: {
-          ...sources.queries,
-          q1: "[:find ?t :in\n $ ;db\n %\n :where (no-such-rule ?t)]",
-        },
-      }),
+  it("builds sources whose :in spans lines and comments, to the same artifact", () => {
+    // Rewrite the queries only, not the header comment that mentions ":in $ %".
+    const spaced = editing("queries.edn", (t) =>
+      t
+        .split("\n")
+        .map((line) =>
+          line.startsWith(";;")
+            ? line
+            : line.replaceAll(":in $ %", ":in\n  $ ; database\n  %  ; rules\n "),
+        )
+        .join("\n"),
     );
-    expect(problems).toEqual(["queries.q1: unknown rule 'no-such-rule'"]);
+    expect(spaced("queries.edn")).not.toEqual(source("queries.edn"));
+    expect(buildPolicy(spaced)).toEqual(buildPolicy());
   });
 
-  it("rejects query inputs the build cannot supply", () => {
-    const sources = currentSources();
+  it("checks queries by their parsed :in, not their spelling", () => {
+    const bundle = readSources();
+    const q1 = "[:find ?t :in\n $ ;db\n %\n :where (no-such-rule ?t)]";
+    expect(
+      problemsOf(() => validateBundle({ ...bundle, queries: { ...bundle.queries, q1 } })),
+    ).toEqual(["queries.edn :q1: unknown rule 'no-such-rule'"]);
+    const q2 = "[:find ?t :in $ [?x ...] :where [?t _ ?x]]";
     const problems = problemsOf(() =>
-      buildPolicy({
-        ...sources,
-        queries: { ...sources.queries, q2: "[:find ?t :in $ [?x ...] :where [?t _ ?x]]" },
-      }),
+      validateBundle({ ...bundle, queries: { ...bundle.queries, q2 } }),
     );
     expect(problems).toHaveLength(1);
-    expect(problems[0]).toMatch(/^queries\.q2: unsupported query input/);
+    expect(problems[0]).toMatch(/^queries\.edn :q2: unsupported query input/);
+  });
+
+  it("fails the build when a query the engine runs is renamed or removed", () => {
+    const renamed = editing("queries.edn", (t) =>
+      t.replace(" :active-count\n", " :active-counts\n"),
+    );
+    expect(problemsOf(() => buildPolicy(renamed))).toEqual([
+      "queries.edn: missing :active-count, which the engine runs",
+      "queries.edn: :active-counts is never run by the engine",
+    ]);
+    const bundle = readSources();
+    const { denials: _, ...queries } = bundle.queries;
+    expect(
+      problemsOf(() =>
+        validateBundle({
+          ...bundle,
+          queries: queries as typeof bundle.queries,
+          keyQueries: bundle.keyQueries.filter(([name]) => name !== "urgency-key"),
+        }),
+      ),
+    ).toEqual([
+      "queries.edn: missing :denials, which the engine runs",
+      'queries.edn :key-queries: need exactly one "urgency-key", which ordering.edn reads',
+    ]);
   });
 });

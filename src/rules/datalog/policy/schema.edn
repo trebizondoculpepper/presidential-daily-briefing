@@ -1,0 +1,31 @@
+;; Database schema, constant sets (asserted on entity 1) and the witnesses every explanation may use.
+;; Each witness is a vector of where-clauses binding ?value for subject ?t.
+{:policy-version 1
+ :many
+ ["label" "owner" "responsible" "platform" "attention" "blocker" "dependent" "closes" "closing" "check" "review" "receipt" "thread" "matched" "overridden" "unlocks-dependent" "permit" "deny" "unknown" "unlock-unknown"]
+ :constants
+ {"small" ["XS" "S"]
+  "large" ["L" "XL" "XXL"]
+  "needs-assessment" ["unassessed" "stale"]
+  "bad-assessment" ["invalid" "conflict"]
+  "prerequisite" ["status:needs-design" "question" "design:decision-needed" "status:blocked" "status:parked"]
+  "design-label" ["documentation" "status:needs-design"]
+  "failure" ["FAILURE" "ERROR" "TIMED_OUT" "CANCELLED" "ACTION_REQUIRED" "STARTUP_FAILURE" "STALE"]
+  "pending" ["PENDING" "QUEUED" "IN_PROGRESS" "WAITING" "REQUESTED" "EXPECTED"]
+  "known-check" ["SUCCESS" "NEUTRAL" "SKIPPED" "FAILURE" "ERROR" "TIMED_OUT" "CANCELLED" "ACTION_REQUIRED" "STARTUP_FAILURE" "STALE" "PENDING" "QUEUED" "IN_PROGRESS" "WAITING" "REQUESTED" "EXPECTED"]
+  "merge-state" ["CLEAN" "HAS_HOOKS" "UNSTABLE"]
+  "refresh-state" ["BEHIND" "UNKNOWN"]
+  "unknown-mergeable" ["UNKNOWN"]
+  "readiness" ["status:ready" "status:incomplete"]}
+ :common-witnesses
+ {"impact" [[?t "impact-size" ?value]]
+  "complexity" [[?t "complexity-size" ?value]]
+  "impactState" [[?t "impact-state" ?value]]
+  "complexityState" [[?t "complexity-state" ?value]]
+  "head" [[?t "head" ?value]]
+  "responsible" [[?t "responsible" ?value]]}
+ :eligibility-witnesses
+ {"labelsComplete" [[?t "labels-complete" ?value]]
+  "nativeComplete" [[?t "native-complete" ?value]]
+  "openBlockers" [[?t "open-blockers" ?value]]
+  "readiness" [[?t "label" ?value] [1 "readiness" ?value]]}}

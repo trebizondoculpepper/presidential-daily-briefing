@@ -1,0 +1,72 @@
+/**
+ * Shape of policy.generated.json, the artifact `npm run rules:build` writes from policy/*.edn.
+ * The engine imports the JSON itself, and the build writes it; this module holds its type and
+ * the query names both of them rely on.
+ */
+import type { Schema } from "datascript";
+
+/**
+ * Every named query the engine runs. The engine reads queries only through these names (the
+ * bundle type enforces it), and the build fails if policy/queries.edn lacks one or defines a
+ * query the engine never runs, so a rename cannot surface as a runtime failure.
+ */
+export const requiredQueries = [
+  "q0",
+  "q1",
+  "q2",
+  "q3",
+  "q4",
+  "q5",
+  "q6",
+  "q7",
+  "unknown-unlocks",
+  "active-dependents",
+  "denials",
+  "other-claims",
+  "active-count",
+  "missing-active-count",
+] as const;
+export type RequiredQuery = (typeof requiredQueries)[number];
+
+/** Sort-key attributes the ordering rules read; each needs exactly one key query. */
+export const requiredKeyQueries = [
+  "own-key",
+  "linked-key",
+  "incomplete-key",
+  "urgency-key",
+] as const;
+
+export interface DecisionRule {
+  id: string;
+  kind: string;
+  band: number;
+  preference: number;
+  /** The :when clauses as canonical EDN, for display and the English policy page (#392). */
+  clauses: string;
+  why: string;
+  codes: string[];
+  /** Complete match query: the :match template with :when appended. */
+  query: string;
+  /** Rule-specific witness name → complete witness query. */
+  witnesses: Record<string, string>;
+}
+
+export interface PolicyBundle {
+  generatedFrom: string;
+  policyVersion: number;
+  schema: Schema;
+  constants: Record<string, (string | number | boolean)[]>;
+  /** rules.edn as one canonical EDN vector. */
+  clauses: string;
+  comparison: string[];
+  /** ordering.edn :rules as one canonical EDN vector; passed only with queries.q4. */
+  sortClauses: string;
+  definitions: DecisionRule[];
+  denials: Record<string, string>;
+  /** Named queries as canonical EDN, keyed by their queries.edn keyword without the colon. */
+  queries: Record<RequiredQuery, string>;
+  keyQueries: [string, string][];
+  /** Witness name → complete witness query, for every decision. */
+  commonWitnesses: Record<string, string>;
+  eligibilityWitnesses: Record<string, string>;
+}
