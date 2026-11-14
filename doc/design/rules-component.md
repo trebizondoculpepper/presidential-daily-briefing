@@ -1,6 +1,6 @@
 # Rules component: native EDN sources, build and test boundary
 
-Status: proposed architecture contract for #348 (stage 1, documentation only). It moves no files and changes no behaviour. Implementation follows in the small PRs listed under "Migration plan". It refines, and does not replace, the owner decisions in [local service and isolated rule testing](local-service-and-rule-testing.md) and the engine contract in [Datalog decisions and explanations](datalog-live-experiment.md). Source placement follows [source layout by capability](source-layout.md) (#335).
+Status: architecture contract for #348. Migration steps 1–4 are implemented: the policy lives in `src/rules/datalog/policy/*.edn` and `policy.ts` is gone. The inventory below describes the code before extraction. Implementation follows in the small PRs listed under "Migration plan". It refines, and does not replace, the owner decisions in [local service and isolated rule testing](local-service-and-rule-testing.md) and the engine contract in [Datalog decisions and explanations](datalog-live-experiment.md). Source placement follows [source layout by capability](source-layout.md) (#335).
 
 ## Summary
 
@@ -99,7 +99,7 @@ The exact field list is fixed in the PR that splits the adapter (step 5), and th
 - Deterministic. The same facts and bundle give byte-identical JSON output. Witness values are sorted, ties fall back to the subject number and then the rule ID, and nothing reads the wall clock, environment, filesystem or network. `now` exists only for the soft time-budget diagnostic, which stays outside the decision fields.
 - Facts stay raw, as the engine contract requires. The adapter supplies no preselected kinds, eligibility verdicts or ranks. Known-false and unknown remain distinct: completeness flags travel with the facts.
 - Errors are `DatalogError` codes, as now: `unsupported-role`, `experimental-scope-exceeded` and `invalid-inference`. The 500-subject and 50,000-datom limits stay in the engine.
-- Command text (`pdb claim …`) is rendering. `commandTemplates` and `commandKinds` move to the adapter. The engine returns the rule's `kind`, and the host maps that to a command.
+- Command text (`pdb claim …`) is rendering. `commandTemplates` and `commandKinds` moved out of the policy into `commands.ts` in step 3, and they move into the adapter in step 5. The engine returns the rule's `kind`, and the host maps that to a command.
 
 ## Native file format
 
