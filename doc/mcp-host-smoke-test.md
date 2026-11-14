@@ -48,6 +48,7 @@ Add `"--agent", "NAME"` to focus reads. Always pass `--project` (or `--repo`): s
 Host notes:
 
 - **Ori:** the server key becomes the identity entry (`ori-KEY` → `[agents."ori.KEY"]`). Ori's daemon can reuse a running server for a key it has started before, so use a fresh key whenever you change `args`. Ori starts a server declared in the repository's `./.ori/mcp.json` only after an operator approves it in an attended run, so for headless checks (`ori mcp test KEY`, `ori code -p`) put the configuration in a file outside the repository and select it with `ORI_MCP_CONFIG` or `--config`.
+- **Codex:** CLI/app-server 0.169.0 identifies its MCP client as `codex-mcp-client`. With `--project`, a single `[agents.codex]` entry is selected automatically (source `client`); multiple `codex.*` entries require explicit `--entry`. See the [Codex retest](reports/agent-platforms/codex-mcp-acceptance.md#codex-automatic-identity-retest-402) for the installed direct-call procedure, which uses no model turn.
 - **Claude Code:** see its report for the MCP output limit (#266) and project-scope approval.
 
 ## 4. Exercise the tools

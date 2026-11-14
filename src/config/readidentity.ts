@@ -118,26 +118,23 @@ export async function resolveReadIdentity(options: ReadIdentityOptions): Promise
       options.entry === undefined && options.harness === undefined && options.clientName
         ? detectClientEntry(options.clientName)
         : null;
-    if (client) {
-      entry = client.entry;
-      source = "client";
-    } else {
-      const resolution = await resolveEntry({
-        entry: options.entry,
-        harness: options.harness,
-        env: options.env,
-        root: target.root,
-        fs,
-      });
-      if (resolution.status === "unresolved") {
-        const candidates = resolution.candidates.length
-          ? ` Candidate entries: ${resolution.candidates.join(", ")}.`
-          : "";
-        return unresolved(`${resolution.message}${candidates}`);
-      }
-      entry = resolution.entry;
-      source = SOURCE[resolution.source];
+    // Ori metadata identifies one configured server entry. Codex metadata identifies only
+    // the harness, so use the same ambiguity guard as an explicit --harness codex.
+    const resolution = await resolveEntry({
+      entry: options.entry ?? (client?.harness === "ori" ? client.entry : undefined),
+      harness: options.harness ?? client?.harness,
+      env: options.env,
+      root: target.root,
+      fs,
+    });
+    if (resolution.status === "unresolved") {
+      const candidates = resolution.candidates.length
+        ? ` Candidate entries: ${resolution.candidates.join(", ")}.`
+        : "";
+      return unresolved(`${resolution.message}${candidates}`);
     }
+    entry = resolution.entry;
+    source = client ? "client" : SOURCE[resolution.source];
     const record = await readIdentity(target.root, entry, fs);
     if (record.name === null) {
       const why = !record.fileExists
