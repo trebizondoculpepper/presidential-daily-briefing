@@ -115,3 +115,32 @@ export function readOne(text: string, file: string): unknown {
     );
   return forms[0];
 }
+
+/**
+ * Prints a value back as canonical EDN for DataScript: single spaces, no comments. Anything the
+ * policy does not use, and anything the reader cannot represent faithfully, is rejected rather
+ * than guessed: nil, tagged literals such as #inst, characters and non-integer numbers.
+ */
+export function printEdn(value: unknown, where: string): string {
+  const fail = (detail: string): never => {
+    throw new Error(`${where}: ${detail}`);
+  };
+  const print = (v: unknown): string => {
+    if (typeof v === "string") return JSON.stringify(v);
+    if (typeof v === "boolean") return String(v);
+    if (typeof v === "number")
+      return Number.isSafeInteger(v) ? String(v) : fail(`unsupported number ${v}`);
+    if (v === null) return fail("nil is not supported in policy sources");
+    if (Array.isArray(v)) return `[${v.map(print).join(" ")}]`;
+    if (typeof v === "object") {
+      if ("sym" in v && typeof v.sym === "string") return v.sym;
+      if ("key" in v && typeof v.key === "string") return `:${v.key}`;
+      if ("list" in v && Array.isArray(v.list)) return `(${v.list.map(print).join(" ")})`;
+      if ("set" in v && Array.isArray(v.set)) return `#{${v.set.map(print).join(" ")}}`;
+      if ("map" in v && Array.isArray(v.map))
+        return `{${(v.map as unknown[][]).map(([k, x]) => `${print(k)} ${print(x)}`).join(" ")}}`;
+    }
+    return fail(`unsupported EDN value ${JSON.stringify(v)}`);
+  };
+  return print(value);
+}
