@@ -1,6 +1,6 @@
 # Source layout by capability
 
-Status: accepted mapping for #335. Stage 2 progress: `updates/`, `rules/datalog/`, `mcp/`, `config/`, `github/`, `estimation/`, `workflow/` and `briefing/` moved. This is a documentation-only contract. It moves no files. The stage-2 move PRs and the stage-3 test split implement it.
+Status: accepted mapping for #335. Stage 2 progress: `updates/`, `rules/datalog/`, `mcp/`, `config/`, `github/`, `estimation/`, `workflow/` and `briefing/` moved. Stage 3 progress: shared fixtures extracted to `src/testing/` (`snapshots.ts`, `fakegh.ts`, `briefing.ts`). This is a documentation-only contract. It moves no files. The stage-2 move PRs and the stage-3 test split implement it.
 
 ## Goal and constraints
 
