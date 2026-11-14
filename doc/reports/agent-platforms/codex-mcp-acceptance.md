@@ -1,5 +1,7 @@
 # Codex MCP acceptance (#252)
 
+**Update (#402):** the installed-client retest below resolves automatic Codex identity selection. The initial results remain historical; model/UI rendering and cancellation are still untested.
+
 Recorded 2026-11-14 UTC against the installed archive built from `c1e56fb` (current main, including #266). **Verdict: conditional.** The real Codex app-server MCP client discovers all four tools and completes representative read calls with bounded results. Configure `--entry codex` or `--harness codex` for persistent identity: automatic selection from this client's metadata is unresolved (#402).
 
 This is a direct-call acceptance run through Codex's app-server API, without a model turn. It establishes actual Codex MCP transport, discovery and read behavior, but does not establish model-visible rendering, token usage, interactive UI behavior, or other clients' acceptance. Parent #25 remains open; this conditional result is not a universal pass.
@@ -72,3 +74,22 @@ Byte counts are `Buffer.byteLength(JSON.stringify(response.result))`, including 
 ## Follow-up
 
 [#402](https://github.com/trebizondoculpepper/presidential-daily-briefing/issues/402) records automatic identity selection for `codex-mcp-client`. The existing resolver intentionally recognizes only verified client-name patterns, so any extension needs its own contract and focused implementation. Explicit entry selection is the working registration path today. A future model/UI acceptance run must report its own evidence separately.
+
+## Codex automatic-identity retest (#402)
+
+Recorded 2026-11-14 UTC after the contract in #429 merged. **Result: supported for the tested Codex app-server surface.** The installed archive built from implementation commit `63b579a` (package 0.1.0; archive SHA-1 `295b7a80d2df1ed4c2ae8c6ec0d7d8b78d3dd84f`) was installed into a fresh disposable global prefix. Codex CLI/app-server remained 0.169.0 on macOS 27.2.1/arm64 and Node v26.10.0. No model turn was invoked; the researcher remains `priya_xu`, with model identifier unavailable.
+
+The direct-call procedure above was repeated with a fresh disposable `CODEX_HOME` and project. All inherited `CODEX_*` and `CLAUDE*` variables were removed before launching Codex; only its disposable `CODEX_HOME` was then supplied. Identity was created using the installed `pdb config set` commands. Startup passed **only `--project`**, without `--entry`, `--harness` or `--agent`.
+
+| Check                                                       | Observed result                                                                                                                              |
+| ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| Discovery                                                   | Connected, server `pdb` 0.1.0; all four tools listed                                                                                         |
+| `triage_issue` #402                                         | Complete; `agent: acceptance_codex_probe`, `identitySource: client`, `entry: codex`, `triageRole: implementer`, diagnostic null; 2,994 bytes |
+| Default `triage_briefing`                                   | Complete; same automatic selection; 15,066 bytes                                                                                             |
+| `triage_dependencies` #402                                  | Complete; same automatic selection; 1,826 bytes                                                                                              |
+| Add `codex.review` using config, restart with project alone | Unfocused read; both `codex` and `codex.review` named in ambiguity diagnostic; no arbitrary choice                                           |
+| Restart with explicit `--entry codex`                       | Recovers persisted name and role; source `entry`, diagnostic null                                                                            |
+| Read-only identity                                          | Contents and modification time unchanged across each run                                                                                     |
+| App-server framing and cleanup                              | Zero non-JSON lines on its stdout; no test server/`gh api` child remained after normal exit                                                  |
+
+The app-server's actual MCP client now selects the Codex harness through the shared ambiguity rules. This resolves #402's reported condition; it does not turn untested UI/model rendering, cancellation, or other Codex surfaces into passes. The original checklist's explicit entry remains useful when several logical Codex entries exist.
