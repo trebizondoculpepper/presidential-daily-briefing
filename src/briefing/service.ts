@@ -2,8 +2,8 @@ import {
   BriefingEngineError,
   resolveEngineSetting,
   defaultEngine,
-} from "./config/engine-setting.js";
-import type { EngineSetting, DecisionEngineMetadata } from "./config/engine-setting.js";
+} from "../config/engine-setting.js";
+import type { EngineSetting, DecisionEngineMetadata } from "../config/engine-setting.js";
 /**
  * Transport-neutral read service shared by the CLI and the MCP adapter (doc/design/mcp.md).
  *
@@ -11,24 +11,24 @@ import type { EngineSetting, DecisionEngineMetadata } from "./config/engine-sett
  * parses terminal text. Only read operations live here: mutation planning and application stay
  * in their own modules and are never reachable through this service.
  */
-import { collect, IssueUnavailable, permissionLookup } from "./github/github.js";
-import type { IssueDiagnosis, Query, Rest } from "./github/github.js";
-import { diagnoseDelivery } from "./workflow/deliverydoctor.js";
-import { deliveryRead } from "./deliveryread.js";
-import type { DeliveryRead } from "./deliveryread.js";
-import { markerTrust } from "./workflow/delivery.js";
-import { readSnapshotResponsibility } from "./workflow/responsibility.js";
-import type { TrustDecision } from "./workflow/delivery.js";
-import { impactMetric } from "./estimation/metrics.js";
-import { dependencyReport, dependencyText } from "./github/dependencies.js";
-import type { DependencyReport } from "./github/dependencies.js";
+import { collect, IssueUnavailable, permissionLookup } from "../github/github.js";
+import type { IssueDiagnosis, Query, Rest } from "../github/github.js";
+import { diagnoseDelivery } from "../workflow/deliverydoctor.js";
+import { deliveryRead } from "../deliveryread.js";
+import type { DeliveryRead } from "../deliveryread.js";
+import { markerTrust } from "../workflow/delivery.js";
+import { readSnapshotResponsibility } from "../workflow/responsibility.js";
+import type { TrustDecision } from "../workflow/delivery.js";
+import { impactMetric } from "../estimation/metrics.js";
+import { dependencyReport, dependencyText } from "../github/dependencies.js";
+import type { DependencyReport } from "../github/dependencies.js";
 import { compactBriefing, compactText } from "./compact.js";
 import { briefing, textReport } from "./briefing.js";
 import type { BriefingOptions } from "./briefing.js";
 import { readSnapshotAssessments } from "./assessments.js";
-import { collectLabelEstimationInput, metricStatus } from "./estimation/complexitylabels.js";
-import type { LabelEstimationRuntime } from "./estimation/complexitylabels.js";
-import type { Snapshot } from "./github/types.js";
+import { collectLabelEstimationInput, metricStatus } from "../estimation/complexitylabels.js";
+import type { LabelEstimationRuntime } from "../estimation/complexitylabels.js";
+import type { Snapshot } from "../github/types.js";
 import type { PickupOrder } from "./ranking.js";
 import { briefingProcess, resolveGuideSetting } from "./process.js";
 import type { BriefingProcess, GuideRuntime } from "./process.js";
@@ -70,8 +70,8 @@ export async function presentBriefing(
   trust?: TrustDecision,
   signal?: AbortSignal,
   loadEngine: () => Promise<
-    Pick<typeof import("./rules/datalog/datalog.js"), "evaluateDatalog">
-  > = () => import("./rules/datalog/datalog.js"),
+    Pick<typeof import("../rules/datalog/datalog.js"), "evaluateDatalog">
+  > = () => import("../rules/datalog/datalog.js"),
   /** #192: live PR and compare reads for delivery; absent (offline) means not evaluated. */
   live?: { query: Query; rest: Rest },
 ): Promise<PresentedBriefing> {
@@ -103,7 +103,7 @@ export async function presentBriefing(
   const responsibility = await readSnapshotResponsibility(snapshot, trust, signal);
   options = { ...options, responsible: responsibility.responsible };
   let experimental:
-    | Awaited<ReturnType<(typeof import("./rules/datalog/datalog.js"))["evaluateDatalog"]>>
+    | Awaited<ReturnType<(typeof import("../rules/datalog/datalog.js"))["evaluateDatalog"]>>
     | undefined;
   const selection = options.engineSetting ?? {
     requested: defaultEngine(),

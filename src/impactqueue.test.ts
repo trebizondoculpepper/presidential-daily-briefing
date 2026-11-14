@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vite-plus/test";
 import { main } from "./cli.js";
-import type { CompactBriefing, ImpactEstimation } from "./compact.js";
+import type { CompactBriefing, ImpactEstimation } from "./briefing/compact.js";
 import type { ComplexitySize } from "./estimation/complexity.js";
 import { TOML_CONFIG_PATH } from "./config/config.js";
 import type { ConfigFileSystem, GitRunner } from "./config/config.js";

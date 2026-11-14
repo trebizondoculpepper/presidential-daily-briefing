@@ -14,7 +14,7 @@
  */
 import { createHash } from "node:crypto";
 import { workflow, briefingStaleHours } from "./briefing.js";
-import { claimPolicy } from "./workflow/claims.js";
+import { claimPolicy } from "../workflow/claims.js";
 import { pickupOrders, pickupPolicy } from "./ranking.js";
 import { roleRegistry } from "./roles.js";
 import {
@@ -25,8 +25,8 @@ import {
   nodeGit,
   resolveRepositoryTarget,
   settingFor,
-} from "./config/config.js";
-import type { ConfigFileSystem, GitRunner } from "./config/config.js";
+} from "../config/config.js";
+import type { ConfigFileSystem, GitRunner } from "../config/config.js";
 
 /** Version of the `process` object's own shape. */
 export const PROCESS_SCHEMA_VERSION = 1;

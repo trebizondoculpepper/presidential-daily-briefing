@@ -13,8 +13,8 @@
 import { complexityGuidance } from "./complexity.js";
 import type { ComplexitySize } from "./complexity.js";
 import { parseLabelProvenance } from "./estimate.js";
-import { pickupEligibility } from "../ranking.js";
-import type { PickupContext } from "../ranking.js";
+import { pickupEligibility } from "../briefing/ranking.js";
+import type { PickupContext } from "../briefing/ranking.js";
 import type { Issue } from "../github/types.js";
 
 export type EstimationStatus = "available" | "disabled" | "unknown";
