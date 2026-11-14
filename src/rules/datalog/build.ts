@@ -120,12 +120,49 @@ export function ruleCalls(clauses: Form[]): string[] {
   return calls;
 }
 
-/** Where-clauses of a vector query: everything after `:where`. */
+/** Where-clauses of a vector or map query: everything after `:where`, or its map value. */
 const whereOf = (query: Form): Form[] => {
-  if (!Array.isArray(query)) return [];
-  const at = query.findIndex((f) => isKeyword(f, "where"));
-  return at < 0 ? [] : query.slice(at + 1);
+  if (Array.isArray(query)) {
+    const at = query.findIndex((f) => isKeyword(f, "where"));
+    return at < 0 ? [] : query.slice(at + 1);
+  }
+  if (typeof query === "object" && query !== null && "map" in query && Array.isArray(query.map)) {
+    const entry = (query.map as Form[][]).find(([k]) => isKeyword(k, "where"));
+    return entry && Array.isArray(entry[1]) ? entry[1] : [];
+  }
+  return [];
 };
+
+/**
+ * The inputs a vector or map query declares in `:in`, as printed symbols. Without `:in`,
+ * DataScript's default is the single database `$`.
+ */
+export function queryInputs(query: Form): string[] {
+  let declared: Form[] | null = null;
+  if (Array.isArray(query)) {
+    const at = query.findIndex((f) => isKeyword(f, "in"));
+    if (at >= 0) {
+      const end = query.findIndex(
+        (f, i) => i > at && typeof f === "object" && f !== null && "key" in f,
+      );
+      declared = query.slice(at + 1, end < 0 ? query.length : end);
+    }
+  } else if (
+    typeof query === "object" &&
+    query !== null &&
+    "map" in query &&
+    Array.isArray(query.map)
+  ) {
+    const entry = (query.map as Form[][]).find(([k]) => isKeyword(k, "in"));
+    if (entry) declared = Array.isArray(entry[1]) ? entry[1] : [entry[1]];
+  } else throw new Error("a query must be a vector or a map");
+  if (declared === null) return ["$"];
+  return declared.map((f) => {
+    const name = symbol(f);
+    if (name === null) throw new Error(`unsupported query input ${JSON.stringify(f)}`);
+    return name;
+  });
+}
 
 /**
  * DataScript only reports an unknown rule when evaluation reaches it, and an empty database
@@ -173,50 +210,47 @@ export function buildPolicy(sources: PolicySources): PolicySources {
     });
   /**
    * One form per string; every rule call is defined; then DataScript itself reads and runs it.
-   * `rules` is the rule set the engine passes with this query, or null when it passes none.
+   * `rules` is the rule set the engine passes when the query's `:in` names `%`. Inputs come from
+   * the parsed `:in` clause, so any valid EDN whitespace, newlines or comments work.
    */
-  const check = (where: string, text: string, rules: string | null, run: (db: Db) => void) =>
+  const check = (where: string, text: string, rules: string) =>
     attempt(where, () => {
       const form = readOne(text, where);
+      const inputs = queryInputs(form);
+      const takesRules = inputs.includes("%");
       // An unreadable rule set is already reported; do not repeat it as every call being unknown.
-      const defined = rules === null ? new Set<string>() : definedIn.get(rules);
-      if (defined)
-        for (const name of undefinedCalls(whereOf(form), defined))
-          problems.push(`${where}: unknown rule '${name}'`);
-      if (db) run(db);
+      const defined = takesRules ? definedIn.get(rules) : new Set<string>();
+      const unknown = defined ? undefinedCalls(whereOf(form), defined) : [];
+      for (const name of unknown) problems.push(`${where}: unknown rule '${name}'`);
+      // DataScript would only repeat the unknown-rule problem already reported.
+      if (!db || unknown.length) return;
+      const args = inputs.slice(1).map((input) => {
+        if (input === "%") return rules;
+        // A scalar binding such as ?t: any entity id exercises the query on an empty database.
+        if (/^\?[^\s]+$/.test(input)) return 0;
+        throw new Error(`unsupported query input ${input}`);
+      });
+      if (inputs[0] !== "$") throw new Error(`first query input must be $, found ${inputs[0]}`);
+      ds.q(text, db, ...args);
     });
 
-  check("clauses", "[]", null, (d) =>
-    ds.q('[:find ?t :in $ % :where [?t "kind" _]]', d, sources.clauses),
-  );
-  check("sortClauses", "[]", null, (d) =>
-    ds.q('[:find ?t :in $ % :where [?t "kind" _]]', d, sources.sortClauses),
-  );
-  const rulesFor = (q: string, rules: string) => (q.includes(":in $ %") ? rules : null);
-  const run = (q: string, rules: string) => (d: Db) => {
-    if (q.includes(":in $ % ?t")) ds.q(q, d, rules, 0);
-    else if (q.includes(":in $ ?t")) ds.q(q, d, 0);
-    else if (q.includes(":in $ %")) ds.q(q, d, rules);
-    else ds.q(q, d);
-  };
-  for (const [name, q] of Object.entries(sources.queries)) {
-    const rules = name === "q4" ? sources.sortClauses : sources.clauses;
-    check(`queries.${name}`, q, rulesFor(q, rules), run(q, rules));
-  }
-  for (const [name, q] of sources.keyQueries)
-    check(`keyQueries.${name}`, q, rulesFor(q, sources.clauses), run(q, sources.clauses));
+  for (const [where, rules] of [
+    ["clauses", sources.clauses],
+    ["sortClauses", sources.sortClauses],
+  ] as const)
+    attempt(where, () => {
+      if (db) ds.q('[:find ?t :in $ % :where [?t "kind" _]]', db, rules);
+    });
+  for (const [name, q] of Object.entries(sources.queries))
+    check(`queries.${name}`, q, name === "q4" ? sources.sortClauses : sources.clauses);
+  for (const [name, q] of sources.keyQueries) check(`keyQueries.${name}`, q, sources.clauses);
   for (const name of [
     "unknownUnlocks",
     "activeDependents",
     "denialsQuery",
     "otherClaimsQuery",
   ] as const)
-    check(
-      name,
-      sources[name],
-      rulesFor(sources[name], sources.clauses),
-      run(sources[name], sources.clauses),
-    );
+    check(name, sources[name], sources.clauses);
 
   const ids = new Set<string>();
   for (const [i, d] of sources.definitions.entries()) {
@@ -229,7 +263,7 @@ export function buildPolicy(sources: PolicySources): PolicySources {
     if (!(d.kind in sources.commandKinds) && d.kind !== "implement")
       problems.push(`${where}: kind "${d.kind}" has no command mapping`);
     const q = matchQuery(d.clauses);
-    check(`${where} clauses`, q, sources.clauses, run(q, sources.clauses));
+    check(`${where} clauses`, q, sources.clauses);
     const bound = new Set([
       ...Object.keys(sources.commonWitnesses),
       ...Object.keys(sources.eligibilityWitnesses),
@@ -254,7 +288,7 @@ export function buildPolicy(sources: PolicySources): PolicySources {
   ];
   for (const [where, clause] of witnesses) {
     const q = witnessQuery(clause);
-    check(where, q, sources.clauses, run(q, sources.clauses));
+    check(where, q, sources.clauses);
   }
   if (problems.length) throw new PolicyBuildError(problems);
   return sources;
