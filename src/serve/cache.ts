@@ -10,7 +10,20 @@
  * background: an idle server makes no GitHub requests.
  */
 import { AsyncLocalStorage } from "node:async_hooks";
-import { IssueUnavailable } from "../github/github.js";
+import { IssueUnavailable, SubjectUnavailable } from "../github/github.js";
+
+/** A read refused because it names a repository outside the served set (#373). */
+export class UnservedRepository extends Error {
+  constructor(readonly repository: string) {
+    super(`${repository} is not served by this pdb serve.`);
+  }
+}
+
+/** Answers about the subject, not GitHub failures: never stale, never a cooldown. */
+const isSubjectAnswer = (error: unknown): boolean =>
+  error instanceof IssueUnavailable ||
+  error instanceof SubjectUnavailable ||
+  error instanceof UnservedRepository;
 import type { Clock } from "../mcp/polling.js";
 import type { AuthContext } from "../serve.js";
 import { STALE_WINDOW_MS } from "./options.js";
@@ -73,6 +86,8 @@ interface Inflight {
   promise: Promise<Entry>;
   controller: AbortController;
   waiters: number;
+  /** Refresh epoch of the repository when the collection started. */
+  epoch: string;
 }
 
 interface Scope {
@@ -429,7 +444,7 @@ export class ServeCache {
     const controller = new AbortController();
     const generation = ++this.generation;
     const epoch = this.epochOf(repository);
-    const flight = { controller, waiters: 0 } as Inflight;
+    const flight = { controller, waiters: 0, epoch } as Inflight;
     flight.promise = (async () => {
       await this.acquire(controller.signal);
       try {
@@ -476,8 +491,7 @@ export class ServeCache {
         controller.abort();
         // Start a rate-limit cooldown before this slot is released, so a read queued behind
         // this one sees it (the waiters' own handling runs only after the release).
-        if (!(error instanceof IssueUnavailable))
-          this.noteRateLimit(classifyFailure(error, this.now()));
+        if (!isSubjectAnswer(error)) this.noteRateLimit(classifyFailure(error, this.now()));
         throw error;
       } finally {
         this.release();
@@ -556,8 +570,10 @@ export class ServeCache {
       return served(entry, "cached");
     }
     this.counters.misses++;
-    // refresh=true never joins a collection that started before this request arrived.
+    // refresh=true never joins a collection that started before this request arrived, and no
+    // read joins one that started before a refresh of its repository (POST /api/v1/refresh).
     let flight = refresh ? undefined : this.inflight.get(key);
+    if (flight && flight.epoch !== this.epochOf(cacheKey.repository)) flight = undefined;
     if (flight) this.counters.coalesced++;
     try {
       if (!flight) {
@@ -568,7 +584,7 @@ export class ServeCache {
     } catch (error) {
       if (signal?.aborted) throw abortError(signal);
       // An unavailable issue is a result (its diagnosis), not a failure: never stale.
-      if (error instanceof IssueUnavailable) throw error;
+      if (isSubjectAnswer(error)) throw error;
       const failure = classifyFailure(error, this.now());
       this.noteRateLimit(failure);
       this.lastSeen.set(cacheKey.repository.toLowerCase(), {

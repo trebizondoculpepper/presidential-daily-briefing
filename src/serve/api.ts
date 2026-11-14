@@ -18,7 +18,7 @@ import { pickupOrders } from "../briefing/ranking.js";
 import type { PickupOrder } from "../briefing/ranking.js";
 import { readBriefing } from "../briefing/service.js";
 import type { ReadRuntime } from "../briefing/service.js";
-import { permissionLookup } from "../github/github.js";
+import { IssueUnavailable, permissionLookup, SubjectUnavailable } from "../github/github.js";
 import type {
   collect as Collect,
   Query,
@@ -43,7 +43,7 @@ import type {
   ServeRuntime,
   ServerFacts,
 } from "../serve.js";
-import { CollectionError, ServeCache } from "./cache.js";
+import { CollectionError, ServeCache, UnservedRepository } from "./cache.js";
 import type { Freshness } from "./cache.js";
 import { HttpFailure, readJsonBody, sendJson } from "./http.js";
 import type { ServeError } from "./http.js";
@@ -61,6 +61,40 @@ export interface ServeReadRuntime {
   fs?: ConfigFileSystem;
   /** Local configuration readers rooted at a project (estimation and guide settings). */
   projectRuntime?: (project: string | undefined) => Pick<ReadRuntime, "estimation" | "guide">;
+}
+
+const githubUrlRepository = /^https:\/\/github\.com\/([\w.-]+\/[\w.-]+)(?:[/?#]|$)/i;
+
+/** The repository a GraphQL read names through its variables, if any. */
+export function queryRepository(variables: QueryVariables): string | null {
+  const { owner, name, url } = variables as Record<string, unknown>;
+  if (typeof owner === "string" && typeof name === "string") return `${owner}/${name}`;
+  if (typeof url === "string") return githubUrlRepository.exec(url)?.[1] ?? null;
+  return null;
+}
+
+/** GraphQL confined to served repositories: any other is refused before gh runs. */
+export function servedOnlyQuery(
+  queryWith: (signal?: AbortSignal) => Query,
+  isServed: (repository: string) => boolean,
+): (signal?: AbortSignal) => Query {
+  return (signal) => {
+    const query = queryWith(signal);
+    return async (source, variables) => {
+      const repository = queryRepository(variables);
+      if (repository !== null && !isServed(repository)) throw new UnservedRepository(repository);
+      return query(source, variables);
+    };
+  };
+}
+
+/** REST confined to served repositories; any other answers as unknown (no status). */
+export function servedOnlyRest(rest: Rest, isServed: (repository: string) => boolean): Rest {
+  return async (path, options) => {
+    const repository = /^\/?repos\/([\w.-]+\/[\w.-]+)(?:[/?]|$)/.exec(path)?.[1];
+    if (repository !== undefined && !isServed(repository)) return { status: null, body: null };
+    return rest(path, options);
+  };
 }
 
 /** The stand-in checkout root of a repository served without a local project. */
@@ -253,6 +287,15 @@ export function readApi(
   runtime: ServeReadRuntime,
   cache: ServeCache,
 ): (facts: ServerFacts) => Routes {
+  // The served set, known once listening. Every GitHub read below is confined to it: an
+  // indirection (a transfer, a dependency edge, a delivery record naming another repository)
+  // never reaches a repository the user did not choose to serve (#373 review).
+  let servedSet: readonly ServedRepository[] = [];
+  const isServed = (repository: string): boolean =>
+    servedSet.some((s) => s.repository.toLowerCase() === repository.toLowerCase());
+  const guardedQueryWith = runtime.queryWith && servedOnlyQuery(runtime.queryWith, isServed);
+  const guardedRest = runtime.rest && servedOnlyRest(runtime.rest, isServed);
+
   // Cached GitHub boundaries: whole collected results per key; auxiliary reads memoised in the
   // entry being presented.
   const cachedCollect: typeof Collect = (repository, collectOptions) => {
@@ -267,25 +310,30 @@ export function readApi(
     const { signal, ...coverage } = depOptions ?? {};
     return cache.read(
       { repository, collector: "deps", coverage: { n: number, ...coverage } },
-      (inner) => runtime.dependencyReport(repository, number, { ...coverage, signal: inner }),
+      (inner) =>
+        runtime.dependencyReport(repository, number, {
+          ...coverage,
+          signal: inner,
+          follow: isServed,
+        }),
       signal,
     );
   };
-  const memoRest: Rest | undefined = runtime.rest
+  const memoRest: Rest | undefined = guardedRest
     ? (path, restOptions) =>
         cache.memo<RestAnswer>(
           `rest\u0000${path}`,
-          () => runtime.rest!(path, restOptions),
+          () => guardedRest(path, restOptions),
           // A failed lookup (no status) is unknown evidence; it is never kept.
           (answer) => answer.status !== null,
         )
     : undefined;
-  const memoQueryWith = runtime.queryWith
+  const memoQueryWith = guardedQueryWith
     ? (signal?: AbortSignal): Query =>
         (query: string, variables: QueryVariables) =>
           cache.memo(
             `query\u0000${query}\u0000${JSON.stringify(variables)}`,
-            () => runtime.queryWith!(signal)(query, variables),
+            () => guardedQueryWith(signal)(query, variables),
             () => true,
           )
     : undefined;
@@ -361,6 +409,7 @@ export function readApi(
   };
 
   return (facts) => {
+    servedSet = facts.served;
     const respond = (
       context: RequestContext,
       httpStatus: number,
@@ -384,7 +433,7 @@ export function readApi(
         values: Map<string, string>,
         served: ServedRepository,
         setSelection: (selection: Selection) => void,
-      ) => Promise<{ status: "complete" | "incomplete"; result: unknown }>,
+      ) => Promise<{ status: "complete" | "incomplete"; result: unknown; warnings?: string[] }>,
     ): Promise<void> => {
       if (context.request.method !== "GET" && context.request.method !== "HEAD")
         throw new HttpFailure(405, "METHOD_NOT_ALLOWED", "Use GET.", [], { allow: "GET, HEAD" });
@@ -401,11 +450,14 @@ export function readApi(
         );
         const primary = freshness[0] ?? liveNow(cache, runtime.now());
         const stale = freshness.find((f) => f.stale);
-        const warnings = stale
-          ? [
-              `Served a stale result observed at ${stale.observedAt} because the live read failed (${stale.refreshError?.code ?? "unknown"}); facts may have changed since.`,
-            ]
-          : [];
+        const warnings = [
+          ...(stale
+            ? [
+                `Served a stale result observed at ${stale.observedAt} because the live read failed (${stale.refreshError?.code ?? "unknown"}); facts may have changed since.`,
+              ]
+            : []),
+          ...(value.warnings ?? []),
+        ];
         respond(context, 200, {
           schemaVersion: 1,
           kind: "serve-read",
@@ -426,7 +478,15 @@ export function readApi(
         let status = 502;
         let failure: ServeError;
         let headers: Record<string, string> = {};
-        if (error instanceof HttpFailure) {
+        if (error instanceof UnservedRepository) {
+          status = 403;
+          failure = { code: "REPOSITORY_NOT_SERVED", message: error.message, next: [] };
+        } else if (error instanceof SubjectUnavailable) {
+          // The pull request or issue does not exist (or cannot be read) in this repository.
+          status = 404;
+          failure = { code: "NOT_FOUND", message: error.message, next: [] };
+          if (served) failure.next = [cliCommand(view, served.repository, number)];
+        } else if (error instanceof HttpFailure) {
           // Argument and selection failures keep the data envelope of this view.
           status = error.status;
           failure = { code: error.code, message: error.message, next: error.next };
@@ -581,7 +641,7 @@ export function readApi(
         if (kind === "prs") {
           await dataRoute(context, "pull-request", ["history"], number, async (values, served) => {
             const history = booleanParam(values, "history");
-            if (!runtime.queryWith)
+            if (!guardedQueryWith)
               throw new CollectionError("GITHUB_UNAVAILABLE", "No GitHub reader is configured.");
             // The whole PR report is the cached fact result: it has no identity projection.
             const read = await cache.read<{ report: unknown; complete: boolean }>(
@@ -595,22 +655,21 @@ export function readApi(
                   ? readReviewHistory(
                       served.repository,
                       number,
-                      runtime.queryWith!(inner),
+                      guardedQueryWith!(inner),
                       runtime.now,
                     )
                   : readPullRequest(
                       served.repository,
                       number,
-                      runtime.queryWith!(inner),
-                      runtime.rest
+                      guardedQueryWith!(inner),
+                      guardedRest
                         ? {
                             trust: markerTrust(
-                              permissionLookup(served.repository, runtime.rest, inner),
+                              permissionLookup(served.repository, guardedRest, inner),
                             ),
                             live: {
-                              query: runtime.queryWith!(inner),
-                              rest: (p, o) =>
-                                runtime.rest!(p, { ...o, signal: o?.signal ?? inner }),
+                              query: guardedQueryWith!(inner),
+                              rest: (p, o) => guardedRest!(p, { ...o, signal: o?.signal ?? inner }),
                             },
                             signal: inner,
                           }
@@ -630,17 +689,37 @@ export function readApi(
               tree,
               signal: context.signal,
             });
-            return { status: "complete", result: report };
+            const skipped = report.unfollowed ?? [];
+            return skipped.length
+              ? {
+                  status: "incomplete",
+                  result: report,
+                  warnings: [
+                    `${skipped.length} dependency node(s) in repositories this server does not serve were not read: ${skipped.map((n) => `${n.repository}#${n.number}`).join(", ")}.`,
+                  ],
+                }
+              : { status: "complete", result: report };
           });
           return true;
         }
         if (sub === "/who") {
           await dataRoute(context, "who", ["staleHours"], number, async (values, served) => {
             const staleHours = positiveParam(values, "staleHours") ?? defaultStaleHours;
-            const snapshot = await cachedCollect(served.repository, {
-              issue: number,
-              signal: context.signal,
-            });
+            let snapshot: Snapshot;
+            try {
+              snapshot = await cachedCollect(served.repository, {
+                issue: number,
+                signal: context.signal,
+              });
+            } catch (error) {
+              // As the issue route: a missing, transferred or inaccessible issue is answered
+              // with its diagnosis, never a server error.
+              if (!(error instanceof IssueUnavailable)) throw error;
+              return {
+                status: "incomplete",
+                result: { schemaVersion: 1, kind: "issue-unavailable", ...error.diagnosis },
+              };
+            }
             const read = await readWho(
               snapshot,
               number,
@@ -674,13 +753,32 @@ export function readApi(
             const diagnosis = read.diagnosis;
             // Transferred-out work is excluded by default; only an explicit opt-in follows it,
             // exactly as the CLI's --include-transferred does.
+            // Never read a repository outside the served set, even by following a transfer.
+            if (
+              diagnosis.state === "moved" &&
+              follow &&
+              !isServed(diagnosis.destination.repository)
+            )
+              return {
+                status: "incomplete",
+                result: { schemaVersion: 1, kind: "issue-unavailable", ...diagnosis },
+                warnings: [
+                  `Not following the transfer: ${diagnosis.destination.repository} is not served by this server. Restart pdb serve with --repo ${diagnosis.destination.repository} to read it.`,
+                ],
+              };
             if (
               diagnosis.state === "moved" &&
               follow &&
               Number.isSafeInteger(Number(diagnosis.destination.number))
             ) {
               const destination = await readBriefing(
-                readRuntime(undefined, diagnosis.destination.repository),
+                readRuntime(
+                  servedSet.find(
+                    (s) =>
+                      s.repository.toLowerCase() === diagnosis.destination.repository.toLowerCase(),
+                  )?.project,
+                  diagnosis.destination.repository,
+                ),
                 {
                   repository: diagnosis.destination.repository,
                   agent: chosen?.agent ?? undefined,

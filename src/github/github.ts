@@ -253,6 +253,13 @@ export async function locateIssue(
 }
 
 /** Thrown when `--issue N` cannot be read; carries the location diagnosis. */
+/**
+ * A read whose subject (a pull request, or an issue a report needs) does not exist or cannot be
+ * read in that repository. Same message as before; the type lets services map it to "not
+ * found" instead of a GitHub failure (#373).
+ */
+export class SubjectUnavailable extends Error {}
+
 export class IssueUnavailable extends Error {
   readonly diagnosis: IssueDiagnosis;
   constructor(diagnosis: IssueDiagnosis) {
