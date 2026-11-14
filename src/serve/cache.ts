@@ -192,6 +192,10 @@ export class ServeCache {
   private sweepTimer: unknown = null;
   private closed = false;
   private readonly scope = new AsyncLocalStorage<Scope>();
+  /** Aborted by close(): the shared login check and memoised reads never outlive the cache. */
+  private readonly lifetime = new AbortController();
+  /** Every collection not yet settled, including ones a refresh replaced in `inflight`. */
+  private readonly flights = new Set<Inflight>();
   private readonly lastSeen = new Map<
     string,
     { observedAt: string | null; lastError: { code: string; at: string } | null }
@@ -269,7 +273,20 @@ export class ServeCache {
       return existing.catch(() => {
         return call();
       });
-    const promise = call().then((value) => {
+    // close() rejects a pending memoised read at once; the request's own signal (which serve's
+    // shutdown aborts) stops the gh child behind it.
+    const lifetime = this.lifetime.signal;
+    const bounded = lifetime.aborted
+      ? Promise.reject(abortError(lifetime))
+      : Promise.race([
+          call(),
+          new Promise<never>((_done, reject) =>
+            lifetime.addEventListener("abort", () => reject(abortError(lifetime)), {
+              once: true,
+            }),
+          ),
+        ]);
+    const promise = bounded.then((value) => {
       if (!keep(value)) entry.memo.delete(key);
       else if (this.entries.get(entry.key) === entry) {
         const extra = sizeOf(value);
@@ -308,9 +325,12 @@ export class ServeCache {
   /** Stop the sweep and abort every in-flight collection. */
   close(): void {
     this.closed = true;
+    this.lifetime.abort(new Error("pdb serve cache closed."));
     if (this.sweepTimer !== null) this.options.clock.clearTimeout(this.sweepTimer);
-    for (const flight of this.inflight.values()) flight.controller.abort();
+    for (const flight of this.flights) flight.controller.abort();
     this.inflight.clear();
+    // Queued collections were aborted above; their tickets are already gone. Any left start
+    // nothing: a released collection checks `closed` before running.
     for (const release of this.queue.splice(0)) release();
   }
 
@@ -407,7 +427,7 @@ export class ServeCache {
     // request must not fail another's check (gh's own timeout bounds it).
     this.authCheck ??= (async () => {
       try {
-        const auth = await this.options.authContext();
+        const auth = await this.options.authContext(this.lifetime.signal);
         this.authCheckedAt = this.now();
         if (auth.host !== this.auth.host || auth.login !== this.auth.login) {
           this.auth = auth;
@@ -443,15 +463,26 @@ export class ServeCache {
     key: string,
     cacheKey: CacheKey,
     produce: (signal: AbortSignal) => Promise<T>,
+    keep: (value: T) => boolean,
   ): Inflight {
     const { repository, collector } = cacheKey;
     const controller = new AbortController();
     const generation = ++this.generation;
     const epoch = this.epochOf(repository);
     const flight = { controller, waiters: 0, epoch } as Inflight;
+    this.flights.add(flight);
     flight.promise = (async () => {
-      await this.acquire(controller.signal);
       try {
+        await this.acquire(controller.signal);
+      } catch (error) {
+        // Cancelled while queued: it never held a slot.
+        this.flights.delete(flight);
+        if (this.inflight.get(key) === flight) this.inflight.delete(key);
+        throw error;
+      }
+      try {
+        if (this.closed)
+          throw new CollectionError("GITHUB_UNAVAILABLE", "pdb serve is shutting down.");
         // A cooldown that began while this read was queued applies to it too.
         if (this.cooldownUntil > this.now() && this.cooldownError) throw this.cooldownError;
         await this.checkAuth();
@@ -477,6 +508,7 @@ export class ServeCache {
         if (
           !this.closed &&
           this.auth === collectedAs &&
+          keep(value) &&
           this.epochOf(repository) === epoch &&
           (!current || current.generation < generation)
         ) {
@@ -499,6 +531,7 @@ export class ServeCache {
         throw error;
       } finally {
         this.release();
+        this.flights.delete(flight);
         if (this.inflight.get(key) === flight) this.inflight.delete(key);
       }
     })();
@@ -547,6 +580,8 @@ export class ServeCache {
     cacheKey: CacheKey,
     produce: (signal: AbortSignal) => Promise<T>,
     signal?: AbortSignal,
+    /** Whether a produced value is definitive enough to store; others are returned only. */
+    keep: (value: T) => boolean = () => true,
   ): Promise<T> {
     if (this.closed) throw new CollectionError("GITHUB_UNAVAILABLE", "pdb serve is shutting down.");
     // A caller already gone never starts (or counts against) a collection.
@@ -582,7 +617,7 @@ export class ServeCache {
     try {
       if (!flight) {
         if (this.cooldownUntil > now && this.cooldownError) throw this.cooldownError;
-        flight = this.startCollection(key, cacheKey, produce);
+        flight = this.startCollection(key, cacheKey, produce, keep);
       }
       return served(await this.wait(key, flight, signal), "live");
     } catch (error) {

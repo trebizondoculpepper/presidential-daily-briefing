@@ -19,6 +19,7 @@ import { startServe } from "../serve.js";
 import type { RunningServer, ServeRuntime } from "../serve.js";
 import { readServices } from "./api.js";
 import {
+  definitiveRest,
   NO_PROJECT_ROOT,
   noLocalProject,
   queryRepository,
@@ -1001,6 +1002,123 @@ describe("pdb serve cache races (#373)", () => {
     expect(await pending).toBe("before-refresh");
     expect(cache.status().entries).toBe(0);
     cache.close();
+  });
+});
+
+describe("pdb serve cache: only definitive values, nothing outlives close (#373 review)", () => {
+  const fresh = (
+    clock = new ManualClock(),
+    auth?: (signal?: AbortSignal) => Promise<{ host: string; login: string }>,
+  ) =>
+    new ServeCache({
+      ttlMs: 300_000,
+      clock,
+      authContext: auth ?? (async () => ({ host: "h", login: "l" })),
+      initialAuth: { host: "h", login: "l" },
+    });
+
+  it("memoises only definitive REST answers", async () => {
+    for (const status of [200, 204, 404, 410])
+      expect(definitiveRest({ status, body: null })).toBe(true);
+    for (const status of [null, 403, 429, 500, 502, 503])
+      expect(definitiveRest({ status, body: null }), String(status)).toBe(false);
+    const cache = fresh();
+    const key = { repository: "o/r", collector: "c", coverage: {} };
+    let calls = 0;
+    const answers = [503, 429, 200];
+    await cache.track(false, async () => {
+      await cache.read(key, async () => "snapshot");
+      for (let i = 0; i < 4; i++)
+        await cache.memo(
+          "rest\u0000p",
+          async () => ({ status: answers[Math.min(calls++, 2)]!, body: null }),
+          definitiveRest,
+        );
+    });
+    // 503 and 429 were retried; 200 was kept, so the fourth call used it.
+    expect(calls).toBe(3);
+    cache.close();
+  });
+
+  it("does not store a value its producer marks as not definitive", async () => {
+    const cache = fresh();
+    const key = { repository: "o/r", collector: "pr", coverage: { n: 1 } };
+    let produced = 0;
+    const incomplete = async () => ({ complete: (++produced, false) });
+    await cache.read(key, incomplete, undefined, (v) => v.complete);
+    await cache.read(key, incomplete, undefined, (v) => v.complete);
+    expect(produced).toBe(2);
+    expect(cache.status().entries).toBe(0);
+    cache.close();
+  });
+
+  it("close() cancels the shared login check, so shutdown never waits on GitHub", async () => {
+    const clock = new ManualClock();
+    let seen: AbortSignal | undefined;
+    const cache = fresh(clock, (signal?: AbortSignal) => {
+      seen = signal;
+      return new Promise((_done, fail) =>
+        signal?.addEventListener("abort", () => fail(new Error("aborted"))),
+      );
+    });
+    clock.advance(301_000);
+    const pending = cache.read(
+      { repository: "o/r", collector: "c", coverage: {} },
+      async () => "x",
+    );
+    await until(() => seen !== undefined);
+    cache.close();
+    expect(seen!.aborted).toBe(true);
+    await expect(pending).rejects.toThrow();
+  });
+
+  it("close() aborts queued and refresh-replaced collections and pending memoised reads", async () => {
+    const cache = new ServeCache({
+      ttlMs: 300_000,
+      clock: new ManualClock(),
+      authContext: async () => ({ host: "h", login: "l" }),
+      initialAuth: { host: "h", login: "l" },
+      maxConcurrent: 1,
+    });
+    const signals: AbortSignal[] = [];
+    const hang = (signal: AbortSignal) => {
+      signals.push(signal);
+      return new Promise<string>((_done, fail) =>
+        signal.addEventListener("abort", () => fail(new Error("aborted"))),
+      );
+    };
+    const key = { repository: "o/r", collector: "c", coverage: {} };
+    const first = cache.read(key, hang);
+    await until(() => signals.length === 1);
+    // A refresh=true read replaces the in-flight entry; the first collection must still stop.
+    const replaced = cache.track(true, () => cache.read(key, hang));
+    let queuedRan = false;
+    const queued = cache.read({ ...key, coverage: { n: 2 } }, async () => {
+      queuedRan = true;
+      return "late";
+    });
+    let memoStarted = false;
+    cache.close();
+    await expect(first).rejects.toThrow();
+    await expect(replaced).rejects.toThrow();
+    await expect(queued).rejects.toThrow();
+    expect(queuedRan).toBe(false);
+    expect(signals.every((s) => s.aborted)).toBe(true);
+    // A memoised read pending at close is rejected immediately.
+    const open = fresh();
+    const pendingMemo = open.track(false, async () => {
+      await open.read({ repository: "o/r", collector: "c", coverage: {} }, async () => "s");
+      memoStarted = true;
+      return open.memo(
+        "q",
+        () => new Promise<string>(() => undefined),
+        () => true,
+      );
+    });
+    await until(() => memoStarted);
+    open.close();
+    await expect(pendingMemo).rejects.toThrow();
+    expect(open.status().inflight).toBe(0);
   });
 });
 

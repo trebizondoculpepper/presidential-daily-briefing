@@ -73,6 +73,15 @@ export function queryRepository(variables: QueryVariables): string | null {
   return null;
 }
 
+/**
+ * Only definitive REST answers are memoised: success, and the negative answers GitHub gives
+ * for something that does not exist or is gone (404, 410). A failed request (no status), a
+ * rate limit (429, or 403 which can carry one) and server errors (5xx) are retried next time.
+ */
+export const definitiveRest = (answer: RestAnswer): boolean =>
+  answer.status !== null &&
+  ((answer.status >= 200 && answer.status < 300) || answer.status === 404 || answer.status === 410);
+
 /** GraphQL confined to served repositories: any other is refused before gh runs. */
 export function servedOnlyQuery(
   queryWith: (signal?: AbortSignal) => Query,
@@ -324,8 +333,7 @@ export function readApi(
         cache.memo<RestAnswer>(
           `rest\u0000${path}`,
           () => guardedRest(path, restOptions),
-          // A failed lookup (no status) is unknown evidence; it is never kept.
-          (answer) => answer.status !== null,
+          definitiveRest,
         )
     : undefined;
   const memoQueryWith = guardedQueryWith
@@ -677,6 +685,9 @@ export function readApi(
                       runtime.now,
                     ),
               context.signal,
+              // Its delivery evidence is read inside this whole result: an incomplete report
+              // may only reflect a transient failure, so only a complete one is stored.
+              (report) => report.complete,
             );
             return { status: read.complete ? "complete" : "incomplete", result: read.report };
           });
