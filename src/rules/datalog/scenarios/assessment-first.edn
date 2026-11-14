@@ -1,0 +1,171 @@
+;; Assessment-first priority scenarios S1–S7 (#356, PR #375), as engine facts.
+;; Facts are the engine's input: entity 1 holds global completeness facts, subjects start at 100,
+;; and nested entities (checks, reviews, threads) follow. Expectations are exhaustive: every action
+;; in order with its rule, band, explanation and bindings, and the exact set of denials.
+;; Generated from the previous TypeScript tests' inputs; edit freely, they are the source now.
+{:suite "assessment-first"
+ :scenarios
+ [{:id "s1-ready-pr-versus-estimate"
+  :doc "S1 ready PR versus estimate"
+  :viewer {:role "implementer"}
+  :facts [{:e 1 "forward-complete" true}
+          {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "current" "impact-size" "L" "complexity-state" "unassessed" "complexity-size" "unknown" "head" "not-a-pr" "label" "status:ready"}
+          {:e 101 "kind" "pr" "state" "OPEN" "number" 2 "target" "https://github.com/o/r/pull/2" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "head2" "draft" false "mergeable" "MERGEABLE" "merge-state" "CLEAN" "review-decision" "" "pr-complete" true "check" 102}
+          {:e 102 "name" "verify" "outcome" "SUCCESS"}]
+  :expect {:actions [{:subject 101 :rule "D-PR-MERGE" :kind "pr-follow-up" :band 2
+              :why "Current verify passes at head head2; inspect the diff and review evidence, then consider merge."
+              :facts {"impact" "unknown" "complexity" "unknown" "impactState" "unknown" "complexityState" "unknown" "head" "head2" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "verify" "SUCCESS" "complete" true "draft" false "mergeState" "CLEAN"}
+              :overridden [] :unlocks 0 :unknown [] :other-claims []}
+            {:subject 100 :rule "D-COMPLEXITY-BOOST" :kind "estimate-complexity" :band 5
+              :why "High impact L, but effort is unassessed; estimate it to test implementation value."
+              :facts {"impact" "L" "complexity" "unknown" "impactState" "current" "complexityState" "unassessed" "head" "not-a-pr" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "readiness" "status:ready"}
+              :overridden ["D-COMPLEXITY"] :unlocks 0 :unknown [] :other-claims []}
+            {:subject 100 :rule "D-ORDINARY" :kind "implement" :band 6
+              :why "Eligible implementation: impact L (current), complexity unknown (unassessed)."
+              :facts {"impact" "L" "complexity" "unknown" "impactState" "current" "complexityState" "unassessed" "head" "not-a-pr" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "readiness" "status:ready"}
+              :overridden ["D-COMPLEXITY"] :unlocks 0 :unknown [] :other-claims []}]
+           :denials #{}}}
+
+ {:id "s2-high-impact-unknown-complexity-versus-ordinary-implementation"
+  :doc "S2 high-impact unknown complexity versus ordinary implementation"
+  :viewer {:role "implementer"}
+  :facts [{:e 1 "forward-complete" true}
+          {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "current" "impact-size" "L" "complexity-state" "unassessed" "complexity-size" "unknown" "head" "not-a-pr" "label" "status:ready"}
+          {:e 101 "kind" "issue" "state" "OPEN" "number" 2 "target" "https://github.com/o/r/issues/2" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "status:ready"}]
+  :expect {:actions [{:subject 100 :rule "D-COMPLEXITY-BOOST" :kind "estimate-complexity" :band 5
+              :why "High impact L, but effort is unassessed; estimate it to test implementation value."
+              :facts {"impact" "L" "complexity" "unknown" "impactState" "current" "complexityState" "unassessed" "head" "not-a-pr" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "readiness" "status:ready"}
+              :overridden ["D-COMPLEXITY"] :unlocks 0 :unknown [] :other-claims []}
+            {:subject 100 :rule "D-ORDINARY" :kind "implement" :band 6
+              :why "Eligible implementation: impact L (current), complexity unknown (unassessed)."
+              :facts {"impact" "L" "complexity" "unknown" "impactState" "current" "complexityState" "unassessed" "head" "not-a-pr" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "readiness" "status:ready"}
+              :overridden ["D-COMPLEXITY"] :unlocks 0 :unknown [] :other-claims []}
+            {:subject 101 :rule "D-ORDINARY" :kind "implement" :band 6
+              :why "Eligible implementation: impact M (current), complexity M (current)."
+              :facts {"impact" "M" "complexity" "M" "impactState" "current" "complexityState" "current" "head" "not-a-pr" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "readiness" "status:ready"}
+              :overridden [] :unlocks 0 :unknown [] :other-claims []}]
+           :denials #{}}}
+
+ {:id "s3-small-complexity-unknown-benefit-versus-new-design-work-designer"
+  :doc "S3 small-complexity unknown benefit versus new design work (designer)"
+  :viewer {:role "designer"}
+  :facts [{:e 1 "forward-complete" true}
+          {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unassessed" "impact-size" "unknown" "complexity-state" "current" "complexity-size" "S" "head" "not-a-pr" "label" "status:ready"}
+          {:e 101 "kind" "issue" "state" "OPEN" "number" 2 "target" "https://github.com/o/r/issues/2" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "status:needs-design"}]
+  :expect {:actions [{:subject 100 :rule "D-IMPACT-BOOST" :kind "assess-impact" :band 5
+              :why "Complexity S is small, but benefit is unassessed; assess impact to test for an easy win."
+              :facts {"impact" "unknown" "complexity" "S" "impactState" "unassessed" "complexityState" "current" "head" "not-a-pr" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "readiness" "status:ready"}
+              :overridden ["D-IMPACT"] :unlocks 0 :unknown [] :other-claims []}
+            {:subject 101 :rule "D-DESIGN" :kind "design" :band 6
+              :why "A design contract is missing. Impact M, complexity M."
+              :facts {"impact" "M" "complexity" "M" "impactState" "current" "complexityState" "current" "head" "not-a-pr" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "designLabel" "status:needs-design"}
+              :overridden [] :unlocks 0 :unknown [] :other-claims []}]
+           :denials #{}}}
+
+ {:id "s4-known-easy-win-versus-unassessed-ticket"
+  :doc "S4 known easy win versus unassessed ticket"
+  :viewer {:role "implementer"}
+  :facts [{:e 1 "forward-complete" true}
+          {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "current" "impact-size" "L" "complexity-state" "current" "complexity-size" "S" "head" "not-a-pr" "label" "status:ready"}
+          {:e 101 "kind" "issue" "state" "OPEN" "number" 2 "target" "https://github.com/o/r/issues/2" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unassessed" "impact-size" "unknown" "complexity-state" "unassessed" "complexity-size" "unknown" "head" "not-a-pr" "label" "status:ready"}]
+  :expect {:actions [{:subject 100 :rule "D-EASY" :kind "implement" :band 4
+              :why "Known easy win: impact L, complexity S."
+              :facts {"impact" "L" "complexity" "S" "impactState" "current" "complexityState" "current" "head" "not-a-pr" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "readiness" "status:ready"}
+              :overridden ["D-ORDINARY"] :unlocks 0 :unknown [] :other-claims []}
+            {:subject 101 :rule "D-COMPLEXITY" :kind "estimate-complexity" :band 5
+              :why "Effort is unassessed; sizing improves the evidence for choosing work."
+              :facts {"impact" "unknown" "complexity" "unknown" "impactState" "unassessed" "complexityState" "unassessed" "head" "not-a-pr" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "readiness" "status:ready"}
+              :overridden [] :unlocks 0 :unknown [] :other-claims []}
+            {:subject 101 :rule "D-ORDINARY" :kind "implement" :band 6
+              :why "Eligible implementation: impact unknown (unassessed), complexity unknown (unassessed)."
+              :facts {"impact" "unknown" "complexity" "unknown" "impactState" "unassessed" "complexityState" "unassessed" "head" "not-a-pr" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "readiness" "status:ready"}
+              :overridden [] :unlocks 0 :unknown [] :other-claims []}]
+           :denials #{}}}
+
+ {:id "s5-large-unassessed-backlog-versus-one-known-easy-win"
+  :doc "S5 large unassessed backlog versus one known easy win"
+  :viewer {:role "implementer"}
+  :facts [{:e 1 "forward-complete" true}
+          {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "current" "impact-size" "XL" "complexity-state" "current" "complexity-size" "S" "head" "not-a-pr" "label" "status:ready"}
+          {:e 101 "kind" "issue" "state" "OPEN" "number" 2 "target" "https://github.com/o/r/issues/2" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unassessed" "impact-size" "unknown" "complexity-state" "unassessed" "complexity-size" "unknown" "head" "not-a-pr" "label" "status:ready"}
+          {:e 102 "kind" "issue" "state" "OPEN" "number" 3 "target" "https://github.com/o/r/issues/3" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unassessed" "impact-size" "unknown" "complexity-state" "unassessed" "complexity-size" "unknown" "head" "not-a-pr" "label" "status:ready"}
+          {:e 103 "kind" "issue" "state" "OPEN" "number" 4 "target" "https://github.com/o/r/issues/4" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unassessed" "impact-size" "unknown" "complexity-state" "unassessed" "complexity-size" "unknown" "head" "not-a-pr" "label" "status:ready"}
+          {:e 104 "kind" "issue" "state" "OPEN" "number" 5 "target" "https://github.com/o/r/issues/5" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unassessed" "impact-size" "unknown" "complexity-state" "unassessed" "complexity-size" "unknown" "head" "not-a-pr" "label" "status:ready"}
+          {:e 105 "kind" "issue" "state" "OPEN" "number" 6 "target" "https://github.com/o/r/issues/6" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unassessed" "impact-size" "unknown" "complexity-state" "unassessed" "complexity-size" "unknown" "head" "not-a-pr" "label" "status:ready"}]
+  :expect {:actions [{:subject 100 :rule "D-EASY" :kind "implement" :band 4
+              :why "Known easy win: impact XL, complexity S."
+              :facts {"impact" "XL" "complexity" "S" "impactState" "current" "complexityState" "current" "head" "not-a-pr" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "readiness" "status:ready"}
+              :overridden ["D-ORDINARY"] :unlocks 0 :unknown [] :other-claims []}
+            {:subject 101 :rule "D-COMPLEXITY" :kind "estimate-complexity" :band 5
+              :why "Effort is unassessed; sizing improves the evidence for choosing work."
+              :facts {"impact" "unknown" "complexity" "unknown" "impactState" "unassessed" "complexityState" "unassessed" "head" "not-a-pr" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "readiness" "status:ready"}
+              :overridden [] :unlocks 0 :unknown [] :other-claims []}
+            {:subject 102 :rule "D-COMPLEXITY" :kind "estimate-complexity" :band 5
+              :why "Effort is unassessed; sizing improves the evidence for choosing work."
+              :facts {"impact" "unknown" "complexity" "unknown" "impactState" "unassessed" "complexityState" "unassessed" "head" "not-a-pr" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "readiness" "status:ready"}
+              :overridden [] :unlocks 0 :unknown [] :other-claims []}
+            {:subject 103 :rule "D-COMPLEXITY" :kind "estimate-complexity" :band 5
+              :why "Effort is unassessed; sizing improves the evidence for choosing work."
+              :facts {"impact" "unknown" "complexity" "unknown" "impactState" "unassessed" "complexityState" "unassessed" "head" "not-a-pr" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "readiness" "status:ready"}
+              :overridden [] :unlocks 0 :unknown [] :other-claims []}
+            {:subject 104 :rule "D-COMPLEXITY" :kind "estimate-complexity" :band 5
+              :why "Effort is unassessed; sizing improves the evidence for choosing work."
+              :facts {"impact" "unknown" "complexity" "unknown" "impactState" "unassessed" "complexityState" "unassessed" "head" "not-a-pr" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "readiness" "status:ready"}
+              :overridden [] :unlocks 0 :unknown [] :other-claims []}
+            {:subject 105 :rule "D-COMPLEXITY" :kind "estimate-complexity" :band 5
+              :why "Effort is unassessed; sizing improves the evidence for choosing work."
+              :facts {"impact" "unknown" "complexity" "unknown" "impactState" "unassessed" "complexityState" "unassessed" "head" "not-a-pr" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "readiness" "status:ready"}
+              :overridden [] :unlocks 0 :unknown [] :other-claims []}
+            {:subject 101 :rule "D-ORDINARY" :kind "implement" :band 6
+              :why "Eligible implementation: impact unknown (unassessed), complexity unknown (unassessed)."
+              :facts {"impact" "unknown" "complexity" "unknown" "impactState" "unassessed" "complexityState" "unassessed" "head" "not-a-pr" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "readiness" "status:ready"}
+              :overridden [] :unlocks 0 :unknown [] :other-claims []}
+            {:subject 102 :rule "D-ORDINARY" :kind "implement" :band 6
+              :why "Eligible implementation: impact unknown (unassessed), complexity unknown (unassessed)."
+              :facts {"impact" "unknown" "complexity" "unknown" "impactState" "unassessed" "complexityState" "unassessed" "head" "not-a-pr" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "readiness" "status:ready"}
+              :overridden [] :unlocks 0 :unknown [] :other-claims []}
+            {:subject 103 :rule "D-ORDINARY" :kind "implement" :band 6
+              :why "Eligible implementation: impact unknown (unassessed), complexity unknown (unassessed)."
+              :facts {"impact" "unknown" "complexity" "unknown" "impactState" "unassessed" "complexityState" "unassessed" "head" "not-a-pr" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "readiness" "status:ready"}
+              :overridden [] :unlocks 0 :unknown [] :other-claims []}
+            {:subject 104 :rule "D-ORDINARY" :kind "implement" :band 6
+              :why "Eligible implementation: impact unknown (unassessed), complexity unknown (unassessed)."
+              :facts {"impact" "unknown" "complexity" "unknown" "impactState" "unassessed" "complexityState" "unassessed" "head" "not-a-pr" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "readiness" "status:ready"}
+              :overridden [] :unlocks 0 :unknown [] :other-claims []}
+            {:subject 105 :rule "D-ORDINARY" :kind "implement" :band 6
+              :why "Eligible implementation: impact unknown (unassessed), complexity unknown (unassessed)."
+              :facts {"impact" "unknown" "complexity" "unknown" "impactState" "unassessed" "complexityState" "unassessed" "head" "not-a-pr" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "readiness" "status:ready"}
+              :overridden [] :unlocks 0 :unknown [] :other-claims []}]
+           :denials #{}}}
+
+ {:id "s6-already-active-implementation-versus-estimate"
+  :doc "S6 already active implementation versus estimate"
+  :viewer {:role "implementer" :agent "me"}
+  :facts [{:e 1 "forward-complete" true}
+          {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "agent:me" "owner" "me"}
+          {:e 101 "kind" "issue" "state" "OPEN" "number" 2 "target" "https://github.com/o/r/issues/2" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "current" "impact-size" "L" "complexity-state" "unassessed" "complexity-size" "unknown" "head" "not-a-pr" "label" "status:ready"}]
+  :expect {:actions [{:subject 101 :rule "D-COMPLEXITY-BOOST" :kind "estimate-complexity" :band 5
+              :why "High impact L, but effort is unassessed; estimate it to test implementation value."
+              :facts {"impact" "L" "complexity" "unknown" "impactState" "current" "complexityState" "unassessed" "head" "not-a-pr" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "readiness" "status:ready"}
+              :overridden ["D-COMPLEXITY"] :unlocks 0 :unknown [] :other-claims []}
+            {:subject 100 :rule "D-OWN" :kind "continue-implementation" :band 6
+              :why "Continue your active claim; impact M, complexity M."
+              :facts {"impact" "M" "complexity" "M" "impactState" "current" "complexityState" "current" "head" "not-a-pr" "labelsComplete" true "nativeComplete" true "openBlockers" 0}
+              :overridden [] :unlocks 0 :unknown [] :other-claims []}
+            {:subject 101 :rule "D-ORDINARY" :kind "implement" :band 6
+              :why "Eligible implementation: impact L (current), complexity unknown (unassessed)."
+              :facts {"impact" "L" "complexity" "unknown" "impactState" "current" "complexityState" "unassessed" "head" "not-a-pr" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "readiness" "status:ready"}
+              :overridden ["D-COMPLEXITY"] :unlocks 0 :unknown [] :other-claims [100]}]
+           :denials #{}}}
+
+ {:id "s7-blocked-but-estimable-ticket"
+  :doc "S7 blocked but estimable ticket"
+  :viewer {:role "implementer"}
+  :facts [{:e 1 "forward-complete" true}
+          {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 1 "blocking-complete" true "impact-state" "current" "impact-size" "L" "complexity-state" "unassessed" "complexity-size" "unknown" "head" "not-a-pr" "label" "status:ready" "blocker" 101}
+          {:e 101 "kind" "issue" "state" "OPEN" "number" 2 "target" "https://github.com/o/r/issues/2" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "agent:other" "owner" "other"}]
+  :expect {:actions [{:subject 100 :rule "D-COMPLEXITY-BOOST" :kind "estimate-complexity" :band 5
+              :why "High impact L, but effort is unassessed; estimate it to test implementation value."
+              :facts {"impact" "L" "complexity" "unknown" "impactState" "current" "complexityState" "unassessed" "head" "not-a-pr" "labelsComplete" true "nativeComplete" true "openBlockers" 1 "readiness" "status:ready"}
+              :overridden ["D-COMPLEXITY"] :unlocks 0 :unknown [] :other-claims []}]
+           :denials #{[100 "D-DENY-BLOCKER"]}}}]}
