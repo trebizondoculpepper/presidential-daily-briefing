@@ -3,7 +3,7 @@
  * "Implementation decisions"). Each builder selects fields from the existing versioned report,
  * names its prunable lists in pruning order and renders minimal text from returned rows only.
  */
-import { treeIncompleteText, type TreeBounds } from "../github/dependencies.js";
+import { legacyTreeText, treeIncompleteText, type TreeBounds } from "../github/dependencies.js";
 import { leanRow } from "../briefing/leanrows.js";
 import { catchUpLimits, catchUpText } from "../briefing/catchup.js";
 import { dependencyFacts } from "../github/dependencies.js";
@@ -589,7 +589,7 @@ export function dependenciesView(
     warnings.push(
       typeof bounds.nodesRead === "number"
         ? treeIncompleteText(bounds as unknown as TreeBounds)
-        : "Tree completeness unknown: no tree bounds were recorded.",
+        : legacyTreeText,
     );
   const incomplete = unknown.length > 0 || unfollowed.length > 0 || truncated;
   return {

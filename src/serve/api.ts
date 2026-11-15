@@ -33,7 +33,7 @@ import type {
   RestAnswer,
 } from "../github/github.js";
 import type { dependencyReport as DependencyReportFn } from "../github/dependencies.js";
-import { notReadText, treeIncompleteText } from "../github/dependencies.js";
+import { legacyTreeText, notReadText, treeIncompleteText } from "../github/dependencies.js";
 import type { Snapshot } from "../github/types.js";
 import { localPaths, redactLocalText, redactPaths } from "../mcp/redact.js";
 import { markerTrust } from "../workflow/delivery.js";
@@ -888,7 +888,7 @@ export function readApi(
                       treeIncompleteText(bounds),
                       ...(bounds.notRead ? [notReadText(bounds).trim()] : []),
                     ]
-                  : ["Tree completeness unknown: no tree bounds were recorded."]
+                  : [legacyTreeText]
                 : []),
             ];
             return skipped.length || truncated
