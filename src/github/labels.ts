@@ -108,3 +108,25 @@ export async function resolveLabels(
     ? { status: "unknown", missing }
     : { status: "resolved", labels: canonical };
 }
+
+/**
+ * Resolve a label filter against the labels of a snapshot's own items, with no request (#371):
+ * for offline and stale reads. A name seen on an item takes its spelling there
+ * (case-insensitively); an unseen name is kept as requested and reported as not verified.
+ */
+export function labelsFromSnapshot(
+  items: readonly { labels: { nodes: readonly { name: string }[] } }[],
+  requested: readonly string[],
+): { labels: string[]; unverified: string[] } {
+  const seen = new Map<string, string>();
+  for (const item of items)
+    for (const label of item.labels.nodes) seen.set(label.name.toLowerCase(), label.name);
+  const labels: string[] = [];
+  const unverified: string[] = [];
+  for (const name of requested) {
+    const known = seen.get(name.toLowerCase());
+    labels.push(known ?? name);
+    if (!known) unverified.push(name);
+  }
+  return { labels, unverified };
+}

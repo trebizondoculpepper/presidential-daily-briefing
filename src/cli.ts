@@ -34,7 +34,7 @@ import {
   planDependencyChange,
 } from "./github/dependencies.js";
 import { briefingRoleNames, roleSectionIds } from "./briefing/roles.js";
-import { normalizeLabelRequest } from "./github/labels.js";
+import { labelsFromSnapshot, normalizeLabelRequest } from "./github/labels.js";
 import { doctorStaleHours, ticketDoctor, ticketDoctorText } from "./workflow/ticketdoctor.js";
 import { diagnoseClosedDrift, diagnoseDelivery } from "./workflow/deliverydoctor.js";
 import { deliveryRead, withDeliveryCompleteness } from "./workflow/deliveryread.js";
@@ -87,6 +87,8 @@ import { complexityGuidanceJson, complexityGuidanceText } from "./estimation/com
 import { impactGuidanceJson, impactGuidanceText } from "./estimation/impact.js";
 import { declaredRulesContext } from "./rules/declared-context.js";
 import { runConfig, runSetup } from "./config/configcli.js";
+import { quotaRefusal } from "./github/readplan.js";
+import { STALE_WINDOW_MS } from "./serve/options.js";
 import { nodeGit } from "./config/config.js";
 import {
   firstUseHint,
@@ -338,7 +340,9 @@ Rollback: pdb config set briefing.engine typescript.
   --include-transferred With --issue: follow a transfer to the destination's intake
   --since ISO           Include changed issues/PRs in all states since timestamp
   --checkpoint PATH     Read last successful window; advance only after complete live output
-  --cache PATH          Save full successful snapshot atomically
+  --cache PATH          Save full successful snapshot atomically. If GitHub refuses the live
+                        read for quota, show this snapshot instead, labelled STALE, when it is
+                        of this repository and at most 30 minutes old (exit 2; nothing written)
   --offline             Read explicit cache; no GitHub queries/checkpoint advancement
   --full                Expanded version-1 report
   --agent NAME          Your identity: attention:NAME first, then agent:NAME work
@@ -989,6 +993,119 @@ export async function cachedSnapshot(
     );
   return data;
 }
+/** Why a stale snapshot is shown instead of a live read (#371, doc/design/read-degradation.md). */
+export interface StaleFallback {
+  reason: "live-read-quota-refused";
+  /** The explicit snapshot file that was reused. */
+  cache: string;
+  /** Retry evidence actually observed on the refusal; null when GitHub sent none. */
+  retryAfterSeconds: number | null;
+  resetAt: string | null;
+  /** The effective age limit: the same bound as the server's stale window. */
+  maxAgeSeconds: number;
+}
+
+/**
+ * The cached snapshot's history, fitted to the requested window (#371). No window requested:
+ * none is shown. A cached complete window that starts at or before the requested one: its
+ * changes narrowed to the request. Otherwise the inventory is kept and the requested window is
+ * marked failed, so its changes are unknown rather than none. Briefing-mode change evidence is
+ * dropped: it belongs to the cached window, not the requested one.
+ */
+function staleWindow(snapshot: Snapshot, requestedSince: string | undefined): Snapshot {
+  const { changeEvidence: _dropped, history, ...rest } = snapshot;
+  if (requestedSince === undefined) return { ...rest, since: null, changed: [] };
+  const cachedFrom = snapshot.since === null ? Number.NaN : Date.parse(snapshot.since);
+  const from = Date.parse(requestedSince);
+  const covered =
+    Number.isFinite(cachedFrom) &&
+    cachedFrom <= from &&
+    (history === undefined || history.state === "complete");
+  if (covered)
+    return {
+      ...rest,
+      since: requestedSince,
+      changed: snapshot.changed.filter((c) => Date.parse(c.updatedAt) >= from),
+      ...(history ? { history: { ...history, since: requestedSince } } : {}),
+    };
+  return {
+    ...rest,
+    since: requestedSince,
+    changed: [],
+    history: { since: requestedSince, state: "failed", failure: "rate-limited", sources: [] },
+    warnings: [
+      ...snapshot.warnings,
+      `The requested history window since ${requestedSince} is not covered by the cached snapshot (${snapshot.since === null ? "it holds no history window" : `its window starts at ${snapshot.since}${history && history.state !== "complete" ? ` and is ${history.state}` : ""}`}); changes in that window are unknown, not none.`,
+    ],
+  };
+}
+
+/**
+ * On a quota refusal of the live read, reuse the caller's explicit `--cache` snapshot when it is
+ * a valid snapshot of the same repository observed within the age limit (#371). Anything else
+ * (no cache, absent, corrupt, foreign, focused, expired) is a distinct diagnosis, never an empty
+ * report. The refusal's own retry evidence is kept; nothing is retried here.
+ */
+export async function quotaFallback(
+  error: unknown,
+  cache: string | undefined,
+  repository: string,
+  now: Date,
+  /** The history window this read requested (--since or the checkpoint); undefined for none. */
+  requestedSince?: string,
+): Promise<{ snapshot: Snapshot; stale: StaleFallback }> {
+  const retry = prop(error, "retry");
+  const retryAfterSeconds = prop(retry, "retryAfterSeconds");
+  const resetAt = prop(retry, "resetAt");
+  const when =
+    typeof resetAt === "string"
+      ? ` (quota resets at ${resetAt})`
+      : typeof retryAfterSeconds === "number"
+        ? ` (retry after ${retryAfterSeconds}s)`
+        : " (no reset time was reported)";
+  const refused = `GitHub refused the live read for quota${when}`;
+  if (!cache)
+    throw new Error(
+      `${refused}. No stale fallback: no --cache PATH snapshot was given. Retry after the reset.`,
+    );
+  let snapshot: Snapshot;
+  try {
+    snapshot = await cachedSnapshot(cache, repository);
+  } catch (failure) {
+    const why =
+      isRecord(failure) && failure.code === "ENOENT"
+        ? `${cache} does not exist`
+        : failure instanceof SyntaxError
+          ? `${cache} is corrupt (not valid JSON)`
+          : `${cache} is not a usable snapshot of ${repository}: ${(failure as Error).message}`;
+    throw new Error(`${refused}. No stale fallback: ${why}. Retry after the reset.`);
+  }
+  const maxAgeSeconds = STALE_WINDOW_MS / 1000;
+  const age = Math.floor((now.getTime() - Date.parse(snapshot.fetchedAt)) / 1000);
+  if (!Number.isFinite(age) || age > maxAgeSeconds)
+    throw new Error(
+      `${refused}. No stale fallback: ${cache} was observed at ${snapshot.fetchedAt}, older than the ${maxAgeSeconds / 60}-minute limit. Retry after the reset, or read it explicitly with --offline --cache ${cache}.`,
+    );
+  const stale: StaleFallback = {
+    reason: "live-read-quota-refused",
+    cache,
+    retryAfterSeconds: typeof retryAfterSeconds === "number" ? retryAfterSeconds : null,
+    resetAt: typeof resetAt === "string" ? resetAt : null,
+    maxAgeSeconds,
+  };
+  const fitted = staleWindow(snapshot, requestedSince);
+  return {
+    stale,
+    snapshot: {
+      ...fitted,
+      warnings: [
+        ...fitted.warnings,
+        `STALE: ${refused}; showing the ${cache} snapshot observed at ${snapshot.fetchedAt} (${Math.max(0, age)}s old, limit ${maxAgeSeconds}s). Refresh before acting: claims and other changes read live and will not use it.`,
+      ],
+    },
+  };
+}
+
 export async function checkpointSince(
   path: string,
   repository: string,
@@ -1917,6 +2034,7 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
     return 0;
   }
   let snapshot: Snapshot;
+  let stale: StaleFallback | undefined;
   if (options.offline) snapshot = await cachedSnapshot(options.cache ?? "", options.repo);
   else {
     const repository = options.repo ?? (await runtime.currentRepository());
@@ -1929,6 +2047,19 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
         since: options.since ?? previous,
       });
     } catch (error) {
+      if (quotaRefusal(error)) {
+        // #371: the explicit snapshot, labelled stale, read from here on exactly as offline
+        // facts: no live verification, no checkpoint advance and no cache write.
+        ({ snapshot, stale } = await quotaFallback(
+          error,
+          options.cache,
+          repository,
+          runtime.now?.() ?? new Date(),
+          options.since ?? previous,
+        ));
+        options.offline = true;
+        return briefingFrom(snapshot, stale);
+      }
       if (!(error instanceof IssueUnavailable)) throw error;
       const d = error.diagnosis;
       // Transferred-out work is excluded by default; only an explicit opt-in follows it.
@@ -1968,82 +2099,113 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
         ],
       };
   }
-  if (options.issue && !snapshot.issues.some((issue) => issue.number === options.issue))
-    throw new Error(`Issue #${options.issue} not in this cache. Refresh live with --issue.`);
-  const guideProcess = options.full
-    ? undefined
-    : briefingProcess(await resolveGuideSetting(snapshot.repository, options.guide, runtime.guide));
-  // #312: resolve the label filter live against the repository before projecting.
-  const labels = options.label?.length
-    ? await resolveLabelFilter(snapshot.repository, options.label, runtime.query ?? ghQuery)
-    : undefined;
-  const { report, text } = await presentBriefing(
-    snapshot,
-    {
-      ...options,
-      ...(labels ? { labels } : {}),
-      process: guideProcess,
-      engineSetting:
-        options.full || options.issue
-          ? undefined
-          : await resolveEngineSetting(snapshot.repository, runtime.guide ?? {}),
-      // #301: declared review policy from local configuration (legacy when undeclared).
-      reviewPolicy: await resolveReviewPolicy(snapshot.repository, runtime.guide ?? {}),
-    },
-    runtime.estimation,
-    runtime.now?.(),
-    undefined,
-    // Provenance authority (#247) uses the per-run permission cache; offline reads make no
-    // request, so trusted provenance is then unknown. Without an injected boundary, likewise.
-    !options.offline && runtime.rest
-      ? markerTrust(permissionLookup(snapshot.repository, runtime.rest))
-      : undefined,
-    undefined,
-    undefined,
-    // #192: delivery evidence is read live only on a live read with both boundaries.
-    !options.offline && runtime.rest && runtime.query
+  return briefingFrom(snapshot, stale);
+
+  async function briefingFrom(
+    snapshot: Snapshot,
+    stale: StaleFallback | undefined,
+  ): Promise<number> {
+    if (options.issue && !snapshot.issues.some((issue) => issue.number === options.issue))
+      throw new Error(`Issue #${options.issue} not in this cache. Refresh live with --issue.`);
+    const guideProcess = options.full
+      ? undefined
+      : briefingProcess(
+          await resolveGuideSetting(snapshot.repository, options.guide, runtime.guide),
+        );
+    // #312: resolve the label filter live against the repository before projecting.
+    let labels: string[] | undefined;
+    if (options.label?.length && options.offline) {
+      // #371: only a stale quota fallback gets here (--offline --label is refused as usage). It
+      // must make no further request, so the filter resolves against the snapshot's own labels.
+      const normalized = normalizeLabelRequest(options.label);
+      const local = labelsFromSnapshot(
+        [...snapshot.issues, ...snapshot.pullRequests],
+        normalized.ok ? normalized.labels : options.label,
+      );
+      labels = local.labels;
+      if (local.unverified.length)
+        snapshot = {
+          ...snapshot,
+          warnings: [
+            ...snapshot.warnings,
+            `Label filter not verified live: ${local.unverified.join(", ")} is on no item of this snapshot, so it matches nothing here; that is not proof the label is absent.`,
+          ],
+        };
+    } else if (options.label?.length)
+      labels = await resolveLabelFilter(
+        snapshot.repository,
+        options.label,
+        runtime.query ?? ghQuery,
+      );
+    const { report, text } = await presentBriefing(
+      snapshot,
+      {
+        ...options,
+        ...(labels ? { labels } : {}),
+        ...(stale ? { stale } : {}),
+        process: guideProcess,
+        engineSetting:
+          options.full || options.issue
+            ? undefined
+            : await resolveEngineSetting(snapshot.repository, runtime.guide ?? {}),
+        // #301: declared review policy from local configuration (legacy when undeclared).
+        reviewPolicy: await resolveReviewPolicy(snapshot.repository, runtime.guide ?? {}),
+      },
+      runtime.estimation,
+      runtime.now?.(),
+      undefined,
+      // Provenance authority (#247) uses the per-run permission cache; offline reads make no
+      // request, so trusted provenance is then unknown. Without an injected boundary, likewise.
+      !options.offline && runtime.rest
+        ? markerTrust(permissionLookup(snapshot.repository, runtime.rest))
+        : undefined,
+      undefined,
+      undefined,
+      // #192: delivery evidence is read live only on a live read with both boundaries.
+      !options.offline && runtime.rest && runtime.query
+        ? {
+            query: runtime.query,
+            rest: runtime.rest,
+            trustWith: (rest: Rest) => markerTrust(permissionLookup(snapshot.repository, rest)),
+          }
+        : undefined,
+    );
+    const checkpoint = options.checkpoint
       ? {
-          query: runtime.query,
-          rest: runtime.rest,
-          trustWith: (rest: Rest) => markerTrust(permissionLookup(snapshot.repository, rest)),
+          previousWindow: snapshot.since,
+          establishesBaseline: !snapshot.since,
+          nextThroughCandidate:
+            !options.offline && report.completeness.complete ? snapshot.startedAt : null,
+          policy:
+            "Advance only after complete successful live output; offline/incomplete results never advance.",
         }
-      : undefined,
-  );
-  const checkpoint = options.checkpoint
-    ? {
-        previousWindow: snapshot.since,
-        establishesBaseline: !snapshot.since,
-        nextThroughCandidate:
-          !options.offline && report.completeness.complete ? snapshot.startedAt : null,
-        policy:
-          "Advance only after complete successful live output; offline/incomplete results never advance.",
+      : null;
+    const checkpointText = checkpoint
+      ? `Checkpoint: ${checkpoint.establishesBaseline ? "establishing current baseline" : `previous window ${checkpoint.previousWindow}`}; ${checkpoint.policy}\n`
+      : "";
+    await output(
+      options.json
+        ? JSON.stringify({ ...report, checkpoint }, null, 2) + "\n"
+        : text + checkpointText,
+    );
+    if (!options.offline && options.checkpoint && report.completeness.complete) {
+      // Start time deliberately overlaps windows: updates arriving during collection are not lost.
+      // #382: under the checkpoint's own lock, for the same repository, never moving it back.
+      const advanced = await advanceCheckpoint(options.checkpoint, {
+        schemaVersion: 1,
+        repository: snapshot.repository,
+        through: snapshot.startedAt,
+      });
+      const say = runtime.stderr ?? ((text: string) => void process.stderr.write(text));
+      for (const note of advanced.cleanup) say(`pdb: ${note}\n`);
+      if (advanced.status === "not-written" || advanced.status === "committed-with-error") {
+        // The report is already on stdout; the cursor's state is said on stderr, never as success.
+        say(`pdb: checkpoint ${options.checkpoint}: ${advanced.reason}\n`);
+        return 2;
       }
-    : null;
-  const checkpointText = checkpoint
-    ? `Checkpoint: ${checkpoint.establishesBaseline ? "establishing current baseline" : `previous window ${checkpoint.previousWindow}`}; ${checkpoint.policy}\n`
-    : "";
-  await output(
-    options.json
-      ? JSON.stringify({ ...report, checkpoint }, null, 2) + "\n"
-      : text + checkpointText,
-  );
-  if (!options.offline && options.checkpoint && report.completeness.complete) {
-    // Start time deliberately overlaps windows: updates arriving during collection are not lost.
-    // #382: under the checkpoint's own lock, for the same repository, never moving it back.
-    const advanced = await advanceCheckpoint(options.checkpoint, {
-      schemaVersion: 1,
-      repository: snapshot.repository,
-      through: snapshot.startedAt,
-    });
-    const say = runtime.stderr ?? ((text: string) => void process.stderr.write(text));
-    for (const note of advanced.cleanup) say(`pdb: ${note}\n`);
-    if (advanced.status === "not-written" || advanced.status === "committed-with-error") {
-      // The report is already on stdout; the cursor's state is said on stderr, never as success.
-      say(`pdb: checkpoint ${options.checkpoint}: ${advanced.reason}\n`);
-      return 2;
     }
+    return report.completeness.complete ? 0 : 2;
   }
-  return report.completeness.complete ? 0 : 2;
 }
 /**
  * True when this module is the process entry point. npm installs bins as

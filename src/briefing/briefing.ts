@@ -522,9 +522,24 @@ analysisRules.set("pull-requests", ({ snapshot, prs }) =>
   }),
 );
 
+/** How a non-live source is named in text (#371): a quota fallback is not a chosen offline read. */
+export const cacheWord = (freshness: { source?: string }): string =>
+  freshness.source === "stale" ? "STALE CACHE (live read refused for quota)" : "OFFLINE CACHE";
+
 export interface BriefingOptions {
   limit: number;
   offline?: boolean;
+  /**
+   * Why an explicit snapshot is shown instead of the refused live read (#371). Set together with
+   * `offline`; freshness then says `stale` rather than `offline`.
+   */
+  stale?: {
+    reason: string;
+    cache: string;
+    retryAfterSeconds: number | null;
+    resetAt: string | null;
+    maxAgeSeconds: number;
+  };
   issue?: number;
   agent?: string;
   /** Explicit viewer platform for platform-restricted pickup. */
@@ -624,6 +639,14 @@ export function briefing(snapshot: Snapshot, options: BriefingOptions, now: Date
       startedAt: snapshot.startedAt,
       fetchedAt: snapshot.fetchedAt,
       offline: !!options.offline,
+      // #371: which source the facts came from; stale carries why and the observed reset.
+      source: options.stale
+        ? ("stale" as const)
+        : options.offline
+          ? ("offline" as const)
+          : ("live" as const),
+      ...(options.stale ? { fallback: options.stale } : {}),
+      renderedAt: now.toISOString(),
       ageSeconds: Math.max(0, Math.floor((now.getTime() - Date.parse(snapshot.fetchedAt)) / 1000)),
       atomicSnapshot: false,
     },
@@ -719,7 +742,7 @@ export type Briefing = ReturnType<typeof briefing>;
 export function textReport(report: Briefing): string {
   const lines = [
     `Presidential Daily Briefing: ${report.repository}`,
-    `Fetched ${report.freshness.fetchedAt}${report.freshness.offline ? ` — OFFLINE CACHE (${report.freshness.ageSeconds}s old), live verification unavailable` : " — LIVE fetch window"}`,
+    `Fetched ${report.freshness.fetchedAt}${report.freshness.offline ? ` — ${cacheWord(report.freshness)} (${report.freshness.ageSeconds}s old), live verification unavailable` : " — LIVE fetch window"}`,
     report.guidance,
   ];
   const section = (title: string, rows: string[], omitted = 0): void => {

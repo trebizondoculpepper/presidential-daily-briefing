@@ -10,6 +10,7 @@
  */
 import type { Comment, Issue, PullRequest, Snapshot } from "../github/types.js";
 import type { TrustDecision } from "../workflow/delivery.js";
+import { cacheWord } from "./briefing.js";
 import { parseQuestionMarker, parseQuestionRecordBody } from "../workflow/claims.js";
 import type { Comment as MarkerComment } from "../workflow/claims.js";
 import type { DatalogAction, QuestionRecordFact } from "../rules/datalog/datalog.js";
@@ -384,12 +385,20 @@ export function humanBriefing(
 
 /** Compact text rendering of a human briefing within `maxChars`. */
 export function humanText(
-  report: { repository: string; freshness: { fetchedAt: string } },
+  report: {
+    repository: string;
+    freshness: { fetchedAt: string; offline?: boolean; source?: string; ageSeconds?: number };
+  },
   human: HumanBriefing,
   maxChars: number,
 ): string {
+  const f = report.freshness;
+  // #371: say where the facts came from; a quota fallback is STALE, never presented as live.
+  const source = f.offline
+    ? `; ${cacheWord(f)}${f.ageSeconds === undefined ? "" : ` (${f.ageSeconds}s old)`}, live verification unavailable${f.source === "stale" ? "; refresh before acting" : ""}`
+    : "";
   const lines = [
-    `HUMAN BRIEFING ${report.repository} for ${human.human ?? "(no human named)"} — fetched ${report.freshness.fetchedAt}`,
+    `HUMAN BRIEFING ${report.repository} for ${human.human ?? "(no human named)"} — fetched ${f.fetchedAt}${source}`,
     "What input of yours is blocking progress? Read-only: no claims, answers or sign-offs are made here.",
     ...human.notices,
   ];

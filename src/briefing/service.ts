@@ -357,7 +357,13 @@ async function presentHuman(
   // Freshness and snapshot completeness come from the shared facts, as in every briefing.
   const facts = briefing(
     snapshot,
-    { limit: 1, agent: options.agent, offline: options.offline },
+    {
+      limit: 1,
+      agent: options.agent,
+      offline: options.offline,
+      // #371: a quota fallback stays labelled stale in the human view too.
+      ...(options.stale ? { stale: options.stale } : {}),
+    },
     now,
   );
   const labelWarnings = snapshot.issues
