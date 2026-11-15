@@ -1,0 +1,3 @@
+# Delivery follow-up alignment proposal (#377)
+
+Rechecked full issue history and merged #497 coverage fix. Recorded the owner-approved draft/progress and continuing-responsibility requirements as an implementation contract. Proposed aligning unaccepted-BEHIND delivery classification with the existing accepted-head S9 rule, clearly distinguishing that engineering choice from an owner answer. Waiting responsibility enters the bounded unified list with explicit state/count/omission semantics, without becoming an executable pickup or mutation authority. Runtime changes remain separate pending review.
