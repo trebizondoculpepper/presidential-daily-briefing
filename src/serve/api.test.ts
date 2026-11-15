@@ -17,7 +17,6 @@ import type { Issue, Page, Snapshot } from "../github/types.js";
 import type { Clock } from "../mcp/polling.js";
 import { startServe } from "../serve.js";
 import type { RunningServer, ServeRuntime } from "../serve.js";
-import { readServices } from "./api.js";
 import {
   definitiveRest,
   NO_PROJECT_ROOT,
@@ -26,6 +25,7 @@ import {
   servedOnlyQuery,
   servedOnlyRest,
 } from "./api.js";
+import { readServices } from "./services.js";
 import type { ServeReadRuntime } from "./api.js";
 import { classifyFailure, ServeCache } from "./cache.js";
 import { serveArguments } from "./options.js";
