@@ -194,7 +194,7 @@ describe("direct dependency impact (#196)", () => {
         },
         edges: [[1, 9]],
       },
-      { states: { 1: { labels: ["platform:x", "status:ready"] } }, edges: [[2, 1]] },
+      { states: { 1: { labels: ["platform:codex", "status:ready"] } }, edges: [[2, 1]] },
     ];
     const parse = (command: string) => {
       const [pdb, name, ...rest] = command.split(" ");
@@ -209,19 +209,33 @@ describe("direct dependency impact (#196)", () => {
       throw new Error(`unexpected suggested command ${command}`);
     };
     let checked = 0;
-    for (const agent of [undefined, "kavya_sabbagh"])
-      for (const graph of graphs) {
-        const { query } = graphQuery(graph);
-        const report = await dependencyReport(repo, 1, { impact: true }, query, clock);
-        const impact = directImpact(report, { prs: [] }, agent)!;
-        for (const [command] of impact.nextAction.matchAll(/pdb [a-z]+ [^)]*/g)) {
-          expect(() => parse(command), command).not.toThrow();
-          if (command.startsWith("pdb claim"))
-            expect(command).toContain(`--agent ${agent ?? "NAME"}`);
-          checked++;
+    const claims: string[] = [];
+    for (const platform of [undefined, "codex"])
+      for (const agent of [undefined, "kavya_sabbagh"])
+        for (const graph of graphs) {
+          const { query } = graphQuery(graph);
+          const report = await dependencyReport(repo, 1, { impact: true }, query, clock);
+          const context = { prs: [], ...(platform ? { platform } : {}) };
+          const impact = directImpact(report, context, agent)!;
+          for (const [command] of impact.nextAction.matchAll(/pdb [a-z]+ [^)]*/g)) {
+            expect(() => parse(command), command).not.toThrow();
+            if (command.startsWith("pdb claim")) {
+              claims.push(command);
+              expect(command).toContain(`--agent ${agent ?? "NAME"}`);
+              if (platform) expect(command).toMatch(new RegExp(`--platform ${platform}$`));
+              else expect(command).not.toContain("--platform");
+              expect(workflowArgumentsFor("claim", command.split(" ").slice(2))).toMatchObject(
+                platform ? { platform } : {},
+              );
+            }
+            checked++;
+          }
         }
-      }
-    expect(checked).toBeGreaterThanOrEqual(8);
+    expect(checked).toBeGreaterThanOrEqual(16);
+    // The platform-restricted ticket is suggested for claim only with its platform stated.
+    expect(claims).toContain(
+      "pdb claim 1 --repo example/project --agent kavya_sabbagh --platform codex",
+    );
     // deps --top suggestions parse too.
     for (const agent of [undefined, "kavya_sabbagh"]) {
       const { query } = graphQuery({
@@ -238,6 +252,27 @@ describe("direct dependency impact (#196)", () => {
       expect(commands).toHaveLength(2);
       for (const command of commands) expect(() => parse(command), command).not.toThrow();
       expect(commands[0]).toBe(`pdb claim 1 --repo example/project --agent ${agent ?? "NAME"}`);
+    }
+    // deps --top --platform P: a platform-restricted ticket's claim carries --platform P.
+    {
+      const { query } = graphQuery({
+        states: { 1: { labels: ["status:ready", "platform:codex"] } },
+        edges: [[2, 1]],
+      });
+      const top = repositoryImpact(
+        await readDependencyInventory(repo, {}, query, clock),
+        10,
+        { prs: [], platform: "codex" },
+        "kavya_sabbagh",
+      );
+      const commands = [...top.nextAction.matchAll(/pdb [a-z]+ [^).]*/g)].map(([c]) => c.trim());
+      expect(commands[0]).toBe(
+        "pdb claim 1 --repo example/project --agent kavya_sabbagh --platform codex",
+      );
+      for (const command of commands) expect(() => parse(command), command).not.toThrow();
+      expect(workflowArgumentsFor("claim", commands[0].split(" ").slice(2))).toMatchObject({
+        platform: "codex",
+      });
     }
     expect(depsArgumentsFor(["--top", "--agent", "kavya_sabbagh"])).toMatchObject({
       top: true,

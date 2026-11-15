@@ -133,12 +133,18 @@ const repositoryOf = (url: string, fallback: string): string =>
  */
 export const claimTemplate = "pdb claim {number} --repo {repo} --agent {agent}{platformFlag}";
 /** The briefing's claim command, filled the same way (agent NAME when not given). */
-export function claimCommand(number: number, repository: string, agent?: string): string {
+export function claimCommand(
+  number: number,
+  repository: string,
+  agent?: string,
+  platform?: string,
+): string {
   const facts: Record<string, string> = {
     repo: repository,
     number: String(number),
     agent: agent ?? "NAME",
-    platformFlag: "",
+    // As the briefing's adapter: the viewer's stated platform is always carried into the claim.
+    platformFlag: platform ? ` --platform ${platform}` : "",
   };
   return claimTemplate.replace(/\{(\w+)\}/g, (_, k: string) => facts[k] ?? "");
 }
@@ -249,7 +255,14 @@ export function directImpact(
     nextAction: "",
     policy: finishFirst,
   };
-  result.nextAction = nextAction(result, subjectIssue, node.upstream, report.repository, agent);
+  result.nextAction = nextAction(
+    result,
+    subjectIssue,
+    node.upstream,
+    report.repository,
+    agent,
+    context.platform,
+  );
   return result;
 }
 
@@ -275,6 +288,7 @@ function nextAction(
   }[],
   repository: string,
   agent?: string,
+  platform?: string,
 ): string {
   const n = `#${subject.number}`;
   const here = repositoryOf(subject.url, repository);
@@ -289,7 +303,7 @@ function nextAction(
   )
     return `A blocker of ${n} was closed as not planned; a person should verify whether the dependency still makes sense before anyone picks it up (pdb ticket ${subject.number}${repoFlag(here)}). When it completes, ${unlocks}.`;
   if (startNow.status === "eligible")
-    return `Start ${n}: claim it (${claimCommand(subject.number, here, agent)}) and implement it; ${unlocks}.`;
+    return `Start ${n}: claim it (${claimCommand(subject.number, here, agent, platform)}) and implement it; ${unlocks}.`;
   if (openClosingPrs.length)
     return `Advance open PR ${openClosingPrs.map((p) => `#${p}`).join(", ")} for ${n} toward merge (PR follow-up, not new pickup); ${n} completes when its whole delivery merges, not at a first PR merge. Then ${unlocks}.`;
   const owners = subject.labels.nodes
@@ -447,7 +461,7 @@ export function repositoryImpact(
   const top = startNow[0];
   const most = completionUnlocks[0];
   const nextAction = top
-    ? `Start #${top.number}: claim it (${claimCommand(top.number, inventory.repository, agent)}) and implement it; completing it makes ${count(top)} dependant(s) pickable. Check it first with pdb deps ${top.number}${repoFlag(inventory.repository)}.`
+    ? `Start #${top.number}: claim it (${claimCommand(top.number, inventory.repository, agent, context.platform)}) and implement it; completing it makes ${count(top)} dependant(s) pickable. Check it first with pdb deps ${top.number}${repoFlag(inventory.repository)}.`
     : most
       ? `Nothing is pickable now. #${most.number} unlocks the most when it completes (${count(most)}); it is not pickable because ${most.notPickable.join("; ")}.`
       : "Nothing is pickable now and no open completion is proven to unlock other work.";
