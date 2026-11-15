@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 import { RateLimitError } from "./dependencies.js";
+import { AuthenticationError } from "./github.js";
 import {
   hydrate,
   quotaRefusal,
@@ -131,7 +132,8 @@ describe("read profiles, coverage and telemetry (#367, collection-profiles.md)",
     for (const status of [401, 403, 404, 410, 500, 502, null])
       expect(restOutcome(answer(status)), String(status)).toBe("failed");
     expect(restOutcome(answer(429))).toBe("rate-limited");
-    expect(restOutcome(answer(403, { message: "API rate limit exceeded" }))).toBe("rate-limited");
+    // The body's message is never classification evidence; only status and evidence are.
+    expect(restOutcome(answer(403, { message: "API rate limit exceeded" }))).toBe("failed");
     expect(
       restOutcome({ status: 403, body: {}, evidence: { category: "rate-limited" } } as never),
     ).toBe("rate-limited");
@@ -168,5 +170,59 @@ describe("read profiles, coverage and telemetry (#367, collection-profiles.md)",
       cost: 6,
     });
     expect(merged.coverage.map((c) => c.source)).toEqual(["open-issues"]);
+  });
+
+  it("classifies quota refusals from structured evidence, never message text", async () => {
+    expect(quotaRefusal(new RateLimitError("secondary limit"))).toBe(true);
+    expect(
+      quotaRefusal(Object.assign(new Error("x"), { evidence: { category: "rate-limited" } })),
+    ).toBe(true);
+    // gh's auth advice mentions rate limits; an authentication failure is never a quota refusal.
+    const auth = new AuthenticationError("Check gh auth status, network and API rate limits.");
+    expect(quotaRefusal(auth)).toBe(false);
+    expect(quotaRefusal(Object.assign(auth, { evidence: { category: "rate-limited" } }))).toBe(
+      false,
+    );
+    expect(quotaRefusal(new Error("API rate limit exceeded"))).toBe(false);
+    // Hydration keeps going after such a failure: only a real refusal stops scheduling.
+    const results = await hydrate(
+      [1, 2, 3, 4],
+      async (n) => {
+        if (n === 1) throw new AuthenticationError("check API rate limits");
+        return n;
+      },
+      { concurrency: 1 },
+    );
+    expect(results.map((r) => r.state)).toEqual(["failed", "done", "done", "done"]);
+    const meter = new ReadMeter("pr-status-v1", "pr", clock);
+    const q = meter.query(
+      async () => {
+        throw new Error("GitHub query failed. Check gh auth status, network and API rate limits.");
+      },
+      "pull-request",
+      "o/r#1",
+    );
+    await expect(q("query{x}", {})).rejects.toThrow();
+    expect(meter.collection().telemetry.failures).toEqual({ failed: 1 });
+  });
+
+  it("times requests with an advancing timer even when now is fixed", async () => {
+    let tick = 0;
+    const meter = new ReadMeter("pr-status-v1", "pr", clock, () => (tick += 7));
+    await meter.query(async () => ({}), "pull-request", "o/r#1")("query{x}", {});
+    const { telemetry } = meter.collection();
+    expect(telemetry.calls[0].durationMs).toBe(7);
+    expect(telemetry.durationMs).toBe(21);
+    // The default timer is performance.now, not the fixed clock.
+    const real = new ReadMeter("pr-status-v1", "pr", clock);
+    await real.query(
+      async () => {
+        await new Promise((r) => setTimeout(r, 15));
+        return {};
+      },
+      "pull-request",
+      "o/r#1",
+    )("query{x}", {});
+    expect(real.collection().telemetry.calls[0].durationMs).toBeGreaterThanOrEqual(10);
   });
 });
