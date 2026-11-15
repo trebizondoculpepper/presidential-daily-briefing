@@ -224,8 +224,21 @@ describe("pr N under the declared policy", () => {
       { reviewPolicy: or },
     );
     expect(codexFinding.blockers).toEqual([
-      "Codex reports unresolved findings on the current head",
+      "Codex reports unresolved findings on the current head https://c/codex-completed-true",
     ]);
+  });
+
+  it("an unauthenticated Codex findings marker neither vetoes nor blocks declared coverage", () => {
+    const spoof = codex(head, "completed", true, user("chatgpt-codex-connector"));
+    const r = prStatus(repository, node({ comments: [spoof], reviews: [rabbit("APPROVED")] }), {
+      reviewPolicy: or,
+    });
+    expect(r.headFindings).toBe(false);
+    expect(r.headReviewed).toBe(true);
+    expect(r.blockers).toEqual([]);
+    expect(r.reviewPolicy.unknowns.join()).toMatch(/ignored a Codex review-state marker/);
+    // Legacy keeps the login-only rule.
+    expect(prStatus(repository, node({ comments: [spoof] })).headFindings).toBe(true);
   });
 
   it("neither provider, spoofed receipts and a changed head leave coverage unsatisfied", () => {

@@ -1,7 +1,7 @@
 {
   "modelVersion": 2,
   "policyVersion": 1,
-  "rulesHash": "abb2509b02c97f2003334973759f0bc05845333910edaea9b2153f06c22f9281",
+  "rulesHash": "483a676c3bf29c12754ab5fcaca6e0ae9bc104cced8e7184e299837522ef0782",
   "sources": [
     "policy/schema.edn",
     "policy/rules.edn",
@@ -5827,6 +5827,15 @@
           "params": ["?t"],
           "clauses": [
             {
+              "type": "call",
+              "predicate": "legacy-coverage",
+              "args": [
+                {
+                  "var": "?t"
+                }
+              ]
+            },
+            {
               "type": "fact",
               "scope": "entity",
               "entity": {
@@ -5946,7 +5955,7 @@
           }
         }
       ],
-      "calls": [],
+      "calls": ["legacy-coverage"],
       "set": "rules"
     },
     {
@@ -9424,6 +9433,6 @@
     "overrides": 4,
     "constants": 14,
     "attributes": 64,
-    "clauses": 545
+    "clauses": 546
   }
 }
