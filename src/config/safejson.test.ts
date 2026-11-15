@@ -7,7 +7,6 @@ import { spawn } from "node:child_process";
 import { mkdtemp, readdir, readFile, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import {
   advanceCheckpoint,
   nodeSafeFs,
@@ -36,7 +35,8 @@ describe("locked durable JSON writes (#382)", () => {
   it("separate processes doing read-modify-write lose no update", async () => {
     await withDir(async (dir) => {
       const target = join(dir, "counter.json");
-      const module = fileURLToPath(new URL("./safejson.ts", import.meta.url));
+      // A file URL, not a path: a Windows path (C:\...) is not a valid module specifier.
+      const module = new URL("./safejson.ts", import.meta.url).href;
       const script = join(dir, "worker.mts");
       await writeFile(
         script,

@@ -25,7 +25,7 @@ export interface BriefingFiles {
   /** Recorded `through` of a valid checkpoint, undefined when the file is missing. */
   checkpointSince: (path: string, repository: string) => Promise<string | undefined>;
   cachedSnapshot: (path: string, repository: string | undefined) => Promise<Snapshot>;
-  atomicJson: (path: string, value: unknown) => Promise<void>;
+  atomicJson: (path: string, value: unknown) => Promise<unknown>;
   /** #382: locked, monotonic checkpoint advance (src/config/safejson.ts); else `atomicJson`. */
   advanceCheckpoint?: (
     path: string,
@@ -454,8 +454,14 @@ async function deliver(
         // Monotonic under the checkpoint's own lock: an older run never moves it back.
         const outcome = await files.advanceCheckpoint(options.checkpoint, checkpoint);
         for (const note of outcome.cleanup) stderr(`pdb: ${note}\n`);
-        if (outcome.status === "not-written" || outcome.status === "committed-with-error")
-          throw new Error(outcome.reason ?? outcome.status);
+        // The new cursor is already in place: never report it as not advanced or rolled back.
+        if (outcome.status === "committed-with-error") {
+          stderr(
+            `pdb: checkpoint ${options.checkpoint} was advanced to ${checkpoint.through}, but ${outcome.reason ?? "its durability is unconfirmed"}. The next run reads the new checkpoint.\n`,
+          );
+          return 2;
+        }
+        if (outcome.status === "not-written") throw new Error(outcome.reason ?? outcome.status);
       } else await files.atomicJson(options.checkpoint, checkpoint);
     } catch (error) {
       // The report is already on stdout; never append a second JSON object there.

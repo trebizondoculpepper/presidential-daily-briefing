@@ -88,6 +88,7 @@ import { impactGuidanceJson, impactGuidanceText } from "./estimation/impact.js";
 import { declaredRulesContext } from "./rules/declared-context.js";
 import { runConfig, runSetup } from "./config/configcli.js";
 import { advanceCheckpoint, overwriteJson, writeSnapshotCache } from "./config/safejson.js";
+import type { WriteOutcome } from "./config/safejson.js";
 import type { ConfigRuntime } from "./config/configcli.js";
 import { estimateUsage, runEstimate } from "./estimation/estimate.js";
 import {
@@ -918,10 +919,18 @@ const isPickupOrder = (text: string): text is PickupOrder =>
  * A locked, durable plain overwrite (#382, src/config/safejson.ts): explicit files such as
  * plans keep their overwrite semantics. Throws when nothing was written.
  */
-export async function atomicJson(path: string, value: unknown): Promise<void> {
+export async function atomicJson(path: string, value: unknown): Promise<WriteOutcome> {
   const outcome = await overwriteJson(path, value);
   if (outcome.status === "not-written") throw new Error(outcome.reason);
+  return outcome;
 }
+
+/** Say what a committed write left unconfirmed or uncleaned, never discarding it (#382). */
+const reportWrite = (runtime: Runtime, path: string, outcome: WriteOutcome): void => {
+  const say = runtime.stderr ?? ((text: string) => void process.stderr.write(text));
+  if (outcome.status === "committed-with-error") say(`pdb: ${path}: ${outcome.reason}\n`);
+  for (const note of outcome.cleanup) say(`pdb: ${note}\n`);
+};
 
 /**
  * Write an explicit `--cache` snapshot (#382): locked, never replacing a newer snapshot of the
@@ -1799,7 +1808,7 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
         repository,
         runtime.migrationRuntime,
       );
-      await atomicJson(values.file, plan);
+      reportWrite(runtime, values.file, await atomicJson(values.file, plan));
       await output(values.json ? JSON.stringify(plan, null, 2) + "\n" : migrationPlanText(plan));
       return 0;
     }
