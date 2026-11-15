@@ -8,6 +8,7 @@ import { spawn } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { isAgentName } from "../config/identity.js";
+import { shellQuote } from "./claims.js";
 import { classifyGhFailure, parseGhResponse } from "../github/evidence.js";
 import type { FailureClassification } from "../github/evidence.js";
 import { isRecord, prop } from "../github/github.js";
@@ -335,8 +336,17 @@ export async function createIssue(
   if (Buffer.byteLength(body, "utf8") > MAX_BODY_BYTES)
     return refuse("BODY_TOO_LARGE", `The body with its marker exceeds ${MAX_BODY_BYTES} bytes.`);
 
+  // Every displayed command is POSIX-quoted per argument; no value reaches a shell unquoted.
   const recovery = [
-    `gh api "repos/${fullName}/issues?creator=${login}&since=${startedAt}&state=all&per_page=30" --jq ".[] | select(.body | contains(\\"${operationId}\\")) | .html_url"`,
+    [
+      "gh",
+      "api",
+      `repos/${fullName}/issues?creator=${login}&since=${startedAt}&state=all&per_page=30`,
+      "--jq",
+      `.[] | select(.body | contains("${operationId}")) | .html_url`,
+    ]
+      .map(shellQuote)
+      .join(" "),
   ];
   if (request.dryRun) {
     result.status = "planned";
@@ -466,8 +476,10 @@ export async function createIssue(
       id: "LABELS_MISSING",
       message: `Issue created, but GitHub did not apply: ${absent.join(", ")}. Do not create it again.`,
     };
-    result.recovery = absent.map(
-      (l) => `gh issue edit ${number} --repo ${fullName} --add-label ${JSON.stringify(l)}`,
+    result.recovery = absent.map((l) =>
+      ["gh", "issue", "edit", String(number), "--repo", fullName, "--add-label", l]
+        .map(shellQuote)
+        .join(" "),
     );
     return result;
   }
@@ -512,60 +524,75 @@ export function issueCreateText(result: IssueCreateResult): string {
  * Production create boundary: `gh api --include -X POST PATH --input -` with the JSON payload on
  * stdin, no shell. A spawn failure proves no dispatch; anything after is treated as dispatched.
  */
-export const ghPost: RestPost = (path, payload) =>
-  new Promise<PostAnswer>((resolve) => {
-    let child;
-    try {
-      child = spawn("gh", ["api", "--include", "--method", "POST", path, "--input", "-"], {
-        stdio: ["pipe", "pipe", "ignore"],
-        shell: false,
-      });
-    } catch {
-      resolve({ dispatched: false, status: null, body: null });
-      return;
-    }
-    let spawned = false;
-    let timedOut = false;
-    let stdout = "";
-    child.once("spawn", () => {
-      spawned = true;
-      child.stdin.end(JSON.stringify(payload));
-    });
-    child.stdout.setEncoding("utf8").on("data", (t: string) => (stdout += t));
-    const timer = setTimeout(() => {
-      timedOut = true;
-      child.kill("SIGTERM");
-    }, 60_000);
-    child.once("error", () => {
-      clearTimeout(timer);
-      resolve({ dispatched: spawned, status: null, body: null });
-    });
-    child.once("close", (code) => {
-      clearTimeout(timer);
-      if (timedOut) {
-        resolve({ dispatched: true, status: null, body: null, timedOut: true });
-        return;
-      }
+type Spawn = typeof spawn;
+/**
+ * Production create boundary over an injectable spawn (tests pass a fake child). A stdin error
+ * (EPIPE when gh exits before reading) never crashes: the close handler decides the outcome,
+ * which without a 201 response is never "created".
+ */
+export const ghPostWith =
+  (spawnChild: Spawn = spawn): RestPost =>
+  (path, payload) =>
+    new Promise<PostAnswer>((resolve) => {
+      let child;
       try {
-        const response = parseGhResponse(stdout);
-        let body: unknown = null;
-        try {
-          body = JSON.parse(response.body);
-        } catch {
-          body = null;
-        }
-        const status = response.status;
-        resolve({
-          dispatched: true,
-          status,
-          body,
-          ...(status !== 201 ? { evidence: classifyGhFailure({ response, exitCode: code }) } : {}),
+        child = spawnChild("gh", ["api", "--include", "--method", "POST", path, "--input", "-"], {
+          stdio: ["pipe", "pipe", "ignore"],
+          shell: false,
         });
       } catch {
-        resolve({ dispatched: true, status: null, body: null });
+        resolve({ dispatched: false, status: null, body: null });
+        return;
       }
+      let spawned = false;
+      let timedOut = false;
+      let stdout = "";
+      child.stdin.on("error", () => {
+        // EPIPE/ECONNRESET: gh exited without reading; the exit decides refused vs unknown.
+      });
+      child.once("spawn", () => {
+        spawned = true;
+        child.stdin.end(JSON.stringify(payload));
+      });
+      child.stdout.setEncoding("utf8").on("data", (t: string) => (stdout += t));
+      const timer = setTimeout(() => {
+        timedOut = true;
+        child.kill("SIGTERM");
+      }, 60_000);
+      child.once("error", () => {
+        clearTimeout(timer);
+        resolve({ dispatched: spawned, status: null, body: null });
+      });
+      child.once("close", (code) => {
+        clearTimeout(timer);
+        if (timedOut) {
+          resolve({ dispatched: true, status: null, body: null, timedOut: true });
+          return;
+        }
+        try {
+          const response = parseGhResponse(stdout);
+          let body: unknown = null;
+          try {
+            body = JSON.parse(response.body);
+          } catch {
+            body = null;
+          }
+          const status = response.status;
+          resolve({
+            dispatched: true,
+            status,
+            body,
+            ...(status !== 201
+              ? { evidence: classifyGhFailure({ response, exitCode: code }) }
+              : {}),
+          });
+        } catch {
+          resolve({ dispatched: true, status: null, body: null });
+        }
+      });
     });
-  });
+
+export const ghPost: RestPost = ghPostWith();
 
 /** Bounded stdin read: stops accumulating just past the body limit. */
 export async function readStdinBounded(): Promise<Uint8Array> {
