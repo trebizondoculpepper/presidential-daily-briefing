@@ -246,7 +246,9 @@ export const briefingInput = z
      * Label filter (#312): same as repeated CLI --label. A candidate must carry every label
      * (AND); names are resolved against the repository; at most eight distinct.
      */
-    label: z.array(z.string()).min(1).max(16).optional(),
+    // Distinct labels are bounded after case-insensitive deduplication (normalizeLabelRequest),
+    // so repeated copies of one label stay idempotent.
+    label: z.array(z.string()).min(1).optional(),
     /**
      * Expanded text (#355, doc/design/next-steps-only.md): same as CLI --context. Text only; the
      * structured result is the same either way.

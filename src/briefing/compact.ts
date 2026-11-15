@@ -451,6 +451,11 @@ export function compactBriefing(
         })()
       : unscopedRanking;
   const shownRanked = fullRanking?.items.slice(0, Math.max(0, options.limit)) ?? [];
+  // #312: presentation counts describe the filtered pool; evaluation above used the full map.
+  const scopedAssessments =
+    assessments && wanted.length
+      ? new Map([...assessments].filter(([url]) => inScope(url)))
+      : assessments;
   const rankedActions: RankedActions | null = fullRanking && {
     ...fullRanking,
     omitted: fullRanking.total - shownRanked.length,
@@ -458,7 +463,7 @@ export function compactBriefing(
   };
   const impactEstimation: ImpactEstimation | null =
     fullRanking && blendedRole === "designer" && assessments
-      ? impactEstimationReport(impactStatus, assessments, fullRanking.items, shownRanked)
+      ? impactEstimationReport(impactStatus, scopedAssessments!, fullRanking.items, shownRanked)
       : null;
   const projection = fullRanking ? [...new Set(fullRanking.items.map((i) => i.target))] : null;
   const ordered = projection
@@ -497,7 +502,7 @@ export function compactBriefing(
   const complexityCounts =
     fullRanking && blendedRole === "implementer" && assessments
       ? {
-          eligible: [...assessments.values()].filter((a) =>
+          eligible: [...scopedAssessments!.values()].filter((a) =>
             ["unassessed", "stale"].includes(a.complexity.state),
           ).length,
           ranked: fullRanking.items.filter((i) => i.kind === "estimate-complexity").length,

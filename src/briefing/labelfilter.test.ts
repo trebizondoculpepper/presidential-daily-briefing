@@ -110,6 +110,40 @@ describe("--label (#312)", () => {
     expect(r.filter?.outside.owned).toBe(1);
   });
 
+  it("assessment counts describe the filtered pool only", () => {
+    const data = snapshot(
+      [issue(1, ["status:ready", "sfx"]), issue(2, ["status:ready"]), issue(3, ["status:ready"])],
+      [],
+    );
+    const view = (state: "unassessed" | "conflict") => ({
+      state,
+      size: null,
+      provenance: null,
+    });
+    const assessments = new Map(
+      data.issues.map((i) => [
+        i.url,
+        {
+          impact: view("conflict"),
+          complexity: view("unassessed"),
+          unlocks: 0,
+          unlocksUnknown: [],
+        },
+      ]),
+    );
+    const run = (role: string, labels?: string[]) =>
+      compactBriefing(
+        data,
+        { limit: 10, agent: "me", role, ...(labels ? { labels } : {}) },
+        briefing(data, { limit: 1000, agent: "me" }, new Date(time)),
+        assessments as never,
+      );
+    expect((run("implementer").estimation as { eligible?: number }).eligible).toBe(3);
+    expect((run("implementer", ["sfx"]).estimation as { eligible?: number }).eligible).toBe(1);
+    expect(run("designer").impactEstimation?.conflicts).toBe(3);
+    expect(run("designer", ["sfx"]).impactEstimation?.conflicts).toBe(1);
+  });
+
   it("truncated labels leave membership unknown and the result incomplete, never a known nonmatch", () => {
     const truncated = issue(1, ["status:ready"]);
     truncated.labels = { ...truncated.labels, pageInfo: { hasNextPage: true, endCursor: "c" } };

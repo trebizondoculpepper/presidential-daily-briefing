@@ -85,7 +85,12 @@ export async function resolveLabels(
     }
     // GitHub answers null for a label that does not exist; an absent or malformed field is
     // missing evidence, not a nonexistent label.
-    if (exact !== null || !search || !Array.isArray(search.nodes))
+    if (
+      exact !== null ||
+      !search ||
+      !Array.isArray(search.nodes) ||
+      search.nodes.some((n) => !n || typeof n !== "object" || typeof n.name !== "string")
+    )
       return { status: "unresolved", why: `the answer for label ${label} was malformed` };
     const match = search.nodes.find(
       (n) => typeof n.name === "string" && n.name.toLowerCase() === label.toLowerCase(),

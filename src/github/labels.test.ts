@@ -82,5 +82,13 @@ describe("label filter requests (#312)", () => {
     });
     const malformed: Query = async () => ({ repository: {} });
     expect((await resolveLabels("o/r", ["bug"], malformed)).status).toBe("unresolved");
+    for (const nodes of [[{}], [null], [{ name: 7 }]]) {
+      const entry: Query = async () => ({
+        repository: { l0: null, s0: { nodes, pageInfo: { hasNextPage: false } } },
+      });
+      expect((await resolveLabels("o/r", ["bug"], entry)).status, JSON.stringify(nodes)).toBe(
+        "unresolved",
+      );
+    }
   });
 });
