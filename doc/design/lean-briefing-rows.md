@@ -1,6 +1,6 @@
 # Lean rows for the designer and implementer queues
 
-Contract for #352, following `next-steps-only.md` (#353/#355). This changes text
+Contract for #352, following `next-steps-only.md` (#353/#355). Implemented in #487 (`src/briefing/leanrows.ts`, shared by CLI and MCP text). This changes text
 presentation, not ranking, authority, JSON schemas or the rules' explanations.
 The comparison in `../reports/lean-briefing-row-comparison.md` uses fixed public
 synthetic inputs and the real native engine. No runtime renderer changes here.
