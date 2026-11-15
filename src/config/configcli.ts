@@ -771,6 +771,7 @@ export async function runSetup(
           fs,
           git: runtime.git ?? nodeGit,
           random: runtime.random,
+          requireName: true,
         });
     const record = write?.record ?? before;
     // Where the name comes from: kept, imported once from the legacy file, or generated.

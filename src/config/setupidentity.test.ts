@@ -139,6 +139,18 @@ describe("pdb setup identity (#314)", () => {
     expect(known.files.get(file)).toBe(existing);
   });
 
+  it("refuses an existing entry without a valid name before writing anything", async () => {
+    const nameless = `[agents.claude]\ntriage_role = "designer"\nnote = "keep"\n`;
+    const t = setup(nameless);
+    expect(await t.call("identity", "--role", "implementer", "--json")).toBe(1);
+    expect(t.json()).toMatchObject({
+      code: "invalid-value",
+      message: expect.stringMatching(/has no valid name.*nothing was changed/),
+      recovery: "Set one explicitly: pdb config set identity.name NAME --entry claude",
+    });
+    expect(t.files.get(file)).toBe(nameless);
+  });
+
   it("never overwrites a malformed identity file", async () => {
     const broken = "[agents\nbroken";
     const t = setup(broken);
