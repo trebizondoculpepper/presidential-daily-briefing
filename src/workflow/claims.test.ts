@@ -1751,6 +1751,25 @@ describe("question resolve and withdraw (#412)", () => {
     ).toBe("refused");
   });
 
+  it("refuses a resolution the reader would reject, instead of posting it", async () => {
+    const q = note(questionBody());
+    const write = permissions({ kavya: "write" });
+    const tooLong = await planQuestionResolution(
+      repo,
+      { ...request(q.url), why: "x".repeat(1001) },
+      ticket([q]),
+      write,
+    );
+    expect(tooLong.ok ? "accepted" : tooLong.error).toBe("INVALID_ARGUMENT");
+    const longName = await planQuestionResolution(
+      repo,
+      { ...request(q.url), agent: `a${"b".repeat(100)}` },
+      ticket([q]),
+      write,
+    );
+    expect(longName.ok ? "accepted" : longName.error).toBe("INVALID_ARGUMENT");
+  });
+
   it("a retry is a no-op; a different outcome after the first is refused", async () => {
     const q = note(questionBody());
     const write = permissions({ kavya: "write", nicole: "write" });

@@ -12,6 +12,7 @@ import {
   foldQuestionResolutions,
   parseResolutionComment,
   resolutionMarker,
+  resolutionProblem,
 } from "./claimactivity.js";
 import type { QuestionResolutionRecord } from "./claimactivity.js";
 import { workflow } from "./definition.js";
@@ -1353,6 +1354,18 @@ export async function planQuestionResolution(
     agent,
     reason: why,
   };
+  // Never post what the reader would reject as malformed: that would report success without a
+  // usable outcome and make later attempts refuse on an authoritative malformed record.
+  const invalid = resolutionProblem(record);
+  if (invalid)
+    return refuse(
+      "INVALID_ARGUMENT",
+      facts,
+      `The resolution would not be a valid record (${invalid}); nothing is posted.`,
+      [
+        `pdb question ${op} ${number} --agent NAME --question ${question} --why TEXT --repo ${repository}`,
+      ],
+    );
   const body = [
     `Question ${op === "resolve" ? "resolved" : "withdrawn"} by \`${agent}\` with \`pdb question ${op}\`: ${question}`,
     "",
