@@ -183,16 +183,60 @@ describe("fatal telemetry boundary", () => {
       }
     }
   });
-  it("does not load an SDK for absent, disabled or invalid configuration", async () => {
+  it("does not load an SDK for disabled or invalid configuration", async () => {
+    let calls = 0;
     const load = async (): Promise<never> => {
+      calls++;
       throw new Error("must not load");
     };
     for (const env of [
-      {},
+      { SENTRY_DSN: "" },
       { SENTRY_DSN: "bad" },
       { SENTRY_DSN: "https://public@example.invalid/1", SENTRY_DISABLED: "1" },
     ])
-      expect(await initializeCrashes("cli", root, "0.11.0", env, load)).toBe(false);
+      expect(await initializeCrashes("cli", root, "0.11.0", env, load, async () => null)).toBe(
+        false,
+      );
+    expect(calls).toBe(0);
+  });
+  it("checks opt-out before SDK loading and the kill switch before config reads", async () => {
+    let loads = 0,
+      reads = 0;
+    const load = async (): Promise<never> => {
+      loads++;
+      throw new Error("must not load");
+    };
+    const read = async () => {
+      reads++;
+      return "[telemetry.crashes]\nenabled=false";
+    };
+    expect(
+      await initializeCrashes("cli", root, "0.12.0", { SENTRY_DISABLED: "1" }, load, read),
+    ).toBe(false);
+    expect(reads).toBe(0);
+    expect(await initializeCrashes("serve", root, "0.12.0", {}, load, read)).toBe(false);
+    expect(reads).toBe(1);
+    expect(
+      await initializeCrashes("mcp", root, "0.12.0", {}, load, async () => {
+        throw new Error("unreadable private path");
+      }),
+    ).toBe(false);
+    expect(loads).toBe(0);
+  });
+  it("uses the public default in an isolated SDK without network", async () => {
+    const script = `
+      import {initializeCrashes,defaultCrashDsn} from './src/telemetry/crashes.ts';
+      let count=0;
+      const sdk={init(options){count++; if(options.dsn!==defaultCrashDsn) throw new Error('wrong endpoint');},onUncaughtExceptionIntegration(){return {};},onUnhandledRejectionIntegration(){return {};}};
+      const result=await initializeCrashes('cli',process.cwd(),'0.12.0',{},async()=>sdk,async()=>null);
+      console.log(JSON.stringify({result,count}));
+    `;
+    const { stdout } = await execute(
+      process.execPath,
+      ["--import", "tsx", "--input-type=module", "-e", script],
+      { cwd: root, timeout: 8000 },
+    );
+    expect(JSON.parse(stdout)).toEqual({ result: true, count: 1 });
   });
   it("sends only an error envelope and exits on a real unhandled rejection", async () => {
     const script = `
@@ -203,7 +247,7 @@ describe("fatal telemetry boundary", () => {
           send: async envelope=>{process.stdout.write(JSON.stringify(envelope)+'\\n');return {statusCode:200};},
           flush:async()=>true
         })})
-      }));
+      }), async()=>null);
       Promise.reject(new Error('DO_NOT_SEND_private_payload'));
     `;
     let stdout = "";
