@@ -313,4 +313,39 @@ describe("human briefing role (#457)", () => {
     expect(rows(view)).toEqual(["decide#1:inferred", "decide#2:inferred"]);
     expect(text).toContain("1 more item(s) omitted");
   });
+
+  describe("v2 question markers (#412)", () => {
+    const id = "0123456789abcdef";
+    const v2 = (repository: string, issueNumber: number) =>
+      `<!-- github-triage:needs-human:${id} v2 {"v":2,"repository":"${repository}","issue":${issueNumber},"resolution":"explicit"} -->`;
+    const withMarker = (marker: string): Comment => {
+      const c = record("owner", ["Which flag name?"]);
+      return { ...c, body: c.body.replace(/<!-- github-triage:needs-human:[^>]*-->/, marker) };
+    };
+
+    it("parses version and operation id from either marker", () => {
+      expect(parseQuestionRecord(withMarker(v2(repo, 1)))).toMatchObject({ version: 2, opId: id });
+      expect(parseQuestionRecord(record("owner", ["Q?"], { marker: id }))).toMatchObject({
+        version: 1,
+        opId: id,
+      });
+    });
+
+    it("ignores a v2 record copied from another issue, and a malformed marker, with warnings", async () => {
+      const ticket = (c: Comment) =>
+        withComments(issue(1, ["question", "status:needs-design"]), [c]);
+      const copied = await human([ticket(withMarker(v2(repo, 9)))]);
+      expect(copied.view.coverage.records.current).toBe(0);
+      expect(copied.view.coverage.warnings.join(" ")).toMatch(
+        new RegExp(`bound to ${repo}#9; ignored`),
+      );
+      const malformed = await human([
+        ticket(withMarker(`<!-- github-triage:needs-human:${id} v2 {"v":2} -->`)),
+      ]);
+      expect(malformed.view.coverage.records).toMatchObject({ current: 0, unverified: 1 });
+      expect(malformed.view.coverage.warnings.join(" ")).toMatch(/has a malformed marker/);
+      const bound = await human([ticket(withMarker(v2(repo, 1)))]);
+      expect(bound.view.coverage.records.current).toBe(1);
+    });
+  });
 });
