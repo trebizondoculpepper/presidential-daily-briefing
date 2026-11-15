@@ -79,4 +79,55 @@
           {:e 100 "kind" "issue" "state" "OPEN" "number" 5 "target" "https://github.com/o/r/issues/5" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "not-a-pr" "label" ["question" "status:ready"] "question-record" 200}
           {:e 200 "record-trust" "trusted" "record-to" "owner"}]
   :expect {:actions []
-           :denials #{[100 "D-DENY-PREREQUISITE"]}}}]}
+           :denials #{[100 "D-DENY-PREREQUISITE"]}}}
+
+ ;; #414 (doc/reports/closed-question-discovery.md): a question outlives its source's closure.
+ {:id "human-closed-source-questions"
+  :doc "closure answers nothing: an unsettled v2 question and a still-labelled v1 question stay visible, an unknown outcome is never read as answered, and resolved, withdrawn and label-removed v1 questions drop out"
+  :viewer {:role "human" :agent "owner"}
+  :facts [{:e 1 "forward-complete" true}
+          {:e 100 "kind" "issue" "state" "CLOSED" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "labels-complete" true "reverse-complete" false "native-complete" false "open-blockers" -1 "blocking-complete" false "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "not-a-pr" "question-record" 200}
+          {:e 200 "record-trust" "trusted" "record-to" "owner" "record-version" 2 "record-outcome" "none"}
+          {:e 101 "kind" "issue" "state" "CLOSED" "number" 2 "target" "https://github.com/o/r/issues/2" "created" 1767225600000 "labels-complete" true "reverse-complete" false "native-complete" false "open-blockers" -1 "blocking-complete" false "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "not-a-pr" "label" "question" "question-record" 201}
+          {:e 201 "record-trust" "trusted" "record-to" "designer-a" "record-version" 1 "record-outcome" "none"}
+          {:e 102 "kind" "issue" "state" "CLOSED" "number" 3 "target" "https://github.com/o/r/issues/3" "created" 1767225600000 "labels-complete" true "reverse-complete" false "native-complete" false "open-blockers" -1 "blocking-complete" false "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "not-a-pr" "question-record" 202}
+          {:e 202 "record-trust" "trusted" "record-to" "owner" "record-version" 2 "record-outcome" "unknown"}
+          {:e 103 "kind" "issue" "state" "CLOSED" "number" 4 "target" "https://github.com/o/r/issues/4" "created" 1767225600000 "labels-complete" true "reverse-complete" false "native-complete" false "open-blockers" -1 "blocking-complete" false "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "not-a-pr" "question-record" 203}
+          {:e 203 "record-trust" "trusted" "record-to" "owner" "record-version" 2 "record-outcome" "resolved"}
+          {:e 104 "kind" "issue" "state" "CLOSED" "number" 5 "target" "https://github.com/o/r/issues/5" "created" 1767225600000 "labels-complete" true "reverse-complete" false "native-complete" false "open-blockers" -1 "blocking-complete" false "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "not-a-pr" "question-record" 204}
+          {:e 204 "record-trust" "trusted" "record-to" "owner" "record-version" 2 "record-outcome" "withdrawn"}
+          {:e 105 "kind" "issue" "state" "CLOSED" "number" 6 "target" "https://github.com/o/r/issues/6" "created" 1767225600000 "labels-complete" true "reverse-complete" false "native-complete" false "open-blockers" -1 "blocking-complete" false "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "not-a-pr" "label" "status:ready" "question-record" 205}
+          {:e 205 "record-trust" "trusted" "record-to" "owner" "record-version" 1 "record-outcome" "none"}
+          {:e 106 "kind" "issue" "state" "CLOSED" "number" 7 "target" "https://github.com/o/r/issues/7" "created" 1767225600000 "labels-complete" false "reverse-complete" false "native-complete" false "open-blockers" -1 "blocking-complete" false "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "not-a-pr" "question-record" 206}
+          {:e 206 "record-trust" "trusted" "record-to" "owner" "record-version" 1 "record-outcome" "none"}
+          {:e 107 "kind" "issue" "state" "CLOSED" "number" 8 "target" "https://github.com/o/r/issues/8" "created" 1767225600000 "labels-complete" true "reverse-complete" false "native-complete" false "open-blockers" -1 "blocking-complete" false "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "not-a-pr" "label" "question" "question-record" 207}
+          {:e 207 "record-trust" "unverified" "record-to" "owner" "record-version" 2 "record-outcome" "none"}]
+  :expect {:actions [{:subject 100 :rule "D-HUMAN-ORPHANED-YOU" :kind "orphaned-question" :band 1
+              :why "The ticket is closed but its trusted question routed to you (owner) has no recorded resolve or withdraw; closure is not an answer."
+              :overridden []}
+            {:subject 101 :rule "D-HUMAN-ORPHANED" :kind "orphaned-question" :band 3
+              :why "The ticket is closed but its trusted question routed to designer-a has no recorded resolve or withdraw; closure is not an answer."
+              :overridden []}
+            {:subject 102 :rule "D-HUMAN-ORPHANED-UNKNOWN" :kind "orphaned-question" :band 3
+              :why "The ticket is closed and whether its trusted question routed to owner was resolved could not be established; it is not read as answered."
+              :overridden []}
+            {:subject 106 :rule "D-HUMAN-ORPHANED-UNKNOWN" :kind "orphaned-question" :band 3 :overridden []}]
+           :denials #{}}}
+
+ {:id "closed-sources-are-human-only"
+  :doc "a closed source with an unsettled question adds nothing to an agent queue, and its attention or ready labels make no other human item"
+  :viewer {:role "implementer" :agent "owner"}
+  :facts [{:e 1 "forward-complete" true}
+          {:e 100 "kind" "issue" "state" "CLOSED" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "labels-complete" true "reverse-complete" false "native-complete" false "open-blockers" -1 "blocking-complete" false "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "not-a-pr" "label" ["status:ready" "attention:owner"] "attention" "owner" "question-record" 200}
+          {:e 200 "record-trust" "trusted" "record-to" "owner" "record-version" 2 "record-outcome" "none"}]
+  :expect {:actions []
+           :denials #{}}}
+
+ {:id "closed-source-attention-is-not-addressed-response"
+  :doc "the human sees only the orphaned question on a closed source, never an addressed-response for its stale attention label"
+  :viewer {:role "human" :agent "owner"}
+  :facts [{:e 1 "forward-complete" true}
+          {:e 100 "kind" "issue" "state" "CLOSED" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "labels-complete" true "reverse-complete" false "native-complete" false "open-blockers" -1 "blocking-complete" false "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "not-a-pr" "label" ["attention:owner" "status:ready"] "attention" "owner" "question-record" 200}
+          {:e 200 "record-trust" "trusted" "record-to" "designer-a" "record-version" 2 "record-outcome" "none"}]
+  :expect {:actions [{:subject 100 :rule "D-HUMAN-ORPHANED" :kind "orphaned-question" :band 3 :overridden []}]
+           :denials #{}}}]}

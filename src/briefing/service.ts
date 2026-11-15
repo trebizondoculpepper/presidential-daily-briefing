@@ -46,6 +46,7 @@ import type { Snapshot } from "../github/types.js";
 import type { PickupOrder } from "./ranking.js";
 import { briefingProcess, resolveGuideSetting } from "./process.js";
 import { humanBriefing, humanText, readHumanEvidence } from "./human.js";
+import { discoverClosedQuestions } from "./closedquestions.js";
 import type { HumanBriefing } from "./human.js";
 import type { BriefingProcess, GuideRuntime } from "./process.js";
 
@@ -130,7 +131,7 @@ export async function presentBriefing(
   // #301: every engine and projection below reads the declared policy from the snapshot.
   if (options.reviewPolicy) snapshot = { ...snapshot, reviewPolicy: options.reviewPolicy };
   if (options.role === humanRole && !options.full && !options.issue)
-    return presentHuman(snapshot, options, now, trust, signal, loadEngine);
+    return presentHuman(snapshot, options, now, trust, signal, loadEngine, live);
   // #367: an issue intake's cost is the whole command's, so the reads made while presenting it
   // (permission lookups and delivery evidence) are metered after its snapshot read.
   const intakeMeter =
@@ -333,18 +334,51 @@ async function presentHuman(
   trust: TrustDecision | undefined,
   signal: AbortSignal | undefined,
   loadEngine: () => Promise<Pick<typeof import("../rules/datalog/datalog.js"), "evaluateDatalog">>,
+  live?: { query: Query; rest: Rest; trustWith?: (rest: Rest) => TrustDecision },
 ): Promise<PresentedBriefing> {
   const evidence = await readHumanEvidence(snapshot, trust, signal);
+  // #414: a question outlives its ticket's closure. Closed sources are read live within a fixed
+  // budget; offline or cached reads say they were not read rather than show none.
+  evidence.closed = live
+    ? await discoverClosedQuestions(
+        snapshot.repository,
+        {
+          query: live.query,
+          rest: live.rest,
+          ...(live.trustWith ? { trustWith: live.trustWith } : {}),
+          ...(trust ? { trust } : {}),
+          ...(signal ? { signal } : {}),
+        },
+        new Set(snapshot.issues.filter((i) => i.state === "OPEN").map((i) => i.url)),
+      )
+    : {
+        read: false,
+        complete: false,
+        why: options.offline ? "offline or cached read" : "no live GitHub read",
+      };
+  const closedSources = evidence.closed.read ? evidence.closed.sources : [];
+  const records = new Map(evidence.records);
+  for (const source of closedSources) records.set(source.issue.url, source.facts);
+  const evaluated: Snapshot = closedSources.length
+    ? {
+        ...snapshot,
+        issues: [
+          // A closed issue already in the snapshot (a dependency stub) is replaced by its read.
+          ...snapshot.issues.filter((i) => !closedSources.some((c) => c.issue.url === i.url)),
+          ...closedSources.map((c) => c.issue),
+        ],
+      }
+    : snapshot;
   const human = options.agent ?? null;
   let result: Awaited<
     ReturnType<(typeof import("../rules/datalog/datalog.js"))["evaluateDatalog"]>
   >;
   try {
     const { evaluateDatalog } = await loadEngine();
-    result = evaluateDatalog(snapshot, new Map(), {
+    result = evaluateDatalog(evaluated, new Map(), {
       role: humanRole,
       agent: human ?? undefined,
-      questionRecords: evidence.records,
+      questionRecords: records,
       ...datalogReviewFacts(snapshot),
       checkRequiredness: datalogCheckFacts(snapshot),
       limit: Number.MAX_SAFE_INTEGER,

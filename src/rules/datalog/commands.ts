@@ -25,5 +25,6 @@ export const commandKinds: Record<string, string> = {
   inspect: "detail",
   "inspect-assessment": "detail",
   "answer-questions": "detail",
+  "orphaned-question": "detail",
   "sign-off": "pr",
 };

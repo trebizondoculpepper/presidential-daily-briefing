@@ -297,7 +297,9 @@ describe("pdb serve read API (#373)", () => {
           schemaVersion: 1,
           kind: "serve-read",
           view: "briefing",
-          status: "complete",
+          // #414: with no live REST/GraphQL boundary closed sources are not read, which the
+          // human view reports as incomplete rather than as no orphaned question.
+          status: role === "human" ? "incomplete" : "complete",
           selection: { repository: repo, agent: "me", identitySource: "tool" },
           error: null,
         });
