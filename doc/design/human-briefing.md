@@ -84,6 +84,7 @@ The compact report for `--role human` carries a `human` object instead of the ag
 - `reason` is the record's `Why:` line, or the rule's explanation for inferred items.
 - `blocks` lists the subject itself and its open native dependents (issues it blocks) for an issue, or the issues a PR closes. Truncated `blocking` evidence is reported in `blocks.unknown`, never as "blocks nothing".
 - `source` is the focused link: the record comment's URL for a question, otherwise the issue or PR URL.
+- Parked tickets are included: parking defers agent work, not a question waiting on the human. When more blocked or closed subjects exist than are listed, `blocks.unknown` says how many were omitted; that is display trimming, not incompleteness.
 - One subject appears once. When several rules match a subject (for example `attention:NAME` and a trusted question routed to the human), the item takes the first-ranked position, keeps every rule ID, and is explicit and addressed if any matching rule is.
 - No item carries a claim, estimate or merge command. The human view never grants claim rights, reserves work or performs a write; next steps are reading the source link or `pdb --repo R --issue N`/`pdb pr N --repo R`. Answering and signing off through a UI is later scope.
 

@@ -15,6 +15,8 @@
 [(parked ?t) [?t "label" "status:parked"]]
 [(foreground ?t) (open ?t) (not (parked ?t))]
 [(foreground ?t) (open ?t) (addressed ?t)]
+;; Human input is waiting whatever the ticket's parking: the human view sees parked work (#457).
+[(foreground ?t) (open ?t) [1 "role" "human"]]
 [(own-issue ?t) (issue ?t) (open ?t) (mine ?t)]
 [(platform-ok ?t) [?t "labels-complete" true] (not [?t "platform" _])]
 [(platform-ok ?t) [1 "platform" ?p] [?t "platform" ?p]]

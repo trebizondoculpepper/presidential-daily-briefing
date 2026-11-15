@@ -253,6 +253,26 @@ describe("human briefing role (#457)", () => {
     expect(view.coverage.warnings.join(" ")).toMatch(/closing issue references truncated/);
   });
 
+  it("shows parked questions and notes closed issues trimmed from the display", async () => {
+    const parked = withComments(issue(1, ["question", "status:parked"]), [
+      record("designer-a", ["Parked?"]),
+    ]);
+    const closes = [11, 12, 13, 14, 15, 16, 17].map((n) => ({ number: n, url: issue(n).url }));
+    const accepted: PullRequest = {
+      ...pr(),
+      closingIssuesReferences: page(closes),
+      reviews: page([
+        { ...by("reviewer"), url: "r", body: "", state: "APPROVED", commit: { oid: "abc123" } },
+      ]),
+    };
+    const { view, complete } = await human([parked], [accepted]);
+    expect(rows(view)).toEqual(["answer-questions#1:explicit", "sign-off#4:inferred"]);
+    expect(view.items[1].blocks.subjects).toHaveLength(5);
+    expect(view.items[1].blocks.unknown).toEqual(["2 more closed issue(s) omitted"]);
+    // Display trimming is not missing evidence.
+    expect(complete).toBe(true);
+  });
+
   it("bounds the items after ranking and reports omissions", async () => {
     const issues = [1, 2, 3].map((n) => issue(n, ["design:decision-needed"]));
     const { view, text } = await human(issues, [], { limit: 2 });

@@ -61,6 +61,17 @@
             {:subject 100 :rule "D-HUMAN-DECIDE" :kind "decide" :band 3 :overridden []}]
            :denials #{[102 "D-DENY-CLAIM"] [102 "D-DENY-BLOCKER"]}}}
 
+ {:id "human-sees-parked-questions"
+  :doc "a parked ticket with a trusted question record and no matching attention label still asks the human"
+  :viewer {:role "human" :agent "owner"}
+  :facts [{:e 1 "forward-complete" true}
+          {:e 100 "kind" "issue" "state" "OPEN" "number" 5 "target" "https://github.com/o/r/issues/5" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "not-a-pr" "label" ["question" "status:parked"] "question-record" 200}
+          {:e 200 "record-trust" "trusted" "record-to" "designer-a"}]
+  :expect {:actions [{:subject 100 :rule "D-HUMAN-ASK" :kind "answer-questions" :band 3
+              :why "A trusted question record routed to designer-a awaits answers on the ticket."
+              :overridden []}]
+           :denials #{}}}
+
  {:id "agent-roles-ignore-question-records"
   :doc "question record facts add nothing to the implementer queue: the question label is still a prerequisite"
   :viewer {:role "implementer" :agent "owner"}
