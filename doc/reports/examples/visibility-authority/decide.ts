@@ -115,7 +115,11 @@ function parseAuthorization(body: string, prefix: string): AuthorizationPayload 
   }
 }
 
-const revision = (c: DemoComment): string => c.lastEditedAt || c.createdAt;
+/** The observed revision; null when the edit fields were not read (unknown, never "unedited"). */
+const revision = (c: DemoComment): string | null =>
+  c.lastEditedAt === undefined || c.includesCreatedEdit === undefined
+    ? null
+    : c.lastEditedAt || c.createdAt;
 const binds = (p: AuthorizationPayload, m: DemoMessage): boolean =>
   p.repository.toLowerCase() === m.repository.toLowerCase() &&
   p.subject === m.subject &&
@@ -161,9 +165,14 @@ async function authorised(
       revoked.push(c.createdAt);
       continue;
     }
-    if (payload.observed !== revision(message.comment)) {
+    const current = revision(message.comment);
+    if (current === null) {
+      reasons.push(`authorisation ${c.url} void: the message's edit history was not read`);
+      continue;
+    }
+    if (payload.observed !== current) {
       reasons.push(
-        `authorisation ${c.url} observed revision ${payload.observed}, the message is now ${revision(message.comment)}; void`,
+        `authorisation ${c.url} observed revision ${payload.observed}, the message is now ${current}; void`,
       );
       continue;
     }
@@ -207,17 +216,25 @@ export async function decide(
       c.author?.__typename === "Bot" &&
       !!c.author.login &&
       (options.reviewApps ?? new Set([codexReviewer])).has(c.author.login.replace(/\[bot\]$/, ""));
-    const edited = !!c.lastEditedAt && c.editor?.login !== c.author?.login;
-    decision.visibility = allowed ? "app" : "external-untriaged";
-    if (allowed && !edited && codexMarker(c.body) !== null) {
+    // Edit status is evidence only when both edit fields were read; missing is unknown, never
+    // "not edited". An edit by anyone but the app itself is not the app's review state.
+    const editKnown = c.lastEditedAt !== undefined && c.includesCreatedEdit !== undefined;
+    const edited = !!c.lastEditedAt || !!c.includesCreatedEdit;
+    const editorKnown = !edited || c.editor?.login !== undefined;
+    const editedByOther = edited && c.editor?.login !== c.author?.login;
+    const typeKnown = c.author?.__typename !== undefined;
+    decision.visibility = !typeKnown ? "unknown" : allowed ? "app" : "external-untriaged";
+    if (!typeKnown) reasons.push(`app ${c.author?.login ?? "(unknown)"} has no account type`);
+    else if (!allowed)
+      reasons.push(`app or bot ${c.author?.login ?? "(unknown)"} is not allowlisted`);
+    else if (codexMarker(c.body) === null) reasons.push("allowlisted app, but no review marker");
+    else if (!editKnown || !editorKnown)
+      reasons.push("review state unverified: edit history not read; cannot clear a blocker");
+    else if (editedByOther) reasons.push("review marker edited by another account; ignored");
+    else {
       decision.authority = "review-state";
       reasons.push(`allowlisted app ${c.author?.login}: review-state evidence only`);
-    } else
-      reasons.push(
-        allowed
-          ? "allowlisted app, but no unedited review marker"
-          : `app or bot ${c.author?.login ?? "(unknown)"} is not allowlisted`,
-      );
+    }
     return decision;
   }
 
