@@ -8,8 +8,8 @@
  * a call budget, and anything Git cannot establish is reported as unknown, never as current.
  */
 import { execFile } from "node:child_process";
-import { stat } from "node:fs/promises";
-import { isAbsolute, join } from "node:path";
+import { realpath, stat } from "node:fs/promises";
+import { isAbsolute, join, resolve } from "node:path";
 
 /** Contract limits: eight Git calls, one second each, three seconds overall. */
 export const gitCallLimit = 8;
@@ -174,6 +174,20 @@ export interface CheckoutOptions {
   deadlineMs?: number;
   /** Modification time of a file, or null; used for FETCH_HEAD. */
   mtime?: (path: string) => Promise<number | null>;
+  /** Whether two paths name the same directory (real paths, case-insensitive on Windows). */
+  samePath?: (a: string, b: string) => Promise<boolean>;
+}
+
+export async function sameDirectory(a: string, b: string): Promise<boolean> {
+  const real = async (p: string) => {
+    try {
+      return await realpath(p);
+    } catch {
+      return resolve(p);
+    }
+  };
+  const [x, y] = await Promise.all([real(a), real(b)]);
+  return process.platform === "win32" ? x.toLowerCase() === y.toLowerCase() : x === y;
 }
 
 const defaultMtime = async (path: string) => {
@@ -221,6 +235,7 @@ async function probe({
   callTimeoutMs = gitCallTimeoutMs,
   deadlineMs = probeDeadlineMs,
   mtime = defaultMtime,
+  samePath = sameDirectory,
 }: CheckoutOptions): Promise<CheckoutStatus> {
   if (installed) return blank(now, "skipped", "npm installation: registry check applies");
   if (optOut) return blank(now, "skipped", "disabled (opt-out or --no-update-check)");
@@ -269,7 +284,11 @@ async function probe({
       "unknown",
       missing ? "Git is not available" : timedOut ? "Git timed out" : "not a Git checkout",
     );
-  const [, gitDir = "", commonDir = "", shallow = ""] = info.split(/\r?\n/);
+  const [toplevel = "", gitDir = "", commonDir = "", shallow = ""] = info.split(/\r?\n/);
+  // The repository found must be this installation itself, not one that merely contains a
+  // copy of it (for example pdb vendored or unpacked inside some other project).
+  if (!(await samePath(toplevel, repo)))
+    return blank(now, "unknown", "installation root is not the top level of a Git checkout");
   const result: CheckoutStatus = { ...blank(now, "checkout", ""), reason: undefined };
 
   // Attached or detached: exit 1 from `symbolic-ref -q` is the only proof of a detached HEAD.
@@ -357,17 +376,26 @@ async function probe({
   // Capture HEAD and every compared ref by object ID; counts use those IDs, never names.
   const targets = [defaultRef?.full, upstreamFull].filter((r): r is string => !!r);
   // One call in the usual case; only if it fails is HEAD read alone, to tell unborn from unreadable.
-  const capture = async (): Promise<{ head: string; ids: string[] | null } | null> => {
-    if (targets.length) {
-      const all = await call(["rev-parse", ...["HEAD", ...targets].map((t) => `${t}^{commit}`)]);
-      if (all !== null) {
-        const [head, ...ids] = all.split(/\r?\n/);
-        return { head, ids };
-      }
+  // `show-ref --head` lists HEAD and whichever targets exist, so one missing target (say a
+  // deleted upstream branch) leaves the other comparison intact. Exact names only.
+  const snapshot = async (): Promise<Map<string, string> | null> => {
+    const out = await call(["show-ref", "--head", ...targets]);
+    if (out === null) return null;
+    const ids = new Map<string, string>();
+    for (const line of out.split(/\r?\n/)) {
+      const [id, name] = line.split(" ");
+      if (name === "HEAD" || targets.includes(name)) ids.set(name, id);
     }
-    const head = await raw(["rev-parse", "--verify", "-q", "HEAD^{commit}"]);
-    if (head.ok) return { head: head.stdout, ids: targets.length ? null : [] };
-    unborn = head.reason === "failed" && head.code === 1;
+    return ids;
+  };
+  const capture = async (): Promise<{ head: string; ids: Map<string, string> } | null> => {
+    const ids = await snapshot();
+    const head = ids?.get("HEAD");
+    if (ids && head) return { head, ids };
+    if (ids === null && timedOut) return null;
+    const proof = await raw(["rev-parse", "--verify", "-q", "HEAD^{commit}"]);
+    if (proof.ok) return { head: proof.stdout, ids: new Map() };
+    unborn = proof.reason === "failed" && proof.code === 1;
     return null;
   };
   // Proven unborn only by `rev-parse --verify -q` exiting 1 on an attached branch.
@@ -375,17 +403,13 @@ async function probe({
   const first = await capture();
   result.commit = first?.head ?? null;
 
-  const compare = async (
-    full: string,
-    index: number,
-    source: Comparison["source"],
-  ): Promise<Comparison> => {
+  const compare = async (full: string, source: Comparison["source"]): Promise<Comparison> => {
     const ref = short(full);
     if (result.commit === null) return unknown(ref, source, "no commit checked out", full);
     if (shallow !== "false") return unknown(ref, source, "shallow or unknown history depth", full);
-    const id = first?.ids?.[index];
+    const id = first?.ids.get(full);
     if (!id || !/^[0-9a-f]{40,64}$/.test(id))
-      return unknown(ref, source, failure("ref unreadable"), full);
+      return unknown(ref, source, failure("ref missing or unreadable"), full);
     const counts = await call(["rev-list", "--left-right", "--count", `${id}...${result.commit}`]);
     const m = /^(\d+)\s+(\d+)$/.exec(counts ?? "");
     if (!m) return unknown(ref, source, failure("comparison failed"), full);
@@ -396,7 +420,7 @@ async function probe({
     return { ref, fullRef: full, source, state, behind, ahead };
   };
 
-  if (defaultRef) result.comparison = await compare(defaultRef.full, 0, defaultRef.source);
+  if (defaultRef) result.comparison = await compare(defaultRef.full, defaultRef.source);
   else
     result.comparison = unknown(
       result.remote ? `${result.remote}/main` : "main",
@@ -409,17 +433,16 @@ async function probe({
             ? "several remotes and no upstream remote to choose from"
             : "no remote-tracking ref",
     );
-  if (upstreamFull) result.upstream = await compare(upstreamFull, defaultRef ? 1 : 0, "upstream");
+  if (upstreamFull) result.upstream = await compare(upstreamFull, "upstream");
 
   // HEAD or any compared ref moving during collection makes every count unreliable.
   const measured = [result.comparison, result.upstream].some((c) => c && c.state !== "unknown");
   if (result.commit && measured) {
-    const again = await call([
-      "rev-parse",
-      "HEAD^{commit}",
-      ...targets.map((t) => `${t}^{commit}`),
-    ]);
-    const before = [first?.head, ...(first?.ids ?? [])].join("\n");
+    const now2 = await snapshot();
+    const key = (m: Map<string, string> | null | undefined) =>
+      m ? ["HEAD", ...targets].map((t) => m.get(t) ?? "").join("\n") : null;
+    const again = key(now2);
+    const before = key(first?.ids && new Map([...first.ids, ["HEAD", first.head]]));
     if (again !== before) {
       const why =
         again === null ? failure("ref unreadable") : "refs changed during inspection; retry";

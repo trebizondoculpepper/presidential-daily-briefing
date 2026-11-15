@@ -233,9 +233,17 @@ describe("source checkout freshness (#309)", () => {
             opts.rows ??
             "refs/remotes/origin/HEAD\trefs/remotes/origin/main\t\t\nrefs/remotes/origin/main\t\t\t\nrefs/heads/feat\t\trefs/remotes/origin/feat\torigin",
         };
-      if (a.startsWith("rev-parse HEAD^{commit}")) {
+      if (a.startsWith("show-ref --head")) {
         const list = opts.captures ?? [];
-        return { ok: true, stdout: list[Math.min(capture++, list.length - 1)] };
+        const ids = list[Math.min(capture++, list.length - 1)].split("\n");
+        const names = ["HEAD", "refs/remotes/origin/main", "refs/remotes/origin/feat"];
+        return {
+          ok: true,
+          stdout: ids
+            .map((id, k) => (id ? `${id} ${names[k]}` : ""))
+            .filter(Boolean)
+            .join("\n"),
+        };
       }
       if (a.startsWith("rev-list")) return { ok: true, stdout: "1\t0" };
       return { ok: false, reason: "failed", code: 128 };
@@ -247,6 +255,7 @@ describe("source checkout freshness (#309)", () => {
     const s = await probe("x", {
       git: scripted({ captures: [[h1, r1, u1].join("\n"), [h2, r1, u1].join("\n")] }),
       mtime: async () => null,
+      samePath: async () => true,
     });
     expect(s.comparison).toMatchObject({
       state: "unknown",
@@ -263,6 +272,7 @@ describe("source checkout freshness (#309)", () => {
     const steady = await probe("x", {
       git: scripted({ captures: [[h1, r1, u1].join("\n")] }),
       mtime: async () => null,
+      samePath: async () => true,
     });
     expect(steady.comparison).toMatchObject({
       state: "behind",
@@ -271,6 +281,7 @@ describe("source checkout freshness (#309)", () => {
     const moved = await probe("x", {
       git: scripted({ captures: [[h1, r1, u1].join("\n"), [h1, r2, u1].join("\n")] }),
       mtime: async () => null,
+      samePath: async () => true,
     });
     expect(moved.comparison).toMatchObject({
       state: "unknown",
@@ -284,6 +295,7 @@ describe("source checkout freshness (#309)", () => {
       probe("x", {
         git: scripted({ symref, captures: [h1 + "\n" + r1] }),
         mtime: async () => null,
+        samePath: async () => true,
       });
     expect(await run({ ok: false, reason: "failed", code: 1 })).toMatchObject({
       detached: true,
@@ -419,6 +431,40 @@ describe("source checkout freshness (#309)", () => {
     expect(await gitWith("git", ["fetch", "origin"], work, 5000)).toMatchObject({ ok: false });
   });
 
+  it("does not report an unrelated repository that merely contains a copy of pdb", async () => {
+    const { work } = await cloned();
+    const copy = join(work, "vendor", "pdb");
+    const { mkdir } = await import("node:fs/promises");
+    await mkdir(copy, { recursive: true });
+    await writeFile(
+      join(copy, "package.json"),
+      JSON.stringify({
+        name: "@trebizondoculpepper/presidential-daily-briefing",
+        version: "0.1.0",
+      }),
+    );
+    const s = await probe(copy);
+    expect(s).toMatchObject({ status: "unknown", comparison: null, branch: null });
+    expect(s.reason).toMatch(/not the top level/);
+    expect(checkoutAdvisory(s)).toBeNull();
+  });
+
+  it("keeps the default comparison when the branch's upstream ref is missing", async () => {
+    const { origin, work } = await cloned();
+    git(work, "checkout", "-q", "-b", "feat");
+    git(work, "push", "-q", "-u", "origin", "feat");
+    await commit(origin);
+    git(work, "fetch", "-q");
+    git(work, "update-ref", "-d", "refs/remotes/origin/feat");
+    const s = await probe(work);
+    expect(s.comparison).toMatchObject({ ref: "origin/main", state: "behind", behind: 1 });
+    expect(s.upstream).toMatchObject({
+      ref: "origin/feat",
+      state: "unknown",
+      reason: expect.stringMatching(/missing/),
+    });
+  });
+
   it("never probes an npm installation, and honours the opt-out", async () => {
     let calls = 0;
     const counting: GitRunner = async () => {
@@ -437,7 +483,12 @@ describe("source checkout freshness (#309)", () => {
   it("times out a hung Git call and stays within the call budget", async () => {
     const hung: GitRunner = () => new Promise(() => {});
     const started = Date.now();
-    const s = await probe("x", { git: hung, callTimeoutMs: 50, deadlineMs: 200 });
+    const s = await probe("x", {
+      git: hung,
+      callTimeoutMs: 50,
+      deadlineMs: 200,
+      samePath: async () => true,
+    });
     expect(Date.now() - started).toBeLessThan(1000);
     expect(s).toMatchObject({ status: "unknown", reason: "Git timed out" });
 
@@ -448,7 +499,12 @@ describe("source checkout freshness (#309)", () => {
         return { ok: true, stdout: "/r\n.git\n.git\nfalse" };
       return new Promise(() => {});
     };
-    const partial = await probe("x", { git: slowAfterInfo, callTimeoutMs: 40, deadlineMs: 150 });
+    const partial = await probe("x", {
+      git: slowAfterInfo,
+      callTimeoutMs: 40,
+      deadlineMs: 150,
+      samePath: async () => true,
+    });
     expect(partial.status).toBe("checkout");
     expect(partial.comparison?.state ?? "unknown").toBe("unknown");
     expect(calls).toBeLessThanOrEqual(8);
