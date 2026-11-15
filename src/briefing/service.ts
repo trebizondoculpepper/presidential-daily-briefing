@@ -4,6 +4,9 @@ import {
   defaultEngine,
 } from "../config/engine-setting.js";
 import type { EngineSetting, DecisionEngineMetadata } from "../config/engine-setting.js";
+import { resolveReviewPolicy } from "../config/review-setting.js";
+import { datalogReviewFacts } from "../workflow/reviewpolicy.js";
+import type { DeclaredReviewPolicy } from "../workflow/reviewpolicy.js";
 /**
  * Transport-neutral read service shared by the CLI and the MCP adapter (doc/design/mcp.md).
  *
@@ -63,6 +66,11 @@ export interface PresentOptions extends Omit<BriefingOptions, "estimation" | "as
    * (doc/design/rules-component.md); defaults to `performance.now`. Tests inject a fixed one.
    */
   engineClock?: () => number;
+  /**
+   * The repository's declared review policy (#301), resolved from local configuration by the
+   * front end. Absent: legacy, reported as not read.
+   */
+  reviewPolicy?: DeclaredReviewPolicy;
 }
 
 /** The versioned briefing report and its text rendering. */
@@ -99,6 +107,8 @@ export async function presentBriefing(
     trustWith?: (rest: Rest) => TrustDecision;
   },
 ): Promise<PresentedBriefing> {
+  // #301: every engine and projection below reads the declared policy from the snapshot.
+  if (options.reviewPolicy) snapshot = { ...snapshot, reviewPolicy: options.reviewPolicy };
   if (options.role === humanRole && !options.full && !options.issue)
     return presentHuman(snapshot, options, now, trust, signal, loadEngine);
   // #367: an issue intake's cost is the whole command's, so the reads made while presenting it
@@ -187,6 +197,7 @@ export async function presentBriefing(
         order: options.order,
         responsible: responsibility.responsible,
         responsibilityUnknown: responsibility.unknown.map((u) => u.issue),
+        ...datalogReviewFacts(snapshot),
         limit: Number.MAX_SAFE_INTEGER,
         signal,
         now: options.engineClock,
@@ -318,6 +329,7 @@ async function presentHuman(
       role: humanRole,
       agent: human ?? undefined,
       questionRecords: evidence.records,
+      ...datalogReviewFacts(snapshot),
       limit: Number.MAX_SAFE_INTEGER,
       signal,
       now: options.engineClock,
@@ -393,6 +405,12 @@ export interface ReadRuntime {
   redactDiagnostic?: (text: string) => string;
   /** Filesystem, git and working directory for the workflow-guide setting (#71). */
   guide?: GuideRuntime;
+  /**
+   * The declared review policy when the front end already knows it (#301): pdb serve with only
+   * --repo states it is undeclared rather than reading any directory (#271). Absent: resolved
+   * from `guide`.
+   */
+  reviewPolicy?: DeclaredReviewPolicy;
 }
 
 /** Live read request for a briefing or one issue's intake. */
@@ -446,6 +464,8 @@ export async function readBriefing(
   const engineSetting = request.issue
     ? undefined
     : await resolveEngineSetting(request.repository, runtime.guide);
+  const reviewPolicy =
+    runtime.reviewPolicy ?? (await resolveReviewPolicy(request.repository, runtime.guide));
   const setting = await resolveGuideSetting(request.repository, undefined, runtime.guide);
   const redact = runtime.redactDiagnostic;
   const process = briefingProcess(
@@ -463,6 +483,7 @@ export async function readBriefing(
       ...(request.order ? { order: request.order } : {}),
       process,
       engineSetting,
+      reviewPolicy,
       ...(runtime.engineClock ? { engineClock: runtime.engineClock } : {}),
     },
     runtime.estimation,

@@ -14,7 +14,8 @@
  * waiver. CI, conflicts, protections, draft state and authority stay independent requirements.
  */
 import { codexMarker, headAccepted, headCodexFindings } from "./reviewevidence.js";
-import type { PullRequest } from "../github/types.js";
+import { prEvidenceGaps } from "../github/previdence.js";
+import type { PullRequest, Snapshot } from "../github/types.js";
 
 /** Registered `review.policy` values; absent configuration is "undeclared", never one of these. */
 export const reviewPolicyIds = ["legacy", "codex-or-coderabbit"] as const;
@@ -381,4 +382,67 @@ export function reviewPolicyText(d: ReviewPolicyDetail): string {
     .map((o) => `${reviewProviders[o.provider].label} ${o.state}`)
     .join(", ");
   return `Review policy ${name}: coverage ${d.coverage}${by ? ` by ${by}` : ""} (${states})`;
+}
+
+/**
+ * The declared policy over one snapshot pull request, shared by the TypeScript engine, delivery
+ * follow-up and the Datalog host adapter. Completeness is previdence's shared gap rule (#497).
+ */
+export function snapshotPolicyReview(
+  pr: PullRequest,
+  warnings: readonly string[],
+  declared: DeclaredReviewPolicy = policyNotRead,
+): PolicyReview {
+  return evaluateReviewPolicy(
+    declared,
+    snapshotReviewEvidence(pr, !prEvidenceGaps(pr, warnings).length),
+  );
+}
+
+/** Coverage mode asserted for the Datalog policy (rules.edn `review-coverage`). */
+export type ReviewCoverageMode = "legacy" | "any" | "unknown";
+export interface ProviderReviewFact {
+  provider: ProviderId;
+  state: ProviderState;
+  commit: string;
+}
+
+/**
+ * Normalized provider facts for the Datalog engine, computed host-side so raw provenance checks
+ * stay outside the pure engine. Legacy asserts none, keeping its pre-#301 inputs exactly.
+ */
+export function datalogReviewFacts(snapshot: Snapshot): {
+  reviewCoverage: ReviewCoverageMode;
+  providerReviews: Map<string, ProviderReviewFact[]>;
+} {
+  const declared = snapshot.reviewPolicy ?? policyNotRead;
+  const effective = effectivePolicy(declared);
+  const providerReviews = new Map<string, ProviderReviewFact[]>();
+  if (effective !== "legacy")
+    for (const pr of snapshot.pullRequests) {
+      const { detail } = snapshotPolicyReview(pr, snapshot.warnings, declared);
+      const counted =
+        effective === "unknown"
+          ? detail.providers
+          : detail.providers.filter((o) =>
+              reviewPolicies[effective].providers.includes(o.provider),
+            );
+      providerReviews.set(
+        pr.url,
+        counted.flatMap((o) =>
+          o.head ? [{ provider: o.provider, state: o.state, commit: o.head }] : [],
+        ),
+      );
+    }
+  return {
+    reviewCoverage:
+      effective === "legacy"
+        ? "legacy"
+        : effective === "unknown"
+          ? "unknown"
+          : reviewPolicies[effective].coverage === "any"
+            ? "any"
+            : "legacy",
+    providerReviews,
+  };
 }

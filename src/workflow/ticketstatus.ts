@@ -482,7 +482,19 @@ export async function readTicketStatus(
     ? detailed.map(() => ({ state: "not-attempted" as const }))
     : await hydrate(
         detailed,
-        (i) => pullRequestStatus(i.repository, i.number, query, clock, meter),
+        (i) =>
+          // #301: the same declared review policy as the focused read.
+          pullRequestStatus(
+            i.repository,
+            i.number,
+            query,
+            clock,
+            meter,
+            // Another repository's PR never inherits this repository's declared policy.
+            i.repository.toLowerCase() === repository.toLowerCase()
+              ? who.snapshot.reviewPolicy
+              : undefined,
+          ),
         { concurrency: readProfiles["ticket-status-v1"].bounds.hydrationConcurrency, signal },
       );
   results.forEach((outcome, index) => {

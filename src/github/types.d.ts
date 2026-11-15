@@ -127,6 +127,11 @@ export type Snapshot = {
    * inventory; absent in snapshots that predate it.
    */
   collection?: import("./readplan.js").ReadCollection;
+  /**
+   * The repository's declared review policy (#301), attached by the front end that resolved
+   * configuration; never cached or collected from GitHub. Absent: legacy, reported as not read.
+   */
+  reviewPolicy?: import("../workflow/reviewpolicy.js").DeclaredReviewPolicy;
 };
 export type Action = {
   rule: string;

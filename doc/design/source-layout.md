@@ -59,7 +59,7 @@ The owner called the rules area "the Prolog area". The implementation is Datalog
 | `completion.ts`       | `workflow/completion.ts`         |                                                                                            |
 | `responsibility.ts`   | `workflow/responsibility.ts`     |                                                                                            |
 | `prstatus.ts`         | `workflow/prstatus.ts`           |                                                                                            |
-| `reviewevidence.ts`   | `workflow/reviewevidence.ts`     | Beside `prstatus.ts`, which it imports types from                                          |
+| `reviewevidence.ts`   | `workflow/reviewevidence.ts`     | Beside `prstatus.ts`; owns the Codex receipt types (#301)                                  |
 | `reviewhistory.ts`    | `workflow/reviewhistory.ts`      |                                                                                            |
 | `team.ts`             | `workflow/team.ts`               |                                                                                            |
 | `who.ts`              | `workflow/who.ts`                |                                                                                            |
@@ -153,7 +153,7 @@ Measured over non-test modules at `7384969`:
 
 1. `github/github ↔ github/dependencies` (unchanged).
 2. `estimation/complexitylabels → estimation/estimation → estimation/estimate → estimation/complexitylabels`.
-3. `workflow/prstatus ↔ workflow/reviewevidence` (`reviewevidence → prstatus` is type only).
+3. ~~`workflow/prstatus ↔ workflow/reviewevidence`~~: removed by #301, which moved the Codex receipt types into `reviewevidence.ts` so `prstatus` can use the declared review policy without growing the group.
 
 Each remaining group stays inside one directory.
 
