@@ -186,6 +186,7 @@ describe("immutable exact-action admission (#515)", () => {
         priority: 10,
         text: "Project priority label matched: project:priority.",
         facts: { label: "project:priority" },
+        omitted: {},
       },
     ]);
     // Everything except the explanation is the default action, including its command.
@@ -301,6 +302,28 @@ describe("immutable exact-action admission (#515)", () => {
     );
     expect(result.slice(0, 2)).toEqual(protectedOnes);
     expect(result[0]).toBe(protectedOnes[0]);
+  });
+  it("keeps witness omissions apart from a witness named like omission metadata", () => {
+    const labels = Array.from({ length: 10 }, (_, i) => `l${i}`);
+    const s = snapshot([issue(1, ["status:ready", ...labels])]);
+    const defaults = runDefault(s);
+    const policy = compile((t) =>
+      t.replace(
+        /:preferences \[[\s\S]*\]\}\s*$/,
+        `:preferences [{:id "project-many" :when [[?a "pdb.action-label" "l0"]] :priority [[(+ 0 1) ?value]] :why "{label} / {labelOmitted}" :witnesses {"label" [[?a "pdb.action-label" ?value]] "labelOmitted" [[(str "mine") ?value]]}}]}`,
+      ),
+    );
+    const projection = project(defaults, s);
+    const admitted = admitProjectResult(
+      evaluateInline(policy, projection),
+      policy,
+      projection,
+      "g1",
+    );
+    const [reason] = [...admitted.matches.values()][0].reasons;
+    expect(reason.facts.labelOmitted).toBe("mine");
+    expect(reason.text.endsWith(" / mine")).toBe(true);
+    expect(reason.omitted).toEqual({ label: 3 });
   });
   it("keeps the highest key, source-order reasons and every matched ID", () => {
     const s = snapshot([issue(1, ["status:ready", "a", "b"]), issue(2, ["status:ready", "b"])]);

@@ -41,6 +41,11 @@ export interface ProjectReason {
   priority: number;
   text: string;
   facts: Record<string, Value>;
+  /**
+   * Witness name → values left out of its binding. Kept apart from `facts`, so a witness named
+   * like `labelOmitted` can never collide with omission metadata.
+   */
+  omitted: Record<string, number>;
 }
 export interface ProjectMatch {
   identity: string;
@@ -146,7 +151,8 @@ export function admitProjectResult(
       if (!isRecord(witnesses) || !exactKeys(witnesses, names))
         return invalid("missing-witness", `preference ${pref.id} witness bindings are incomplete`);
       // A Map, not an object literal: a witness named __proto__ must stay an ordinary binding.
-      const bound = new Map<string, Value>();
+      const bound = new Map<string, Value>(),
+        omitted = new Map<string, number>();
       for (const name of names) {
         const values = witnesses[name];
         if (!Array.isArray(values) || values.length === 0)
@@ -161,7 +167,7 @@ export function admitProjectResult(
         else {
           bound.set(name, sorted.slice(0, resultLimits.valuesPerWitness).join("; "));
           if (sorted.length > resultLimits.valuesPerWitness)
-            bound.set(`${name}Omitted`, sorted.length - resultLimits.valuesPerWitness);
+            omitted.set(name, sorted.length - resultLimits.valuesPerWitness);
         }
       }
       // Placeholders were validated against witness names by the compiler; a literal :why only
@@ -169,7 +175,17 @@ export function admitProjectResult(
       const text = pref.why.replace(/\{([^{}]*)\}/g, (_, k: string) => String(bound.get(k)));
       const facts: Record<string, Value> = Object.fromEntries(bound);
       const list = perAction.get(identity) ?? [];
-      list.push({ id: pref.id, priority, reason: { id: pref.id, priority, text, facts } });
+      list.push({
+        id: pref.id,
+        priority,
+        reason: {
+          id: pref.id,
+          priority,
+          text,
+          facts,
+          omitted: Object.fromEntries(omitted),
+        },
+      });
       perAction.set(identity, list);
     }
   }
