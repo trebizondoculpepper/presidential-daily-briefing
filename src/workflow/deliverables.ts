@@ -416,11 +416,32 @@ const submitPlan = (agent: string): { remove: string[]; add: string[] } => ({
 /** The reason `claim --rework` gives its `membership open` record (doc "Rework authority"). */
 export const reworkReason = "rework claim";
 
-/** The label plan a reset `--as` writes, shared by the reset step and retry detection. */
+/**
+ * The label plan a reset `--as` writes (doc/design/reset-readiness.md): remove the review label and
+ * the opposite readiness label, add the target, so the result is exactly the target (#276).
+ */
 const resetPlan = (as: DeliverablesRequest["as"]): { remove: string[]; add: string[] } => ({
+  remove: [claimPolicy.awaitingReview, as === "ready" ? claimPolicy.incomplete : workflow.ready],
+  add: [as === "ready" ? workflow.ready : claimPolicy.incomplete],
+});
+/** The plan resets wrote before #276: it removed only the review label. Recognised, never written. */
+const legacyResetPlan = (as: DeliverablesRequest["as"]): { remove: string[]; add: string[] } => ({
   remove: [claimPolicy.awaitingReview],
   add: [as === "ready" ? workflow.ready : claimPolicy.incomplete],
 });
+const samePlan = (
+  a: { remove: string[]; add: string[] },
+  b: { remove: string[]; add: string[] },
+): boolean => JSON.stringify([a.remove, a.add]) === JSON.stringify([b.remove, b.add]);
+/**
+ * The `--as` target a recorded reset plan was written for, when it is the current or the legacy
+ * plan for that target; null for any other plan. Retry identity compares this, so a reset recorded
+ * before #276 is still recognised as the same request (doc "Preserve old request identity").
+ */
+export const resetTarget = (plan: { remove: string[]; add: string[] } | undefined) =>
+  (["ready", "incomplete"] as const).find(
+    (as) => !!plan && (samePlan(plan, resetPlan(as)) || samePlan(plan, legacyResetPlan(as))),
+  ) ?? null;
 
 /** The readiness labels a reset chooses between; exactly one is the target of any reset plan. */
 const readinessLabels: readonly string[] = [workflow.ready, claimPolicy.incomplete];
@@ -538,7 +559,14 @@ const resetNeutralOps: ReadonlySet<DeliveryOp> = new Set([
 ]);
 /** Whether a folded record is the one this request would write (retry detection). */
 const sameRequest = (rec: DeliveryRecord, want: Partial<DeliveryRecord> & { op: DeliveryOp }) =>
-  rec.op === want.op && defining(rec) === defining(want);
+  rec.op === want.op &&
+  (defining(rec) === defining(want) ||
+    // A reset is the same request when it was for the same agent and target, whichever plan
+    // generation wrote it; its own recorded plan, never a regenerated one, is then applied.
+    (rec.op === "reset" &&
+      rec.agent === want.agent &&
+      resetTarget(rec.plan) !== null &&
+      resetTarget(rec.plan) === resetTarget(want.plan)));
 
 /**
  * Plan one `deliverables` command. Reads only; `applyDeliverables` performs the writes.
@@ -906,6 +934,15 @@ export async function planDeliverables(
         ]
       : [];
   };
+  /**
+   * The unsupported-operation `gh` fallback that sets the readiness a reset was for, shown after
+   * inspection and never run (doc "Preserve old request identity and plans").
+   */
+  const legacyCorrection = (plan: { add: string[] }): string => {
+    const target = plan.add[0] ?? workflow.ready;
+    const other = target === workflow.ready ? claimPolicy.incomplete : workflow.ready;
+    return `gh issue edit ${number} --repo ${repository} --remove-label ${other} --add-label ${target}`;
+  };
   const noop = (reason: string): DeliverablesAccepted => ({
     ok: true,
     noop: true,
@@ -1032,9 +1069,23 @@ export async function planDeliverables(
       const observed = ownRecord.observedLabels;
       const added = plan.add.filter((l) => labels.includes(l));
       const removed = plan.remove.filter((l) => !labels.includes(l));
+      const current = resetObserved(labels);
+      // Without its starting state, an old record counts as applied only when the relevant labels
+      // are exactly its target; anything else is unknown and refused below, never guessed.
       const done = observed
-        ? sameSet(resetObserved(labels), resetPlanResult(plan, observed))
-        : added.length === plan.add.length && removed.length === plan.remove.length;
+        ? sameSet(current, resetPlanResult(plan, observed))
+        : sameSet(current, resetObserved(plan.add)) &&
+          added.length === plan.add.length &&
+          removed.length === plan.remove.length;
+      // A completed pre-#276 plan can leave both readiness labels. That is a finished historical
+      // operation, not a pending one: report it and change nothing (doc "Preserve old request").
+      if (done && !sameSet(current, resetObserved(plan.add)))
+        return refuse(
+          "DELIVERY_DIVERGED",
+          facts,
+          `${where} and applied, but it was written before reset removed the opposite readiness label, so the ticket now carries ${current.join(", ")}. The old plan is complete and is not extended or replayed, and no second reset is posted. Inspect current claims and responsibility, then correct the labels deliberately.`,
+          [inspect, cmd(`who ${number}`), legacyCorrection(plan)],
+        );
       if (done) return noop(`Reset already recorded (comment ${own.comment}) and applied.`);
       // Completing the plan is allowed only while it is provably unapplied: the relevant labels
       // are the reset's recorded starting state, or that state with only some removals made.
@@ -1047,7 +1098,7 @@ export async function planDeliverables(
           observed
             ? `${where} but its plan (${pending}) is no longer pending: the ticket now carries ${resetObserved(labels).join(", ") || "no readiness or review label"}, which is neither its recorded starting state (${resetObserved(observed).join(", ") || "none"}) nor a partial application of it, so readiness was most likely changed afterwards without a delivery record. Its stale labels are not re-applied and others' changes are never reverted. Inspect the ticket; if a reset is still wanted, run it again deliberately so it is decided against the current labels.`
             : `${where} but its plan (${pending}) is not applied, and the record does not state the labels it started from, so a pending plan cannot be told apart from later changes. Its labels are not applied and others' changes are never reverted. Inspect the ticket and set the readiness labels by hand, or run a new reset deliberately.`,
-          [inspect, cmd(`who ${number}`), retry],
+          [inspect, cmd(`who ${number}`), ...(observed ? [] : [legacyCorrection(plan)]), retry],
         );
       // Finishing the plan is a write, so the reset's live prerequisites are checked again: a
       // claim or open PR that appeared since the record was posted blocks the labels too.
@@ -1707,7 +1758,8 @@ named pull requests, folds the trusted delivery records, then posts one record c
               into its target (ATTEST_NOT_APPLICABLE otherwise)
   reassign    Maintainer override: make another agent responsible (no claim may be held)
   reset       Maintainer override: end responsibility and return the ticket to ready or
-              incomplete; refused RESET_HAS_OPEN_PR while an open PR links or closes the issue
+              incomplete (removes status:awaiting-review and the other readiness label);
+              refused RESET_HAS_OPEN_PR while an open PR links or closes the issue
   void        Maintainer override: exclude one malformed trusted record (VOID_NOT_APPLICABLE
               for anything else)
 The authenticated account must have write, maintain or admin permission (MARKER_UNVERIFIED).
