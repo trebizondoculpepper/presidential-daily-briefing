@@ -306,7 +306,7 @@ const commentFields =
  * as lacking authority (ignored, with a warning); `unknown` could not be established (refused).
  */
 export type Authority = { status: "trusted" } | { status: "untrusted" | "unknown"; why: string };
-async function actorAuthority(
+export async function actorAuthority(
   actor: Actor | null | undefined,
   role: string,
   permission: PermissionLookup,
@@ -383,6 +383,9 @@ const markerId = (parts: unknown[]): string =>
   createHash("sha256").update(JSON.stringify(parts)).digest("hex").slice(0, 16);
 const marker = (kind: string, parts: unknown[]): string =>
   `<!-- github-triage:${kind}:${markerId(parts)} -->`;
+/** The claim marker `pdb claim` posts for this agent on this ticket (verifies a reported agent). */
+export const claimMarkerFor = (repository: string, number: number, agent: string): string =>
+  marker("claim", [repository, number, agent]);
 
 /** Prefix of every needs-human question marker, v1 and v2. */
 export const questionMarkerPrefix = "<!-- github-triage:needs-human:";
@@ -441,7 +444,7 @@ export function parseQuestionMarker(body: string): ParsedQuestionMarker | null {
 }
 
 /** A release's durable intent, recorded in its handoff comment before labels change. */
-interface ReleaseRecord {
+export interface ReleaseRecord {
   v: 1;
   agent: string;
   outcome: ReleaseOutcome;
@@ -478,7 +481,7 @@ function releaseRecords(comments: Comment[], op: string): ReleaseRecord[] {
   return records.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 }
 /** Every parsable release record on the issue, oldest first, whoever made it. */
-function allReleases(comments: Comment[]): ReleaseRecord[] {
+export function allReleases(comments: Comment[]): ReleaseRecord[] {
   const records: ReleaseRecord[] = [];
   for (const c of comments) {
     for (const m of c.body.matchAll(/<!-- github-triage:release:[0-9a-f]+ /g)) {
@@ -537,6 +540,28 @@ function labelSteps(
 
 /** Older label-event pages read at most, so a long label history costs a bounded number of requests. */
 const claimHistoryPages = 3;
+type TimelinePage<E> = {
+  nodes: E[];
+  pageInfo?: { hasPreviousPage?: boolean; startCursor?: string | null };
+};
+const labelEventFields =
+  "__typename ... on LabeledEvent{createdAt label{name}} ... on UnlabeledEvent{createdAt label{name}}";
+/** One page of an issue's timeline (newest `last:100` before `before`), or null when unreadable. */
+async function timelinePage<E>(
+  repository: string,
+  number: number,
+  itemTypes: string,
+  fields: string,
+  before: string | null,
+  query: GraphQuery,
+): Promise<TimelinePage<E> | null> {
+  const [owner, name] = repository.split("/");
+  const data = (await query(
+    `query($owner:String!,$name:String!,$number:Int!${before ? ",$before:String!" : ""}){repository(owner:$owner,name:$name){issue(number:$number){timelineItems(itemTypes:[${itemTypes}],last:100${before ? ",before:$before" : ""}){nodes{${fields}} pageInfo{hasPreviousPage startCursor}}}}}`,
+    { owner, name, number, ...(before ? { before } : {}) },
+  )) as { repository: { issue: { timelineItems: TimelinePage<E> } | null } | null };
+  return data.repository?.issue?.timelineItems ?? null;
+}
 /**
  * When `ownerLabel` was last added: the identity of the caller's current claim. Pages backwards
  * through label history (bounded) when the add event is not in `readTicket`'s window. `since` is
@@ -561,27 +586,96 @@ export async function claimStart(
   let events = item.timelineItems?.nodes ?? [];
   let info = item.timelineItems?.pageInfo;
   let since = latestAdd(events);
-  const [owner, name] = repository.split("/");
   for (
     let pageNo = 0;
     !since && info?.hasPreviousPage && info.startCursor && pageNo < claimHistoryPages;
     pageNo++
   ) {
-    const data = (await query(
-      `query($owner:String!,$name:String!,$number:Int!,$before:String!){repository(owner:$owner,name:$name){issue(number:$number){timelineItems(itemTypes:[LABELED_EVENT,UNLABELED_EVENT],last:100,before:$before){nodes{__typename ... on LabeledEvent{createdAt label{name}} ... on UnlabeledEvent{createdAt label{name}}} pageInfo{hasPreviousPage startCursor}}}}}`,
-      { owner, name, number, before: info.startCursor },
-    )) as {
-      repository: {
-        issue: { timelineItems: NonNullable<TicketIssue["timelineItems"]> } | null;
-      } | null;
-    };
-    const older = data.repository?.issue?.timelineItems;
+    const older = await timelinePage<LabelEvent>(
+      repository,
+      number,
+      "LABELED_EVENT,UNLABELED_EVENT",
+      labelEventFields,
+      info.startCursor,
+      query,
+    );
     if (!older) break;
     events = [...older.nodes, ...events];
     info = older.pageInfo;
     since = latestAdd(older.nodes);
   }
   return { since, complete: !info?.hasPreviousPage, events };
+}
+
+/**
+ * One event of a ticket's label and closure history (#573), with the actor whose authority
+ * decides whether a label add counts as a pickup. `actor` undefined means it was not read.
+ */
+export type HistoryEvent =
+  | {
+      __typename: "LabeledEvent" | "UnlabeledEvent";
+      createdAt: string;
+      label: { name: string };
+      actor?: Actor | null;
+    }
+  | {
+      __typename: "ClosedEvent";
+      createdAt: string;
+      stateReason?: string | null;
+      actor?: Actor | null;
+    }
+  | { __typename: "ReopenedEvent"; createdAt: string; actor?: Actor | null };
+const actorFields = "actor{__typename login}";
+const historyEventFields = `__typename ... on LabeledEvent{createdAt label{name} ${actorFields}} ... on UnlabeledEvent{createdAt label{name} ${actorFields}} ... on ClosedEvent{createdAt stateReason ${actorFields}} ... on ReopenedEvent{createdAt ${actorFields}}`;
+/** A bounded read of a ticket's label and closure timeline. */
+export interface TicketHistory {
+  /** Oldest first. */
+  events: HistoryEvent[];
+  /** False when older pages remain past the bound or a page could not be read. */
+  complete: boolean;
+  /** Requests made, at most 1 + `claimHistoryPages`. */
+  pages: number;
+}
+/**
+ * A ticket's label and closure timeline (`LabeledEvent`, `UnlabeledEvent`, `ClosedEvent`,
+ * `ReopenedEvent`), newest page first and then backwards within the same bound as `claimStart`.
+ * `complete: false` means earlier events may exist unseen: closures and pickups before the
+ * oldest event read are unknown, never absent.
+ */
+export async function ticketHistory(
+  repository: string,
+  number: number,
+  query: GraphQuery,
+): Promise<TicketHistory> {
+  const types = "LABELED_EVENT,UNLABELED_EVENT,CLOSED_EVENT,REOPENED_EVENT";
+  const first = await timelinePage<HistoryEvent>(
+    repository,
+    number,
+    types,
+    historyEventFields,
+    null,
+    query,
+  );
+  if (!first) return { events: [], complete: false, pages: 1 };
+  let events = first.nodes;
+  let info = first.pageInfo;
+  let pages = 1;
+  for (let pageNo = 0; info?.hasPreviousPage && pageNo < claimHistoryPages; pageNo++) {
+    if (!info.startCursor) break;
+    const older = await timelinePage<HistoryEvent>(
+      repository,
+      number,
+      types,
+      historyEventFields,
+      info.startCursor,
+      query,
+    );
+    pages++;
+    if (!older) return { events, complete: false, pages };
+    events = [...older.nodes, ...events];
+    info = older.pageInfo;
+  }
+  return { events, complete: !info?.hasPreviousPage, pages };
 }
 
 /** Older comment pages read at most, so a long discussion costs a bounded number of requests. */
