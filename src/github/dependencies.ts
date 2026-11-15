@@ -12,6 +12,8 @@ import {
 } from "./github.js";
 import type { Query } from "./github.js";
 import type { Issue, NativeNode, Reference } from "./types.js";
+import { ReadMeter } from "./readplan.js";
+import type { ReadCollection } from "./readplan.js";
 
 const execute = promisify(execFile);
 const pageInfo = "pageInfo { hasNextPage endCursor }";
@@ -154,6 +156,11 @@ export interface DependencyReport {
    * #373): known only from the edge, never walked. Absent when nothing was skipped.
    */
   unfollowed?: { repository: string; number: number }[];
+  /**
+   * Profile, per-source coverage and cost of this read (#367). Discussion, reviews and linked
+   * pull requests are `not-requested`: the report says nothing about them.
+   */
+  collection?: ReadCollection;
 }
 /**
  * Read one ticket's native dependencies; with `tree`, walk upstream and downstream
@@ -171,6 +178,13 @@ export async function dependencyReport(
   now: () => Date = () => new Date(),
 ): Promise<DependencyReport> {
   const startedAt = now().toISOString();
+  const meter = new ReadMeter(
+    "issue-detail-v1",
+    tree ? "deps-tree" : "deps",
+    now,
+    undefined,
+    signal,
+  );
   const nodes = new Map<string, DependencyFacts>();
   const pending: [string, number][] = [[repository, number]];
   const unfollowed = new Map<string, { repository: string; number: number }>();
@@ -180,11 +194,26 @@ export async function dependencyReport(
     if (nodes.has(key)) continue;
     if (follow && !follow(repo)) {
       unfollowed.set(key, { repository: repo, number: n });
+      meter.cover("issue", key, "not-requested", { omission: "repository not served; not read" });
       continue;
     }
     signal?.throwIfAborted();
-    const item = await readDependencyIssue(repo, n, query);
+    const item = await readDependencyIssue(repo, n, meter.query(query, "issue", key));
     nodes.set(key, dependencyFacts(item, repo));
+    // completeNative throws unless both edge lists match their totals, so they are complete.
+    meter.cover("issue", key, "complete");
+    meter.cover(
+      "labels",
+      key,
+      item.labels.pageInfo.hasNextPage ? "partial" : "complete",
+      item.labels.pageInfo.hasNextPage ? { omission: "labels beyond the first 100" } : {},
+    );
+    meter.cover("native-blocked-by", key, "complete");
+    meter.cover("native-blocking", key, "complete");
+    for (const source of ["comments", "linked-pull-requests"])
+      meter.cover(source, key, "not-requested", {
+        omission: "not read by a dependency report",
+      });
     if (tree)
       for (const ref of [...item.blockedBy.nodes, ...item.blocking.nodes])
         pending.push([ref.repository.nameWithOwner, ref.number]);
@@ -218,6 +247,7 @@ export async function dependencyReport(
     guidance:
       "Native blockers are authoritative. Closed blockers do not prove behavior was delivered. Body drift is migration context only.",
     ...(unfollowed.size ? { unfollowed: [...unfollowed.values()] } : {}),
+    collection: meter.collection(),
   };
 }
 export function dependencyText(report: DependencyReport): string {

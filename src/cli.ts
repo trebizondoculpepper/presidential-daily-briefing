@@ -593,6 +593,7 @@ const deliveryBoundaries = (runtime: Runtime, repository: string, offline: boole
   !offline && runtime.rest && runtime.query
     ? {
         trust: markerTrust(permissionLookup(repository, runtime.rest)),
+        trustWith: (rest: Rest) => markerTrust(permissionLookup(repository, rest)),
         live: { query: runtime.query, rest: runtime.rest },
       }
     : {};

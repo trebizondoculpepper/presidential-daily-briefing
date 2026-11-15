@@ -112,6 +112,11 @@ export type Snapshot = {
     github?: import("./evidence.js").AttemptSummary;
   };
   rateLimit: { remaining: number; resetAt: string } | null;
+  /**
+   * Read profile, per-source coverage and cost (#367). A focused profile is not a repository
+   * inventory; absent in snapshots that predate it.
+   */
+  collection?: import("./readplan.js").ReadCollection;
 };
 export type Action = {
   rule: string;
