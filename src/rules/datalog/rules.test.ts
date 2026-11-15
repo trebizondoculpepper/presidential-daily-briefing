@@ -159,17 +159,12 @@ describe("rule runner outcome categories (#348)", () => {
     // Recorded, not hidden: #340 adds scenarios for these.
     expect(missing).toEqual(missingToday);
   });
+
+  it("asserts every denial rule in at least one scenario (#340)", () => {
+    const asserted = new Set(scenarios.flatMap(([, s]) => s.expect.denials.map(([, id]) => id)));
+    expect(Object.keys(policy.denials).filter((id) => !asserted.has(id))).toEqual([]);
+  });
 });
 
-/** Rules no scenario selects yet; shrinking this list is #340's work. */
-const missingToday: string[] = [
-  "D-PR-REVIEW",
-  "D-PR-CONFLICT",
-  "D-PR-INTEGRATE",
-  "D-DOCUMENT",
-  "D-DESIGN-REVIEW",
-  "D-OWN-EASY",
-  "D-BAD-COMPLEXITY",
-  "D-BAD-IMPACT",
-  "D-OWN-UNFAVORABLE",
-];
+/** Rules no scenario selects yet; #340 covered the last of them, so any new rule needs a scenario. */
+const missingToday: string[] = [];

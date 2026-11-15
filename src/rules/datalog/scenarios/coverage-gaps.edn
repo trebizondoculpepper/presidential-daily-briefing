@@ -1,0 +1,128 @@
+;; Coverage scenarios from the #340 audit (doc/reports/rule-test-coverage-audit.md): one case per
+;; decision rule or denial that no other scenario selected. Each was written from the rule's stated
+;; intent, run through the real engine, and checked against that intent before being recorded.
+;; Expectations are exhaustive, as in policy-cases.edn.
+{:suite "coverage-gaps"
+ :scenarios
+ [
+ {:id "pr-changes-requested-is-review-follow-up"
+  :doc "A PR with requested changes and otherwise passing checks asks for review follow-up, not merge (D-PR-REVIEW)."
+  :viewer {:role "implementer"}
+  :facts [{:e 1 "forward-complete" true}
+          {:e 100 "kind" "pr" "state" "OPEN" "number" 2 "target" "https://github.com/o/r/pull/2" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "head2" "draft" false "pr-complete" true "review-decision" "" "mergeable" "MERGEABLE" "merge-state" "CLEAN" "check" 101 "thread" 102}
+          {:e 101 "name" "verify" "outcome" "SUCCESS"}
+          {:e 102 "resolved" false}]
+  :expect {:actions [{:subject 100 :rule "D-PR-REVIEW" :kind "pr-follow-up" :band 2
+              :why "PR has unresolved review findings at head head2."
+              :facts {"impact" "unknown" "complexity" "unknown" "impactState" "unknown" "complexityState" "unknown" "head" "head2" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "reviewDecision" "" "unresolvedThreads" "unresolved"}
+              :overridden [] :unlocks 0 :unknown [] :other-claims []}]
+           :denials #{}}}
+
+ {:id "pr-merge-conflict-is-follow-up"
+  :doc "A conflicting PR asks for conflict resolution (D-PR-CONFLICT)."
+  :viewer {:role "implementer"}
+  :facts [{:e 1 "forward-complete" true}
+          {:e 100 "kind" "pr" "state" "OPEN" "number" 2 "target" "https://github.com/o/r/pull/2" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "head2" "draft" false "pr-complete" true "review-decision" "" "mergeable" "CONFLICTING" "merge-state" "DIRTY" "check" 101}
+          {:e 101 "name" "verify" "outcome" "SUCCESS"}]
+  :expect {:actions [{:subject 100 :rule "D-PR-CONFLICT" :kind "pr-follow-up" :band 2
+              :why "PR has merge conflicts at head head2."
+              :facts {"impact" "unknown" "complexity" "unknown" "impactState" "unknown" "complexityState" "unknown" "head" "head2" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "mergeable" "CONFLICTING"}
+              :overridden [] :unlocks 0 :unknown [] :other-claims []}]
+           :denials #{}}}
+
+ {:id "accepted-pr-behind-base-needs-integration"
+  :doc "An accepted PR (verify passed, head approved, no findings) whose branch is behind asks to update and recheck, not merge (D-PR-INTEGRATE)."
+  :viewer {:role "implementer"}
+  :facts [{:e 1 "forward-complete" true}
+          {:e 100 "kind" "pr" "state" "OPEN" "number" 2 "target" "https://github.com/o/r/pull/2" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "head2" "draft" false "pr-complete" true "review-decision" "" "mergeable" "MERGEABLE" "merge-state" "BEHIND" "check" 101 "review" 102}
+          {:e 101 "name" "verify" "outcome" "SUCCESS"}
+          {:e 102 "review-state" "APPROVED" "review-commit" "head2"}]
+  :expect {:actions [{:subject 100 :rule "D-PR-INTEGRATE" :kind "pr-follow-up" :band 2
+              :why "Accepted at head head2 (verify passed, head reviewed, no fetched findings) but merge state is BEHIND, mergeable MERGEABLE; refresh mergeability or update the branch, then recheck before considering merge."
+              :facts {"impact" "unknown" "complexity" "unknown" "impactState" "unknown" "complexityState" "unknown" "head" "head2" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "mergeable" "MERGEABLE" "mergeState" "BEHIND" "verify" "SUCCESS"}
+              :overridden [] :unlocks 0 :unknown [] :other-claims []}]
+           :denials #{}}}
+
+ {:id "designer-documents-an-agreed-decision"
+  :doc "A designer is asked to document a ticket marked design:documentation-needed (D-DOCUMENT)."
+  :viewer {:role "designer"}
+  :facts [{:e 1 "forward-complete" true}
+          {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "head" "not-a-pr" "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "label" ["status:ready" "design:documentation-needed"]}]
+  :expect {:actions [{:subject 100 :rule "D-DOCUMENT" :kind "document" :band 3
+              :why "An agreed decision needs documentation before implementation."
+              :facts {"impact" "M" "complexity" "M" "impactState" "current" "complexityState" "current" "head" "not-a-pr" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "readiness" "status:ready" "documentationLabel" "design:documentation-needed"}
+              :overridden [] :unlocks 0 :unknown [] :other-claims []}]
+           :denials #{}}}
+
+ {:id "designer-reviews-a-documentation-pr"
+  :doc "A designer is asked to review a documentation PR they are not responsible for (D-DESIGN-REVIEW)."
+  :viewer {:role "designer" :agent "me"}
+  :facts [{:e 1 "forward-complete" true}
+          {:e 100 "kind" "pr" "state" "OPEN" "number" 2 "target" "https://github.com/o/r/pull/2" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "head2" "draft" false "pr-complete" true "review-decision" "" "mergeable" "MERGEABLE" "merge-state" "CLEAN" "label" "documentation" "check" 101}
+          {:e 101 "name" "verify" "outcome" "SUCCESS"}]
+  :expect {:actions [{:subject 100 :rule "D-DESIGN-REVIEW" :kind "design-review" :band 3
+              :why "Review the design/documentation PR at head head2."
+              :facts {"impact" "unknown" "complexity" "unknown" "impactState" "unknown" "complexityState" "unknown" "head" "head2" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "designEvidence" "documentation"}
+              :overridden [] :unlocks 0 :unknown [] :other-claims []}]
+           :denials #{}}}
+
+ {:id "own-easy-win-is-continued-first"
+  :doc "The viewer's own claim on a known easy win (impact L, complexity S) is continued in band 4 (D-OWN-EASY)."
+  :viewer {:role "implementer" :agent "me"}
+  :facts [{:e 1 "forward-complete" true}
+          {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "head" "not-a-pr" "impact-state" "current" "impact-size" "L" "complexity-state" "current" "complexity-size" "S" "label" ["agent:me"] "owner" "me"}]
+  :expect {:actions [{:subject 100 :rule "D-OWN-EASY" :kind "continue-implementation" :band 4
+              :why "Continue your known easy win: impact L, complexity S."
+              :facts {"impact" "L" "complexity" "S" "impactState" "current" "complexityState" "current" "head" "not-a-pr" "labelsComplete" true "nativeComplete" true "openBlockers" 0}
+              :overridden ["D-OWN"] :unlocks 0 :unknown [] :other-claims []}]
+           :denials #{}}}
+
+ {:id "conflicting-complexity-is-inspected-not-estimated"
+  :doc "Conflicting complexity evidence asks an implementer to inspect, never to estimate over it (D-BAD-COMPLEXITY)."
+  :viewer {:role "implementer"}
+  :facts [{:e 1 "forward-complete" true}
+          {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "head" "not-a-pr" "impact-state" "current" "impact-size" "M" "complexity-state" "conflict" "complexity-size" "unknown" "label" "status:ready"}]
+  :expect {:actions [{:subject 100 :rule "D-BAD-COMPLEXITY" :kind "inspect-assessment" :band 5
+              :why "Complexity evidence is conflict; inspect and correct the labels or provenance."
+              :facts {"impact" "M" "complexity" "unknown" "impactState" "current" "complexityState" "conflict" "head" "not-a-pr" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "readiness" "status:ready"}
+              :overridden [] :unlocks 0 :unknown [] :other-claims []}
+            {:subject 100 :rule "D-ORDINARY" :kind "implement" :band 6
+              :why "Eligible implementation: impact M (current), complexity unknown (conflict)."
+              :facts {"impact" "M" "complexity" "unknown" "impactState" "current" "complexityState" "conflict" "head" "not-a-pr" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "readiness" "status:ready"}
+              :overridden [] :unlocks 0 :unknown [] :other-claims []}]
+           :denials #{}}}
+
+ {:id "invalid-impact-is-inspected-by-a-designer"
+  :doc "Invalid impact evidence asks a designer to inspect and correct it (D-BAD-IMPACT)."
+  :viewer {:role "designer"}
+  :facts [{:e 1 "forward-complete" true}
+          {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "head" "not-a-pr" "impact-state" "invalid" "impact-size" "unknown" "complexity-state" "current" "complexity-size" "M" "label" "status:ready"}]
+  :expect {:actions [{:subject 100 :rule "D-BAD-IMPACT" :kind "inspect-assessment" :band 5
+              :why "Impact evidence is invalid; inspect and correct the labels or provenance."
+              :facts {"impact" "unknown" "complexity" "M" "impactState" "invalid" "complexityState" "current" "head" "not-a-pr" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "readiness" "status:ready"}
+              :overridden [] :unlocks 0 :unknown [] :other-claims []}]
+           :denials #{}}}
+
+ {:id "own-unfavorable-work-is-reconsidered-last"
+  :doc "The viewer's own claim on unfavorable work (impact S, complexity XL) is continued only in band 7, with a reconsider prompt (D-OWN-UNFAVORABLE)."
+  :viewer {:role "implementer" :agent "me"}
+  :facts [{:e 1 "forward-complete" true}
+          {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "head" "not-a-pr" "impact-state" "current" "impact-size" "S" "complexity-state" "current" "complexity-size" "XL" "label" ["agent:me"] "owner" "me"}]
+  :expect {:actions [{:subject 100 :rule "D-OWN-UNFAVORABLE" :kind "continue-implementation" :band 7
+              :why "Your active work has impact S and complexity XL; reconsider or split before continuing."
+              :facts {"impact" "S" "complexity" "XL" "impactState" "current" "complexityState" "current" "head" "not-a-pr" "labelsComplete" true "nativeComplete" true "openBlockers" 0}
+              :overridden ["D-OWN"] :unlocks 0 :unknown [] :other-claims []}]
+           :denials #{}}}
+
+ {:id "an-open-closing-pr-denies-pickup"
+  :doc "A ready ticket that an open PR already closes is not offered for implementation (D-DENY-OPEN-PR)."
+  :viewer {:role "implementer"}
+  :facts [{:e 1 "forward-complete" true}
+          {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "head" "not-a-pr" "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "label" "status:ready"}
+          {:e 101 "kind" "pr" "state" "OPEN" "number" 2 "target" "https://github.com/o/r/pull/2" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "head2" "draft" false "pr-complete" true "review-decision" "" "mergeable" "MERGEABLE" "merge-state" "CLEAN" "closes" 100 "check" 102}
+          {:e 102 "name" "verify" "outcome" "FAILURE"}]
+  :expect {:actions [{:subject 101 :rule "D-PR-FAIL" :kind "pr-follow-up" :band 2
+              :why "PR checks failed at head head2; inspect and repair before merge."
+              :facts {"impact" "unknown" "complexity" "unknown" "impactState" "unknown" "complexityState" "unknown" "head" "head2" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "failedChecks" "verify:FAILURE"}
+              :overridden [] :unlocks 0 :unknown [] :other-claims []}]
+           :denials #{[100 "D-DENY-OPEN-PR"]}}}]}
