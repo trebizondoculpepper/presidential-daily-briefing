@@ -120,9 +120,27 @@ const repoFlag = (repository: string): string => ` --repo ${repository}`;
 const repositoryOf = (url: string, fallback: string): string =>
   /github\.com\/([^/]+\/[^/]+)\/issues\//.exec(url)?.[1] ?? fallback;
 
+/**
+ * The briefing's claim template, `commandTemplates.claim` in rules/datalog/commands.ts. Kept as
+ * a copy because importing that module here splits the lazily loaded evaluator chunk in the
+ * package; a test pins the two equal.
+ */
+export const claimTemplate = "pdb claim {number} --repo {repo} --agent {agent}{platformFlag}";
+/** The briefing's claim command, filled the same way (agent NAME when not given). */
+export function claimCommand(number: number, repository: string, agent?: string): string {
+  const facts: Record<string, string> = {
+    repo: repository,
+    number: String(number),
+    agent: agent ?? "NAME",
+    platformFlag: "",
+  };
+  return claimTemplate.replace(/\{(\w+)\}/g, (_, k: string) => facts[k] ?? "");
+}
+
 export function directImpact(
   report: DependencyReport,
   context: PickupContext = { prs: [] },
+  agent?: string,
 ): DirectImpact | null {
   const direct = report.direct;
   const node = report.nodes[0];
@@ -225,7 +243,7 @@ export function directImpact(
     nextAction: "",
     policy: finishFirst,
   };
-  result.nextAction = nextAction(result, subjectIssue, node.upstream, report.repository);
+  result.nextAction = nextAction(result, subjectIssue, node.upstream, report.repository, agent);
   return result;
 }
 
@@ -250,6 +268,7 @@ function nextAction(
     repository?: { nameWithOwner: string };
   }[],
   repository: string,
+  agent?: string,
 ): string {
   const n = `#${subject.number}`;
   const here = repositoryOf(subject.url, repository);
@@ -264,7 +283,7 @@ function nextAction(
   )
     return `A blocker of ${n} was closed as not planned; a person should verify whether the dependency still makes sense before anyone picks it up (pdb ticket ${subject.number}${repoFlag(here)}). When it completes, ${unlocks}.`;
   if (startNow.status === "eligible")
-    return `Start ${n}: claim it (pdb claim ${subject.number}${repoFlag(here)}) and implement it; ${unlocks}.`;
+    return `Start ${n}: claim it (${claimCommand(subject.number, here, agent)}) and implement it; ${unlocks}.`;
   if (openClosingPrs.length)
     return `Advance open PR ${openClosingPrs.map((p) => `#${p}`).join(", ")} for ${n} toward merge (PR follow-up, not new pickup); ${n} completes when its whole delivery merges, not at a first PR merge. Then ${unlocks}.`;
   const owners = subject.labels.nodes
