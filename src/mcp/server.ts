@@ -63,7 +63,7 @@ export interface McpOptions {
   project?: string;
   repo?: string;
   agent?: string;
-  /** Explicit `[agents.KEY]` entry of the project's agent-inbox.toml (read only). */
+  /** Explicit `[agents.KEY]` entry of the project's pdb.toml (legacy agent-inbox.toml fallback; read only). */
   entry?: string;
   /** Explicit supported harness selecting its entry (read only). */
   harness?: string;
@@ -120,7 +120,8 @@ Tools: triage_briefing, triage_issue, triage_dependencies, triage_events. Never 
   --repo owner/name     Default repository (a tool's repo argument wins)
   --agent NAME          Default agent for focused reads (a tool's agent argument wins)
   --entry KEY           Without an agent, read the name of [agents.KEY] in the project's
-                        root agent-inbox.toml (read only; never created or changed)
+                        root pdb.toml, else a legacy agent-inbox.toml entry reported as
+                        legacy-not-imported (read only; never created, imported or changed)
   --harness NAME        Without an agent or --entry, select that harness's entry
                         (claude, codex, ori); else the MCP client (ori-SERVER selects
                         ori.SERVER), else the detected harness; otherwise unfocused

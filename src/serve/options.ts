@@ -64,7 +64,7 @@ JSON API and HTTP MCP over one memory-only cache of collected GitHub facts. Requ
 authenticated gh and Node 26+. Never changes GitHub. Stop it with Ctrl-C.
   --repo owner/name     Serve this repository (repeatable)
   --project PATH        Serve the repository of this local checkout, and use its configuration
-                        and agent-inbox.toml for identity (repeatable)
+                        and pdb.toml for identity (repeatable)
                         At least one --repo or --project is required; the working directory is
                         never used to choose a repository.
   --port N              Port to listen on, 0-65535 (default ${DEFAULT_PORT}; 0 picks a free port)
@@ -74,7 +74,7 @@ authenticated gh and Node 26+. Never changes GitHub. Stop it with Ctrl-C.
                         who can reach it can read what your gh login can see
   --ttl DURATION        How long a collected result is reused, 1m to 10m (default 5m)
   --agent NAME          Default agent for focused reads (a request's agent wins)
-  --entry KEY           Without an agent, use [agents.KEY] of the project's agent-inbox.toml
+  --entry KEY           Without an agent, use [agents.KEY] of the project's pdb.toml
   --harness NAME        Without an agent or --entry, select that harness's entry
   --help                Show usage
 Routes (read-only; every data route accepts repo=owner/name and refresh=true):
