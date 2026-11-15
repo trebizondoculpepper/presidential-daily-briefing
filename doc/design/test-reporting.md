@@ -38,6 +38,28 @@ native JUnit output run through a small TypeScript wrapper (`scripts/ci-step.ts 
 COMMAND...`) that streams output unchanged and records the exit code, duration and a
 bounded tail (at most 60 lines, 8 KB) of combined output.
 
+### Rule outcome category demonstration (#394)
+
+The `rule outcome categories` step (`scripts/rules-categories.ts`, logic in
+`src/ci/rulecategories.ts`) runs the real rules runner, with `--scenarios DIR`, against
+deliberately broken inputs kept in `src/rules/datalog/category-demo/`. Each case must land
+in its category:
+
+| Case                                        | Expected                                               |
+| ------------------------------------------- | ------------------------------------------------------ |
+| a valid scenario with a wrong expectation   | exit 1, `<failure type="RuleDecisionFailure">`         |
+| malformed EDN (an unclosed map)             | exit 2, `<error type="RuleInfrastructureError">`       |
+| a scenario directory the runner cannot load | exit 2, `<error type="RuleInfrastructureError">`       |
+| a JUnit report the runner cannot write      | exit 2, no report, `RuleInfrastructureError` on stderr |
+
+Nothing of the other category may appear in a case's report. The step writes a table to the
+step summary on every platform and fails only on a miscategorization, so CI stays green while
+continuously showing the categories are distinct. Its JUnit goes to
+`reports/rules-categories/`, uploaded with the artifact. The summarizer reads only the
+required report files, so these demonstration failures are never counted as real ones. The
+production scenarios never include `category-demo/`, and `npm test` runs the same
+demonstration through `src/ci/rulecategories.test.ts`.
+
 The job uploads `reports/` with the official `actions/upload-artifact` under `if: always()`
 as `test-reports-<os>-node<version>`, retained 14 days, so reports survive a failing step.
 

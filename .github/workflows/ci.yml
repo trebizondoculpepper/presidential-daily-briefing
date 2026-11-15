@@ -48,6 +48,11 @@ jobs:
         run: npx tsx scripts/ci-step.ts check -- npm run check
       - name: rule decisions
         run: npx tsx scripts/ci-step.ts rules -- npm run rules:test -- --junit reports/junit-rules.xml
+      - name: rule outcome categories
+        # #394: deliberately broken rule inputs (a wrong decision, malformed EDN, runner faults)
+        # must each land in the right category. A demonstration, not production failures: it
+        # fails only on a miscategorization, and writes its table to the step summary.
+        run: npx tsx scripts/ci-step.ts rule-categories -- npx tsx scripts/rules-categories.ts
       - name: test
         # Naming reporters disables Vitest's automatic annotations, so github-actions is explicit.
         run: npx tsx scripts/ci-step.ts tests -- npx vp test run --reporter=default --reporter=github-actions --reporter=junit --outputFile.junit=reports/junit-tests.xml

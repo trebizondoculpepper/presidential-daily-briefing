@@ -1,0 +1,7 @@
+;; Category demonstration (#394): deliberately MALFORMED EDN (an unclosed map). The runner must
+;; report a RuleInfrastructureError (exit 2): no assertion was made, so it is not a wrong
+;; decision. Not a production fixture: only scripts/rules-categories.ts runs it.
+{:suite "category-demo-malformed"
+ :scenarios
+ [{:id "unclosed-map"
+   :viewer {:role "implementer"}
