@@ -16,17 +16,9 @@ const src = join(dirname(fileURLToPath(import.meta.url)), "..");
 /** Known groups, as module paths relative to src/ without the extension. */
 const known: string[][] = [
   ["github/dependencies", "github/github"],
-  [
-    "briefing/assessments",
-    "briefing/briefing",
-    "estimation/complexitylabels",
-    "estimation/estimate",
-    "estimation/estimation",
-    "workflow/claims",
-    "workflow/delivery",
-    "workflow/prstatus",
-    "workflow/reviewevidence",
-  ],
+  ["estimation/complexitylabels", "estimation/estimate", "estimation/estimation"],
+  // reviewevidence imports prstatus for types only.
+  ["workflow/prstatus", "workflow/reviewevidence"],
   // pdb serve (#373): the serve/* modules import types from serve.ts; #445 breaks it.
   ["serve", "serve/api", "serve/cache", "serve/mcp", "serve/services"],
 ];
