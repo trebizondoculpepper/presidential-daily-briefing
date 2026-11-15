@@ -27,6 +27,8 @@ const known: string[][] = [
     "workflow/prstatus",
     "workflow/reviewevidence",
   ],
+  // pdb serve (#373): the serve/* modules import types from serve.ts; #445 breaks it.
+  ["serve", "serve/api", "serve/cache"],
 ];
 
 /** Non-test TypeScript modules: no tests, no declaration files, nothing from src/testing/. */
