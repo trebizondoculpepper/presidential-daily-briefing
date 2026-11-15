@@ -11,9 +11,16 @@
  */
 import { randomBytes } from "node:crypto";
 import * as nodeFs from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import envPaths from "env-paths";
-import { acquireFileLock, type LockFs } from "../config/filelock.js";
+import {
+  acquireFileLock,
+  releaseProblem,
+  stuckLockMessage,
+  type LockFs,
+  type ReleaseOutcome,
+} from "../config/filelock.js";
+import { nodeSafeFs } from "../config/safejson.js";
 import {
   checkForUpdate,
   type CheckOptions,
@@ -29,8 +36,6 @@ export const cacheSchemaVersion = 1;
 export const cacheFileName = "update-check.json";
 /** Refresh interval for lookups (successful or failed) and for repeating a notice. */
 export const refreshMs = 24 * 60 * 60 * 1000;
-/** A lock older than this is from a crashed or stuck process and may be broken. */
-export const lockStaleMs = 10_000;
 /** How long an invocation waits for another one's lock before skipping the optional check. */
 export const lockWaitMs = 250;
 const lockPollMs = 25;
@@ -101,35 +106,34 @@ export async function readCache(fs: CacheFs, file: string): Promise<UpdateCache>
 /** Write to a unique temporary file, then rename over the cache: readers never see half a file. */
 async function writeCache(fs: CacheFs, file: string, cache: UpdateCache): Promise<void> {
   const temp = `${file}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
+  const text = JSON.stringify(cache, null, 2) + "\n";
+  // #382: on the real filesystem the temporary file is private, exclusive and synced before the
+  // rename, and the directory is synced after it (best effort: this cache is optional state).
+  const real = fs === nodeFs;
   try {
-    await fs.writeFile(temp, JSON.stringify(cache, null, 2) + "\n", { flag: "wx" });
+    if (real) await nodeSafeFs.createSynced(temp, text);
+    else await fs.writeFile(temp, text, { flag: "wx" });
     await fs.rename(temp, file);
   } catch (error) {
     await fs.unlink(temp).catch(() => {});
     throw error;
   }
+  if (real) await nodeSafeFs.syncDirectory(dirname(file)).catch(() => {});
 }
 
 /**
- * Take the cache lock, waiting at most `lockWaitMs` and breaking a lock older than
- * `lockStaleMs`. Returns a release function, or null when the lock could not be taken safely
- * (the caller then skips the optional check). Semantics: `src/config/filelock.ts`; the worst case of
- * its accepted race here is a duplicate registry request and notice with last-writer-wins
- * atomic cache replacement.
+ * Take the cache lock, waiting at most `lockWaitMs`. A lock is never broken by age (#382,
+ * doc/design/safe-shared-file-writes.md): a held or stuck lock makes the optional check skip
+ * honestly ("busy") rather than take over another writer's lock. Returns a release function
+ * reporting what it found, or null. Semantics: `src/config/filelock.ts`.
  */
 export function acquireLock(
   fs: LockFs,
   lock: string,
   now: () => number,
   sleep: (ms: number) => Promise<void>,
-): Promise<(() => Promise<void>) | null> {
-  return acquireFileLock(
-    fs,
-    lock,
-    { waitMs: lockWaitMs, staleMs: lockStaleMs, pollMs: lockPollMs },
-    now,
-    sleep,
-  );
+): Promise<(() => Promise<ReleaseOutcome>) | null> {
+  return acquireFileLock(fs, lock, { waitMs: lockWaitMs, pollMs: lockPollMs }, now, sleep);
 }
 
 const within = (iso: string | undefined, now: number) => {
@@ -167,8 +171,13 @@ export async function cachedCheckForUpdate({
   const file = join(dir, cacheFileName);
   // The lock is judged by the wall clock that stamps file mtimes, not the injected cache clock.
   const release = await acquireLock(fs, join(dir, `${cacheFileName}.lock`), Date.now, sleep);
-  if (!release) return unavailable("update cache busy or not writable; check skipped");
-  try {
+  const lockPath = join(dir, `${cacheFileName}.lock`);
+  if (!release)
+    return unavailable(
+      `update cache busy or not writable; check skipped. If no other pdb is running, ${stuckLockMessage(lockPath)}`,
+    );
+  // The lock is released exactly once, around every path out of the locked work (#382).
+  const locked = async (): Promise<UpdateCheckResult> => {
     // Re-read under the lock: a concurrent invocation may have just refreshed it.
     const cache = await readCache(fs, file);
     const state: ChannelState = { ...cache.channels[channel] };
@@ -221,9 +230,18 @@ export async function cachedCheckForUpdate({
       if (result.status === "newer") result = { ...result, notify: false };
     }
     return result;
-  } finally {
+  };
+  let outcome: UpdateCheckResult;
+  try {
+    outcome = await locked();
+  } catch (error) {
+    // The primary failure stands; a cleanup problem never replaces it.
     await release();
+    throw error;
   }
+  // A lock this check could not remove blocks later checks: report it with the result.
+  const problem = releaseProblem(lockPath, await release());
+  return problem ? { ...outcome, lockProblem: problem } : outcome;
 
   function unavailable(reason: string): UpdateCheckResult {
     return { status: "unknown", reason, installed: installed.version, channel };

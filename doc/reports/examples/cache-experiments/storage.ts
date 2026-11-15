@@ -647,7 +647,7 @@ export async function storeSnapshot(
   } catch (e) {
     return failed(e);
   }
-  let release: (() => Promise<void>) | null = null;
+  let release: (() => Promise<unknown>) | null = null;
   const started = lockNow();
   try {
     step = "lock";

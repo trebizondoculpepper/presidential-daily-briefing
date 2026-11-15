@@ -25,7 +25,17 @@ export interface BriefingFiles {
   /** Recorded `through` of a valid checkpoint, undefined when the file is missing. */
   checkpointSince: (path: string, repository: string) => Promise<string | undefined>;
   cachedSnapshot: (path: string, repository: string | undefined) => Promise<Snapshot>;
-  atomicJson: (path: string, value: unknown) => Promise<void>;
+  atomicJson: (path: string, value: unknown) => Promise<unknown>;
+  /** #382: locked, monotonic checkpoint advance (src/config/safejson.ts); else `atomicJson`. */
+  advanceCheckpoint?: (
+    path: string,
+    checkpoint: { schemaVersion: 1; repository: string; through: string },
+  ) => Promise<{ status: string; reason?: string; cleanup: string[] }>;
+  /** #382: locked snapshot cache write that never replaces a newer snapshot; else `atomicJson`. */
+  writeSnapshotCache?: (
+    path: string,
+    snapshot: Snapshot,
+  ) => Promise<{ status: string; reason?: string; cleanup: string[] }>;
   /** Where a path really lands; defaults to the real filesystem (`fileIdentity`). */
   identity?: (path: string) => Promise<FileIdentity>;
 }
@@ -367,7 +377,13 @@ async function deliver(
       };
     else if (options.cache) {
       try {
-        await files.atomicJson(options.cache, snapshot);
+        if (files.writeSnapshotCache) {
+          const outcome = await files.writeSnapshotCache(options.cache, snapshot);
+          for (const note of outcome.cleanup) stderr(`pdb: ${note}\n`);
+          // A newer snapshot already cached is kept, honestly; anything else unwritten refuses.
+          if (outcome.status === "kept") stderr(`pdb: ${outcome.reason}\n`);
+          else if (outcome.status !== "written") throw new Error(outcome.reason ?? outcome.status);
+        } else await files.atomicJson(options.cache, snapshot);
       } catch (error) {
         throw new FileRefusal(
           "cache",
@@ -428,11 +444,25 @@ async function deliver(
   await output(text);
   if (!options.offline && options.checkpoint && complete) {
     try {
-      await files.atomicJson(options.checkpoint, {
-        schemaVersion: 1,
+      // `complete` means the candidate is set (it is computed from the same report).
+      const checkpoint = {
+        schemaVersion: 1 as const,
         repository: snapshot.repository,
-        through: built.checkpoint.candidate,
-      });
+        through: built.checkpoint.candidate as string,
+      };
+      if (files.advanceCheckpoint) {
+        // Monotonic under the checkpoint's own lock: an older run never moves it back.
+        const outcome = await files.advanceCheckpoint(options.checkpoint, checkpoint);
+        for (const note of outcome.cleanup) stderr(`pdb: ${note}\n`);
+        // The new cursor is already in place: never report it as not advanced or rolled back.
+        if (outcome.status === "committed-with-error") {
+          stderr(
+            `pdb: checkpoint ${options.checkpoint} was advanced to ${checkpoint.through}, but ${outcome.reason ?? "its durability is unconfirmed"}. The next run reads the new checkpoint.\n`,
+          );
+          return 2;
+        }
+        if (outcome.status === "not-written") throw new Error(outcome.reason ?? outcome.status);
+      } else await files.atomicJson(options.checkpoint, checkpoint);
     } catch (error) {
       // The report is already on stdout; never append a second JSON object there.
       stderr(

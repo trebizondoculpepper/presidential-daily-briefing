@@ -367,23 +367,25 @@ describe("daily cached version check (#65, doc/design/updates.md)", () => {
     });
   });
 
-  it("breaks a stale lock but does not wait long behind a live one", async () => {
+  it("never takes over an old-looking lock, and does not wait long behind it (#382)", async () => {
     const { cachedCheckForUpdate, cacheFileName, lockWaitMs } = await import("./updatecache.js");
-    const { utimes } = await import("node:fs/promises");
+    const { utimes, unlink } = await import("node:fs/promises");
     await withDir(async (cacheDir) => {
       const lock = join(cacheDir, `${cacheFileName}.lock`);
       await writeFile(lock, "{}");
       const reg = counting({ latest: "0.2.0" });
       const opts = { cacheDir, installed: installed("0.1.0"), fetchImpl: reg.fetchImpl };
+      const busy = { status: "unknown", reason: expect.stringMatching(/busy/) };
       const started = Date.now();
-      expect(await cachedCheckForUpdate(opts)).toMatchObject({
-        status: "unknown",
-        reason: expect.stringMatching(/busy/),
-      });
+      expect(await cachedCheckForUpdate(opts)).toMatchObject(busy);
       expect(Date.now() - started).toBeLessThan(lockWaitMs + 500);
-      expect(reg.calls).toEqual([]);
+      // An old timestamp is not proof the holder is gone: the lock is still not taken over.
       const old = new Date(Date.now() - 60_000);
       await utimes(lock, old, old);
+      expect(await cachedCheckForUpdate(opts)).toMatchObject(busy);
+      expect(reg.calls).toEqual([]);
+      // Removed deliberately, the check runs again.
+      await unlink(lock);
       expect((await cachedCheckForUpdate(opts)).status).toBe("newer");
       expect(await readdir(cacheDir)).toEqual([cacheFileName]);
     });
@@ -425,63 +427,97 @@ describe("daily cached version check (#65, doc/design/updates.md)", () => {
     });
   });
 
-  it("lets at most one of two contenders breaking the same stale lock proceed", async () => {
-    const { acquireLock, lockStaleMs } = await import("./updatecache.js");
+  it("never steals a crashed holder's lock, and release reports what it found (#382)", async () => {
+    const { acquireLock } = await import("./updatecache.js");
     let clock = 100_000;
-    const files = new Map<string, { data: string; mtimeMs: number }>();
+    const files = new Map<string, string>();
     const enoent = () => Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+    let unlinkCode: string | null = null;
     const mem = {
       readFile: async (p: string) => {
         const f = files.get(p);
-        if (!f) throw enoent();
-        return f.data;
+        if (f === undefined) throw enoent();
+        return f;
       },
       writeFile: async (p: string, data: string, o: { flag?: string }) => {
         if (o.flag === "wx" && files.has(p))
           throw Object.assign(new Error("EEXIST"), { code: "EEXIST" });
-        files.set(p, { data, mtimeMs: clock });
+        files.set(p, data);
       },
       rename: async () => {},
       unlink: async (p: string) => {
+        if (unlinkCode) throw Object.assign(new Error(unlinkCode), { code: unlinkCode });
         if (!files.delete(p)) throw enoent();
       },
       mkdir: async () => {},
-      stat: async (p: string) => {
-        const f = files.get(p);
-        if (!f) throw enoent();
-        return { mtimeMs: f.mtimeMs };
-      },
+      stat: async () => ({ mtimeMs: 0 }),
     };
     const lock = "/cache/update-check.json.lock";
-    files.set(lock, { data: '{"token":"crashed"}', mtimeMs: clock - lockStaleMs - 1 });
     const now = () => clock;
     const sleep = async (ms: number) => void (clock += ms);
-    // B judges the crashed lock stale; meanwhile A breaks it and takes the lock. B's stat still
-    // reports the stale lock it saw, the interleaving that let the old code delete A's lock.
-    let a: (() => Promise<void>) | null = null;
-    let fired = false;
-    const raced = {
-      ...mem,
-      stat: async (p: string) => {
-        const seen = await mem.stat(p);
-        if (!fired) {
-          fired = true;
-          a = await acquireLock(mem, lock, now, sleep);
-        }
-        return seen;
-      },
-    };
-    const b = await acquireLock(raced, lock, now, sleep);
-    expect(a).not.toBeNull();
-    expect(b).toBeNull();
-    const held = files.get(lock)!.data;
-    // Release removes only a lock holding our own token.
-    files.set(lock, { data: '{"token":"someone-else"}', mtimeMs: clock });
-    await a!();
-    expect(files.get(lock)?.data).toBe('{"token":"someone-else"}');
-    files.set(lock, { data: held, mtimeMs: clock });
-    await a!();
-    expect(files.has(lock)).toBe(false);
+    // A crashed holder's lock, however old, is never taken over.
+    files.set(lock, '{"token":"crashed"}');
+    expect(await acquireLock(mem, lock, now, sleep)).toBeNull();
+    expect(files.get(lock)).toBe('{"token":"crashed"}');
+    // Removed deliberately, the lock is taken; release removes only our own token.
+    files.delete(lock);
+    const release = (await acquireLock(mem, lock, now, sleep))!;
+    const held = files.get(lock)!;
+    files.set(lock, '{"token":"someone-else"}');
+    expect(await release()).toEqual({ status: "replaced" });
+    expect(files.get(lock)).toBe('{"token":"someone-else"}');
+    files.set(lock, held);
+    unlinkCode = "EACCES";
+    expect(await release()).toEqual({ status: "failed", code: "EACCES" });
+    unlinkCode = null;
+    expect(await release()).toEqual({ status: "released" });
+    expect(await release()).toEqual({ status: "missing" });
+  });
+
+  it("reports a lock it could not remove beside the result, and releases on every path (#382)", async () => {
+    const { cachedCheckForUpdate } = await import("./updatecache.js");
+    const real = await import("node:fs/promises");
+    const fail = (code: string) => Object.assign(new Error(code), { code });
+    await withDir(async (cacheDir) => {
+      const reg = counting({ latest: "0.2.0" });
+      const opts = { cacheDir, installed: installed("0.1.0"), fetchImpl: reg.fetchImpl };
+      const stuck = {
+        ...real,
+        unlink: async (p: string) => {
+          if (p.endsWith(".lock")) throw fail("EACCES");
+          return real.unlink(p);
+        },
+      };
+      const r = await cachedCheckForUpdate({ ...opts, fs: stuck });
+      expect(r.status).toBe("newer");
+      expect(r.lockProblem).toMatch(/update-check\.json\.lock could not be removed .*\(EACCES\)/);
+      // A later check names the lock and how to recover.
+      const later = await cachedCheckForUpdate(opts);
+      expect(later).toMatchObject({
+        status: "unknown",
+        reason: expect.stringMatching(
+          /never removed automatically.*delete .*update-check\.json\.lock/,
+        ),
+      });
+    });
+    await withDir(async (cacheDir) => {
+      const reg = counting({ latest: "0.2.0" });
+      // An unwritable cache returns early from the locked work; the lock is still released.
+      const unwritable = {
+        ...real,
+        writeFile: async (p: string, d: string, o: { flag?: string }) => {
+          if (p.endsWith(".tmp")) throw fail("EROFS");
+          return real.writeFile(p, d, o);
+        },
+      };
+      await cachedCheckForUpdate({
+        cacheDir,
+        installed: installed("0.1.0"),
+        fetchImpl: reg.fetchImpl,
+        fs: unwritable,
+      });
+      expect((await readdir(cacheDir)).filter((f) => f.endsWith(".lock"))).toEqual([]);
+    });
   });
 
   it("makes no cache or network access when skipped, and uses a per-user cache directory", async () => {

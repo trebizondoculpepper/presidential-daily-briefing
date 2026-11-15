@@ -1497,6 +1497,25 @@ describe("briefing command: CLI, checkpoint and offline cache (#170)", () => {
     expect(h.errors.join("")).not.toContain("/secret/path");
   });
 
+  it("a checkpoint committed with unconfirmed durability is reported as advanced, never rolled back (#382)", async () => {
+    const h = harness({
+      files: {
+        advanceCheckpoint: async () => ({
+          status: "committed-with-error",
+          reason: "the new file is in place, but its directory could not be synced (EIO)",
+          cleanup: [],
+        }),
+      },
+    });
+    expect(await h.run(["--checkpoint", "cp.json", "--json"])).toBe(2);
+    expect(h.stdout).toHaveLength(1);
+    const errors = h.errors.join("");
+    expect(errors).toMatch(
+      /was advanced to .*but the new file is in place.*The next run reads the new checkpoint/,
+    );
+    expect(errors).not.toContain("was not advanced");
+  });
+
   it("refuses malformed or mismatched checkpoints without collecting or resetting them", async () => {
     const h = harness();
     h.disk.set("cp.json", "{not json");

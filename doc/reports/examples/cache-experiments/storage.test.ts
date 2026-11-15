@@ -371,16 +371,17 @@ describe("locking", () => {
     expect(clock.now() - started).toBeGreaterThanOrEqual(5000);
     expect(clock.now() - started).toBeLessThan(5100);
     expect(JSON.parse(readFileSync(lock, "utf8"))).toMatchObject({ token: "other" });
-    // Contrast: the helper's age-based path (as the update cache uses it) would take it over.
+    // Since #382 the shared helper agrees: an old-looking lock is never taken over, whatever
+    // stale age a caller passes (before #382 this call broke it).
     const broken = await acquireFileLock(
       nodeFs,
       lock,
-      { waitMs: 1000, staleMs: 10_000, pollMs: 25 },
+      { waitMs: 100, staleMs: 10_000, pollMs: 25 },
       Date.now,
       async () => {},
     );
-    expect(broken).not.toBeNull();
-    await broken?.();
+    expect(broken).toBeNull();
+    expect(JSON.parse(readFileSync(lock, "utf8"))).toMatchObject({ token: "other" });
   });
 
   it("a live holder past the helper's 10 s stale age keeps its lock", async () => {
