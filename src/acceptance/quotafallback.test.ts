@@ -94,6 +94,45 @@ describe("quota fallback to an explicit snapshot (#371)", () => {
     });
   });
 
+  it("applies a --label filter from the snapshot, making no further GitHub request", async () => {
+    await withDir(async (dir) => {
+      const cache = join(dir, "cache.json");
+      await atomicJson(cache, snapshot());
+      const queries: unknown[] = [];
+      const run = async (labels: string[]) => {
+        let out = "";
+        const code = await main(
+          ["--repo", repo, "--no-update-check", "--cache", cache, "--json", ...labels],
+          async (text) => void (out += text),
+          {
+            collect: async () => {
+              throw quota({});
+            },
+            // Any live label lookup would be refused for quota too.
+            query: async (...args: unknown[]) => {
+              queries.push(args);
+              throw quota({});
+            },
+            currentRepository: async () => repo,
+            now: () => minutes(1),
+            stderr: () => {},
+          },
+        );
+        return { code, report: JSON.parse(out) };
+      };
+      const seen = await run(["--label", "STATUS:READY"]);
+      expect(seen.code).toBe(2);
+      expect(seen.report.freshness.source).toBe("stale");
+      expect(seen.report.completeness.warnings.join("\n")).not.toContain("not verified live");
+      const unseen = await run(["--label", "no-such-label"]);
+      expect(unseen.code).toBe(2);
+      expect(unseen.report.completeness.warnings.join("\n")).toContain(
+        "Label filter not verified live: no-such-label",
+      );
+      expect(queries).toEqual([]);
+    });
+  });
+
   it("gives a distinct diagnosis for no, absent, corrupt, foreign and expired snapshots", async () => {
     await withDir(async (dir) => {
       const refused = quota({ retryAfterSeconds: 60 });

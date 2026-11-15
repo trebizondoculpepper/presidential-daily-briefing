@@ -34,7 +34,7 @@ import {
   planDependencyChange,
 } from "./github/dependencies.js";
 import { briefingRoleNames, roleSectionIds } from "./briefing/roles.js";
-import { normalizeLabelRequest } from "./github/labels.js";
+import { labelsFromSnapshot, normalizeLabelRequest } from "./github/labels.js";
 import { doctorStaleHours, ticketDoctor, ticketDoctorText } from "./workflow/ticketdoctor.js";
 import { diagnoseClosedDrift, diagnoseDelivery } from "./workflow/deliverydoctor.js";
 import { deliveryRead, withDeliveryCompleteness } from "./workflow/deliveryread.js";
@@ -2074,9 +2074,30 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
           await resolveGuideSetting(snapshot.repository, options.guide, runtime.guide),
         );
     // #312: resolve the label filter live against the repository before projecting.
-    const labels = options.label?.length
-      ? await resolveLabelFilter(snapshot.repository, options.label, runtime.query ?? ghQuery)
-      : undefined;
+    let labels: string[] | undefined;
+    if (options.label?.length && options.offline) {
+      // #371: only a stale quota fallback gets here (--offline --label is refused as usage). It
+      // must make no further request, so the filter resolves against the snapshot's own labels.
+      const normalized = normalizeLabelRequest(options.label);
+      const local = labelsFromSnapshot(
+        [...snapshot.issues, ...snapshot.pullRequests],
+        normalized.ok ? normalized.labels : options.label,
+      );
+      labels = local.labels;
+      if (local.unverified.length)
+        snapshot = {
+          ...snapshot,
+          warnings: [
+            ...snapshot.warnings,
+            `Label filter not verified live: ${local.unverified.join(", ")} is on no item of this snapshot, so it matches nothing here; that is not proof the label is absent.`,
+          ],
+        };
+    } else if (options.label?.length)
+      labels = await resolveLabelFilter(
+        snapshot.repository,
+        options.label,
+        runtime.query ?? ghQuery,
+      );
     const { report, text } = await presentBriefing(
       snapshot,
       {
