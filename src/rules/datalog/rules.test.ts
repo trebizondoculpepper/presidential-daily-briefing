@@ -8,6 +8,8 @@ import { describe, it, expect } from "vite-plus/test";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { buildPolicy, policyDir } from "./build.js";
+import { evaluatePolicy } from "./engine.js";
+import type { Datom } from "datascript";
 import {
   readScenarios,
   runScenario,
@@ -48,6 +50,120 @@ const run = (source: string) => {
   const [scenario] = readScenarios(source, "t.edn");
   runScenario(scenario, policy);
 };
+
+/**
+ * Which role and subject kind each decision rule is for (#469). Pinned here, not read from the
+ * policy, so deleting a guard from decisions.edn cannot silently change the expectation. A new
+ * rule must be added here; changing a rule's audience is a deliberate edit of this table.
+ * `pr-action` is the policy's PR audience: implementers, and a designer for a design PR they are
+ * responsible for (rules.edn `pr-action`). `agents` is every role except human.
+ */
+const audience: Record<
+  string,
+  {
+    role: "implementer" | "designer" | "human" | "pr-action" | "agents" | "any";
+    kind: "issue" | "pr" | "any";
+  }
+> = {
+  "D-ATTENTION": { role: "any", kind: "any" },
+  "D-PR-FAIL": { role: "pr-action", kind: "pr" },
+  "D-PR-REVIEW": { role: "pr-action", kind: "pr" },
+  "D-PR-CONFLICT": { role: "pr-action", kind: "pr" },
+  "D-PR-MERGE": { role: "pr-action", kind: "pr" },
+  "D-PR-INTEGRATE": { role: "pr-action", kind: "pr" },
+  "D-DECIDE": { role: "designer", kind: "any" },
+  "D-DOCUMENT": { role: "designer", kind: "any" },
+  "D-DESIGN-REVIEW": { role: "designer", kind: "pr" },
+  "D-EASY": { role: "implementer", kind: "issue" },
+  "D-OWN-EASY": { role: "implementer", kind: "issue" },
+  "D-COMPLEXITY-BOOST": { role: "implementer", kind: "issue" },
+  "D-COMPLEXITY": { role: "implementer", kind: "issue" },
+  "D-IMPACT-BOOST": { role: "designer", kind: "issue" },
+  "D-IMPACT": { role: "designer", kind: "issue" },
+  "D-BAD-COMPLEXITY": { role: "implementer", kind: "issue" },
+  "D-BAD-IMPACT": { role: "designer", kind: "issue" },
+  "D-ORDINARY": { role: "implementer", kind: "issue" },
+  "D-OWN": { role: "implementer", kind: "issue" },
+  "D-DESIGN": { role: "designer", kind: "issue" },
+  "D-UNFAVORABLE": { role: "implementer", kind: "issue" },
+  "D-OWN-UNFAVORABLE": { role: "implementer", kind: "issue" },
+  "D-INSPECT": { role: "agents", kind: "issue" },
+  "D-HUMAN-ASK-YOU": { role: "human", kind: "issue" },
+  "D-HUMAN-ASK": { role: "human", kind: "issue" },
+  "D-HUMAN-UNVERIFIED": { role: "human", kind: "issue" },
+  "D-HUMAN-DECIDE": { role: "human", kind: "issue" },
+  "D-HUMAN-SIGNOFF": { role: "human", kind: "pr" },
+};
+const roles = ["implementer", "designer", "human"] as const;
+
+/**
+ * The designer half of `pr-action` (rules.edn), restated independently of the policy: a design PR
+ * (a design label on the PR or on an issue it closes) linked to the viewer as owner, as
+ * responsible, or by closing an issue the viewer owns.
+ */
+const designLabels = ["documentation", "status:needs-design"];
+function ownDesignPr(datoms: Datom[], pr: number, agent: string): boolean {
+  const has = (e: number, a: string, v: unknown) =>
+    datoms.some(([x, y, z]) => x === e && y === a && z === v);
+  const closes = datoms.filter(([e, a]) => e === pr && a === "closes").map(([, , v]) => Number(v));
+  const design = [pr, ...closes].some((e) => designLabels.some((l) => has(e, "label", l)));
+  const mine =
+    !!agent &&
+    (has(pr, "owner", agent) ||
+      has(pr, "responsible", agent) ||
+      closes.some((i) => has(i, "owner", agent)));
+  return design && mine;
+}
+
+describe("rule audience: roles and subject kinds (#469)", () => {
+  it("pins every decision rule's audience", () => {
+    expect(policy.definitions.map((d) => d.id).sort()).toEqual(Object.keys(audience).sort());
+  });
+
+  it("guards each role-specific rule with its role in the policy", () => {
+    for (const d of policy.definitions) {
+      const { role } = audience[d.id]!;
+      if (role === "any") continue;
+      const guarded =
+        role === "pr-action"
+          ? d.clauses.includes("(pr-action ?t)")
+          : role === "agents"
+            ? d.clauses.includes('[(not= ?role "human")]')
+            : d.clauses.includes(`[1 "role" "${role}"]`);
+      expect(guarded, `${d.id} lost its ${role} guard`).toBe(true);
+    }
+  });
+
+  // Metamorphic: rerun every scenario under each role, and with each subject's kind flipped
+  // (issue <-> pr). Whatever is selected must still be meant for that role and that kind, so a
+  // weakened role or kind guard fails here even though no scenario was written for it.
+  it.each(scenarios)("%s: every role and kind variant selects only rules meant for it", (_, s) => {
+    const subjects = [...new Set(s.datoms.filter(([, a]) => a === "kind").map(([e]) => e))];
+    const flipped = (subject: number | null): Datom[] =>
+      s.datoms.map(([e, a, v]) =>
+        e === subject && a === "kind" ? [e, a, v === "issue" ? "pr" : "issue"] : [e, a, v],
+      );
+    for (const role of roles)
+      for (const subject of [null, ...subjects]) {
+        const datoms = flipped(subject);
+        const kindOf = new Map(datoms.filter(([, a]) => a === "kind").map(([e, , v]) => [e, v]));
+        const result = evaluatePolicy({ viewer: { ...s.viewer, role }, datoms }, { policy });
+        for (const d of result.decisions) {
+          const meant = audience[d.ruleId]!;
+          const where = `${d.ruleId} on ${String(kindOf.get(d.subject))} ${d.subject} as ${role}${subject === null ? "" : ` (kind of ${subject} flipped)`}`;
+          const allowed =
+            meant.role === "any" ||
+            meant.role === role ||
+            (meant.role === "agents" && role !== "human") ||
+            (meant.role === "pr-action" &&
+              (role === "implementer" ||
+                (role === "designer" && ownDesignPr(datoms, d.subject, s.viewer.agent))));
+          expect(allowed, where).toBe(true);
+          expect(meant.kind === "any" || meant.kind === kindOf.get(d.subject), where).toBe(true);
+        }
+      }
+  });
+});
 
 describe("rule runner outcome categories (#348)", () => {
   it("passes a correct expectation and reports a wrong one as a rule failure", () => {
