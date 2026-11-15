@@ -1,0 +1,32 @@
+;; #343 (doc/design/required-advisory-checks.md): only pending required checks make a PR wait.
+{:suite "required-checks"
+ :scenarios
+ [{:id "advisory-pending-alone-does-not-wait"
+  :doc "verify passed; only an advisory job (GitHub reports it not required for this PR) is still running"
+  :viewer {:role "implementer"}
+  :facts [{:e 1 "forward-complete" true}
+          {:e 102 "kind" "pr" "state" "OPEN" "number" 3 "target" "https://github.com/o/r/pull/3" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "head3" "draft" false "mergeable" "MERGEABLE" "merge-state" "CLEAN" "review-decision" "" "pr-complete" true "check" 104 "check" 105}
+          {:e 104 "name" "verify" "outcome" "SUCCESS"}
+          {:e 105 "name" "test (freebsd)" "outcome" "IN_PROGRESS" "required" "advisory"}]
+  :expect {:actions [{:subject 102 :rule "D-PR-MERGE" :kind "pr-follow-up" :band 2
+              :why "Current verify passes at head head3; inspect the diff and review evidence, then consider merge."
+              :facts {"impact" "unknown" "complexity" "unknown" "impactState" "unknown" "complexityState" "unknown" "head" "head3" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "verify" "SUCCESS" "complete" true "draft" false "mergeState" "CLEAN"}
+              :overridden [] :unlocks 0 :unknown [] :other-claims []}]
+           :denials #{}}}
+
+ {:id "unknown-requiredness-still-waits"
+  :doc "verify passed; a running job with unknown requiredness keeps the PR waiting (never advisory)"
+  :viewer {:role "implementer"}
+  :facts [{:e 1 "forward-complete" true}
+          {:e 102 "kind" "pr" "state" "OPEN" "number" 3 "target" "https://github.com/o/r/pull/3" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "head3" "draft" false "mergeable" "MERGEABLE" "merge-state" "CLEAN" "review-decision" "" "pr-complete" true "check" 104 "check" 105}
+          {:e 104 "name" "verify" "outcome" "SUCCESS"}
+          {:e 105 "name" "test (freebsd)" "outcome" "IN_PROGRESS"}]
+  :expect {:actions [] :denials #{}}}
+
+ {:id "missing-required-check-waits"
+  :doc "every visible check passed, but a required check has not reported on this head"
+  :viewer {:role "implementer"}
+  :facts [{:e 1 "forward-complete" true}
+          {:e 102 "kind" "pr" "state" "OPEN" "number" 3 "target" "https://github.com/o/r/pull/3" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "head3" "draft" false "mergeable" "MERGEABLE" "merge-state" "CLEAN" "review-decision" "" "pr-complete" true "check" 104 "missing-required" "deploy-gate"}
+          {:e 104 "name" "verify" "outcome" "SUCCESS"}]
+  :expect {:actions [] :denials #{}}}]}

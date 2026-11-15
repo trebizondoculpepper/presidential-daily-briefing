@@ -65,6 +65,15 @@ export interface DatalogOptions {
     string,
     readonly { provider: string; state: string; commit: string }[]
   >;
+  /**
+   * Required-check classification per PR URL (#343), computed by the host's shared classifier
+   * (github/requiredchecks.ts) so this lazily loaded chunk does not import it. Absent: every
+   * pending check's requiredness is unknown, which keeps the PR waiting (never advisory).
+   */
+  checkRequiredness?: ReadonlyMap<
+    string,
+    { readonly advisoryPending: readonly string[]; readonly missingRequired: readonly string[] }
+  >;
   limit: number;
   signal?: AbortSignal;
   now?: () => number;
@@ -230,12 +239,19 @@ function normalize(
         const other = ids.get(ref.url);
         if (other !== undefined) put(id, "closes", other);
       }
+      const requiredness = options.checkRequiredness?.get(pr.url);
+      const advisory = new Set(requiredness?.advisoryPending ?? []);
       for (const check of rollup?.contexts.nodes ?? []) {
         const c = nextId++;
+        const checkName = check.name ?? check.context ?? "unnamed";
         put(id, "check", c);
-        put(c, "name", check.name ?? check.context ?? "unnamed");
+        put(c, "name", checkName);
         put(c, "outcome", check.conclusion ?? check.state ?? check.status ?? "UNKNOWN");
+        // #343: a pending check GitHub reports as not required for this PR does not make it wait.
+        if (advisory.has(checkName)) put(c, "required", "advisory");
       }
+      for (const missing of requiredness?.missingRequired ?? [])
+        put(id, "missing-required", missing);
       // Raw review evidence; the policy decides what binds to the current head (#182).
       for (const review of pr.reviews?.nodes ?? []) {
         const r = nextId++;

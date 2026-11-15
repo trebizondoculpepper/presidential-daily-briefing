@@ -1,7 +1,7 @@
 {
   "modelVersion": 2,
   "policyVersion": 1,
-  "rulesHash": "483a676c3bf29c12754ab5fcaca6e0ae9bc104cced8e7184e299837522ef0782",
+  "rulesHash": "d9f58cb6967f351902c3f10aad87ea788488a5caecfd4afbe5ae2c623fbfc77e",
   "sources": [
     "policy/schema.edn",
     "policy/rules.edn",
@@ -37,6 +37,7 @@
       "linked-key": "linked-to-viewer sort key",
       "matched": "matched decision rule",
       "merge-state": "merge state",
+      "missing-required": "required check not yet reported",
       "mergeable": "mergeability",
       "name": "name",
       "native-complete": "completeness of native dependency evidence",
@@ -62,6 +63,7 @@
       "resolved": "resolved flag",
       "responsible": "responsible agent",
       "review-coverage": "declared review coverage",
+      "required": "check requiredness",
       "reverse-complete": "completeness of reverse closing-PR evidence",
       "review": "review",
       "review-commit": "reviewed commit",
@@ -5162,11 +5164,52 @@
               },
               "phrase": null,
               "many": true
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "fact",
+                  "scope": "entity",
+                  "entity": {
+                    "var": "?c"
+                  },
+                  "attribute": "required",
+                  "value": {
+                    "lit": "advisory"
+                  },
+                  "phrase": "check requiredness",
+                  "many": false
+                }
+              ]
             }
           ],
           "source": {
             "file": "policy/rules.edn",
             "index": 56
+          }
+        },
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "missing-required",
+              "value": {
+                "var": "?m"
+              },
+              "phrase": "required check not yet reported",
+              "many": false
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 57
           }
         }
       ],
@@ -5228,7 +5271,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 57
+            "index": 58
           }
         }
       ],
@@ -5258,7 +5301,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 58
+            "index": 59
           }
         },
         {
@@ -5293,7 +5336,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 59
+            "index": 60
           }
         }
       ],
@@ -5349,7 +5392,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 60
+            "index": 61
           }
         }
       ],
@@ -5509,7 +5552,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 61
+            "index": 62
           }
         }
       ],
@@ -5577,7 +5620,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 62
+            "index": 63
           }
         }
       ],
@@ -5655,7 +5698,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 63
+            "index": 64
           }
         },
         {
@@ -5738,7 +5781,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 64
+            "index": 65
           }
         },
         {
@@ -5812,7 +5855,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 65
+            "index": 66
           }
         }
       ],
@@ -5890,7 +5933,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 66
+            "index": 67
           }
         },
         {
@@ -5951,7 +5994,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 67
+            "index": 68
           }
         }
       ],
@@ -6106,7 +6149,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 68
+            "index": 69
           }
         }
       ],
@@ -6157,7 +6200,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 69
+            "index": 70
           }
         },
         {
@@ -6192,7 +6235,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 70
+            "index": 71
           }
         }
       ],
@@ -6227,7 +6270,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 71
+            "index": 72
           }
         }
       ],
@@ -6253,7 +6296,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 72
+            "index": 73
           }
         },
         {
@@ -6271,7 +6314,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 73
+            "index": 74
           }
         },
         {
@@ -6302,7 +6345,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 74
+            "index": 75
           }
         },
         {
@@ -6320,7 +6363,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 75
+            "index": 76
           }
         },
         {
@@ -6338,7 +6381,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 76
+            "index": 77
           }
         }
       ],
@@ -6373,7 +6416,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 77
+            "index": 78
           }
         }
       ],
@@ -6412,7 +6455,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 78
+            "index": 79
           }
         },
         {
@@ -6452,7 +6495,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 79
+            "index": 80
           }
         }
       ],
@@ -6495,7 +6538,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 80
+            "index": 81
           }
         }
       ],
@@ -6538,7 +6581,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 81
+            "index": 82
           }
         }
       ],
@@ -6567,7 +6610,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 82
+            "index": 83
           }
         }
       ],
@@ -6610,7 +6653,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 83
+            "index": 84
           }
         }
       ],
@@ -6663,7 +6706,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 84
+            "index": 85
           }
         }
       ],
@@ -6722,7 +6765,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 85
+            "index": 86
           }
         }
       ],
@@ -6777,7 +6820,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 86
+            "index": 87
           }
         }
       ],
@@ -9425,14 +9468,14 @@
   "coverage": {
     "decisions": 28,
     "predicates": 60,
-    "alternatives": 96,
+    "alternatives": 97,
     "denials": 8,
     "queries": 15,
     "keyQueries": 4,
     "evidence": 31,
     "overrides": 4,
     "constants": 14,
-    "attributes": 64,
-    "clauses": 546
+    "attributes": 66,
+    "clauses": 549
   }
 }

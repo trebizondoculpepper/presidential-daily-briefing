@@ -19,6 +19,7 @@ import type { MemberState, TicketDelivery } from "./completion.js";
 import type { Issue, PullRequest, Snapshot } from "../github/types.js";
 import { prChecks } from "../briefing/briefing.js";
 import { prEvidenceGaps } from "../github/previdence.js";
+import { classifyChecks } from "../github/requiredchecks.js";
 import { workflow } from "./definition.js";
 import type { PrStatusReport } from "./prstatus.js";
 import { snapshotPolicyReview } from "./reviewpolicy.js";
@@ -158,7 +159,12 @@ export function snapshotFollowUpFacts(
     // Every PR evidence source, not only threads: a later page may hold a finding (#497).
     complete: !prEvidenceGaps(pr, warnings).length,
     failing: checks.some((c) => workflow.failure.includes(c.outcome)),
-    pending: checks.some((c) => workflow.unfinished.includes(c.outcome)),
+    // #343: the shared requiredness model, as the briefing rules: an advisory job alone does
+    // not hold delivery follow-up in waiting; unknown requiredness or a missing required check does.
+    pending: ((r) =>
+      r.requiredPending.length + r.unknownPending.length + r.missingRequired.length > 0)(
+      classifyChecks(pr),
+    ),
     unknownChecks: checks.some((c) => !known.includes(c.outcome)),
     verified: checks.some(
       (c) => c.name === workflow.verify && workflow.verifySuccess.includes(c.outcome),
