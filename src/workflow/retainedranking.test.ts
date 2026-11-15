@@ -256,6 +256,24 @@ describe("both engines rank retained claims alike (#413)", () => {
   });
 });
 
+describe("team claim activity is bounded (#413)", () => {
+  it("reads at most the cap and names the agents it skipped", async () => {
+    const { readTeamActivity, teamActivityCap } = await import("./retainedfacts.js");
+    const many = Array.from({ length: teamActivityCap }, (_, i) => ticket(100 + i, ["agent:big"]));
+    const s = snapshot([ticket(1, ["agent:alpha"]), ...many], []);
+    let reads = 0;
+    const live = { query: async () => ({}), permission: async () => "write" as never };
+    const { activity, omitted } = await readTeamActivity(s, ["big", "alpha"], live, async () => {
+      reads++;
+      return read({ state: "active", lastActivity: null });
+    });
+    // Agents are read in name order: alpha's one claim fits, big's thirty would exceed the cap.
+    expect([...activity.keys()]).toEqual(["alpha"]);
+    expect(omitted).toEqual(["big"]);
+    expect(reads).toBe(1);
+  });
+});
+
 describe("shortlist selection sees retained-claim activity (#413)", () => {
   it("reads activity once, before the first selection pass, so hydration covers its rows", async () => {
     const { readBriefing } = await import("../briefing/service.js");

@@ -6,6 +6,9 @@
 import type { DeclaredReviewPolicy } from "./reviewpolicy.js";
 import { collectIssueFocus, ghQueryWith, hydratePullRequests } from "../github/github.js";
 import type { FocusOptions, Query, Rest } from "../github/github.js";
+import { permissionLookup } from "../github/github.js";
+import type { GraphQuery } from "./claims.js";
+import { readRetainedFacts, readTeamActivity, teamActivityCap } from "./retainedfacts.js";
 import { ReadMeter } from "../github/readplan.js";
 import type { Snapshot } from "../github/types.js";
 import { diagnoseDelivery } from "./deliverydoctor.js";
@@ -68,7 +71,31 @@ export async function readTeam(
   boundaries: DeliveryBoundaries,
 ) {
   snapshot = withPolicy(snapshot, boundaries);
-  const view = teamView(snapshot, options);
+  // #413: each claim's activity on a live read, with the claim guard's own reader (bounded).
+  const holders = teamView(snapshot, options).agents.map((a) => a.agent);
+  const activity =
+    boundaries.live && !options.offline && holders.length
+      ? await readTeamActivity(snapshot, holders, {
+          query: boundaries.live.query as GraphQuery,
+          permission: permissionLookup(
+            snapshot.repository,
+            boundaries.live.rest,
+            boundaries.signal,
+          ),
+        })
+      : null;
+  const view = teamView(snapshot, {
+    ...options,
+    ...(activity ? { activity: activity.activity } : {}),
+  });
+  if (activity?.omitted.length)
+    view.completeness = {
+      complete: false,
+      warnings: [
+        ...view.completeness.warnings,
+        `Claim activity not read for ${activity.omitted.join(", ")}: more than ${teamActivityCap} claims in this view; read one with pdb who N.`,
+      ],
+    };
   // #192: responsibilities per agent (S18 inventory), including agents with no claim.
   const read = deliveryRead(snapshot, await diagnoseDelivery(snapshot, boundaries));
   const report = withDeliveryCompleteness(
@@ -101,11 +128,34 @@ export async function readWho(
   const read = deliveryRead(scoped, diagnosis ?? (await diagnoseDelivery(scoped, boundaries)));
   const view = read.tickets.find((t) => t.number === number) ?? null;
   const issue = scoped.issues[0];
+  // #413: each recorded owner's claim activity on this ticket, live only (null: not read).
+  const claimActivity =
+    boundaries.live && !options.offline && ownership.recordedOwners
+      ? await Promise.all(
+          ownership.recordedOwners.map(async (agent) => {
+            const facts = await readRetainedFacts(scoped, agent, {
+              query: boundaries.live!.query as GraphQuery,
+              permission: permissionLookup(
+                snapshot.repository,
+                boundaries.live!.rest,
+                boundaries.signal,
+              ),
+            });
+            const fact = issue ? facts?.claimActivity?.get(issue.url) : undefined;
+            return { agent, state: fact?.state ?? "unknown", reason: fact?.reason ?? "" };
+          }),
+        )
+      : null;
   const report = withDeliveryCompleteness(
-    issue ? { ...ownership, ...deliveryFields(issue, view) } : ownership,
+    issue
+      ? { ...ownership, claimActivity, ...deliveryFields(issue, view) }
+      : { ...ownership, claimActivity },
     read,
   );
   const text = appendLines(ticketOwnershipText(ownership), [
+    ...(claimActivity ?? []).map(
+      (a) => `Claim activity: ${a.agent}: ${a.state}${a.reason ? ` (${a.reason})` : ""}`,
+    ),
     ...deliveryLines(view),
     ...omissionLines(read),
   ]);

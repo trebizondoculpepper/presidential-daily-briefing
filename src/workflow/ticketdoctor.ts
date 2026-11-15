@@ -84,6 +84,11 @@ export interface TicketDoctorOptions {
   delivery?: DeliveryDiagnosis;
   /** #192: closed-issue drift for an explicit `--since` window; absent means not scanned. */
   closedDrift?: ClosedDriftScan;
+  /**
+   * #413: each agent's claim activity (agent, then claim URL), read live with the claim guard's
+   * reader. Absent: not read, so several claims are only a candidate (they may be waiting).
+   */
+  claimActivity?: ReadonlyMap<string, ReadonlyMap<string, { state: string; reason: string }>>;
 }
 export interface TicketDoctorReport {
   schemaVersion: 1;
@@ -566,6 +571,7 @@ export function ticketDoctor(
     impactEnabled = true,
     delivery,
     closedDrift,
+    claimActivity,
   }: TicketDoctorOptions = {},
 ): TicketDoctorReport {
   const open = snapshot.issues.filter((i) => i.state === "OPEN");
@@ -1057,26 +1063,64 @@ export function ticketDoctor(
   }
 
   // Per-agent claims and staleness reuse the team view with the doctor's own threshold.
-  const team = teamView(snapshot, { now, staleHours, offline });
+  const team = teamView(snapshot, {
+    now,
+    staleHours,
+    offline,
+    ...(claimActivity ? { activity: claimActivity } : {}),
+  });
+  // #412/#413: several claims are valid only while all but one are verified waiting. A guard
+  // contradiction (more than one claim not verified waiting) is definite; unread activity is a
+  // candidate. Recovery is always explicit: nothing is released or reclaimed here.
+  const releaseSteps = (number: number, agent: string) =>
+    (["ready", "incomplete", "done"] as const).map((outcome) =>
+      cmd.release(
+        number,
+        agent,
+        outcome,
+        `${agent}'s disposition for #${number}: release as ${outcome}${outcome === "done" ? " (add --pr URL when a PR exists)" : ""}; keep the one claim being worked on.`,
+      ),
+    );
   for (const agent of team.agents) {
-    if (agent.claims.length > 1)
+    const read = claimActivity?.has(agent.agent) ?? false;
+    const notWaiting = agent.claims.filter(
+      (c) => c.activity?.state !== "waiting" && c.activity?.state !== "not-owned",
+    );
+    const list = agent.claims.map((c) => `#${c.number}`).join(", ");
+    if (agent.claims.length > 1 && !read)
       for (const claim of agent.claims)
         add(
           openIssue(claim.url),
           "agent-multiple-claims",
+          "candidate",
+          `${agent.agent} holds ${agent.claims.length} claims (${list}); their activity was not read, so whether all but one are verified waiting is unknown.`,
+          [cmd.team(), ...releaseSteps(claim.number, agent.agent)],
+          { judgment: true },
+        );
+    else if (notWaiting.length > 1)
+      for (const claim of notWaiting)
+        add(
+          openIssue(claim.url),
+          "agent-multiple-active-claims",
           "definite",
-          `${agent.agent} holds ${agent.claims.length} active claims (${agent.claims.map((c) => `#${c.number}`).join(", ")}).`,
-          [
-            cmd.team(),
-            ...(["ready", "incomplete", "done"] as const).map((outcome) =>
-              cmd.release(
-                claim.number,
-                agent.agent,
-                outcome,
-                `${agent.agent}'s disposition for #${claim.number}: release as ${outcome}${outcome === "done" ? " (add --pr URL when a PR exists)" : ""}; keep the one claim being worked on.`,
-              ),
-            ),
-          ],
+          `${agent.agent} holds ${notWaiting.length} claims that are not verified waiting (${notWaiting.map((c) => `#${c.number}`).join(", ")}); the claim guard admits at most one. Keep one, and for #${claim.number} record a wait with evidence or release it.`,
+          [cmd.team(), ...releaseSteps(claim.number, agent.agent)],
+          {
+            judgment: true,
+            facts: [
+              `#${claim.number}: ${claim.activity?.state ?? "unknown"}${claim.activity?.reason ? ` (${claim.activity.reason})` : ""}.`,
+              `A wait is recorded with pdb claim wait ${claim.number} --repo ${snapshot.repository} --agent ${agent.agent} --question URL|--blocked-by owner/repo#M --why TEXT.`,
+            ],
+          },
+        );
+    for (const claim of agent.claims)
+      if (claim.activity?.state === "unknown")
+        add(
+          openIssue(claim.url),
+          "claim-activity-unknown",
+          "definite",
+          `${agent.agent}'s claim on #${claim.number} has unknown activity (${claim.activity.reason}); unknown is never waiting, so it blocks another claim until resolved.`,
+          [cmd.who(claim.number), ...releaseSteps(claim.number, agent.agent)],
           { judgment: true },
         );
     for (const claim of agent.claims) {

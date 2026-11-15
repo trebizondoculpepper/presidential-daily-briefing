@@ -118,3 +118,33 @@ export async function readRetainedFacts(
   const urls = owned.urls.filter((u) => claimActivity.get(u)?.state !== "not-owned");
   return { ownedClaims: { ...owned, urls }, claimActivity };
 }
+
+/** At most this many claims are read per team view; the rest are reported as not read. */
+export const teamActivityCap = 30;
+
+/**
+ * Activity of every agent's claims for the team view (#413), live only, bounded by
+ * {@link teamActivityCap}. An agent whose claims were not all read is absent from the map, so
+ * the view says "not read" rather than guessing; `omitted` names them.
+ */
+export async function readTeamActivity(
+  snapshot: Snapshot,
+  agents: readonly string[],
+  live: { query: GraphQuery; permission: PermissionLookup },
+  read: typeof readRetained = readRetained,
+): Promise<{ activity: Map<string, Map<string, ClaimActivityFact>>; omitted: string[] }> {
+  const activity = new Map<string, Map<string, ClaimActivityFact>>();
+  const omitted: string[] = [];
+  let budget = teamActivityCap;
+  for (const agent of [...agents].sort()) {
+    const claims = ownedClaims(snapshot, agent).urls.length;
+    if (claims > budget) {
+      omitted.push(agent);
+      continue;
+    }
+    budget -= claims;
+    const facts = await readRetainedFacts(snapshot, agent, live, read);
+    if (facts?.claimActivity) activity.set(agent, facts.claimActivity);
+  }
+  return { activity, omitted };
+}

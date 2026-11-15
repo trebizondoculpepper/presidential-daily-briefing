@@ -77,17 +77,46 @@ describe("Ticket Doctor v1 (#66, doc/design/diagnostics.md)", () => {
     expect(kinds(r, 3)).toEqual(["definite:readiness-conflict"]);
     expect(kinds(r, 4)).toEqual(["definite:urgency-conflict", "candidate:classification-missing"]);
     expect(kinds(r, 5)).toEqual(["definite:design-conflict"]);
-    expect(kinds(r, 6)).toEqual(["definite:multiple-owners", "definite:agent-multiple-claims"]);
+    // #413: unread activity makes several claims a candidate (they may be verified waiting).
+    expect(kinds(r, 6)).toEqual(["definite:multiple-owners", "candidate:agent-multiple-claims"]);
     expect(kinds(r, 7)).toEqual(["definite:ready-with-open-pr"]);
     expect(kinds(r, 8)).toEqual(["definite:blocked-without-reason"]);
     expect(kinds(r, 9)).toEqual([
-      "definite:agent-multiple-claims",
       "candidate:leftover-readiness",
+      "candidate:agent-multiple-claims",
       "candidate:stale-agent-activity",
     ]);
     expect(kinds(r, 10)).toEqual(["candidate:dependency-drift"]);
     expect(kinds(r, 11)).toEqual(["definite:dependency-cycle"]);
     expect(kinds(r, 12)).toEqual(["definite:dependency-cycle"]);
+  });
+  it("judges an agent's several claims by their read activity, recovering only explicitly (#413)", () => {
+    const activity = (six: string, nine: string) =>
+      new Map([
+        [
+          "ana",
+          new Map([
+            [issue(6).url, { state: six, reason: "r6" }],
+            [issue(9).url, { state: nine, reason: "r9" }],
+          ]),
+        ],
+      ]);
+    const both = report({ claimActivity: activity("active", "resume-required") });
+    expect(kinds(both, 6)).toContain("definite:agent-multiple-active-claims");
+    expect(kinds(both, 9)).toContain("definite:agent-multiple-active-claims");
+    const finding = both.tickets
+      .find((x) => x.number === 9)!
+      .findings.find((f) => f.kind === "agent-multiple-active-claims")!;
+    expect(JSON.stringify(finding)).toContain("pdb claim wait 9");
+    // All but one verified waiting: valid, no multiple-claims finding at all.
+    const valid = report({ claimActivity: activity("waiting", "active") });
+    expect(kinds(valid, 6).filter((k) => k.includes("multiple-"))).toEqual([
+      "definite:multiple-owners",
+    ]);
+    expect(kinds(valid, 9).some((k) => k.includes("multiple"))).toBe(false);
+    // Unknown is never waiting: flagged with an inspection route.
+    const unknown = report({ claimActivity: activity("waiting", "unknown") });
+    expect(kinds(unknown, 9)).toContain("definite:claim-activity-unknown");
   });
   it("uses its own 24h staleness default, configurable, and bounds output with omitted counts", () => {
     expect(kinds(report({ staleHours: 48 }), 9)).not.toContain("candidate:stale-agent-activity");
