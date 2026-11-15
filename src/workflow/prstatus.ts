@@ -10,8 +10,17 @@
  * approval.
  */
 import { workflow } from "./definition.js";
-import { codexMarker, headAccepted, headCodexFindings } from "./reviewevidence.js";
+import { codexMarker } from "./reviewevidence.js";
+import type { CodexMarker } from "./reviewevidence.js";
+import {
+  evaluateReviewPolicy,
+  policyNotRead,
+  reviewPolicyText,
+  reviewProviders,
+} from "./reviewpolicy.js";
+import type { DeclaredReviewPolicy, ReviewPolicyDetail } from "./reviewpolicy.js";
 export { codexMarker };
+export type { CodexMarker, CodexReviewState } from "./reviewevidence.js";
 import { ghQuery, prop, selected, SubjectUnavailable } from "../github/github.js";
 import type { Query } from "../github/github.js";
 import type { ReadMeter } from "../github/readplan.js";
@@ -29,6 +38,8 @@ type CheckContext = {
   targetUrl?: string | null;
   startedAt?: string | null;
   completedAt?: string | null;
+  /** The GitHub App that published a check run: provider identity, never its display name. */
+  checkSuite?: { app: { slug: string } | null } | null;
 };
 type ReviewNode = {
   author: Login;
@@ -87,13 +98,6 @@ export type PullRequestNode = {
 };
 
 export type CheckClass = "passed" | "pending" | "cancelled" | "failed" | "unknown";
-/** Codex's machine-readable review state, embedded in its summary comment. */
-export type CodexReviewState = {
-  status?: string;
-  commit_sha?: string;
-  has_unresolved_findings?: boolean;
-};
-export type CodexMarker = { code_review?: CodexReviewState };
 export type Receipt = {
   by: string;
   at: string;
@@ -157,8 +161,13 @@ export type PrStatusReport = {
    * an approval or clean Codex receipt bound to the current head, vetoed by head findings.
    */
   headReviewed: boolean;
-  /** A Codex receipt on the current head reports unresolved findings (all receipts, #192). */
+  /**
+   * A known finding on the current head under the effective review policy: a Codex receipt
+   * (all receipts, #192), or with a declared provider policy any configured provider (#301).
+   */
   headFindings: boolean;
+  /** Declared review policy, per-provider head state and coverage (#301). */
+  reviewPolicy: ReviewPolicyDetail;
   reviewRequest: { at: string; url: string; status: string } | null;
   linkedIssues: {
     number: number;
@@ -173,7 +182,7 @@ export type PrStatusReport = {
 };
 
 const query = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){number title url state isDraft merged mergeable mergeStateStatus reviewDecision headRefOid headRefName baseRefName updatedAt
-commits(last:1){nodes{commit{oid committedDate statusCheckRollup{state contexts(first:100){nodes{__typename ... on CheckRun{name status conclusion detailsUrl startedAt completedAt} ... on StatusContext{context state targetUrl}} pageInfo{hasNextPage}}}}}}
+commits(last:1){nodes{commit{oid committedDate statusCheckRollup{state contexts(first:100){nodes{__typename ... on CheckRun{name status conclusion detailsUrl startedAt completedAt checkSuite{app{slug}}} ... on StatusContext{context state targetUrl}} pageInfo{hasNextPage}}}}}}
 reviews(last:50){nodes{author{__typename login} state submittedAt url commit{oid}} pageInfo{hasPreviousPage}}
 reviewThreads(first:100){nodes{isResolved isOutdated path line first:comments(first:1){totalCount nodes{author{__typename login} body createdAt url}} latest:comments(last:1){nodes{author{login} createdAt url}}} pageInfo{hasNextPage}}
 comments(last:100){nodes{author{__typename login} body createdAt url} pageInfo{hasPreviousPage}}
@@ -220,7 +229,11 @@ const reviewerFor: Record<string, string> = {
 export function prStatus(
   repository: string,
   pr: PullRequestNode,
-  { now = new Date(), startedAt }: { now?: Date; startedAt?: string } = {},
+  {
+    now = new Date(),
+    startedAt,
+    reviewPolicy = policyNotRead,
+  }: { now?: Date; startedAt?: string; reviewPolicy?: DeclaredReviewPolicy } = {},
 ): PrStatusReport {
   const head = pr.headRefOid;
   const rollup = pr.commits.nodes[0]?.commit.statusCheckRollup ?? null;
@@ -332,6 +345,35 @@ export function prStatus(
       .map((n) => n.slice(workflow.ownerPrefix.length)),
   }));
 
+  // #301: the declared policy over every fetched review, comment and head check run.
+  const policy = evaluateReviewPolicy(reviewPolicy, {
+    head,
+    reviews: pr.reviews.nodes.map((r) => ({
+      author: r.author,
+      state: r.state,
+      commit: r.commit?.oid ?? null,
+      at: r.submittedAt,
+      url: r.url,
+    })),
+    comments: comments.map((c) => ({ author: c.author, body: c.body, url: c.url })),
+    checks: (rollup?.contexts.nodes ?? [])
+      .filter((c) => c.__typename === "CheckRun")
+      .map((c) => ({
+        app: c.checkSuite?.app?.slug ?? null,
+        name: c.name ?? "unnamed",
+        status: c.status ?? null,
+        conclusion: c.conclusion ?? null,
+        url: c.detailsUrl ?? pr.url,
+      })),
+    complete:
+      !pr.comments.pageInfo?.hasPreviousPage &&
+      !pr.reviews.pageInfo?.hasPreviousPage &&
+      !pr.reviewThreads.pageInfo.hasNextPage,
+  });
+  const declaredCoverage = policy.detail.effective === "codex-or-coderabbit";
+  // A satisfied declared policy makes another provider's pending or stale state detail only.
+  const optionalDetail = declaredCoverage && policy.headReviewed;
+
   /** Every current blocker, simultaneously; no single merge verdict. */
   const blockers: string[] = [];
   const open = pr.state === "OPEN";
@@ -388,6 +430,7 @@ export function prStatus(
     if (codex?.has_unresolved_findings && codex.commit_sha === head)
       blockers.push("Codex reports unresolved findings on the current head");
     else if (
+      !optionalDetail &&
       codex &&
       codex.commit_sha !== head &&
       // A formal Codex review of the current head covers it even if the marker comment is stale.
@@ -396,7 +439,30 @@ export function prStatus(
       )
     )
       blockers.push("Codex's latest review is for an older commit; current head not yet covered");
-    if (request?.status === "no reaction yet")
+    // A declared provider's known finding is a veto whatever the other provider says (#301).
+    for (const f of declaredCoverage || policy.detail.effective === "unknown"
+      ? policy.detail.findings
+      : [])
+      if (
+        !(
+          f.provider === "codex" &&
+          blockers.includes("Codex reports unresolved findings on the current head")
+        )
+      )
+        blockers.push(
+          `${reviewProviders[f.provider].label} reports unresolved findings on the current head ${f.source}`,
+        );
+    if (declaredCoverage && !policy.headReviewed && !policy.detail.findings.length)
+      blockers.push(
+        `review policy ${policy.detail.effective}: no configured provider has accepted the current head yet (${policy.detail.providers.map((o) => `${reviewProviders[o.provider].label} ${o.state}`).join(", ")})`,
+      );
+    if (policy.detail.effective === "unknown")
+      blockers.push(
+        `review policy unknown (${reviewPolicy.state === "unknown" ? reviewPolicy.reason : "unresolved"}): review coverage cannot be established`,
+      );
+    if (optionalDetail) {
+      // Coverage is satisfied: an outstanding request or running optional review is detail.
+    } else if (request?.status === "no reaction yet")
       blockers.push("a review was requested and has had no reaction");
     else if (request?.status.startsWith("review in progress"))
       blockers.push(`waiting for the requested review to finish (${request.status})`);
@@ -475,15 +541,9 @@ export function prStatus(
     },
     receipts: receipts.slice(-limits.receipts),
     omittedReceipts: Math.max(0, receipts.length - limits.receipts),
-    headReviewed: headAccepted(
-      head,
-      pr.reviews.nodes.map((v) => ({ state: v.state, commit: v.commit?.oid ?? null })),
-      receipts.map((c) => ({ by: c.by, state: c.codexState?.code_review })),
-    ),
-    headFindings: headCodexFindings(
-      head,
-      receipts.map((c) => ({ by: c.by, state: c.codexState?.code_review })),
-    ),
+    headReviewed: policy.headReviewed,
+    headFindings: policy.headFindings,
+    reviewPolicy: policy.detail,
     reviewRequest: request,
     linkedIssues,
     blockers,
@@ -501,6 +561,7 @@ export async function pullRequestStatus(
   q: Query = ghQuery,
   now: () => Date = () => new Date(),
   meter?: ReadMeter,
+  reviewPolicy?: DeclaredReviewPolicy,
 ): Promise<PrStatusReport> {
   const startedAt = now().toISOString();
   const [owner, name] = repository.split("/");
@@ -513,7 +574,7 @@ export async function pullRequestStatus(
   const pr = selected<PullRequestNode>(prop(data, "repository", "pullRequest"));
   if (!pr) throw new SubjectUnavailable(`Pull request #${number} is unavailable in ${repository}.`);
   if (meter) coverPullRequest(meter, subject, pr);
-  return prStatus(repository, pr, { now: now(), startedAt });
+  return prStatus(repository, pr, { now: now(), startedAt, reviewPolicy });
 }
 
 /** Per-source coverage of one pr-status-v1 read; truncated connections are partial. */
@@ -557,6 +618,8 @@ export function prStatusText(r: PrStatusReport): string {
       (v) =>
         `  ${v.reviewer}: ${v.state} on ${v.reviewedCommit?.slice(0, 7) ?? "?"}${v.current ? " (current head)" : " (older commit)"}`,
     ),
+    reviewPolicyText(r.reviewPolicy),
+    ...r.reviewPolicy.unknowns.map((u) => `  unknown: ${u}`),
     `Unresolved threads: ${r.threads.unresolved.length + r.threads.omitted}`,
     ...r.threads.unresolved.map(
       (t) =>

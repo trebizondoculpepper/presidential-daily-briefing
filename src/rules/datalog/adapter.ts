@@ -52,6 +52,19 @@ export interface DatalogOptions {
   responsible?: ReadonlyMap<string, readonly string[]>;
   /** Issues whose delivery records could not be folded; reported, never treated as absence. */
   responsibilityUnknown?: readonly string[];
+  /**
+   * Declared review coverage (#301): `legacy` (default, the pre-#301 rule), `any` (either
+   * configured provider) or `unknown` (nothing is accepted). The host resolves configuration.
+   */
+  reviewCoverage?: "legacy" | "any" | "unknown";
+  /**
+   * Normalized provider review states per PR URL, authenticated and head-bound by the host
+   * (workflow/reviewpolicy.ts) so raw provenance checks stay outside the pure engine.
+   */
+  providerReviews?: ReadonlyMap<
+    string,
+    readonly { provider: string; state: string; commit: string }[]
+  >;
   limit: number;
   signal?: AbortSignal;
   now?: () => number;
@@ -126,6 +139,9 @@ function normalize(
       .filter((p) => p.state === "OPEN")
       .every((p) => !p.closingIssuesReferences.pageInfo.hasNextPage),
   );
+  // Absent is legacy (rules.edn legacy-coverage), keeping legacy inputs exactly as before #301.
+  if (options.reviewCoverage && options.reviewCoverage !== "legacy")
+    put(1, "review-coverage", options.reviewCoverage);
   for (const [id, s] of objects) {
     // A NaN sort key breaks the comparator's total order (#450): refuse, naming the subject.
     if (!Number.isFinite(Date.parse(s.createdAt)))
@@ -237,6 +253,13 @@ function normalize(
         if (typeof state.status === "string") put(r, "receipt-status", state.status);
         if (typeof state.has_unresolved_findings === "boolean")
           put(r, "receipt-findings", state.has_unresolved_findings);
+      }
+      for (const review of options.providerReviews?.get(pr.url) ?? []) {
+        const r = nextId++;
+        put(id, "provider-review", r);
+        put(r, "provider", review.provider);
+        put(r, "provider-state", review.state);
+        put(r, "provider-commit", review.commit);
       }
       for (const thread of pr.reviewThreads?.nodes ?? []) {
         const c = nextId++;

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { resolveEngineSetting } from "./config/engine-setting.js";
+import { resolveReviewPolicy } from "./config/review-setting.js";
 /** One read-only intake command. Contract: doc/pdb-cli.md. */
 import { realpathSync } from "node:fs";
 import { readFile, writeFile, rename, mkdir } from "node:fs/promises";
@@ -236,6 +237,9 @@ Rollback: pdb config set briefing.engine typescript.
                         as a complexity:S label with provenance (estimate --help);
                         --metric impact records a benefit estimate as impact:S
   pr N                  Why is pull request N not progressing? Every blocker at once
+                        under the declared review.policy (pdb config help): with
+                        codex-or-coderabbit either provider's current-head acceptance
+                        covers review; a finding from either still blocks
   pr N --history        Why does PR N keep failing review? Rounds, findings, recurring files
   claim N --agent NAME [--branch B] [--platform P] [--rework] [--dry-run]  Claim an eligible ticket;
                         --rework reclaims your own awaiting-review issue to fix review feedback;
@@ -1175,6 +1179,8 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
       ? await cachedSnapshot(values.cache ?? "", values.repo)
       : await runtime.collect(values.repo ?? (await runtime.currentRepository()), {});
     if (!values.offline && values.cache) await atomicJson(values.cache, snapshot);
+    // #301: the declared review policy, after caching (configuration is never cached).
+    snapshot.reviewPolicy = await resolveReviewPolicy(snapshot.repository, runtime.guide ?? {});
     const impact = await metricStatus(impactMetric, snapshot.repository, runtime.estimation).catch(
       () => "unknown" as const,
     );
@@ -1497,6 +1503,8 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
       ? await cachedSnapshot(values.cache ?? "", values.repo)
       : await runtime.collect(values.repo ?? (await runtime.currentRepository()), {});
     if (!values.offline && values.cache) await atomicJson(values.cache, snapshot);
+    // #301: the declared review policy, after caching (configuration is never cached).
+    snapshot.reviewPolicy = await resolveReviewPolicy(snapshot.repository, runtime.guide ?? {});
     const { report, text } = await readTeam(
       snapshot,
       { staleHours, now: runtime.now?.() ?? new Date(), offline: !!values.offline },
@@ -1591,6 +1599,8 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
           issue: number,
         });
     if (!values.offline && values.cache) await atomicJson(values.cache, snapshot);
+    // #301: the declared review policy, after caching (configuration is never cached).
+    snapshot.reviewPolicy = await resolveReviewPolicy(snapshot.repository, runtime.guide ?? {});
     const { report, text } = await readWho(
       snapshot,
       number,
@@ -1656,6 +1666,9 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
           query,
           // #192: delivery and responsibility for the issues this PR is linked to close.
           deliveryBoundaries(runtime, repository, false),
+          undefined,
+          // #301: the repository's declared review policy, from local configuration only.
+          await resolveReviewPolicy(repository, runtime.guide ?? {}),
         );
     await output(values.json ? JSON.stringify(report, null, 2) + "\n" : text);
     return report.completeness.complete ? 0 : 2;
@@ -1801,6 +1814,8 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
         options.full || options.issue
           ? undefined
           : await resolveEngineSetting(snapshot.repository, runtime.guide ?? {}),
+      // #301: declared review policy from local configuration (legacy when undeclared).
+      reviewPolicy: await resolveReviewPolicy(snapshot.repository, runtime.guide ?? {}),
     },
     runtime.estimation,
     runtime.now?.(),

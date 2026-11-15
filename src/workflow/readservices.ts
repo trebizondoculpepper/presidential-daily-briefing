@@ -3,6 +3,7 @@
  * summary", #373). The CLI and `pdb serve` call these directly; neither runs the other or parses
  * terminal text, so both emit the same versioned JSON for the same facts.
  */
+import type { DeclaredReviewPolicy } from "./reviewpolicy.js";
 import { collectIssueFocus, ghQueryWith, hydratePullRequests } from "../github/github.js";
 import type { FocusOptions, Query, Rest } from "../github/github.js";
 import { ReadMeter } from "../github/readplan.js";
@@ -392,11 +393,13 @@ export async function readPullRequest(
   query: Query,
   boundaries: DeliveryBoundaries,
   now?: () => Date,
+  /** Declared review policy (#301); absent: legacy, reported as not read. */
+  reviewPolicy?: DeclaredReviewPolicy,
 ) {
   // pr-status-v1 (#367): the selected PR, then delivery of the issues it closes; nothing else.
   const meter = new ReadMeter("pr-status-v1", "pr", now, undefined, boundaries.signal);
   const subject = `${repository}#${number}`;
-  const status = await pullRequestStatus(repository, number, query, now, meter);
+  const status = await pullRequestStatus(repository, number, query, now, meter, reviewPolicy);
   const metered = meteredBoundaries(boundaries, meter, subject);
   // Keep each linked issue's repository: a PR may close an issue elsewhere.
   const linked = status.linkedIssues.map((i) => {

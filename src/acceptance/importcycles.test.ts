@@ -17,8 +17,6 @@ const src = join(dirname(fileURLToPath(import.meta.url)), "..");
 const known: string[][] = [
   ["github/dependencies", "github/github"],
   ["estimation/complexitylabels", "estimation/estimate", "estimation/estimation"],
-  // reviewevidence imports prstatus for types only.
-  ["workflow/prstatus", "workflow/reviewevidence"],
   // pdb serve (#373): the serve/* modules import types from serve.ts; #445 breaks it.
   ["serve", "serve/api", "serve/cache", "serve/mcp", "serve/services"],
 ];
@@ -115,7 +113,7 @@ describe("import cycles (doc/design/source-layout.md, #436)", () => {
   it("reads imports of every form", () => {
     expect(graph.size).toBeGreaterThan(50);
     // Type-only and `import()` edges count: they are part of the cycles the contract lists.
-    expect(graph.get("workflow/reviewevidence")).toContain("workflow/prstatus");
+    expect(graph.get("config/review-setting")).toContain("briefing/process");
     expect(graph.get("briefing/service")).toContain("rules/datalog/datalog");
   });
 
