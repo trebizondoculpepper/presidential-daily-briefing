@@ -437,6 +437,7 @@ export function readApi(
     redactDiagnostic: redactLocalText,
     ...(runtime.loadEngine ? { loadEngine: runtime.loadEngine } : {}),
     ...projectReaders(runtime, project, repository),
+    closedQuestions: cache.closedQuestions.slot(project, repository),
   });
 
   /** Boundaries with the served repository's declared review policy (#301). */

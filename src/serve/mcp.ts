@@ -67,7 +67,14 @@ export function cachedMcpRuntime(
     served: (repo) => {
       try {
         const chosen = selectRepository(facts.served, repo);
-        return { ...chosen, runtime: projectReaders(read, chosen.project, chosen.repository) };
+        return {
+          ...chosen,
+          runtime: {
+            ...projectReaders(read, chosen.project, chosen.repository),
+            // #414: the same closed-ticket scan as the JSON API for this project and repository.
+            closedQuestions: cache.closedQuestions.slot(chosen.project, chosen.repository),
+          },
+        };
       } catch (error) {
         if (error instanceof HttpFailure)
           throw new SelectionRefusal(
