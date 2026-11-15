@@ -1053,6 +1053,48 @@ try {
         },
       )}`,
     );
+    // The real installed entrypoints read the opt-out before resolving the SDK.
+    {
+      const marker = join(work, "unexpected-sdk-load");
+      const preload = join(work, "config-opt-out.mjs");
+      // Locate the dependency from the installed package, independent of npm hoisting.
+      const { createRequire } = await import("node:module");
+      const requireInstalled = createRequire(join(packageDir, "package.json"));
+      const pathsUrl = pathToFileURL(requireInstalled.resolve("env-paths"));
+      await writeFile(
+        preload,
+        `import paths from ${JSON.stringify(pathsUrl.href)};
+        import {mkdirSync,writeFileSync} from 'node:fs';import {join} from 'node:path';import {registerHooks} from 'node:module';
+        const dir=paths('presidential-daily-briefing').config;mkdirSync(dir,{recursive:true});writeFileSync(join(dir,'crash-reporting.toml'),'[telemetry.crashes]\\nenabled=false');
+        registerHooks({resolve(specifier,context,next){if(specifier==='@sentry/node')writeFileSync(${JSON.stringify(marker)},'loaded');return next(specifier,context);}});`,
+      );
+      const optOutEnv = {
+        ...env,
+        SENTRY_DISABLED: "",
+        SENTRY_DSN: "https://public@sentry.example.invalid/1",
+        HOME: work,
+        USERPROFILE: work,
+        APPDATA: join(work, "appdata"),
+        XDG_CONFIG_HOME: join(work, "config"),
+        NODE_OPTIONS: `--import=${pathToFileURL(preload).href}`,
+      };
+      for (const name of ["cli", "mcp"])
+        await run(process.execPath, [join(packageDir, "dist", `${name}.mjs`), "--help"], {
+          env: optOutEnv,
+          cwd: work,
+        });
+      await serveSmoke(bin, optOutEnv, checkout);
+      if (
+        await readFile(marker, "utf8").then(
+          () => true,
+          () => false,
+        )
+      )
+        throw new Error("Configured opt-out loaded the SDK");
+      console.log(
+        "ok   installed CLI, STDIO MCP and HTTP serve config opt-out never resolve the SDK",
+      );
+    }
     // Node's own source-map support must not rewrite installed frames to unpackaged src/ paths.
     console.log(
       `ok   installed serve fault with NODE_OPTIONS=--enable-source-maps keeps the same frames: ${await packagedCrash("serve", packageDir, env, checkout, work, { NODE_OPTIONS: "--enable-source-maps" })}`,
