@@ -137,6 +137,12 @@ export interface ReadCollection {
   coverage: ReadSourceCoverage[];
   /** Targets the read did not attempt, for example after a definitive quota failure. */
   notAttempted: string[];
+  /**
+   * A definitive quota refusal seen during this read, with GitHub's own retry evidence when the
+   * refusal carried it; null when none was seen. A caller that keeps reading state (pdb serve)
+   * starts its cooldown from this even when the read returned an incomplete result.
+   */
+  quota: { retryAfterSeconds: number | null; resetAt: string | null } | null;
   telemetry: ReadTelemetry;
 }
 
@@ -211,6 +217,18 @@ export class ReadMeter {
   readonly calls: ReadCall[] = [];
   readonly coverage: ReadSourceCoverage[] = [];
   readonly notAttempted: string[] = [];
+  private refusal: ReadCollection["quota"] = null;
+  /** Record a quota refusal's structured retry evidence (RateLimitError's `retry`). */
+  private noteRefusal(error: unknown): void {
+    if (!quotaRefusal(error)) return;
+    const seconds = prop(error, "retry", "retryAfterSeconds");
+    const reset = prop(error, "retry", "resetAt");
+    this.refusal = {
+      retryAfterSeconds:
+        typeof seconds === "number" ? seconds : (this.refusal?.retryAfterSeconds ?? null),
+      resetAt: typeof reset === "string" ? reset : (this.refusal?.resetAt ?? null),
+    };
+  }
   private rate: ReadTelemetry["rateLimit"] = null;
   private readonly started: number;
   readonly monotonic: () => number;
@@ -265,6 +283,7 @@ export class ReadMeter {
         });
         return returned;
       } catch (error) {
+        this.noteRefusal(error);
         this.calls.push({
           source,
           subject,
@@ -303,6 +322,7 @@ export class ReadMeter {
         record(answer, restOutcome(answer));
         return answer;
       } catch (error) {
+        this.noteRefusal(error);
         record(null, outcomeOf(error, this.signal));
         throw error;
       }
@@ -351,6 +371,13 @@ export class ReadMeter {
       bounds: { ...readProfiles[this.profile].bounds },
       coverage: [...(prior?.coverage ?? []), ...this.coverage],
       notAttempted: [...(prior?.notAttempted ?? []), ...this.notAttempted],
+      quota:
+        this.refusal ??
+        prior?.quota ??
+        // A REST answer refused for quota carries no error object: no retry evidence then.
+        (calls.some((c) => c.outcome === "rate-limited")
+          ? { retryAfterSeconds: null, resetAt: null }
+          : null),
       telemetry: {
         requests: calls.length,
         graphqlRequests: graphql.length,

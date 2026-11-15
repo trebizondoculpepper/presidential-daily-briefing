@@ -539,6 +539,15 @@ export class ServeCache {
     return this.authCheck;
   }
 
+  /**
+   * Start the rate-limit cooldown for a quota refusal that a read reported in its result rather
+   * than threw (#367: a focused read that stopped early returns an incomplete answer). The same
+   * bounds and defaults as a thrown RateLimitError apply.
+   */
+  noteQuotaRefusal(retry: { retryAfterSeconds?: number | null; resetAt?: string | null }): void {
+    this.noteRateLimit(classifyFailure({ rateLimited: true, retry }, this.now()));
+  }
+
   private noteRateLimit(failure: CollectionError): void {
     if (failure.code !== "GITHUB_RATE_LIMITED" || !failure.resetAt) return;
     const until = Date.parse(failure.resetAt);

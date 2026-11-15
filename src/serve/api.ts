@@ -768,14 +768,14 @@ export function readApi(
             try {
               // issue-detail-v1 (#367): only the ticket, its linked open PRs and its delivery
               // records; the whole report is the cached result, keyed by profile and options.
-              read = await cache.read<{ report: unknown; complete: boolean }>(
+              read = await cache.read<Awaited<ReturnType<typeof readWhoLive>>>(
                 {
                   repository: served.repository,
                   collector: "who",
                   coverage: { n: number, profile: "issue-detail-v1", staleHours },
                 },
-                (inner) =>
-                  readWhoLive(
+                async (inner) => {
+                  const result = await readWhoLive(
                     served.repository,
                     number,
                     {
@@ -802,10 +802,18 @@ export function readApi(
                         },
                     runtime.now,
                     focus,
-                  ),
+                  );
+                  // A quota refusal the read stopped on (it returns an incomplete answer rather
+                  // than throwing) starts the same cooldown as a thrown RateLimitError, before
+                  // this collection slot is released.
+                  const quota = result.report.collection.quota;
+                  if (quota) cache.noteQuotaRefusal(quota);
+                  return result;
+                },
                 context.signal,
-                // Delivery is read inside this result: only a complete one is stored.
-                (result) => result.complete,
+                // Delivery is read inside this result: only a complete one is stored, and never
+                // one that stopped on a quota refusal.
+                (result) => result.complete && !result.report.collection.quota,
               );
             } catch (error) {
               // As the issue route: a missing, transferred or inaccessible issue is answered

@@ -225,4 +225,36 @@ describe("read profiles, coverage and telemetry (#367, collection-profiles.md)",
     )("query{x}", {});
     expect(real.collection().telemetry.calls[0].durationMs).toBeGreaterThanOrEqual(10);
   });
+
+  it("reports a quota refusal's structured retry evidence, and null when there was none", async () => {
+    const clean = new ReadMeter("issue-detail-v1", "who", clock);
+    await clean.query(async () => ({}), "issue", "o/r#1")("query{x}", {});
+    expect(clean.collection().quota).toBeNull();
+    const refused = new ReadMeter("issue-detail-v1", "who", clock);
+    await refused
+      .query(
+        async () => {
+          throw new RateLimitError("limited", { resetAt: "2026-11-15T01:00:00.000Z" });
+        },
+        "pull-request",
+        "o/r#2",
+      )("query{x}", {})
+      .catch(() => undefined);
+    expect(refused.collection().quota).toEqual({
+      retryAfterSeconds: null,
+      resetAt: "2026-11-15T01:00:00.000Z",
+    });
+    // An authentication failure is not a quota refusal.
+    const auth = new ReadMeter("issue-detail-v1", "who", clock);
+    await auth
+      .query(
+        async () => {
+          throw new AuthenticationError("check API rate limits");
+        },
+        "issue",
+        "o/r#1",
+      )("query{x}", {})
+      .catch(() => undefined);
+    expect(auth.collection().quota).toBeNull();
+  });
 });
