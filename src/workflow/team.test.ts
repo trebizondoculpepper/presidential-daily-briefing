@@ -67,9 +67,11 @@ describe("team view (#41, doc/design/diagnostics.md)", () => {
   it("separates definite violations from candidates", () => {
     const view = teamView(build(), { now: new Date(time) });
     const ana = view.agents.find((a) => a.agent === "ana")!;
-    expect(ana.warnings.filter((w) => w.certainty === "definite").map((w) => w.kind)).toEqual([
-      "multiple-claims",
-    ]);
+    // #413: without activity, several claims are not a definite violation (they may be waiting).
+    expect(ana.warnings.filter((w) => w.certainty === "definite")).toEqual([]);
+    expect(ana.warnings.find((w) => w.kind === "multiple-claims")).toMatchObject({
+      certainty: "candidate",
+    });
     expect(view.conflicts).toEqual([{ number: 3, url: issue(3).url, agents: ["bo", "ana"] }]);
     const details = ana.warnings
       .filter((w) => w.certainty === "candidate")
@@ -87,8 +89,39 @@ describe("team view (#41, doc/design/diagnostics.md)", () => {
       ),
     ).toBe(false);
     const text = teamText(view);
-    expect(text).toContain("WARNING: 3 active claims");
+    expect(text).toContain("ana: 3 claims");
     expect(text).toContain("CONFLICT: also claimed by bo");
+  });
+  it("judges several claims by their read activity (#413)", () => {
+    const urls = teamView(build(), { now: new Date(time) })
+      .agents.find((a) => a.agent === "ana")!
+      .claims.map((c) => c.url);
+    const read = (states: string[]) =>
+      teamView(build(), {
+        now: new Date(time),
+        activity: new Map([
+          ["ana", new Map(urls.map((u, i) => [u, { state: states[i]!, reason: `r${i}` }]))],
+        ]),
+      }).agents.find((a) => a.agent === "ana")!;
+    // All but one verified waiting: a review reminder, not a violation.
+    const valid = read(["waiting", "active", "waiting"]);
+    expect(valid.warnings.filter((w) => w.certainty === "definite")).toEqual([]);
+    expect(valid.warnings.find((w) => w.kind === "retained-claims")?.detail).toContain(
+      "all but one verified waiting",
+    );
+    expect(valid.claims[0]!.activity).toEqual({ state: "waiting", reason: "r0" });
+    // Two not waiting: a definite contradiction with explicit, non-automatic recovery.
+    const two = read(["active", "resume-required", "waiting"]);
+    const contradiction = two.warnings.find((w) => w.kind === "multiple-active-claims");
+    expect(contradiction?.certainty).toBe("definite");
+    expect(contradiction?.detail).toContain("Nothing is released automatically");
+    // Unknown is never waiting: it counts as not waiting and is flagged itself.
+    const unknown = read(["waiting", "unknown", "waiting"]);
+    expect(unknown.warnings.map((w) => w.kind)).toContain("claim-activity-unknown");
+    expect(unknown.warnings.map((w) => w.kind)).not.toContain("multiple-active-claims");
+    expect(teamText({ ...teamView(build(), { now: new Date(time) }), agents: [valid] })).toContain(
+      "activity: waiting (r0)",
+    );
   });
   it("runs offline from a cache and validates its options", async () => {
     const dir = await mkdtemp(join(tmpdir(), "triage-team-"));

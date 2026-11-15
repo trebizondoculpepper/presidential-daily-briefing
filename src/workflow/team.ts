@@ -29,6 +29,11 @@ export interface TeamClaim {
   pullRequests: LinkedPullRequest[];
   latestActivity: { at: string; source: string } | null;
   candidates: string[];
+  /**
+   * The claim's activity (#413), read live with the claim guard's reader for the agent holding
+   * it; null when not read (offline or no live boundary).
+   */
+  activity: { state: string; reason: string } | null;
 }
 export interface TeamWarning {
   kind: string;
@@ -70,6 +75,8 @@ export interface TeamOptions {
   now?: Date;
   staleHours?: number;
   offline?: boolean;
+  /** #413: claim activity per agent, then per claim URL; absent means not read. */
+  activity?: ReadonlyMap<string, ReadonlyMap<string, { state: string; reason: string }>>;
 }
 
 export interface ActivityEvent {
@@ -106,7 +113,12 @@ export function pullRequestState(pr: PullRequest): LinkedPullRequest {
  */
 export function teamView(
   snapshot: Snapshot,
-  { now = new Date(), staleHours = defaultStaleHours, offline = false }: TeamOptions = {},
+  {
+    now = new Date(),
+    staleHours = defaultStaleHours,
+    offline = false,
+    activity: claimActivity,
+  }: TeamOptions = {},
 ): TeamView {
   const open = snapshot.issues.filter((i) => i.state === "OPEN");
   const linked = new Map<string, PullRequest[]>();
@@ -151,6 +163,7 @@ export function teamView(
       pullRequests: prs,
       latestActivity: activity ? { at: activity.at, source: activity.source } : null,
       candidates,
+      activity: null,
     };
     for (const agent of holders) {
       let entry = agents.get(agent);
@@ -158,17 +171,45 @@ export function teamView(
         entry = { agent, presence: "unknown", claims: [], warnings: [] };
         agents.set(agent, entry);
       }
-      entry.claims.push(claim);
+      const read = claimActivity?.get(agent)?.get(issue.url);
+      entry.claims.push(read ? { ...claim, activity: read } : claim);
     }
   }
   for (const entry of agents.values()) {
     entry.claims.sort((a, b) => a.number - b.number);
-    if (entry.claims.length > 1)
+    const list = (claims: TeamClaim[]) => claims.map((c) => `#${c.number}`).join(", ");
+    const read = claimActivity?.has(entry.agent) ?? false;
+    // #412/#413: more than one claim is valid only while all but one are verified waiting.
+    // A claim the live read found released since the snapshot counts for nothing.
+    const notWaiting = entry.claims.filter(
+      (c) => c.activity?.state !== "waiting" && c.activity?.state !== "not-owned",
+    );
+    if (entry.claims.length > 1 && !read)
       entry.warnings.push({
         kind: "multiple-claims",
-        certainty: "definite",
-        detail: `${entry.claims.length} active claims (${entry.claims.map((c) => `#${c.number}`).join(", ")}); one active claim per agent.`,
+        certainty: "candidate",
+        detail: `${entry.claims.length} retained claims (${list(entry.claims)}); their activity was not read, so whether all but one are verified waiting is unknown.`,
       });
+    else if (notWaiting.length > 1)
+      entry.warnings.push({
+        kind: "multiple-active-claims",
+        certainty: "definite",
+        detail: `${list(notWaiting)} are not verified waiting; the claim guard admits at most one such claim. Recover explicitly: finish one, record a wait (pdb claim wait N), or release one. Nothing is released automatically.`,
+      });
+    else if (entry.claims.length > 1)
+      entry.warnings.push({
+        kind: "retained-claims",
+        certainty: "candidate",
+        detail: `${entry.claims.length} retained claims (${list(entry.claims)}), all but one verified waiting; review which to finish, justify as waiting, release or reassign.`,
+      });
+    for (const c of entry.claims)
+      if (c.activity?.state === "unknown")
+        entry.warnings.push({
+          kind: "claim-activity-unknown",
+          certainty: "definite",
+          ticket: c.number,
+          detail: `#${c.number}'s activity is unknown (${c.activity.reason}); unknown is never waiting. Inspect it with pdb --repo ${snapshot.repository} --issue ${c.number} --json.`,
+        });
     for (const c of entry.claims)
       for (const detail of c.candidates)
         entry.warnings.push({
@@ -217,12 +258,13 @@ export function teamText(view: TeamView): string {
   ];
   if (!view.agents.length) lines.push("", "No open tickets carry an agent: claim.");
   for (const a of view.agents) {
-    lines.push(
-      "",
-      `${a.agent}: ${a.claims.length} active claim${a.claims.length === 1 ? "" : "s"}`,
-    );
+    lines.push("", `${a.agent}: ${a.claims.length} claim${a.claims.length === 1 ? "" : "s"}`);
     for (const c of a.claims) {
       lines.push(`  #${c.number} ${c.title} ${c.url}`);
+      if (c.activity)
+        lines.push(
+          `    activity: ${c.activity.state}${c.activity.reason ? ` (${c.activity.reason})` : ""}`,
+        );
       lines.push(
         `    last activity: ${c.latestActivity ? `${c.latestActivity.at} (${c.latestActivity.source})` : "unknown"}`,
       );
