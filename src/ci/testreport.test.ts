@@ -74,6 +74,14 @@ describe("JUnit parsing (#393)", () => {
     expect(parseJunit(whole.slice(0, whole.length - 20)).kind).toBe("malformed");
     expect(parseJunit(vitest(passing, 3)).kind).toBe("malformed");
     expect(parseJunit("<html></html>").kind).toBe("malformed");
+    // An unclosed failure element is corruption, never a pass (with or without counts).
+    expect(
+      parseJunit(
+        '<testsuites><testsuite tests="1"><testcase name="x"><failure message="boom"></testcase></testsuite></testsuites>',
+      ).kind,
+    ).toBe("malformed");
+    // A suite declaring a failure the cases do not contain cannot read as passing.
+    expect(parseJunit(vitest(passing, 1, 1)).kind).toBe("malformed");
     expect(parseJunit(vitest("", 0))).toMatchObject({ kind: "report", tests: 0 });
   });
 

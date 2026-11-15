@@ -68,11 +68,18 @@ export function parseJunit(xml: string): ParsedReport {
       return { kind: "malformed", why: `suite ${sAttr.name ?? "?"} has no valid tests count` };
     declared += tests;
     const body = suite[2]!;
+    const before = cases.length;
     for (const c of body.matchAll(/<testcase\b([^>]*?)(\/>|>([\s\S]*?)<\/testcase>)/g)) {
       const a = attributes(c[1]!);
       const inner = c[3] ?? "";
       const fail = /<(failure|error)\b([^>]*?)(?:\/>|>([\s\S]*?)<\/\1>)/.exec(inner);
       const skipped = /<skipped\b/.test(inner);
+      // An outcome element that cannot be read whole is corruption, never a pass.
+      if (!fail && /<(failure|error)\b/.test(inner))
+        return {
+          kind: "malformed",
+          why: `test case ${a.name ?? "?"} has an unreadable failure or error element`,
+        };
       const fa = fail ? attributes(fail[2]!) : {};
       cases.push({
         suite: sAttr.name ?? "",
@@ -82,6 +89,17 @@ export function parseJunit(xml: string): ParsedReport {
         message: fail ? (fa.message ?? null) : null,
         detail: fail ? decodeXml(fail[3] ?? "").trim() || null : null,
       });
+    }
+    // Declared failure and error counts must match the parsed cases, so no failure can hide.
+    const mine = cases.slice(before);
+    for (const kind of ["failure", "error"] as const) {
+      const attr = sAttr[kind === "failure" ? "failures" : "errors"];
+      const found = mine.filter((c) => c.outcome === kind).length;
+      if (attr !== undefined && Number(attr) !== found)
+        return {
+          kind: "malformed",
+          why: `suite ${sAttr.name ?? "?"} declares ${attr} ${kind === "failure" ? "failures" : "errors"} but contains ${found}`,
+        };
     }
   }
   if (cases.length !== declared)
