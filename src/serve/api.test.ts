@@ -265,6 +265,21 @@ async function cliJson(args: string[]): Promise<Record<string, unknown>> {
   return JSON.parse(out) as Record<string, unknown>;
 }
 
+/**
+ * #516: a served --repo-only repository cannot read its project configuration, so its effective
+ * policy is "unavailable", while a checkout without configuration reports "disabled". Everything
+ * else must be identical; this removes only that manifest and returns the states it held.
+ */
+const splitPolicy = (value: unknown): { rest: unknown; states: string[] } => {
+  const states: string[] = [];
+  const rest = JSON.parse(JSON.stringify(value), (key: string, v: unknown) => {
+    if (key !== "effectivePolicy") return v;
+    states.push((v as { state: string }).state);
+    return undefined;
+  }) as unknown;
+  return { rest, states };
+};
+
 const envelopeKeys = [
   "schemaVersion",
   "kind",
@@ -313,7 +328,13 @@ describe("pdb serve read API (#373)", () => {
           "--limit",
           "10",
         ]);
-        expect(reply.json.result).toEqual(cli);
+        const served = splitPolicy(reply.json.result);
+        const local = splitPolicy(cli);
+        expect(served.rest).toEqual(local.rest);
+        if (role !== "human") {
+          expect(served.states).toEqual(["unavailable"]);
+          expect(local.states).toEqual(["disabled"]);
+        }
       }
     } finally {
       await s.close();
@@ -863,11 +884,11 @@ describe("pdb serve cache (#373)", () => {
       const designer = await call(s.running.port, "/api/v1/briefing?agent=other&role=designer");
       expect(s.calls.collect).toHaveLength(1);
       expect(designer.json.freshness.source).toBe("cached");
-      expect(implementer.json.result).toEqual(
-        await cliJson(["--agent", "me", "--role", "implementer"]),
+      expect(splitPolicy(implementer.json.result).rest).toEqual(
+        splitPolicy(await cliJson(["--agent", "me", "--role", "implementer"])).rest,
       );
-      expect(designer.json.result).toEqual(
-        await cliJson(["--agent", "other", "--role", "designer"]),
+      expect(splitPolicy(designer.json.result).rest).toEqual(
+        splitPolicy(await cliJson(["--agent", "other", "--role", "designer"])).rest,
       );
       expect(implementer.json.result).not.toEqual(designer.json.result);
     } finally {

@@ -8,6 +8,7 @@ import { cachedIssueFacts } from "./issue-facts.js";
  * mutates GitHub; refresh changes only the server's own memory.
  */
 import { BriefingArgumentError } from "../briefing/compact.js";
+import { noCheckout } from "../config/project-rules-setting.js";
 import { resolveReviewPolicy } from "../config/review-setting.js";
 import type { DeclaredReviewPolicy } from "../workflow/reviewpolicy.js";
 import {
@@ -128,7 +129,7 @@ const refuseWrite = async (): Promise<never> => {
  */
 export function noLocalProject(
   repository: string,
-): Pick<ReadRuntime, "estimation" | "guide" | "reviewPolicy"> {
+): Pick<ReadRuntime, "estimation" | "guide" | "reviewPolicy" | "projectRules"> {
   const git: GitRunner = async (args) =>
     args[0] === "rev-parse"
       ? `${NO_PROJECT_ROOT}\n`
@@ -146,6 +147,8 @@ export function noLocalProject(
     estimation: readers,
     guide: readers,
     reviewPolicy: { state: "undeclared", scope: "no-matching-project" },
+    // #516: whether project preferences are enabled cannot be read without the checkout.
+    projectRules: { enabled: "unavailable", reason: noCheckout(repository) },
   };
 }
 
@@ -457,7 +460,7 @@ export const projectReaders = (
   runtime: ServeReadRuntime,
   project: string | undefined,
   repository: string,
-): Pick<ReadRuntime, "estimation" | "guide" | "reviewPolicy"> =>
+): Pick<ReadRuntime, "estimation" | "guide" | "reviewPolicy" | "projectRules"> =>
   project
     ? (runtime.projectRuntime?.(project) ?? {
         estimation: { cwd: project },

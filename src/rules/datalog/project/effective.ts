@@ -25,14 +25,19 @@ export const projectRulesSource = "pdb.rules.edn" as const;
 
 export interface EffectivePolicyManifest {
   schemaVersion: 1;
-  state: "disabled" | "active" | "error";
+  /**
+   * `unavailable`: no local checkout of the repository is selected, so whether its project rules
+   * are enabled cannot be read. The default order applies and the briefing stays complete, as for
+   * every other repository setting such a selection cannot read; `reason` names the remedy.
+   */
+  state: "disabled" | "active" | "error" | "unavailable";
   formatVersion: 1 | null;
   projectionVersion: 1 | null;
   basePolicyVersion: number | null;
   defaultRulesHash: string;
   /** Null when disabled or unreadable. */
   projectRulesHash: string | null;
-  /** The default hash when disabled; the composite when active; null on error. */
+  /** The default hash when disabled; the composite when active; null on error or unavailable. */
   effectiveRulesHash: string | null;
   appliedOrderMode: "impact" | "disabled-by-age-order" | "disabled" | "error";
   /** The project-relative policy file, never a local path. */
@@ -114,12 +119,22 @@ export async function effectivePolicy<A extends AdmittedAction & { why?: { ruleI
         state: "disabled",
         effectiveRulesHash: options.base.rulesHash,
         appliedOrderMode: "disabled",
-        reason:
-          setting.source === "no-matching-project"
-            ? "no local checkout of this repository was selected, so no project configuration applies"
-            : setting.source === "not-read"
-              ? "project configuration was not read"
-              : "rules.project.enabled is false",
+        reason: "rules.project.enabled is false",
+      },
+    };
+  if (setting.enabled === "unavailable")
+    return {
+      items: [...actions],
+      warnings: [],
+      manifest: {
+        ...blank,
+        state: "unavailable",
+        effectiveRulesHash: null,
+        appliedOrderMode: "disabled",
+        reason: setting.reason,
+        next: [
+          "Start pdb serve or pdb-mcp with --project <checkout>, or run pdb inside the checkout",
+        ],
       },
     };
   const failed = (reason: string, partial: Partial<EffectivePolicyManifest> = {}) => ({
@@ -195,15 +210,8 @@ export async function projectRulesView(
   runtime: Pick<ProjectPolicyRuntime, "loadPolicy"> = {},
 ): Promise<import("../rules-command.js").ProjectRulesView> {
   if (setting.enabled === false)
-    return {
-      state: "disabled",
-      reason:
-        setting.source === "no-matching-project"
-          ? "no local checkout of this repository was selected, so no project configuration applies"
-          : setting.source === "not-read"
-            ? "project configuration was not read"
-            : "rules.project.enabled is false",
-    };
+    return { state: "disabled", reason: "rules.project.enabled is false" };
+  if (setting.enabled === "unavailable") return { state: "unknown", reason: setting.reason };
   if (setting.enabled === "unknown")
     return {
       state: "error",
