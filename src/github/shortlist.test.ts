@@ -556,6 +556,76 @@ describe("routine briefing: discover all, rank, hydrate only the shortlist (#368
     });
   });
 
+  describe("every output path carries the shortlist's provisional coverage (#368)", () => {
+    const large = () => {
+      const issues = Array.from({ length: 60 }, (_, i) => ready(i + 1));
+      return fakeGitHub(issues, []);
+    };
+    it("the MCP briefing: bounded unread list with its total, notice and text, in budget", async () => {
+      const { Client } = await import("@modelcontextprotocol/client");
+      const { InMemoryTransport } = await import("@modelcontextprotocol/server");
+      const { createServer } = await import("../mcp.js");
+      const { budgetBytes } = await import("../mcp/bounded.js");
+      const { shortlistListed } = await import("../mcp/views.js");
+      for (const maxChars of [undefined, 1500]) {
+        const fake = large();
+        const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+        await createServer(
+          {},
+          {
+            currentRepository: async () => repo,
+            collect: async () => {
+              throw new Error("full read not expected");
+            },
+            collectShortlist,
+            dependencyReport: async () => {
+              throw new Error("not used");
+            },
+            query: fake.query,
+            now: clock,
+            guide: config("typescript"),
+            estimation: config("typescript"),
+          },
+        ).connect(serverSide);
+        const client = new Client({ name: "test", version: "1.0.0" });
+        await client.connect(clientSide);
+        const result = await client.callTool({
+          name: "triage_briefing",
+          arguments: { repo, agent: "kavya", ...(maxChars ? { maxChars } : {}) },
+        });
+        await client.close();
+        const data = (result.structuredContent as { data: { shortlist: Record<string, unknown> } })
+          .data;
+        const coverage = data.shortlist;
+        expect(coverage.provisional).toBe(true);
+        const total = Number(coverage.notHydratedTotal);
+        expect(total).toBeGreaterThan(shortlistListed);
+        expect(coverage.notHydrated).toHaveLength(shortlistListed);
+        expect(coverage.notHydratedOmitted).toBe(total - shortlistListed);
+        expect(String(coverage.notice)).toContain("discovered but not hydrated");
+        const text = (result.content as { text: string }[])[0].text;
+        expect(text).toContain(`PROVISIONAL: ${total} open item(s)`);
+        if (maxChars) expect(text.length).toBeLessThanOrEqual(maxChars);
+        expect(Buffer.byteLength(JSON.stringify(result))).toBeLessThanOrEqual(budgetBytes);
+      }
+    });
+
+    it("the rebrief hook's briefing text", async () => {
+      const { serviceTransport } = await import("../rebrief/transports.js");
+      const fake = large();
+      const read = await serviceTransport({
+        ...runtimeFor(fake, "typescript", true),
+      }).read(
+        { repository: repo, agent: "kavya", role: "implementer", platform: "codex" } as Parameters<
+          ReturnType<typeof serviceTransport>["read"]
+        >[0],
+        new AbortController().signal,
+      );
+      expect(read.text.startsWith("PROVISIONAL: Shortlist:")).toBe(true);
+      expect((read.report as unknown as Report).shortlist?.provisional).toBe(true);
+    });
+  });
+
   it("stops hydrating after a quota refusal and reports the rest not attempted", async () => {
     const issues = Array.from({ length: 25 }, (_, i) => ready(i + 1));
     const fake = fakeGitHub(issues, []);
