@@ -105,7 +105,12 @@ export type Snapshot = {
   /** Optional, versioned briefing-mode evidence (#168); absent in legacy snapshots. */
   changeEvidence?: import("./changes.js").ChangeEvidence;
   warnings: string[];
-  metrics?: { requestCount: number; durationMs: number };
+  metrics?: {
+    requestCount: number;
+    durationMs: number;
+    /** Per-attempt gh evidence summary (#293); present only for the production transport. */
+    github?: import("./evidence.js").AttemptSummary;
+  };
   rateLimit: { remaining: number; resetAt: string } | null;
 };
 export type Action = {

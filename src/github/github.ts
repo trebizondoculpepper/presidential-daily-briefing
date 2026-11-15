@@ -18,8 +18,22 @@ import type {
   SourceCoverage,
 } from "./changes.js";
 import type { Comment, Issue, Page, PullRequest, Reference, Snapshot } from "./types.js";
-import { classifyGhFailure, parseGhResponse, rateLimitMessage } from "./evidence.js";
-import type { GhResponse } from "./evidence.js";
+import {
+  classifyGhFailure,
+  operationIds,
+  parseGhResponse,
+  quotaObservation,
+  rateLimitMessage,
+  summarizeAttempts,
+} from "./evidence.js";
+import type {
+  AttemptEvent,
+  AttemptObserver,
+  FailureClassification,
+  GhResponse,
+  OperationId,
+  QuotaObservation,
+} from "./evidence.js";
 
 const execute = promisify(execFile);
 
@@ -61,49 +75,150 @@ export function selected<T>(value: unknown): T | null {
  * Read-only GraphQL through gh. With `signal`, aborting terminates the running gh child
  * process (execFile's kill on abort) and rejects with the abort reason instead of a result.
  */
+export interface QueryTelemetry {
+  /** Registered operation ID; anything else is reported as "other". */
+  operation?: OperationId;
+  /** Receives one event per gh attempt. It must not throw; if it does, the read is unaffected. */
+  observer?: AttemptObserver;
+  /** Wall clock and monotonic milliseconds, injectable for tests. */
+  now?: () => Date;
+  monotonic?: () => number;
+}
+
 export const ghQueryWith =
-  (signal?: AbortSignal): Query =>
+  (signal?: AbortSignal, telemetry: QueryTelemetry = {}): Query =>
   async (query, variables) => {
-    signal?.throwIfAborted();
-    // --include keeps the response's own status and headers, so a failure is classified from
-    // the same response's evidence (#293), never from a separate /rate_limit reading.
-    const args = ["api", "graphql", "--include", "-f", `query=${query}`];
-    for (const [key, value] of Object.entries(variables)) args.push("-F", `${key}=${value}`);
-    let stdout: string;
+    if (!telemetry.observer) return ghQueryAttempt(signal, query, variables).then((r) => r.data);
+    const monotonic = telemetry.monotonic ?? (() => performance.now());
+    const startedAt = (telemetry.now?.() ?? new Date()).toISOString();
+    const started = monotonic();
+    let outcome: Awaited<ReturnType<typeof ghQueryAttempt>> | null = null;
+    let failure: unknown = null;
     try {
-      ({ stdout } = await execute("gh", args, {
-        maxBuffer: 32 * 1024 * 1024,
-        timeout: 60_000,
-        signal,
-      }));
+      outcome = await ghQueryAttempt(signal, query, variables);
+      return outcome.data;
     } catch (error) {
-      signal?.throwIfAborted();
-      const response = responseOf(prop(error, "stdout"));
-      // gh exits non-zero on any GraphQL error but still prints the response. A response whose
-      // only errors are NOT_FOUND is a valid answer ("no such issue"): callers see null fields.
-      const answer = graphqlAnswer(response?.body);
-      if (answer) return answer;
-      throw ghQueryFailure(error, response);
+      failure = error;
+      throw error;
+    } finally {
+      const evidence = outcome?.evidence ?? evidenceOf(failure);
+      const category: AttemptEvent["outcome"] = outcome
+        ? "success"
+        : signal?.aborted
+          ? "cancelled"
+          : (evidence?.category ?? "unknown");
+      try {
+        telemetry.observer({
+          schemaVersion: 1,
+          operation: operationIds.includes(telemetry.operation ?? "other")
+            ? (telemetry.operation ?? "other")
+            : "other",
+          route: "graphql",
+          startedAt,
+          durationMs: Math.max(0, Math.round(monotonic() - started)),
+          outcome: category,
+          httpStatus: outcome?.status ?? evidence?.httpStatus ?? null,
+          errorTypes: evidence?.errorTypes ?? [],
+          bodyBytes: outcome?.bodyBytes ?? null,
+          cost: outcome?.cost ?? null,
+          observation: outcome?.observation ?? evidence?.observation ?? quotaObservation(new Map()),
+        });
+      } catch {
+        // Telemetry never changes a read's result (contract: observers must not throw into it).
+      }
     }
-    let response: GhResponse;
-    try {
-      response = parseGhResponse(stdout);
-    } catch {
-      throw new Error("GitHub returned a malformed response; no fresh report saved.");
-    }
-    stdout = response.body;
-    const parsed: unknown = JSON.parse(stdout);
-    const errors = prop(parsed, "errors");
-    if (Array.isArray(errors) && errors.length && !graphqlAnswer(stdout)) {
-      const limited = sameResponseLimit(response) ?? rateLimitFailure("", stdout);
-      if (limited) throw limited;
-      throw new Error("GitHub returned incomplete query data; no fresh report saved.");
-    }
-    const data = prop(parsed, "data");
-    if (!isRecord(data))
-      throw new Error("GitHub returned incomplete query data; no fresh report saved.");
-    return data;
   };
+
+/** The same-response classification a failed attempt carries, if any. */
+const evidenceOf = (error: unknown): FailureClassification | null => {
+  const evidence = prop(error, "evidence");
+  return isRecord(evidence) ? (evidence as unknown as FailureClassification) : null;
+};
+/**
+ * Attach the attempt's classification to the error it throws, without overriding evidence an
+ * error already carries (a RateLimitError's own). Non-enumerable, so error serialisation and
+ * messages are unchanged.
+ */
+function withEvidence<E extends Error>(error: E, evidence: FailureClassification): E {
+  if (!evidenceOf(error))
+    Object.defineProperty(error, "evidence", { value: evidence, enumerable: false });
+  return error;
+}
+
+/** One gh GraphQL attempt: the data plus its same-response evidence for telemetry. */
+async function ghQueryAttempt(
+  signal: AbortSignal | undefined,
+  query: string,
+  variables: QueryVariables,
+): Promise<{
+  data: JsonObject;
+  status: number | null;
+  bodyBytes: number;
+  cost: number | null;
+  observation: QuotaObservation;
+  evidence: FailureClassification | null;
+}> {
+  signal?.throwIfAborted();
+  // --include keeps the response's own status and headers, so a failure is classified from
+  // the same response's evidence (#293), never from a separate /rate_limit reading.
+  const args = ["api", "graphql", "--include", "-f", `query=${query}`];
+  for (const [key, value] of Object.entries(variables)) args.push("-F", `${key}=${value}`);
+  let stdout: string;
+  try {
+    ({ stdout } = await execute("gh", args, {
+      maxBuffer: 32 * 1024 * 1024,
+      timeout: 60_000,
+      signal,
+    }));
+  } catch (error) {
+    signal?.throwIfAborted();
+    const response = responseOf(prop(error, "stdout"));
+    // gh exits non-zero on any GraphQL error but still prints the response. A response whose
+    // only errors are NOT_FOUND is a valid answer ("no such issue"): callers see null fields.
+    const answer = graphqlAnswer(response?.body);
+    if (answer) return attemptResult(answer, response!);
+    const failure = ghQueryFailure(error, response);
+    // execFile's timeout kills gh with SIGTERM; that is a timeout, not a GitHub answer.
+    const timedOut = prop(error, "killed") === true && prop(error, "signal") === "SIGTERM";
+    throw withEvidence(
+      failure,
+      classifyGhFailure({ response, exitCode: prop(error, "code"), timedOut }),
+    );
+  }
+  let response: GhResponse;
+  try {
+    response = parseGhResponse(stdout);
+  } catch {
+    throw new Error("GitHub returned a malformed response; no fresh report saved.");
+  }
+  stdout = response.body;
+  const parsed: unknown = JSON.parse(stdout);
+  const errors = prop(parsed, "errors");
+  if (Array.isArray(errors) && errors.length && !graphqlAnswer(stdout)) {
+    const limited = sameResponseLimit(response) ?? rateLimitFailure("", stdout);
+    if (limited) throw withEvidence(limited, classifyGhFailure({ response }));
+    throw withEvidence(
+      new Error("GitHub returned incomplete query data; no fresh report saved."),
+      classifyGhFailure({ response }),
+    );
+  }
+  const data = prop(parsed, "data");
+  if (!isRecord(data))
+    throw new Error("GitHub returned incomplete query data; no fresh report saved.");
+  return attemptResult(data, response);
+}
+
+const attemptResult = (data: JsonObject, response: GhResponse) => {
+  const cost = prop(data, "rateLimit", "cost");
+  return {
+    data,
+    status: response.status,
+    bodyBytes: Buffer.byteLength(response.body, "utf8"),
+    cost: typeof cost === "number" && Number.isFinite(cost) && cost >= 0 ? cost : null,
+    observation: quotaObservation(response.headers),
+    evidence: null,
+  };
+};
 const text = (value: unknown): string =>
   typeof value === "string" ? value : Buffer.isBuffer(value) ? value.toString() : "";
 /**
@@ -468,9 +583,15 @@ export interface CollectOptions {
 export async function collect(
   repository: string,
   options: CollectOptions = {},
-  query: Query = ghQueryWith(options.signal),
+  injected?: Query,
   now: () => Date = () => new Date(),
 ): Promise<Snapshot> {
+  // The production transport records one event per gh attempt for the additive metrics.github
+  // summary (#293); an injected query keeps its own behaviour and adds no summary.
+  const attempts: AttemptEvent[] = [];
+  let query: Query =
+    injected ??
+    ghQueryWith(options.signal, { operation: "snapshot", observer: (e) => attempts.push(e) });
   const originalQuery = query;
   let requestCount = 0;
   query = (...args: Parameters<Query>) => {
@@ -703,7 +824,11 @@ export async function collect(
     ...(changeEvidence ? { changeEvidence } : {}),
     warnings,
     rateLimit,
-    metrics: { requestCount, durationMs: Date.parse(now().toISOString()) - Date.parse(startedAt) },
+    metrics: {
+      requestCount,
+      durationMs: Date.parse(now().toISOString()) - Date.parse(startedAt),
+      ...(injected ? {} : { github: summarizeAttempts(attempts) }),
+    },
   };
 }
 

@@ -211,3 +211,85 @@ export function rateLimitMessage(c: FailureClassification): string {
     return `GitHub refused the query as rate limited, but this same response reported ${quota}; the cause and retry time are unproven.`;
   return `GitHub query was rate limited; this response reported no quota or reset${o.retryAfterSeconds !== null ? `, only a retry after ${o.retryAfterSeconds}s` : ""}.`;
 }
+
+/**
+ * Registered operation IDs (#293 "Allowed request evidence"): callers choose one of these, never
+ * free text, so no prose or repository content can reach telemetry through an operation name.
+ */
+export const operationIds = [
+  "snapshot",
+  "issue",
+  "comments",
+  "dependencies",
+  "pull-request",
+  "estimate",
+  "delivery",
+  "other",
+] as const;
+export type OperationId = (typeof operationIds)[number];
+
+/** One GitHub API attempt as observed by the gh transport; nothing else leaves it. */
+export interface AttemptEvent {
+  schemaVersion: 1;
+  operation: OperationId;
+  route: "graphql";
+  startedAt: string;
+  durationMs: number;
+  /** `success` (including a NOT_FOUND-only answer), else the failure category. */
+  outcome: "success" | FailureCategory;
+  httpStatus: number | null;
+  errorTypes: string[];
+  /** UTF-8 bytes of the response body when known; not wire bytes. */
+  bodyBytes: number | null;
+  /** GraphQL query cost when the response reported it; null when not selected or unknown. */
+  cost: number | null;
+  observation: QuotaObservation;
+}
+export type AttemptObserver = (event: AttemptEvent) => void;
+
+/** A bounded summary of attempts (#293 "Reporting, aggregation and retry"). */
+export interface AttemptSummary {
+  schemaVersion: 1;
+  attempts: number;
+  succeeded: number;
+  failed: number;
+  cancelled: number;
+  bodyBytes: number;
+  /** Sum of the costs that were reported; attempts without one are counted separately. */
+  knownCost: number;
+  unknownCostAttempts: number;
+  /** Failures by category. */
+  failures: Partial<Record<FailureCategory, number>>;
+  /** The latest header observation per rate-limit resource; never summed across calls. */
+  latest: Record<string, QuotaObservation>;
+}
+
+/** Summarise attempts. Retries count again; remaining allowances are never added up. */
+export function summarizeAttempts(events: readonly AttemptEvent[]): AttemptSummary {
+  const summary: AttemptSummary = {
+    schemaVersion: 1,
+    attempts: events.length,
+    succeeded: 0,
+    failed: 0,
+    cancelled: 0,
+    bodyBytes: 0,
+    knownCost: 0,
+    unknownCostAttempts: 0,
+    failures: {},
+    latest: {},
+  };
+  for (const e of events) {
+    if (e.outcome === "success") summary.succeeded++;
+    else if (e.outcome === "cancelled") summary.cancelled++;
+    else {
+      summary.failed++;
+      summary.failures[e.outcome] = (summary.failures[e.outcome] ?? 0) + 1;
+    }
+    summary.bodyBytes += e.bodyBytes ?? 0;
+    if (e.cost === null) summary.unknownCostAttempts++;
+    else summary.knownCost += e.cost;
+    const resource = e.observation.resource;
+    if (resource && e.observation.remaining !== null) summary.latest[resource] = e.observation;
+  }
+  return summary;
+}

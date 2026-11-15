@@ -13,7 +13,9 @@ import {
   parseGhResponse,
   quotaObservation,
   rateLimitMessage,
+  summarizeAttempts,
 } from "./evidence.js";
+import type { AttemptEvent } from "./evidence.js";
 import { RateLimitError } from "./dependencies.js";
 import { ghQueryWith } from "./github.js";
 
@@ -252,4 +254,168 @@ describe("gh transport keeps the same-response evidence (#293)", () => {
       });
     },
   );
+});
+
+describe("per-attempt telemetry (#293, slice 2)", () => {
+  async function withGh(output: string, code: number, run: () => Promise<void>, sleep = false) {
+    const dir = await mkdtemp(join(tmpdir(), "triage-gh-telemetry-"));
+    const path = process.env.PATH;
+    try {
+      await writeFile(join(dir, "out"), output);
+      await writeFile(
+        join(dir, "gh"),
+        `#!/bin/sh\n${sleep ? "exec sleep 30\n" : ""}cat "${join(dir, "out")}"\nexit ${code}\n`,
+        { mode: 0o700 },
+      );
+      process.env.PATH = `${dir}:${path}`;
+      await run();
+    } finally {
+      process.env.PATH = path;
+      await rm(dir, { recursive: true });
+    }
+  }
+  const clocks = () => {
+    let t = 1000;
+    return { now: () => new Date("2026-11-15T00:00:00.000Z"), monotonic: () => (t += 25) };
+  };
+  const query = "query { viewer { login } } # ghp_secretToken";
+
+  it.skipIf(process.platform === "win32")(
+    "emits one event per attempt with outcome, status, bytes, cost and same-response quota",
+    async () => {
+      const events: AttemptEvent[] = [];
+      const body = { data: { viewer: { login: "x" }, rateLimit: { cost: 3 } } };
+      await withGh(response(quota(4000), body), 0, async () => {
+        await ghQueryWith(undefined, {
+          operation: "snapshot",
+          observer: (e) => events.push(e),
+          ...clocks(),
+        })(query, {});
+      });
+      expect(events).toEqual([
+        {
+          schemaVersion: 1,
+          operation: "snapshot",
+          route: "graphql",
+          startedAt: "2026-11-15T00:00:00.000Z",
+          durationMs: 25,
+          outcome: "success",
+          httpStatus: 200,
+          errorTypes: [],
+          bodyBytes: Buffer.byteLength(JSON.stringify(body)),
+          cost: 3,
+          observation: expect.objectContaining({ remaining: 4000, resource: "graphql" }),
+        },
+      ]);
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "classifies failures on the event, never leaks the query, token or GitHub's message",
+    async () => {
+      const events: AttemptEvent[] = [];
+      const observe = {
+        operation: "issue" as const,
+        observer: (e: AttemptEvent) => events.push(e),
+      };
+      await withGh(response(quota(5000), limited), 1, async () => {
+        await ghQueryWith(undefined, observe)(query, {}).catch(() => undefined);
+      });
+      await withGh(response({}, { message: "oops" }, "HTTP/2.0 502 Bad Gateway"), 1, async () => {
+        await ghQueryWith(undefined, observe)(query, {}).catch(() => undefined);
+      });
+      expect(events.map((e) => [e.outcome, e.httpStatus])).toEqual([
+        ["rate-limited", 200],
+        ["server", 502],
+      ]);
+      expect(events[0]!.observation.remaining).toBe(5000);
+      expect(events[0]!.errorTypes).toEqual(["RATE_LIMIT"]);
+      const serialized = JSON.stringify(events);
+      for (const sentinel of ["783193", "ghp_secretToken", "viewer", "oops"])
+        expect(serialized).not.toContain(sentinel);
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "an observer that throws never changes the read, and unregistered operations are 'other'",
+    async () => {
+      await withGh(response(quota(1), { data: { ok: true } }), 0, async () => {
+        const data = await ghQueryWith(undefined, {
+          observer: () => {
+            throw new Error("observer broke");
+          },
+        })(query, {});
+        expect(data).toEqual({ ok: true });
+        const seen: AttemptEvent[] = [];
+        await ghQueryWith(undefined, {
+          operation: "free text; rm -rf" as never,
+          observer: (e) => seen.push(e),
+        })(query, {});
+        expect(seen[0]!.operation).toBe("other");
+      });
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
+    "a cancelled attempt is reported as cancelled",
+    async () => {
+      const events: AttemptEvent[] = [];
+      await withGh(
+        "",
+        0,
+        async () => {
+          const controller = new AbortController();
+          const pending = ghQueryWith(controller.signal, { observer: (e) => events.push(e) })(
+            query,
+            {},
+          );
+          setTimeout(() => controller.abort(), 100);
+          await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+        },
+        true,
+      );
+      expect(events.map((e) => e.outcome)).toEqual(["cancelled"]);
+    },
+  );
+
+  it("summarises attempts: retries count again, costs split known and unknown, no summed quota", () => {
+    const event = (over: Partial<AttemptEvent>): AttemptEvent => ({
+      schemaVersion: 1,
+      operation: "snapshot",
+      route: "graphql",
+      startedAt: "2026-11-15T00:00:00.000Z",
+      durationMs: 1,
+      outcome: "success",
+      httpStatus: 200,
+      errorTypes: [],
+      bodyBytes: 100,
+      cost: null,
+      observation: quotaObservation(new Map()),
+      ...over,
+    });
+    const graphql = (remaining: number) =>
+      quotaObservation(
+        new Map([
+          ["x-ratelimit-resource", "graphql"],
+          ["x-ratelimit-remaining", String(remaining)],
+        ]),
+      );
+    const summary = summarizeAttempts([
+      event({ cost: 2, observation: graphql(4000) }),
+      event({ outcome: "rate-limited", bodyBytes: 50, observation: graphql(3999) }),
+      event({ cost: 2, observation: graphql(3998) }),
+      event({ outcome: "cancelled", bodyBytes: null }),
+    ]);
+    expect(summary).toMatchObject({
+      attempts: 4,
+      succeeded: 2,
+      failed: 1,
+      cancelled: 1,
+      bodyBytes: 250,
+      knownCost: 4,
+      unknownCostAttempts: 2,
+      failures: { "rate-limited": 1 },
+    });
+    expect(summary.latest.graphql!.remaining).toBe(3998);
+  });
 });
