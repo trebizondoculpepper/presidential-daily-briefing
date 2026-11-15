@@ -52,6 +52,8 @@ export interface ServeOptions {
   agent?: string;
   entry?: string;
   harness?: string;
+  /** Which settings were given as arguments, even with a default value (#459 config sources). */
+  given?: { port: boolean; ttl: boolean };
 }
 
 export const serveHelp = `Usage: pdb serve [--port N] [--host ADDR] [--allow-remote] [--ttl DURATION]
@@ -83,7 +85,7 @@ Routes (read-only; every data route accepts repo=owner/name and refresh=true):
   GET  /api/v1/status, /healthz           Status and cache counters; liveness
   /mcp                                    HTTP MCP: the four pdb-mcp read-only tools
   GET  /                                  Read-only dashboard: pick project and role, see next steps
-  GET  /api/v1/diagnostics/projects|cache|inflight[?repo=&limit=&cursor=]
+  GET  /api/v1/diagnostics/projects|config|cache|inflight|errors|rules[?repo=&limit=&cursor=]
                                           Read-only state of the server itself; never collects
 Results carry freshness (live, cached or stale); a stale result is always incomplete.
 HTTP MCP example (verified with Claude Code; doc/reports/serve-http-mcp-acceptance.md):
@@ -179,6 +181,7 @@ export function serveArguments(args: string[]): ServeOptions & { help?: boolean 
     host,
     allowRemote,
     ttlMs,
+    given: { port: values.port !== undefined, ttl: values.ttl !== undefined },
     repos,
     projects,
     agent: values.agent,

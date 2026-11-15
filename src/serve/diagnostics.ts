@@ -39,6 +39,28 @@ export interface InflightDiagnostic {
   cancelled: boolean;
 }
 
+/** One recent collection failure (doc/design/serve-diagnostics-api.md "Errors"). */
+export interface ErrorEventDiagnostic {
+  id: string;
+  repository: string;
+  /** Internal: the auth context, so other logins' failures are never shown. Not in output. */
+  auth: string;
+  at: string;
+  /** The collector that failed (a registered name). */
+  operation: string;
+  code: string;
+  /** The #293 same-response category when the failure carried one. */
+  category: string | null;
+  subject: number | null;
+  hint: string;
+  /** Quota numbers only when that response's headers proved them. */
+  quota: {
+    resource: string | null;
+    limit: number | null;
+    remaining: number | null;
+    resetAt: string | null;
+  } | null;
+}
 /** The request facts a diagnostic read needs. */
 export interface DiagnosticContext {
   request: IncomingMessage;
@@ -51,9 +73,55 @@ export interface DiagnosticFacts {
   auth: { host: string };
 }
 /** Held cache state, read without side effects (ServeCache.diagnostics). */
-export type HeldState = () => { entries: CacheEntryDiagnostic[]; inflight: InflightDiagnostic[] };
+export type HeldState = () => {
+  entries: CacheEntryDiagnostic[];
+  inflight: InflightDiagnostic[];
+  errors: Omit<ErrorEventDiagnostic, "auth">[];
+  discardedErrors: number;
+  errorsSince: string;
+};
 
-export const diagnosticViews = ["projects", "cache", "inflight"] as const;
+/** One effective setting (doc/design/serve-diagnostics-api.md "Config"). */
+export interface SettingDiagnostic {
+  value: string | number | boolean | null;
+  source: "default" | "global" | "repository" | "argument" | "unknown";
+  known: boolean;
+}
+/** The loaded rules' identity (doc/design/serve-diagnostics-api.md "Rules"). */
+export interface RulesDiagnostic {
+  /** The selected repository's engine setting; null when it is read per request, not held. */
+  configuredEngine: SettingDiagnostic;
+  policyVersion: number;
+  rulesHash: string;
+  supportedRoles: string[];
+  validation: { state: string; detail: string };
+  englishRules: { cli: string; page: string | null };
+}
+
+/** What the diagnostics read, all supplied by services.ts (no import of the serve group). */
+export interface DiagnosticSources {
+  facts: DiagnosticFacts;
+  held: HeldState;
+  /** The served-repository resolver shared with the read API, with non-reflecting messages. */
+  select: (repo: string | undefined) => string;
+  /** Allowlisted settings for one served repository. */
+  config: (repository: string) => {
+    settings: Record<string, SettingDiagnostic>;
+    warnings: string[];
+  };
+  rules: (repository: string) => Promise<{ rules: RulesDiagnostic; warnings: string[] }>;
+  instanceId: string;
+  now: () => Date;
+}
+
+export const diagnosticViews = [
+  "projects",
+  "config",
+  "cache",
+  "inflight",
+  "errors",
+  "rules",
+] as const;
 type View = (typeof diagnosticViews)[number];
 const prefix = "/api/v1/diagnostics/";
 
@@ -69,8 +137,11 @@ interface ProjectDiagnostic {
 /** Each view's accepted query parameters; anything else, or a repeated one, is refused. */
 const accepted: Record<View, readonly string[]> = {
   projects: ["limit", "cursor"],
+  config: ["repo"],
   cache: ["repo", "limit", "cursor"],
   inflight: ["repo", "limit", "cursor"],
+  errors: ["repo", "limit", "cursor"],
+  rules: ["repo"],
 };
 
 const invalid = (message: string) => new HttpFailure(400, "INVALID_ARGUMENT", message);
@@ -83,13 +154,9 @@ const idOrder = (id: string): number => Number(id.slice(1));
  * scopes cursors (a restart expires them) and is never a credential or control token.
  */
 export function diagnosticsApi(
-  facts: DiagnosticFacts,
-  held: HeldState,
-  /** The served-repository resolver shared with the read API (selectRepository). */
-  select: (repo: string | undefined) => string,
-  instanceId: string,
-  now: () => Date,
+  sources: DiagnosticSources,
 ): (context: DiagnosticContext) => Promise<boolean> {
+  const { facts, held, select, instanceId, now } = sources;
   return async (context) => {
     const path = context.url.pathname;
     if (!path.startsWith(prefix)) return false;
@@ -111,7 +178,35 @@ export function diagnosticsApi(
     const limit = limitText === undefined ? 20 : Number(limitText);
 
     const selected = view === "projects" ? null : select(values.get("repo"));
-    let items: (ProjectDiagnostic | CacheEntryDiagnostic | InflightDiagnostic)[];
+    const envelope = (data: unknown, warnings: string[] = []) =>
+      sendJson(context.response, 200, {
+        schemaVersion: 1,
+        kind: "serve-diagnostics",
+        view,
+        observedAt: now().toISOString(),
+        instanceId,
+        selection: { repository: selected },
+        coverage: { complete: warnings.length === 0, warnings },
+        data,
+      });
+    // Single documents: settings and the loaded rules; neither reads GitHub or evaluates rules.
+    if (view === "config") {
+      const { settings, warnings } = sources.config(selected!);
+      envelope({ settings }, warnings);
+      return true;
+    }
+    if (view === "rules") {
+      const { rules, warnings } = await sources.rules(selected!);
+      envelope(rules, warnings);
+      return true;
+    }
+    const state = view === "projects" ? null : held();
+    let items: (
+      | ProjectDiagnostic
+      | CacheEntryDiagnostic
+      | InflightDiagnostic
+      | Omit<ErrorEventDiagnostic, "auth">
+    )[];
     if (view === "projects")
       items = [...facts.served]
         .sort((a, b) => a.repository.localeCompare(b.repository))
@@ -123,20 +218,25 @@ export function diagnosticsApi(
           registrationSource: "explicit" as const,
         }));
     else {
-      const state = held();
       const mine = (r: string) => r === selected!.toLowerCase();
       items =
-        view === "cache"
-          ? state.entries
+        view === "errors"
+          ? state!.errors
               .filter((e) => mine(e.repository))
-              .sort((a, b) => idOrder(a.id) - idOrder(b.id))
+              // Newest first, then by ID.
+              .sort((a, b) => b.at.localeCompare(a.at) || idOrder(b.id) - idOrder(a.id))
               .map((e) => ({ ...e, repository: selected! }))
-          : state.inflight
-              .filter((f) => mine(f.repository))
-              .sort(
-                (a, b) => a.startedAt.localeCompare(b.startedAt) || idOrder(a.id) - idOrder(b.id),
-              )
-              .map((f) => ({ ...f, repository: selected! }));
+          : view === "cache"
+            ? state!.entries
+                .filter((e) => mine(e.repository))
+                .sort((a, b) => idOrder(a.id) - idOrder(b.id))
+                .map((e) => ({ ...e, repository: selected! }))
+            : state!.inflight
+                .filter((f) => mine(f.repository))
+                .sort(
+                  (a, b) => a.startedAt.localeCompare(b.startedAt) || idOrder(a.id) - idOrder(b.id),
+                )
+                .map((f) => ({ ...f, repository: selected! }));
     }
 
     // The list revision fingerprints the filtered inventory: any added or removed row changes
@@ -166,15 +266,15 @@ export function diagnosticsApi(
       next < items.length
         ? Buffer.from(`${view}:${instanceId}:${revision}:${next}`).toString("base64url")
         : null;
-    sendJson(context.response, 200, {
-      schemaVersion: 1,
-      kind: "serve-diagnostics",
-      view,
-      observedAt: now().toISOString(),
-      instanceId,
-      selection: { repository: selected },
-      coverage: { complete: true, warnings: [] },
-      data: { total: items.length, omitted: items.length - page.length, nextCursor, items: page },
+    envelope({
+      total: items.length,
+      omitted: items.length - page.length,
+      nextCursor,
+      items: page,
+      // The ring is bounded recent history, not an audit log: say what it no longer holds.
+      ...(view === "errors"
+        ? { discarded: state!.discardedErrors, retainedSince: state!.errorsSince }
+        : {}),
     });
     return true;
   };
