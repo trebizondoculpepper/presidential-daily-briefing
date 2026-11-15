@@ -1335,6 +1335,14 @@ export async function planQuestionResolution(
     parseResolutionComment,
   );
   const folded = foldQuestionResolutions(classified, new Map([[questionCommentId, questionOpId]]));
+  // Unverifiable records could hold an earlier, different first outcome: never settle past them.
+  if (folded.unknown.length)
+    return refuse(
+      "EVIDENCE_INCOMPLETE",
+      facts,
+      `An earlier resolution record could not be verified (${folded.unknown.join("; ")}); nothing is posted.`,
+      [`${triage} --issue ${number}`],
+    );
   const outcome = folded.outcomes.get(questionCommentId);
   if (outcome) {
     const mine = classified.find(
@@ -1359,13 +1367,6 @@ export async function planQuestionResolution(
       [`${triage} --issue ${number}`],
     );
   }
-  if (folded.unknown.length)
-    return refuse(
-      "EVIDENCE_INCOMPLETE",
-      facts,
-      `An earlier resolution record could not be verified (${folded.unknown.join("; ")}); nothing is posted.`,
-      [`${triage} --issue ${number}`],
-    );
   const record: QuestionResolutionRecord = {
     v: 1,
     op,

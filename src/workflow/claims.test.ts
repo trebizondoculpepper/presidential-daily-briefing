@@ -1771,6 +1771,29 @@ describe("question resolve and withdraw (#412)", () => {
     expect(longName.ok ? "accepted" : longName.error).toBe("INVALID_ARGUMENT");
   });
 
+  it("an earlier unverifiable resolution refuses even a matching retry", async () => {
+    const q = note(questionBody());
+    const write = permissions({ kavya: "write" });
+    const mine = accepted(await planQuestionResolution(repo, request(q.url), ticket([q]), write));
+    const other = accepted(
+      await planQuestionResolution(repo, request(q.url, "withdraw"), ticket([q]), write),
+    );
+    // Edited, and who edited it cannot be established: its authority is unknown.
+    const earlier = {
+      ...note(other.changes[0]!.command.at(-1)!, "kavya", "2026-11-15T02:00:00Z"),
+      lastEditedAt: "2026-11-15T02:30:00Z",
+      editor: null,
+    };
+    const later = note(mine.changes[0]!.command.at(-1)!, "kavya", "2026-11-15T03:00:00Z");
+    const plan = await planQuestionResolution(
+      repo,
+      request(q.url),
+      ticket([q, earlier, later]),
+      write,
+    );
+    expect(plan.ok ? "accepted" : plan.error).toBe("EVIDENCE_INCOMPLETE");
+  });
+
   it("refuses when the authenticated account could not author a trusted record", async () => {
     const q = note(questionBody());
     const plan = await planQuestionResolution(
