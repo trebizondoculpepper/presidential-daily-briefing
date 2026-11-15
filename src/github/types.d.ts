@@ -102,6 +102,16 @@ export type Snapshot = {
   dependencies: Dependency[];
   changed: { number: number; title: string; url: string; state: string; updatedAt: string }[];
   since: string | null;
+  /**
+   * The requested history window's own outcome (#370), absent when no history was requested.
+   * `failed`/`partial` mean changes in the window are unknown, not none.
+   */
+  history?: {
+    since: string;
+    state: "complete" | "partial" | "failed";
+    failure: string | null;
+    sources: { source: string; pages: number; complete: boolean; failure: string | null }[];
+  };
   /** Optional, versioned briefing-mode evidence (#168); absent in legacy snapshots. */
   changeEvidence?: import("./changes.js").ChangeEvidence;
   warnings: string[];
