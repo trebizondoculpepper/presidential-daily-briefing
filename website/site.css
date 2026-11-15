@@ -316,3 +316,11 @@ footer {
 .quickstart > div {
   min-width: 0;
 }
+
+summary.terminal-bar {
+  cursor: pointer;
+  display: list-item;
+}
+summary.terminal-bar span + span {
+  margin-left: 1rem;
+}
