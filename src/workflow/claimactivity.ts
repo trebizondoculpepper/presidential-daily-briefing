@@ -9,9 +9,22 @@
  * carry it (it already orders delivery records), while GraphQL node IDs are not fetched.
  */
 import { createHash } from "node:crypto";
-import type { Comment } from "./claims.js";
-import type { TrustDecision } from "./delivery.js";
 import { isAgentName } from "../config/identity.js";
+
+// Structural copies of claims.ts's Comment and delivery.ts's TrustDecision, so claims.ts can
+// use this module without an import cycle (src/acceptance/importcycles.test.ts).
+type Actor = { __typename?: string; login?: string };
+export type Comment = {
+  body: string;
+  createdAt?: string;
+  author?: Actor | null;
+  lastEditedAt?: string | null;
+  includesCreatedEdit?: boolean;
+  editor?: Actor | null;
+};
+export type TrustDecision = (
+  comment: Comment,
+) => Promise<{ status: "trusted" } | { status: "untrusted" | "unknown"; why: string }>;
 
 export const activityMarkerPrefix = "<!-- github-triage:claim-activity ";
 export const resolutionMarkerPrefix = "<!-- github-triage:question-resolution ";

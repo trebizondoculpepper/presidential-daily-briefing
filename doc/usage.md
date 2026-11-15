@@ -81,6 +81,8 @@ Use writable paths. Since/checkpoint reads include changed open, closed and merg
 
 ## Output and troubleshooting
 
+`pdb question resolve|withdraw N --agent NAME --question URL --why TEXT [--dry-run] [--json]` records, with a reason, that a needs-human question (its comment URL) was answered or withdrawn. It is an explicit assertion, never inferred from replies, label removal, merges or closure; the first trusted outcome stands, a retry is a no-op, and it works on closed issues (#412).
+
 --json returns structured output; --full selects expanded rather than compact reports. Compact text holds only the next steps, a repository/role identifier and material warnings (#355); --context adds background sections, totals and engine metadata, and never changes JSON or the selected actions. --limit and --max-chars bound output; inspect omitted counts and detail navigation rather than assume missing rows do not exist. Text/JSON contents are evidence, not a complete semantic interpretation of discussion.
 
 Exit 0 means complete briefing; 2 means incomplete evidence; 1 means invalid arguments or API/cache failure. Individual commands explain their exit contract in help. Pending, cancelled, absent and failed checks all prevent a successful-verification conclusion but are different problems; inspect the exact outcome, not only a grouped summary. A review may cover an older head even when CI is green. Fetch timestamps describe a window, not an atomic snapshot.

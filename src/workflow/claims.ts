@@ -7,6 +7,13 @@
  * the injected `gh` write boundary. Label names come from the registered workflow policy.
  */
 import { createHash } from "node:crypto";
+import {
+  classifyMarkers,
+  foldQuestionResolutions,
+  parseResolutionComment,
+  resolutionMarker,
+} from "./claimactivity.js";
+import type { QuestionResolutionRecord } from "./claimactivity.js";
 import { workflow } from "./definition.js";
 import { ghQuery, permissionLookup, writePermissions } from "../github/github.js";
 import type { PermissionLookup } from "../github/github.js";
@@ -177,6 +184,9 @@ interface TicketIssue {
  */
 export type Comment = {
   body: string;
+  /** Numeric comment id (question/resolution binding, #412). */
+  databaseId?: number;
+  url?: string;
   createdAt?: string;
   author?: Actor | null;
   lastEditedAt?: string | null;
@@ -205,7 +215,7 @@ interface TicketResponse {
 
 /** Comment fields read wherever a marker may drive a write: body, author and edit evidence. */
 const commentFields =
-  "body createdAt author{__typename login} lastEditedAt includesCreatedEdit editor{__typename login}";
+  "databaseId url body createdAt author{__typename login} lastEditedAt includesCreatedEdit editor{__typename login}";
 
 /**
  * Whether a marker comment may drive a write (#212, doc/design/triage-efficiency-and-trust.md
@@ -1180,6 +1190,188 @@ async function readPullRequest(url: string, query: GraphQuery): Promise<string |
   } catch {
     return null;
   }
+}
+
+export interface QuestionResolutionRequest {
+  number: number;
+  agent: string;
+  op: "resolve" | "withdraw";
+  /** The needs-human comment URL: https://github.com/OWNER/NAME/issues/N#issuecomment-ID. */
+  question: string;
+  why: string;
+}
+
+/**
+ * Plan `question resolve|withdraw N --agent NAME --question URL --why TEXT` (#412,
+ * doc/design/blocked-retained-claims.md). Appends one question-resolution v1 record: a deliberate
+ * assertion with a reason, never inferred from a reply, label removal, merge or closure. The
+ * question must be a readable needs-human record on this issue (v1, or v2 bound here) by a
+ * write-authorised author, with no earlier trusted outcome; unknown evidence refuses. The issue
+ * may be closed: a question on a closed source can still be answered (#414).
+ */
+export async function planQuestionResolution(
+  repository: string,
+  request: QuestionResolutionRequest,
+  query: GraphQuery = ghQuery,
+  permission: PermissionLookup = permissionLookup(repository),
+): Promise<ClaimPlan> {
+  const { number, agent, op, question, why } = request;
+  const triage = `pdb --repo ${repository}`;
+  const retry = `pdb question ${op} ${number} --agent ${agent} --question ${question} --why ${shellQuote(why)} --repo ${repository}`;
+  const target =
+    /^https:\/\/github\.com\/([^/\s]+\/[^/\s#]+)\/issues\/(\d+)#issuecomment-(\d{1,20})$/.exec(
+      question,
+    );
+  if (
+    !target ||
+    target[1]!.toLowerCase() !== repository.toLowerCase() ||
+    Number(target[2]) !== number
+  )
+    return refuse(
+      "QUESTION_NOT_ON_ISSUE",
+      { number },
+      `--question must be a needs-human comment on ${repository}#${number} (…/issues/${number}#issuecomment-ID).`,
+      [`${triage} --issue ${number}`],
+    );
+  const questionCommentId = target[3]!;
+  const { item } = await readTicket(repository, number, agent, query);
+  if (!item)
+    return refuse("TICKET_NOT_FOUND", { number }, `#${number} must exist.`, [`${triage} --json`]);
+  if (item.__typename !== "Issue")
+    return refuse("NOT_AN_ISSUE", { number, url: item.url }, "Questions are recorded on issues.", [
+      `gh pr view ${number} --repo ${repository}`,
+    ]);
+  const facts = {
+    number,
+    url: item.url,
+    title: item.title,
+    state: item.state,
+  } satisfies ClaimFacts;
+  // Every resolution of this question is newer than it, so reading back to it reads them all.
+  const history = await commentHistory(
+    repository,
+    number,
+    item,
+    (c) => c.some((x) => String(x.databaseId) === questionCommentId),
+    query,
+  );
+  const found = history.comments.find((x) => String(x.databaseId) === questionCommentId);
+  if (!found)
+    return refuse(
+      history.complete ? "QUESTION_NOT_FOUND" : "EVIDENCE_INCOMPLETE",
+      facts,
+      history.complete
+        ? `No comment ${questionCommentId} on #${number}.`
+        : "The comment history is longer than the bounded read, so the question could not be found; nothing is posted.",
+      [`${triage} --issue ${number}`],
+    );
+  const marker = parseQuestionMarker(found.body);
+  const readable =
+    marker?.version === 1 ||
+    (marker?.version === 2 &&
+      marker.repository.toLowerCase() === repository.toLowerCase() &&
+      marker.issue === number);
+  if (!marker || !readable)
+    return refuse(
+      "NOT_A_QUESTION",
+      facts,
+      `Comment ${questionCommentId} is not a readable needs-human question record on this issue.`,
+      [`${triage} --issue ${number}`],
+    );
+  const authority = await commentAuthority(found, permission);
+  if (authority.status !== "trusted")
+    return refuse(
+      "QUESTION_UNVERIFIED",
+      facts,
+      `The question's author authority is not established (${authority.why}); only a write-authorised question is resolved.`,
+      [`${triage} --issue ${number}`],
+    );
+  const questionOpId = marker.opId;
+  const opId = createHash("sha256")
+    .update(
+      JSON.stringify([
+        "question-resolution",
+        repository.toLowerCase(),
+        number,
+        questionCommentId,
+        op,
+        agent,
+      ]),
+    )
+    .digest("hex")
+    .slice(0, 32);
+  const ordered = history.comments.filter(
+    (c): c is Comment & { databaseId: number; createdAt: string } =>
+      typeof c.databaseId === "number" && typeof c.createdAt === "string",
+  );
+  const classified = await classifyMarkers(
+    ordered,
+    { repository, issue: number },
+    (c) => commentAuthority(c, permission),
+    parseResolutionComment,
+  );
+  const folded = foldQuestionResolutions(classified, new Map([[questionCommentId, questionOpId]]));
+  const outcome = folded.outcomes.get(questionCommentId);
+  if (outcome) {
+    const mine = classified.find(
+      (c) =>
+        String(c.comment.databaseId) === outcome.comment &&
+        c.status === "trusted" &&
+        c.record.opId === opId,
+    );
+    if (mine)
+      return {
+        ok: true,
+        facts,
+        noop: true,
+        reason: `Already recorded: question ${questionCommentId} was ${outcome.op}d (comment ${outcome.comment}).`,
+        changes: [],
+        retry,
+      };
+    return refuse(
+      "QUESTION_ALREADY_SETTLED",
+      facts,
+      `Question ${questionCommentId} was already ${outcome.op}d by ${outcome.agent} (comment ${outcome.comment}); the first explicit outcome stands.`,
+      [`${triage} --issue ${number}`],
+    );
+  }
+  if (folded.unknown.length)
+    return refuse(
+      "EVIDENCE_INCOMPLETE",
+      facts,
+      `An earlier resolution record could not be verified (${folded.unknown.join("; ")}); nothing is posted.`,
+      [`${triage} --issue ${number}`],
+    );
+  const record: QuestionResolutionRecord = {
+    v: 1,
+    op,
+    opId,
+    repository,
+    issue: number,
+    questionCommentId,
+    questionOpId,
+    agent,
+    reason: why,
+  };
+  const body = [
+    `Question ${op === "resolve" ? "resolved" : "withdrawn"} by \`${agent}\` with \`pdb question ${op}\`: ${question}`,
+    "",
+    `**Why:** ${why}`,
+    "",
+    resolutionMarker(record),
+  ].join("\n");
+  return {
+    ok: true,
+    facts,
+    noop: false,
+    changes: [
+      {
+        step: "comment",
+        command: ["issue", "comment", String(number), "--repo", repository, "--body", body],
+      },
+    ],
+    retry,
+  };
 }
 
 /**

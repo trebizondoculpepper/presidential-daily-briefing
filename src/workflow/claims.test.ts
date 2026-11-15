@@ -13,12 +13,16 @@ import {
   claimText,
   parseQuestionMarker,
   planClaim,
+  planQuestionResolution,
+  questionMarker,
+  questionRecordBody,
   planNeedsHuman,
   planRelease,
 } from "./claims.js";
 import type { ReworkAuthority } from "./claims.js";
 import type { ClaimAccepted, ClaimPlan, ClaimRefusal } from "./claims.js";
 import { by, issue, page, repo, time } from "../testing/snapshots.js";
+import { parseResolutionComment } from "./claimactivity.js";
 import { permissions } from "../testing/fakegh.js";
 
 /** Split a command as a POSIX shell would: single quotes, whitespace, and `#` comments. */
@@ -1647,5 +1651,143 @@ describe("needs-human question markers (#412)", () => {
       `<!-- github-triage:needs-human:XYZ -->`,
     ])
       expect(parseQuestionMarker(bad)?.version, bad).toBe("malformed");
+  });
+});
+
+describe("question resolve and withdraw (#412)", () => {
+  const url = (id: number, issueNumber = 7) =>
+    `https://github.com/${repo}/issues/${issueNumber}#issuecomment-${id}`;
+  const questionBody = (boundTo = 7) =>
+    questionRecordBody(
+      { designer: "nicole", agent: "kavya", why: "w", questions: ["q"] },
+      questionMarker("0123456789abcdef", repo, boundTo),
+    );
+  let ids = 5000;
+  const note = (body: string, login = "kavya", at = "2026-11-15T01:00:00Z") => ({
+    ...by(login),
+    databaseId: ++ids,
+    url: url(ids),
+    body,
+    createdAt: at,
+  });
+  const ticket =
+    (comments: object[], more = false) =>
+    async () => ({
+      repository: {
+        issueOrPullRequest: {
+          __typename: "Issue",
+          number: 7,
+          title: "T7",
+          url: `https://github.com/${repo}/issues/7`,
+          state: "CLOSED",
+          updatedAt: time,
+          labels: page([]),
+          issueDependenciesSummary: { blockedBy: 0 },
+          blockedBy: page([]),
+          closedByPullRequestsReferences: page([]),
+          comments: {
+            ...page(comments),
+            pageInfo: { hasPreviousPage: more, startCursor: more ? "c" : null },
+          },
+        },
+        claims: page([]),
+      },
+    });
+  const request = (question: string, op: "resolve" | "withdraw" = "resolve", agent = "kavya") => ({
+    number: 7,
+    agent,
+    op,
+    question,
+    why: "The owner answered: use the short flag.",
+  });
+
+  it("appends one resolution bound to the question and its operation, even on a closed issue", async () => {
+    const q = note(questionBody());
+    const plan = accepted(
+      await planQuestionResolution(
+        repo,
+        request(q.url),
+        ticket([q]),
+        permissions({ kavya: "write" }),
+      ),
+    );
+    expect(plan.noop).toBe(false);
+    const body = plan.changes[0]!.command.at(-1)!;
+    expect(body).toContain(
+      `Question resolved by \`kavya\` with \`pdb question resolve\`: ${q.url}`,
+    );
+    expect(parseResolutionComment(body)).toMatchObject({
+      kind: "record",
+      record: {
+        op: "resolve",
+        questionCommentId: String(q.databaseId),
+        questionOpId: "0123456789abcdef",
+        agent: "kavya",
+        reason: "The owner answered: use the short flag.",
+      },
+    });
+  });
+
+  it("refuses a URL on another issue, a comment that is not a readable question here, and an unverified author", async () => {
+    const q = note(questionBody());
+    const write = permissions({ kavya: "write", mallory: "read" });
+    const refusal = async (req: ReturnType<typeof request>, comments: object[]) => {
+      const plan = await planQuestionResolution(repo, req, ticket(comments), write);
+      return plan.ok ? "accepted" : plan.error;
+    };
+    expect(await refusal(request(url(q.databaseId, 8)), [q])).toBe("QUESTION_NOT_ON_ISSUE");
+    expect(await refusal(request("https://example.com/x"), [q])).toBe("QUESTION_NOT_ON_ISSUE");
+    const plain = note("just a reply");
+    expect(await refusal(request(plain.url), [plain])).toBe("NOT_A_QUESTION");
+    const copied = note(questionBody(9));
+    expect(await refusal(request(copied.url), [copied])).toBe("NOT_A_QUESTION");
+    const forged = note(questionBody(), "mallory");
+    expect(await refusal(request(forged.url), [forged])).toBe("QUESTION_UNVERIFIED");
+    expect(await refusal(request(url(999999)), [q])).toBe("QUESTION_NOT_FOUND");
+    expect(
+      (await planQuestionResolution(repo, request(url(999999)), ticket([q], true), write)).ok
+        ? "accepted"
+        : "refused",
+    ).toBe("refused");
+  });
+
+  it("a retry is a no-op; a different outcome after the first is refused", async () => {
+    const q = note(questionBody());
+    const write = permissions({ kavya: "write", nicole: "write" });
+    const first = accepted(await planQuestionResolution(repo, request(q.url), ticket([q]), write));
+    const recorded = note(first.changes[0]!.command.at(-1)!, "kavya", "2026-11-15T02:00:00Z");
+    const retry = accepted(
+      await planQuestionResolution(repo, request(q.url), ticket([q, recorded]), write),
+    );
+    expect(retry.noop).toBe(true);
+    const other = await planQuestionResolution(
+      repo,
+      request(q.url, "withdraw", "nicole"),
+      ticket([q, recorded]),
+      write,
+    );
+    expect(other.ok ? "accepted" : other.error).toBe("QUESTION_ALREADY_SETTLED");
+  });
+
+  it("parses the command strictly", async () => {
+    const { questionArgumentsFor } = await import("../cli.js");
+    const ok = questionArgumentsFor([
+      "withdraw",
+      "7",
+      "--agent",
+      "a",
+      "--question",
+      "u",
+      "--why",
+      " w ",
+    ]);
+    expect(ok).toMatchObject({ op: "withdraw", number: 7, agent: "a", question: "u", why: "w" });
+    for (const bad of [
+      ["answer", "7", "--agent", "a", "--question", "u", "--why", "w"],
+      ["resolve", "7", "--agent", "a", "--question", "u"],
+      ["resolve", "7", "--agent", "a", "--why", "w"],
+      ["resolve", "x", "--agent", "a", "--question", "u", "--why", "w"],
+    ])
+      expect(() => questionArgumentsFor(bad), bad.join(" ")).toThrow(/Usage: pdb question/);
   });
 });
