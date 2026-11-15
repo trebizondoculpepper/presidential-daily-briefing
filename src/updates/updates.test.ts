@@ -474,6 +474,52 @@ describe("daily cached version check (#65, doc/design/updates.md)", () => {
     expect(await release()).toEqual({ status: "missing" });
   });
 
+  it("reports a lock it could not remove beside the result, and releases on every path (#382)", async () => {
+    const { cachedCheckForUpdate } = await import("./updatecache.js");
+    const real = await import("node:fs/promises");
+    const fail = (code: string) => Object.assign(new Error(code), { code });
+    await withDir(async (cacheDir) => {
+      const reg = counting({ latest: "0.2.0" });
+      const opts = { cacheDir, installed: installed("0.1.0"), fetchImpl: reg.fetchImpl };
+      const stuck = {
+        ...real,
+        unlink: async (p: string) => {
+          if (p.endsWith(".lock")) throw fail("EACCES");
+          return real.unlink(p);
+        },
+      };
+      const r = await cachedCheckForUpdate({ ...opts, fs: stuck });
+      expect(r.status).toBe("newer");
+      expect(r.lockProblem).toMatch(/update-check\.json\.lock could not be removed .*\(EACCES\)/);
+      // A later check names the lock and how to recover.
+      const later = await cachedCheckForUpdate(opts);
+      expect(later).toMatchObject({
+        status: "unknown",
+        reason: expect.stringMatching(
+          /never removed automatically.*delete .*update-check\.json\.lock/,
+        ),
+      });
+    });
+    await withDir(async (cacheDir) => {
+      const reg = counting({ latest: "0.2.0" });
+      // An unwritable cache returns early from the locked work; the lock is still released.
+      const unwritable = {
+        ...real,
+        writeFile: async (p: string, d: string, o: { flag?: string }) => {
+          if (p.endsWith(".tmp")) throw fail("EROFS");
+          return real.writeFile(p, d, o);
+        },
+      };
+      await cachedCheckForUpdate({
+        cacheDir,
+        installed: installed("0.1.0"),
+        fetchImpl: reg.fetchImpl,
+        fs: unwritable,
+      });
+      expect((await readdir(cacheDir)).filter((f) => f.endsWith(".lock"))).toEqual([]);
+    });
+  });
+
   it("makes no cache or network access when skipped, and uses a per-user cache directory", async () => {
     const { cachedCheckForUpdate, defaultCacheDir } = await import("./updatecache.js");
     await withDir(async (cacheDir) => {

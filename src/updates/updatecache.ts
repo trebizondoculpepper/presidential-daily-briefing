@@ -13,7 +13,13 @@ import { randomBytes } from "node:crypto";
 import * as nodeFs from "node:fs/promises";
 import { dirname, join } from "node:path";
 import envPaths from "env-paths";
-import { acquireFileLock, type LockFs, type ReleaseOutcome } from "../config/filelock.js";
+import {
+  acquireFileLock,
+  releaseProblem,
+  stuckLockMessage,
+  type LockFs,
+  type ReleaseOutcome,
+} from "../config/filelock.js";
 import { nodeSafeFs } from "../config/safejson.js";
 import {
   checkForUpdate,
@@ -165,8 +171,13 @@ export async function cachedCheckForUpdate({
   const file = join(dir, cacheFileName);
   // The lock is judged by the wall clock that stamps file mtimes, not the injected cache clock.
   const release = await acquireLock(fs, join(dir, `${cacheFileName}.lock`), Date.now, sleep);
-  if (!release) return unavailable("update cache busy or not writable; check skipped");
-  try {
+  const lockPath = join(dir, `${cacheFileName}.lock`);
+  if (!release)
+    return unavailable(
+      `update cache busy or not writable; check skipped. If no other pdb is running, ${stuckLockMessage(lockPath)}`,
+    );
+  // The lock is released exactly once, around every path out of the locked work (#382).
+  const locked = async (): Promise<UpdateCheckResult> => {
     // Re-read under the lock: a concurrent invocation may have just refreshed it.
     const cache = await readCache(fs, file);
     const state: ChannelState = { ...cache.channels[channel] };
@@ -219,9 +230,18 @@ export async function cachedCheckForUpdate({
       if (result.status === "newer") result = { ...result, notify: false };
     }
     return result;
-  } finally {
+  };
+  let outcome: UpdateCheckResult;
+  try {
+    outcome = await locked();
+  } catch (error) {
+    // The primary failure stands; a cleanup problem never replaces it.
     await release();
+    throw error;
   }
+  // A lock this check could not remove blocks later checks: report it with the result.
+  const problem = releaseProblem(lockPath, await release());
+  return problem ? { ...outcome, lockProblem: problem } : outcome;
 
   function unavailable(reason: string): UpdateCheckResult {
     return { status: "unknown", reason, installed: installed.version, channel };

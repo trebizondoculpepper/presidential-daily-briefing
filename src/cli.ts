@@ -1082,6 +1082,9 @@ export async function main(
       (await pending) ?? { status: "unknown", reason: "", installed: null, channel: "" },
     );
     if (advisory) (runtime.stderr ?? ((t) => process.stderr.write(t)))(`${advisory}\n`);
+    // #382: a lock this check could not remove blocks later checks; say how to recover.
+    const lockProblem = (await pending)?.lockProblem;
+    if (lockProblem) (runtime.stderr ?? ((t) => process.stderr.write(t)))(`pdb: ${lockProblem}\n`);
     const checkout = await checkoutPending;
     const stale = checkout && checkoutAdvisory(checkout);
     if (stale) (runtime.stderr ?? ((t) => process.stderr.write(t)))(`${stale}\n`);
