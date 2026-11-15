@@ -55,6 +55,7 @@ npx tsx scripts/smoke.ts src/cli.ts           # same smoke against the TypeScrip
 npm run package-test                          # pack, install globally into a temp prefix, smoke
 npm run rules:build                           # validate policy/*.edn, write policy.generated.json
 npm run rules:test [-- --junit PATH]          # rules-only: run scenarios/*.edn against the engine
+npm run test:report                           # CI's JUnit reports + summary locally, into reports/
 ```
 
 ## Editing the rules

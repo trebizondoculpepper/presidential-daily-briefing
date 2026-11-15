@@ -42,7 +42,8 @@
     "mcp": "tsx src/mcp.ts",
     "pdb": "tsx src/cli.ts",
     "rules:build": "tsx src/rules/datalog/build.ts",
-    "rules:test": "tsx src/rules/datalog/runner.ts"
+    "rules:test": "tsx src/rules/datalog/runner.ts",
+    "test:report": "tsx scripts/test-report.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/server": "2.4.0",
