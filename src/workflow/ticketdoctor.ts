@@ -10,6 +10,7 @@ import { owners } from "../briefing/briefing.js";
 import { workflow } from "./definition.js";
 import { dependencyDrift, nativeKnown } from "../github/dependencies.js";
 import { teamView } from "./team.js";
+import { teamActivityCap } from "./retainedfacts.js";
 import { complexityLabelFindings, metricLabelFindings } from "../estimation/complexitylabels.js";
 import { impactMetric } from "../estimation/metrics.js";
 import { closingPrEvidence } from "../briefing/ranking.js";
@@ -89,6 +90,12 @@ export interface TicketDoctorOptions {
    * reader. Absent: not read, so several claims are only a candidate (they may be waiting).
    */
   claimActivity?: ReadonlyMap<string, ReadonlyMap<string, { state: string; reason: string }>>;
+  /**
+   * #413: agents whose claim activity was not read because the team-view budget was exceeded.
+   * Naming them keeps the scan honest: their active-claim contradictions are unknown, so the
+   * scan is incomplete rather than reporting "no issue" with exit code 0.
+   */
+  omittedAgents?: readonly string[];
 }
 export interface TicketDoctorReport {
   schemaVersion: 1;
@@ -572,6 +579,7 @@ export function ticketDoctor(
     delivery,
     closedDrift,
     claimActivity,
+    omittedAgents,
   }: TicketDoctorOptions = {},
 ): TicketDoctorReport {
   const open = snapshot.issues.filter((i) => i.state === "OPEN");
@@ -1185,6 +1193,12 @@ export function ticketDoctor(
     ...(delivery?.warnings ?? []),
     ...(closedDrift?.warnings ?? []),
   ];
+  // #413: unread claim activity is a scan gap, not a clean pass: an agent's active-claim
+  // contradictions are unknown when the activity budget skipped them.
+  if (omittedAgents?.length)
+    warnings.push(
+      `Claim activity not read for ${omittedAgents.join(", ")}: more than ${teamActivityCap} claims in this view; read one with pdb who N.`,
+    );
   return {
     schemaVersion: 1,
     kind: "ticket-doctor",
