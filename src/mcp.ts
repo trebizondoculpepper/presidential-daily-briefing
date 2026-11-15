@@ -4,6 +4,7 @@
  * src/mcp/server.ts so that `pdb serve` can build the same server without loading this entry.
  */
 import { realpathSync } from "node:fs";
+import { initializeCrashes } from "./telemetry/crashes.js";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
@@ -22,6 +23,11 @@ function isEntryPoint(entry: string | undefined): boolean {
 }
 
 if (isEntryPoint(process.argv[1])) {
+  await initializeCrashes(
+    "mcp",
+    fileURLToPath(new URL("../", import.meta.url)),
+    (await installedVersion()).version,
+  );
   try {
     const options = mcpArguments(process.argv.slice(2));
     if (options.help) process.stdout.write(mcpHelp);

@@ -5,6 +5,7 @@ import { resolveEngineSetting } from "./config/engine-setting.js";
 import { resolveReviewPolicy } from "./config/review-setting.js";
 /** One read-only intake command. Contract: doc/pdb-cli.md. */
 import { realpathSync } from "node:fs";
+import { initializeCrashes } from "./telemetry/crashes.js";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -2380,6 +2381,11 @@ function isEntryPoint(entry: string | undefined): boolean {
   }
 }
 if (isEntryPoint(process.argv[1])) {
+  await initializeCrashes(
+    process.argv[2] === "serve" ? "serve" : "cli",
+    fileURLToPath(new URL("../", import.meta.url)),
+    (await installedVersion()).version,
+  );
   try {
     process.exitCode = await main(process.argv.slice(2));
   } catch (error) {
