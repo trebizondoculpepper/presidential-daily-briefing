@@ -20,9 +20,13 @@ import { commandKinds } from "./commands.js";
 import { requiredQueries, requiredKeyQueries } from "./bundle.js";
 import type { PolicyBundle, DecisionRule, OverridePair, RequiredQuery } from "./bundle.js";
 import { rulesHashOf } from "./hash.js";
+import { compileEnglish, EnglishCompileError } from "./english.js";
+import type { EnglishPolicy } from "./english-model.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 export const artifactPath = join(here, "policy.generated.json");
+/** The compiled English model `pdb rules` renders (#416); derived from the same bundle. */
+export const englishPath = join(here, "english.generated.json");
 export const policyDir = join(here, "policy");
 export const sourceFiles = [
   "schema.edn",
@@ -210,6 +214,7 @@ export function readSources(
       "constants",
       "common-witnesses",
       "eligibility-witnesses",
+      "lexicon",
     ]);
     const queryMap = named(
       // Query names are keywords in the file; read them as names in source order.
@@ -277,6 +282,21 @@ export function readSources(
         need(schemaMap, "policy-version", "policy/schema.edn"),
         "policy/schema.edn :policy-version",
       ),
+      lexicon: (() => {
+        const where = "policy/schema.edn :lexicon";
+        const m = keyed(need(schemaMap, "lexicon", "policy/schema.edn"), where, [
+          "attributes",
+          "viewer",
+        ]);
+        const phrases = (key: string) =>
+          Object.fromEntries(
+            named(need(m, key, where), `${where} :${key}`).map(([k, v]) => [
+              k,
+              text(v, `${where} :${key} "${k}"`),
+            ]),
+          );
+        return { attributes: phrases("attributes"), viewer: phrases("viewer") };
+      })(),
       schema: Object.fromEntries(
         vector(need(schemaMap, "many", "policy/schema.edn"), "policy/schema.edn :many").map((a) => [
           text(a, "policy/schema.edn :many"),
@@ -470,6 +490,15 @@ export function validateBundle(bundle: PolicyBundle): PolicyBundle {
     if (!derived.has(id))
       problems.push(`decisions.edn :denials: ${id} is never derived by rules.edn`);
   problems.push(...overrideProblems(bundle));
+  // The English listing must account for every construct: an unsupported form or a missing
+  // lexicon phrase fails the build, never an omitted line in `pdb rules`.
+  if (!problems.length)
+    try {
+      compileEnglish(bundle);
+    } catch (error) {
+      if (error instanceof EnglishCompileError) problems.push(...error.problems);
+      else problems.push(`english: ${error instanceof Error ? error.message : String(error)}`);
+    }
   for (const key of bundle.comparison)
     if (!/^[a-z]+$/.test(key)) problems.push(`ordering.edn :comparison: invalid key "${key}"`);
   if (problems.length) throw new PolicyBuildError(problems);
@@ -530,7 +559,8 @@ export function overrideProblems(bundle: Pick<PolicyBundle, "overrides" | "defin
 export const buildPolicy = (read?: (file: string) => string) => validateBundle(readSources(read));
 
 /** The artifact as written: stable JSON, so a fresh build and the committed file compare exactly. */
-export const serialize = (artifact: PolicyBundle) => `${JSON.stringify(artifact, null, 2)}\n`;
+export const serialize = (artifact: PolicyBundle | EnglishPolicy) =>
+  `${JSON.stringify(artifact, null, 2)}\n`;
 
 function main(argv: string[]): number {
   let artifact: PolicyBundle;
@@ -540,27 +570,35 @@ function main(argv: string[]): number {
     process.stderr.write(`${error instanceof Error ? error.message : String(error)}\n`);
     return 1;
   }
+  const english = compileEnglish(artifact);
+  const outputs: [string, PolicyBundle | EnglishPolicy][] = [
+    [artifactPath, artifact],
+    [englishPath, english],
+  ];
   if (argv.includes("--check")) {
-    let committed: unknown;
-    try {
-      committed = JSON.parse(readFileSync(artifactPath, "utf8"));
-    } catch (error) {
-      process.stderr.write(
-        `Cannot read ${artifactPath}: ${error instanceof Error ? error.message : String(error)}. Run npm run rules:build.\n`,
-      );
-      return 1;
+    for (const [path, fresh] of outputs) {
+      let committed: unknown;
+      try {
+        committed = JSON.parse(readFileSync(path, "utf8"));
+      } catch (error) {
+        process.stderr.write(
+          `Cannot read ${path}: ${error instanceof Error ? error.message : String(error)}. Run npm run rules:build.\n`,
+        );
+        return 1;
+      }
+      // Compared as data, so reformatting the JSON file never counts as drift.
+      if (!isDeepStrictEqual(committed, JSON.parse(serialize(fresh)))) {
+        process.stderr.write(
+          `${path} is stale: the policy sources changed. Run npm run rules:build and commit the result.\n`,
+        );
+        return 1;
+      }
     }
-    // Compared as data, so reformatting the JSON file never counts as drift.
-    if (!isDeepStrictEqual(committed, JSON.parse(serialize(artifact)))) {
-      process.stderr.write(
-        `${artifactPath} is stale: the policy sources changed. Run npm run rules:build and commit the result.\n`,
-      );
-      return 1;
-    }
-    process.stdout.write("Rules artifact is current.\n");
+    process.stdout.write("Rules artifacts are current.\n");
     return 0;
   }
   writeFileSync(artifactPath, serialize(artifact));
+  writeFileSync(englishPath, serialize(english));
   process.stdout.write(`Wrote ${artifactPath} (rulesHash ${rulesHashOf(artifact)})\n`);
   return 0;
 }

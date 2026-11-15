@@ -29,4 +29,75 @@
  {"labelsComplete" [[?t "labels-complete" ?value]]
   "nativeComplete" [[?t "native-complete" ?value]]
   "openBlockers" [[?t "open-blockers" ?value]]
-  "readiness" [[?t "label" ?value] [1 "readiness" ?value]]}}
+  "readiness" [[?t "label" ?value] [1 "readiness" ?value]]}
+ :lexicon
+ ;; Phrases naming the inputs the rules read, for `pdb rules` (#416). A phrase names an input
+ ;; only and never describes a rule. The build fails if a literal attribute in any rule, query
+ ;; or witness lacks a phrase here, or if an entry here is unused. Constant sets need none.
+ ;; :viewer names the viewer facts the engine asserts on entity 1.
+ {:attributes
+  {"active-count" "number of active dependents"
+   "active-dependent" "active dependent"
+   "assessment-kind" "assessment action kind"
+   "attention" "agent whose attention is requested"
+   "band" "band"
+   "blocker" "native blocker"
+   "blocking-complete" "completeness of dependent coverage"
+   "check" "check run"
+   "closes" "issue it closes"
+   "closing" "closing pull request"
+   "complexity-size" "complexity size"
+   "complexity-state" "complexity assessment state"
+   "created" "creation order"
+   "dependent" "native dependent"
+   "draft" "draft flag"
+   "forward-complete" "completeness of forward closing-PR evidence"
+   "head" "head commit"
+   "impact-size" "impact size"
+   "impact-state" "impact assessment state"
+   "incomplete-key" "incomplete-label sort key"
+   "kind" "kind"
+   "label" "label"
+   "labels-complete" "completeness of label evidence"
+   "linked-key" "linked-to-viewer sort key"
+   "matched" "matched decision rule"
+   "merge-state" "merge state"
+   "mergeable" "mergeability"
+   "name" "name"
+   "native-complete" "completeness of native dependency evidence"
+   "number" "number"
+   "open-blockers" "number of open blockers"
+   "outcome" "outcome"
+   "overridden" "overridden decision rule"
+   "own-key" "owned-by-viewer sort key"
+   "owner" "claiming agent"
+   "platform" "required platform"
+   "pr-complete" "completeness of pull request evidence"
+   "preference" "preference"
+   "question-record" "question record"
+   "receipt" "review receipt"
+   "receipt-commit" "reviewed commit"
+   "receipt-findings" "findings flag"
+   "receipt-status" "receipt status"
+   "record-to" "addressee"
+   "record-trust" "trust level"
+   "resolved" "resolved flag"
+   "responsible" "responsible agent"
+   "reverse-complete" "completeness of reverse closing-PR evidence"
+   "review" "review"
+   "review-commit" "reviewed commit"
+   "review-decision" "review decision"
+   "review-state" "review state"
+   "rule" "rule ID"
+   "state" "state"
+   "target" "target"
+   "thread" "review thread"
+   "unlock-count" "number of dependents it unlocks"
+   "unlock-unknown" "reason the unlock count is unknown"
+   "unlocks-dependent" "dependent it would unlock"
+   "urgency-key" "urgency sort key"}
+  :viewer
+  {"agent" "agent name"
+   "role" "role"
+   "platform" "platform"
+   "order" "requested order"}}}
