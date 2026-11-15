@@ -973,7 +973,14 @@ export async function main(
     await output(
       rest.includes("--json")
         ? JSON.stringify(
-            { schemaVersion: 1, version: installed.version, check: result, checkout },
+            {
+              schemaVersion: 1,
+              version: installed.version,
+              // The local source root, as the text output shows it; null for an npm install.
+              installation: installed.installed ? null : (installed.root ?? null),
+              check: result,
+              checkout,
+            },
             null,
             2,
           ) + "\n"
