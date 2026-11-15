@@ -705,7 +705,8 @@ export class QuotaService {
       }
     }
 
-    let flight = state.flight;
+    // A lookup whose last reader cancelled is aborted: never join it, start a fresh one.
+    let flight = state.flight?.controller.signal.aborted ? null : state.flight;
     if (!flight) {
       flight = this.start(state);
       requests.quota = 1;

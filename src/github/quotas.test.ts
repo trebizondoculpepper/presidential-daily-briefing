@@ -359,6 +359,33 @@ describe("QuotaService freshness, isolation and cancellation", () => {
     expect((await service.view(ctxA)).freshness).toBe("live");
   });
 
+  it("starts a fresh lookup when a reader arrives right after the last one cancelled", async () => {
+    const h = harness((call) =>
+      call === 1
+        ? new Promise<RestAnswer>((_, reject) =>
+            h.calls[0]!.signal!.addEventListener("abort", () =>
+              // The aborted lookup settles only later, after the new reader has arrived.
+              setTimeout(() => reject(new Error("aborted")), 5),
+            ),
+          )
+        : ok(),
+    );
+    const service = new QuotaService({ rest: h.rest, now: h.clock });
+    const c = new AbortController();
+    const cancelled = service.view(ctxA, { signal: c.signal });
+    await Promise.resolve();
+    c.abort();
+    const fresh = service.view(ctxA);
+    await expect(cancelled).rejects.toBeDefined();
+    const view = await fresh;
+    expect(view).toMatchObject({ freshness: "live", failure: null, requests: { quota: 1 } });
+    expect(h.calls).toHaveLength(2);
+    expect(h.calls[1]!.signal!.aborted).toBe(false);
+    // The late cancellation of the first lookup does not displace the fresh reading.
+    await new Promise((r) => setTimeout(r, 10));
+    expect((await service.view(ctxA)).freshness).toBe("cached");
+  });
+
   it("drops a late result after the context is forgotten (login switch)", async () => {
     let release!: (a: RestAnswer) => void;
     const h = harness((call) =>
