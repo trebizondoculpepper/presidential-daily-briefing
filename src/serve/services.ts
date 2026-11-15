@@ -73,7 +73,11 @@ export function readServices(
         }
       },
       config: (repository) => serveSettings(options, facts.served, repository),
-      rules: (repository) => rulesIdentity(serveSettings(options, facts.served, repository)),
+      rules: (repository) =>
+        rulesIdentity(
+          serveSettings(options, facts.served, repository),
+          facts.served.find((s) => s.repository === repository)?.project !== undefined,
+        ),
       instanceId: randomUUID(),
       now: () => serve.clock.now(),
     });
@@ -135,6 +139,8 @@ function serveSettings(
       processGuide: repositorySetting(false),
       "complexity.enabled": repositorySetting(true),
       "impact.enabled": repositorySetting(true),
+      // #516: without the checkout, whether project rules are enabled is not known, never false.
+      "rules.project.enabled": { value: null, source: "unknown", known: false },
     },
     warnings: local
       ? ["Repository settings are read from the project for each request and are not held here."]
@@ -148,6 +154,7 @@ function serveSettings(
  */
 async function rulesIdentity(
   config: ReturnType<typeof serveSettings>,
+  local: boolean,
 ): Promise<{ rules: RulesDiagnostic; warnings: string[] }> {
   const { rulesHash, policyVersion } = await import("../rules/datalog/datalog.js");
   const engine = config.settings["briefing.engine"]!;
@@ -164,6 +171,18 @@ async function rulesIdentity(
         "Validated by npm run rules:build --check before packaging; the server does not re-run it.",
     },
     englishRules: { cli: "pdb rules", page: "/rules" },
+    // #516: project preferences are read from the checkout for each briefing, never held here.
+    projectPolicy: local
+      ? {
+          state: "per-request",
+          detail:
+            "Read from the project's configuration and pdb.rules.edn for each briefing; the /rules page and each briefing's decisionEngine.effectivePolicy show the effective revision.",
+        }
+      : {
+          state: "unknown",
+          detail:
+            "Served without a local project (--repo only): whether project preferences are enabled cannot be read; briefings report effectivePolicy state unavailable. Serve it with --project.",
+        },
   };
   return { rules, warnings: engine.known ? [] : config.warnings };
 }

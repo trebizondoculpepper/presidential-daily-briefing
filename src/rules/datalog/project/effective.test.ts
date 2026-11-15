@@ -98,7 +98,7 @@ const run = (
 describe("effective project policy (#516)", () => {
   it("leaves the default queue and hash untouched when disabled", async () => {
     const items = defaults();
-    for (const source of ["default", "config", "no-matching-project", "not-read"] as const) {
+    for (const source of ["default", "config"] as const) {
       const result = await run({ enabled: false, source }, "impact", {
         loadPolicy: async () => {
           throw new Error("a disabled policy must not be read");
@@ -115,6 +115,24 @@ describe("effective project policy (#516)", () => {
         source: "pdb.rules.edn",
       });
     }
+  });
+
+  it("reports a selection without a local checkout as unavailable, not disabled, and complete", async () => {
+    const items = defaults();
+    const result = await run({
+      enabled: "unavailable",
+      reason: "no local checkout; use --project",
+    });
+    expect(result.items).toEqual(items);
+    expect(result.warnings).toEqual([]);
+    expect(result.manifest).toMatchObject({
+      state: "unavailable",
+      appliedOrderMode: "disabled",
+      defaultRulesHash: rulesHash,
+      effectiveRulesHash: null,
+      reason: "no local checkout; use --project",
+    });
+    expect(result.manifest.next.join(" ")).toContain("--project");
   });
 
   it("applies an enabled, valid policy with the composite hash and per-row provenance", async () => {
@@ -265,9 +283,9 @@ describe("project policy enablement and briefing integration (#516)", () => {
     ).toEqual({ enabled: true, source: "config", root: SYNTHETIC_ROOT });
     expect(
       await resolveProjectRulesSetting("another/repo", local("[rules.project]\nenabled = true\n")),
-    ).toEqual({
-      enabled: false,
-      source: "no-matching-project",
+    ).toMatchObject({ enabled: "unavailable", reason: expect.stringContaining("--project") });
+    expect(await resolveProjectRulesSetting(snapshot.repository)).toMatchObject({
+      enabled: "unavailable",
     });
     expect(await resolveProjectRulesSetting(snapshot.repository, local("garbage ="))).toMatchObject(
       {
@@ -287,12 +305,17 @@ describe("project policy enablement and briefing integration (#516)", () => {
     });
 
   it("reports the default hash and a disabled manifest when not enabled", async () => {
-    const report = (await present({})).report;
-    expect(report.decisionEngine.rulesHash).toBe(rulesHash);
-    expect(report.decisionEngine.effectivePolicy).toMatchObject({
+    const presented = await present({ projectRules: { enabled: false, source: "default" } });
+    expect(presented.report.decisionEngine.rulesHash).toBe(rulesHash);
+    expect(presented.report.decisionEngine.effectivePolicy).toMatchObject({
       state: "disabled",
       effectiveRulesHash: rulesHash,
     });
+    // Not read at all (no checkout selected): unavailable, and the briefing stays complete.
+    const unread = await present({});
+    expect(unread.report.decisionEngine.rulesHash).toBe(rulesHash);
+    expect(unread.report.decisionEngine.effectivePolicy).toMatchObject({ state: "unavailable" });
+    expect(unread.complete).toBe(presented.complete);
   });
 
   it("ranks by the active policy and reports its composite hash", async () => {

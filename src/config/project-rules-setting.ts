@@ -15,17 +15,27 @@ import {
 import type { GuideRuntime } from "../briefing/process.js";
 
 export type ProjectRulesSetting =
-  /** Disabled by configuration (`config`/`default`), or no local checkout matched (`no-matching-project`). */
-  | { enabled: false; source: "config" | "default" | "no-matching-project" | "not-read" }
+  /** Disabled by the repository's own configuration (`config`) or its registry default. */
+  | { enabled: false; source: "config" | "default" }
+  /**
+   * No local checkout of the repository is selected (a remote CLI read, `pdb serve --repo`, MCP
+   * without `--project`), so its committed configuration cannot be read at all. Reported as its
+   * own explicit state with the remedy, never as "disabled" (#516).
+   */
+  | { enabled: "unavailable"; reason: string }
   | { enabled: true; source: "config"; root: string }
   /** The configuration could not be read: whether project rules apply is unknown. */
   | { enabled: "unknown"; reason: string };
+
+/** Why a selection without a matching local checkout cannot know its project rules. */
+export const noCheckout = (repository: string): string =>
+  `no local checkout of ${repository} is selected, so its committed configuration and pdb.rules.edn cannot be read; run pdb inside that checkout, or start pdb serve or pdb-mcp with --project`;
 
 export async function resolveProjectRulesSetting(
   repository: string,
   runtime?: GuideRuntime,
 ): Promise<ProjectRulesSetting> {
-  if (!runtime) return { enabled: false, source: "not-read" };
+  if (!runtime) return { enabled: "unavailable", reason: noCheckout(repository) };
   let target;
   try {
     target = await resolveRepositoryTarget(
@@ -38,7 +48,7 @@ export async function resolveProjectRulesSetting(
       error instanceof ConfigError &&
       ["not-a-repository", "repository-mismatch"].includes(error.code)
     )
-      return { enabled: false, source: "no-matching-project" };
+      return { enabled: "unavailable", reason: noCheckout(repository) };
     return { enabled: "unknown", reason: "the repository configuration could not be resolved" };
   }
   try {

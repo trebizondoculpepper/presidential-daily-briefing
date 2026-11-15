@@ -214,9 +214,15 @@ Part 2 (effective English and `pdb rules init`) is also implemented:
 - A missing checkout, or a `--repo`-only served project, is `unknown`. It is never shown as the effective policy.
 - `pdb rules init` writes a validated starter bound to the shipped hash into the verified checkout with an exclusive create, refuses an existing file or symlink, and enables nothing.
 
-Part 3 (serve/MCP generation caches, isolation and installed surface parity) follows. All three depend on this reviewed contract and their
-native predecessors. #75 remains open until its full default/override/output/test
-requirements are verified; a schema or worker alone does not complete it.
+Part 3 completes #516:
+
+- **Selections without a local checkout.** A remote CLI read, `pdb serve --repo` and `pdb-mcp` without `--project` cannot read the repository's committed configuration, so whether its project rules are enabled is not knowable there. The manifest reports the explicit state `unavailable` (`effectiveRulesHash: null`, `appliedOrderMode: disabled`), with a reason naming the cause and the `--project` remedy. `/rules` and the diagnostics rules view show it as unknown.
+- **Why the briefing stays complete in that case.** This matches the review policy and the other repository settings such a selection cannot read. Marking every `--repo`-only briefing incomplete would permanently degrade serve, MCP and rebrief for repositories that use no project rules at all. The state is still explicit, and it is never presented as `disabled` or as the effective policy. An enabled policy that fails stays `error` and incomplete, as above.
+- **Reads and caching.** `pdb serve` caches collected GitHub facts, not presented briefings. Each request therefore re-reads its own project's setting and `pdb.rules.edn` and evaluates in its own generation, so a changed or broken file takes effect on the next request and no project or client sees another's policy.
+- **Diagnostics.** `/api/v1/diagnostics/config` lists `rules.project.enabled` as unknown, and the rules view reports `projectPolicy` as `per-request` or `unknown`.
+- **Installed package.** `scripts/package-test.ts` checks that the installed CLI briefing, `pdb rules`, the MCP briefing, a `pdb serve --project` briefing and its `/rules` page name one effective revision. All three depend on this reviewed contract and their
+  native predecessors. #75 remains open until its full default/override/output/test
+  requirements are verified; a schema or worker alone does not complete it.
 
 Required fixtures include valid native conditional/key/reason, multiple matches,
 no-match/default parity, old/new age-order parity, protected-band invariance,
