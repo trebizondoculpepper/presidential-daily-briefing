@@ -3,6 +3,7 @@
  * "Implementation decisions"). Each builder selects fields from the existing versioned report,
  * names its prunable lists in pruning order and renders minimal text from returned rows only.
  */
+import { leanRow } from "../briefing/leanrows.js";
 import { catchUpLimits, catchUpText } from "../briefing/catchup.js";
 import { dependencyFacts } from "../github/dependencies.js";
 import type { CatchUpReport } from "../briefing/catchup.js";
@@ -146,9 +147,35 @@ export function briefingView(
         `Presidential Daily Briefing: ${base.repository} — fetched ${str(freshness.fetchedAt)}${freshness.offline ? " (OFFLINE CACHE)" : ""}`,
       ];
       if (d.rankedActions) {
+        const titles = new Map(
+          list(report.subjects).map((s) => [str(obj(s).url), obj(s)] as const),
+        );
         lines.push(
           `Next actions (${list(ranked.items).length} shown of ${Number(ranked.total ?? 0)}):`,
-          ...itemsLine("", list(ranked.items)),
+          // Lean rows by default (#487), the same projection as the CLI text.
+          ...(context
+            ? itemsLine("", list(ranked.items))
+            : list(ranked.items).map((row, i) => {
+                const item = obj(row);
+                const subject = titles.get(str(item.target));
+                return leanRow(
+                  i + 1,
+                  {
+                    kind: str(item.kind),
+                    target: str(item.target),
+                    nextCommand: str(item.nextCommand) || null,
+                    thenCommand: str(item.thenCommand) || null,
+                    inspection: str(item.inspection) || null,
+                    unlocks: Number(item.unlocks ?? 0),
+                    unlocksUnknown: list(item.unlocksUnknown).map(String),
+                  },
+                  {
+                    number: subject ? Number(subject.number) : str(item.target).split("/").pop()!,
+                    title: subject ? str(subject.title) : str(item.target),
+                  },
+                  str(obj(item.why).text) || null,
+                );
+              })),
         );
       }
       if (d.human) {

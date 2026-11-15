@@ -65,8 +65,9 @@ describe("next steps only by default (#355)", () => {
 
   it("keeps the ranked steps, their reasons and commands, and nonzero omissions", async () => {
     const plain = (await run(populated(), "datalog", ["--limit", "1"])).out;
-    expect(plain).toMatch(/\nNEXT STEPS \(\d+; \d+ omitted\)\n- #\d+ Ticket \d+ — /);
-    expect(plain).toMatch(/\n {2}Why: .+\n {2}Next: pdb /);
+    expect(plain).toMatch(
+      /\nNEXT STEPS \(\d+; \d+ omitted\)\n1\. [A-Z][a-z ]+ #\d+: Ticket \d+\n {3}.+\n {3}Next: pdb .+--repo /,
+    );
   });
 
   it("says no next steps were found, and never implies no work when evidence is incomplete", async () => {
@@ -105,5 +106,66 @@ describe("next steps only by default (#355)", () => {
       .join("\n");
     expect(context).toContain("Action targets");
     expect(context).toContain("Subjects:");
+  });
+
+  it("renders lean rows (#487): rank, label, title, one reason, commands, link; no metrics or codes", async () => {
+    const plain = (await run(populated(), "datalog", ["--role", "implementer"])).out;
+    const rows = plain.slice(plain.indexOf("NEXT STEPS"));
+    expect(rows).toMatch(/\n1\. (Implement|Estimate complexity) #\d+: Ticket \d+\n/);
+    // No paired metric line, reason-code lists or zero-only unlock decoration by default.
+    expect(rows).not.toMatch(/impact \w+ · complexity/);
+    expect(rows).not.toMatch(/\((ordinary|assessment|easy-win)[,)]/);
+    expect(rows).not.toContain("unlocks at least 0");
+    expect(rows).not.toMatch(/^- #/m);
+    // --context keeps the detailed rows.
+    const context = (await run(populated(), "datalog", ["--role", "implementer", "--context"])).out;
+    expect(context).toMatch(/impact \w+ · complexity/);
+    expect(context).toMatch(/^- #\d+ Ticket \d+ — \S+ \(/m);
+  });
+
+  it("shows unlock evidence only when it is positive or uncertain", async () => {
+    const { leanRow } = await import("./leanrows.js");
+    const base = {
+      kind: "implement",
+      target: "https://github.com/o/r/issues/7",
+      nextCommand: "pdb claim 7 --repo o/r",
+    };
+    const subject = { number: 7, title: "Seven" };
+    expect(leanRow(2, { ...base, unlocks: 0, unlocksUnknown: [] }, subject, "Why.")).toBe(
+      "2. Implement #7: Seven\n   Why.\n   Next: pdb claim 7 --repo o/r\n   https://github.com/o/r/issues/7",
+    );
+    expect(leanRow(1, { ...base, unlocks: 2, unlocksUnknown: [] }, subject, "Why.")).toContain(
+      "   Unlocks 2 otherwise-ready ticket(s).",
+    );
+    expect(
+      leanRow(1, { ...base, unlocks: 1, unlocksUnknown: ["#9 evidence incomplete"] }, subject, "W"),
+    ).toContain("   Unlocks at least 1 otherwise-ready ticket(s).");
+    expect(
+      leanRow(1, { ...base, unlocks: 0, unlocksUnknown: ["#9 evidence incomplete"] }, subject, "W"),
+    ).toContain("   Unlocks unknown: #9 evidence incomplete.");
+    // Without a command the inspection path stays; the reason is never invented.
+    const inspect = leanRow(
+      1,
+      { kind: "inspect", target: base.target, inspection: "pdb --issue 7 --json" },
+      subject,
+      null,
+    );
+    expect(inspect).toBe(
+      "1. Inspect #7: Seven\n   Inspect: pdb --issue 7 --json\n   https://github.com/o/r/issues/7",
+    );
+  });
+
+  it("CLI and MCP default text render the same lean rows", async () => {
+    const json = JSON.parse(
+      (await run(populated(), "datalog", ["--role", "implementer", "--json"])).out,
+    );
+    const cli = (await run(populated(), "datalog", ["--role", "implementer"])).out;
+    const base = { repository: repo } as Parameters<typeof briefingView>[0];
+    const presentation = {} as Parameters<ReturnType<typeof briefingView>["text"]>[1];
+    const view = briefingView(base, json);
+    const mcp = view.text(json, presentation).join("\n");
+    const rowsOf = (text: string) => text.split("\n").filter((l) => /^(\d+\. | {3})/.test(l));
+    expect(rowsOf(mcp)).toEqual(rowsOf(cli));
+    expect(rowsOf(mcp).length).toBeGreaterThan(0);
   });
 });
