@@ -4,7 +4,8 @@
  *
  * Compares the running source checkout's package-lock.json with npm's hidden lock
  * (node_modules/.package-lock.json) and confirms each runtime dependency named in the root
- * manifest still resolves under node_modules. Read-only: never runs npm, package scripts or
+ * manifest still has its entry point (exports or main) under node_modules. Lock identity
+ * (`resolved` and `integrity`) is compared as well as the version. Read-only: never runs npm, package scripts or
  * any other process, and never writes. Every read shares one deadline; anything that cannot be
  * established is unknown, never "up to date".
  *
@@ -56,7 +57,59 @@ export interface DependencyOptions {
   deadlineMs?: number;
 }
 
-type Lock = Map<string, { version: string | null; dev: boolean; optional: boolean; link: boolean }>;
+type Lock = Map<
+  string,
+  {
+    version: string | null;
+    /** Lock identity: where the package came from and its content hash. */
+    resolved: string | null;
+    integrity: string | null;
+    dev: boolean;
+    optional: boolean;
+    link: boolean;
+    bundled: boolean;
+  }
+>;
+
+/**
+ * The entry file a package's own manifest names for `import`: `exports` ("." or a bare
+ * conditions object, choosing import, then node, then default) or else `main`, else index.js.
+ * Returns null when `exports` exists but names no file this check can follow.
+ */
+export function entryPoint(manifest: Record<string, unknown>): string[] | null {
+  const pick = (target: unknown): string | null => {
+    if (typeof target === "string") return target;
+    if (Array.isArray(target)) {
+      for (const t of target) {
+        const found = pick(t);
+        if (found) return found;
+      }
+      return null;
+    }
+    if (typeof target !== "object" || target === null) return null;
+    const conditions = target as Record<string, unknown>;
+    for (const c of ["import", "node", "default"]) if (c in conditions) return pick(conditions[c]);
+    return null;
+  };
+  const exports = manifest.exports;
+  if (exports !== undefined && exports !== null) {
+    const root =
+      typeof exports === "object" &&
+      !Array.isArray(exports) &&
+      Object.keys(exports).some((k) => k.startsWith("."))
+        ? (exports as Record<string, unknown>)["."]
+        : exports;
+    const file = pick(root);
+    return file ? [file] : null;
+  }
+  const main = typeof manifest.main === "string" && manifest.main ? manifest.main : "index.js";
+  return main.endsWith(".js") ||
+    main.endsWith(".mjs") ||
+    main.endsWith(".cjs") ||
+    main.endsWith(".json")
+    ? [main]
+    : [main, `${main}.js`, `${main}/index.js`];
+}
 
 class Unknown extends Error {}
 
@@ -82,6 +135,9 @@ function parseLock(text: string, what: string): Lock {
     const entry = value as Record<string, unknown>;
     lock.set(key, {
       version: typeof entry.version === "string" ? entry.version : null,
+      resolved: typeof entry.resolved === "string" ? entry.resolved : null,
+      integrity: typeof entry.integrity === "string" ? entry.integrity : null,
+      bundled: entry.inBundle === true,
       dev: entry.dev === true || entry.devOptional === true,
       optional: entry.optional === true,
       link: entry.link === true,
@@ -176,8 +232,37 @@ async function check({
       throw new Unknown("package.json is not valid JSON");
     }
   }
-  const resolves = async (name: string) =>
-    (await readText(join(root, "node_modules", ...name.split("/"), "package.json"))) !== null;
+  /** Whether a runtime dependency's own entry point exists, or unknown when it cannot tell. */
+  const resolve = async (name: string): Promise<"ok" | "missing" | "unknown"> => {
+    const dir = join(root, "node_modules", ...name.split("/"));
+    const text = await readText(join(dir, "package.json"));
+    if (text === null) return "missing";
+    let manifest: unknown;
+    try {
+      manifest = JSON.parse(text);
+    } catch {
+      return "unknown";
+    }
+    if (typeof manifest !== "object" || manifest === null) return "unknown";
+    const candidates = entryPoint(manifest as Record<string, unknown>);
+    if (!candidates) return "unknown";
+    let failed = false;
+    for (const file of candidates) {
+      if (file.split(/[\\/]/).includes("..")) return "unknown";
+      try {
+        if ((await readText(join(dir, ...file.split("/")))) !== null) return "ok";
+      } catch {
+        failed = true; // A directory or an unreadable file: try the next candidate.
+      }
+    }
+    return failed ? "unknown" : "missing";
+  };
+  const unresolvable: string[] = [];
+  const resolves = async (name: string) => {
+    const result = await resolve(name);
+    if (result === "unknown") unresolvable.push(`node_modules/${name}`);
+    return result !== "missing";
+  };
 
   const hiddenText = await readText(join(root, "node_modules", ".package-lock.json"));
   if (hiddenText === null) {
@@ -203,6 +288,8 @@ async function check({
   const missing: string[] = [];
   const mismatched: string[] = [];
   const omittedDev: string[] = [];
+  /** Packages whose lock identity cannot be compared: neither side shares resolved/integrity. */
+  const unverifiable: string[] = [];
   for (const [key, want] of expected) {
     if (want.link) continue;
     const have = actual.get(key);
@@ -211,7 +298,18 @@ async function check({
       (want.dev ? omittedDev : missing).push(key);
       continue;
     }
-    if (want.version !== null && have.version !== want.version) mismatched.push(key);
+    if (want.version !== null && have.version !== want.version) {
+      mismatched.push(key);
+      continue;
+    }
+    if (want.bundled) continue;
+    // Same version: the lock identity (source and content hash) must match too, on whatever
+    // fields both sides record.
+    const shared = (["resolved", "integrity"] as const).filter(
+      (f) => want[f] !== null && have[f] !== null,
+    );
+    if (shared.length === 0) unverifiable.push(key);
+    else if (shared.some((f) => want[f] !== have[f])) mismatched.push(key);
   }
   const extraneous = [...actual.keys()].filter(
     (key) => !expected.has(key) && !actual.get(key)!.link,
@@ -229,7 +327,9 @@ async function check({
   if (missing.length + mismatched.length + extraneous.length > 0) {
     const parts = [
       missing.length ? `missing: ${names(missing)}` : null,
-      mismatched.length ? `version differs from package-lock.json: ${names(mismatched)}` : null,
+      mismatched.length
+        ? `version, source or integrity differs from package-lock.json: ${names(mismatched)}`
+        : null,
       extraneous.length ? `not in package-lock.json: ${names(extraneous)}` : null,
       omittedDev.length ? `missing dev: ${names(omittedDev)}` : null,
     ].filter(Boolean);
@@ -241,6 +341,16 @@ async function check({
       ...fix,
     };
   }
+  if (unresolvable.length)
+    return unknown(
+      "runtime dependency entry points",
+      `The entry point of ${names(unresolvable)} could not be established from its own package.json.`,
+    );
+  if (unverifiable.length)
+    return unknown(
+      "package-lock.json vs node_modules/.package-lock.json",
+      `Neither lock records a comparable source or integrity for ${names(unverifiable)}.`,
+    );
   if (omittedDev.length)
     return unknown(
       "package-lock.json vs node_modules/.package-lock.json",
@@ -250,7 +360,7 @@ async function check({
     id: dependencyCheckId,
     status: "ok",
     source: "package-lock.json vs node_modules/.package-lock.json",
-    detail: `Installed dependencies match package-lock.json (${expected.size} packages; ${declared.length} runtime dependencies resolve). This is not a full integrity check.`,
+    detail: `Installed dependencies match package-lock.json (${expected.size} packages; ${declared.length} runtime dependency entry points exist). This is not a full integrity check.`,
     next: [],
   };
 }
