@@ -2,8 +2,9 @@
  * The local read-only dashboard served by `pdb serve` at `/` (#374, doc/design/serve.md and
  * doc/design/serve-global-dashboard-roadmap.md).
  *
- * It reads only `/api/v1/status` and `/api/v1/briefing`. Ranking, reasons and commands come from
- * the shared engine through that API; nothing here orders or chooses work. The page loads no
+ * It reads only `/api/v1/status` and `/api/v1/briefing`; each issue row links to the read-only
+ * ticket detail page (#454, ticket-page.ts), which reads that one ticket only when opened.
+ * Ranking, reasons and commands come from the shared engine through that API; nothing here orders or chooses work. The page loads no
  * external resources and has no inline script: the HTML, stylesheet and script are three
  * same-origin responses under a strict Content-Security-Policy.
  *
@@ -70,6 +71,8 @@ pre.rules { white-space: pre-wrap; overflow-wrap: anywhere; font-size: .85rem; }
 ul.projects { display: inline; padding: 0; }
 ul.projects li { display: inline; margin: 0 .5rem 0 0; }
 .toc li { margin: 0; }
+a.detail { font-size: .8rem; margin-left: .4rem; }
+blockquote { margin: .2rem 0 .2rem 1rem; white-space: pre-wrap; overflow-wrap: anywhere; }
 `;
 
 export interface DashboardRenderers {
@@ -199,7 +202,22 @@ export function dashboardRenderers(): DashboardRenderers {
         `Ranked ${String(item.kind)}${codes.length ? ` (${codes.join(", ")})` : ""}.`;
       const ids = list(item.ruleIds).length ? list(item.ruleIds) : codes;
       const rules = ids.map(escapeHtml).join(", ");
-      return `<li>${name}<span class="kind">${escapeHtml(item.kind)}</span><p class="why">${escapeHtml(reason)}${rules ? ` <small>(${rules})</small>` : ""}</p>${commands}</li>`;
+      // The consolidated read-only detail of this ticket (#454), only for an issue of the
+      // selected project; it is fetched when opened, never prefetched from the list.
+      const selection = record(record(envelope).selection);
+      const repository = String(selection.repository ?? "");
+      const issue = /^https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/issues\/([1-9]\d*)$/.exec(target);
+      const detail =
+        issue && issue[1]!.toLowerCase() === repository.toLowerCase()
+          ? ` <a class="detail" href="${escapeHtml(
+              `/ticket?${new URLSearchParams({
+                repo: repository,
+                n: issue[2]!,
+                ...(selection.agent ? { agent: String(selection.agent) } : {}),
+              }).toString()}`,
+            )}">details</a>`
+          : "";
+      return `<li>${name}${detail}<span class="kind">${escapeHtml(item.kind)}</span><p class="why">${escapeHtml(reason)}${rules ? ` <small>(${rules})</small>` : ""}</p>${commands}</li>`;
     });
     const omitted = Number(ranked.omitted ?? 0);
     return `<ol>${rows.join("")}</ol>${omitted > 0 ? `<p>${omitted} more not shown.</p>` : ""}`;

@@ -44,6 +44,7 @@ import {
 } from "../workflow/readservices.js";
 import type { DeliveryBoundaries } from "../workflow/readservices.js";
 import { defaultStaleHours } from "../workflow/team.js";
+import { readTicketStatus, ticketLimits } from "../workflow/ticketstatus.js";
 import type { RequestContext, Routes, ServedRepository, ServerFacts } from "../serve.js";
 import { CollectionError, ServeCache, UnservedRepository } from "./cache.js";
 import type { Freshness } from "./cache.js";
@@ -139,7 +140,7 @@ export function noLocalProject(repository: string): Pick<ReadRuntime, "estimatio
   return { estimation: readers, guide: readers };
 }
 
-type View = "briefing" | "issue" | "dependencies" | "pull-request" | "who" | "team";
+type View = "briefing" | "issue" | "dependencies" | "pull-request" | "who" | "team" | "ticket";
 type Status = "complete" | "incomplete" | "error";
 
 /** Envelope `selection`, the MCP `selectionSchema` shape. */
@@ -169,6 +170,7 @@ export interface ReadEnvelope {
 
 const repoPattern = /^[\w.-]+\/[\w.-]+$/;
 const agentPattern = /^[A-Za-z0-9][\w.-]*$/;
+const platformPattern = /^[\w.-]+$/;
 const sincePattern = /^\d{4}-\d\d-\d\dT.*(?:Z|[+-]\d{2}:\d{2})$/;
 
 const isPickupOrder = (text: string): text is PickupOrder =>
@@ -282,6 +284,8 @@ function cliCommand(view: View, repository: string, number?: number): string {
       return `pdb who ${number} ${repo} --json`;
     case "team":
       return `pdb team ${repo} --json`;
+    case "ticket":
+      return `pdb ticket ${number} ${repo} --json`;
   }
 }
 
@@ -294,6 +298,8 @@ const refreshScopes = {
   team: ["collect"],
   deps: ["deps"],
   prs: ["pr", "pr-history"],
+  // The consolidated ticket detail (#454) is its own whole result.
+  tickets: ["ticket"],
 } as const;
 
 /**
@@ -685,6 +691,103 @@ export function readApi(
           );
           return { status: read.complete ? "complete" : "incomplete", result: read.report };
         });
+        return true;
+      }
+      const ticketMatch = /^\/api\/v1\/tickets\/([1-9]\d{0,15})$/.exec(path);
+      if (ticketMatch && Number.isSafeInteger(Number(ticketMatch[1]))) {
+        const number = Number(ticketMatch[1]);
+        // The consolidated ticket detail (#454, doc/design/consolidated-ticket-view.md): the
+        // shared #197 `readTicketStatus` service, its `ticket-status` document unchanged.
+        await dataRoute(
+          context,
+          "ticket",
+          ["agent", "entry", "harness", "platform", "limitPrs"],
+          number,
+          async (values, served, setSelection) => {
+            const platform = values.get("platform");
+            if (platform !== undefined && !platformPattern.test(platform))
+              throw invalid("platform must be a platform name such as claude-code.");
+            const limitPrs = integerParam(
+              values,
+              "limitPrs",
+              1,
+              ticketLimits.maxPullRequests,
+              ticketLimits.defaultPullRequests,
+            );
+            // Every argument is validated before identity resolution and before any read.
+            const selection = await identity(values, served);
+            setSelection(selection);
+            if (!runtime.collectIssueFocus && !guardedQueryWith)
+              throw new CollectionError("GITHUB_UNAVAILABLE", "No GitHub reader is configured.");
+            const agent = selection.agent ?? undefined;
+            let read: Awaited<ReturnType<typeof readTicketStatus>>;
+            try {
+              read = await cache.read<Awaited<ReturnType<typeof readTicketStatus>>>(
+                {
+                  repository: served.repository,
+                  collector: "ticket",
+                  coverage: {
+                    n: number,
+                    profile: "ticket-status-v1",
+                    limitPrs,
+                    agent: agent ?? null,
+                    platform: platform ?? null,
+                  },
+                },
+                async (inner) => {
+                  const result = await readTicketStatus(
+                    served.repository,
+                    number,
+                    {
+                      staleHours: defaultStaleHours,
+                      now: runtime.now(),
+                      limitPrs,
+                      signal: inner,
+                      ...(agent ? { agent } : {}),
+                      ...(platform ? { platform } : {}),
+                      ...(guardedRest
+                        ? {
+                            locate: (repository: string, n: number) =>
+                              locateIssue(repository, n, (p, o) =>
+                                guardedRest(p, { ...o, signal: o?.signal ?? inner }),
+                              ),
+                          }
+                        : {}),
+                    },
+                    boundaries(served.repository, inner),
+                    guardedQueryWith
+                      ? guardedQueryWith(inner)
+                      : async () => {
+                          throw new CollectionError(
+                            "GITHUB_UNAVAILABLE",
+                            "No GitHub reader is configured.",
+                          );
+                        },
+                    runtime.now,
+                    runtime.collectIssueFocus ?? CollectIssueFocus,
+                  );
+                  // A quota refusal the read stopped on starts the shared cooldown before this
+                  // collection slot is released, exactly as the who route does.
+                  const quota = result.report.collection.quota;
+                  if (quota) cache.noteQuotaRefusal(quota);
+                  return result;
+                },
+                context.signal,
+                // Only a complete answer is stored, and never one that stopped on quota.
+                (result) => result.complete && !result.report.collection.quota,
+              );
+            } catch (error) {
+              // A missing, transferred or inaccessible ticket keeps its diagnosis; a transfer is
+              // never followed here (the CLI does not follow it either).
+              if (!(error instanceof IssueUnavailable)) throw error;
+              return {
+                status: "incomplete",
+                result: { schemaVersion: 1, kind: "issue-unavailable", ...error.diagnosis },
+              };
+            }
+            return { status: read.complete ? "complete" : "incomplete", result: read.report };
+          },
+        );
         return true;
       }
       const match = /^\/api\/v1\/(issues|prs)\/([1-9]\d{0,15})(\/deps|\/who)?$/.exec(path);
