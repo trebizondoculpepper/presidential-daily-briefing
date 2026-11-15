@@ -9,26 +9,16 @@
  * D-HUMAN-ORPHANED* rules do. Whatever it could not read is reported as incomplete coverage,
  * never as "no question" or "answered".
  */
+import { createHash, randomUUID } from "node:crypto";
 import type { Comment, Issue } from "../github/types.js";
 import { comment as commentFields, common, info, prop } from "../github/github.js";
 import type { Query, QueryVariables, Rest } from "../github/github.js";
 import type { QuestionRecordFact } from "../rules/datalog/datalog.js";
 import type { TrustDecision } from "../workflow/delivery.js";
-import { parseQuestionMarker, questionMarkerPrefix } from "../workflow/claims.js";
-import {
-  classifyMarkers,
-  foldQuestionResolutions,
-  parseResolutionComment,
-} from "../workflow/claimactivity.js";
-import type { ActivityComment } from "../workflow/claimactivity.js";
-import { parseQuestionRecord } from "./questionrecord.js";
+import { questionMarkerPrefix } from "../workflow/claims.js";
 import type { HumanRecord } from "./questionrecord.js";
-
-/**
- * Labels that keep a legacy v1 question open: the policy's `question-label` set
- * (src/rules/datalog/policy/schema.edn). Used only to choose which records an item lists.
- */
-const legacyQuestionLabels: readonly string[] = ["question", "design:decision-needed"];
+import { emptyQuestionCounts, foldSourceQuestions } from "./questionfold.js";
+import type { QuestionCounts } from "./questionfold.js";
 
 /** Request bounds of one closed-source read. */
 export interface ClosedQuestionBounds {
@@ -36,6 +26,7 @@ export interface ClosedQuestionBounds {
   inventoryPages: number;
   commentPages: number;
   pageSize: number;
+  overlapSeconds: number;
 }
 export const closedQuestionPolicy: Readonly<ClosedQuestionBounds> = {
   /** GitHub requests per read: inventory pages, comment pages and permission lookups together. */
@@ -46,6 +37,8 @@ export const closedQuestionPolicy: Readonly<ClosedQuestionBounds> = {
   commentPages: 10,
   /** Rows per page. */
   pageSize: 100,
+  /** How far an incremental `since` pass reaches back before its watermark (clock skew, races). */
+  overlapSeconds: 300,
 };
 
 /** What the bounded closed-source read covered; `complete` only when nothing was left unread. */
@@ -54,8 +47,31 @@ export interface ClosedSourceCoverage {
   complete: boolean;
   bounds: ClosedQuestionBounds;
   requests: number;
+  /**
+   * This request's inventory pages and rows; `complete` when the baseline inventory has finished
+   * (in this request or, in `pdb serve`, across earlier ones).
+   */
   inventory: { pages: number; rows: number; complete: boolean };
-  /** Closed issues read in the inventory. */
+  /**
+   * `baseline`: listing every closed issue, continued across requests in `pdb serve`;
+   * `refresh`: after a finished baseline, an overlapping `since` pass over changed issues.
+   */
+  phase: "baseline" | "refresh";
+  /** The scan this request continued; see doc/design/human-briefing.md "Continuation". */
+  scan: {
+    /** Opaque: server instance, repository, scan start and generation. */
+    continuation: string;
+    /** `fresh`: started here; `continued`: resumed from memory; `restarted`: memory lost/expired. */
+    origin: "fresh" | "continued" | "restarted";
+    restartReason: string | null;
+    startedAt: string;
+    generation: number;
+    /** Closed issues updated before this are folded; null until a baseline finishes. */
+    watermark: string | null;
+    /** The `since` of a refresh pass in progress, or null. */
+    refreshSince: string | null;
+  };
+  /** Closed issues read so far in this scan. */
   discovered: number;
   /** Closed issues whose whole comment history was read. */
   hydrated: number;
@@ -63,15 +79,7 @@ export interface ClosedSourceCoverage {
   pending: string[];
   /** Permission lookups that could not be made or answered. */
   permissionGaps: number;
-  records: {
-    /** Trusted records with no explicit outcome; a legacy v1 one may still be resolved by labels. */
-    noOutcome: number;
-    unknown: number;
-    resolved: number;
-    withdrawn: number;
-    untrusted: number;
-    unverified: number;
-  };
+  records: QuestionCounts;
   startedAt: string;
   fetchedAt: string;
   failure: string | null;
@@ -109,10 +117,17 @@ export interface ClosedQuestionRuntime {
   now?: () => Date;
   signal?: AbortSignal;
   bounds?: Partial<ClosedQuestionBounds>;
+  /**
+   * Scan progress kept between requests (`pdb serve`); absent, each read starts afresh. One slot
+   * per served project and repository: progress is never shared between them.
+   */
+  slot?: ClosedScanSlot;
 }
 
 const inventorySource = (size: number) =>
   `query($owner:String!,$name:String!,$cursor:String){repository(owner:$owner,name:$name){issues(first:${size},after:$cursor,states:CLOSED,orderBy:{field:UPDATED_AT,direction:DESC}){nodes{${common}} ${info}}} rateLimit{remaining resetAt}}`;
+const sinceSource = (size: number) =>
+  `query($owner:String!,$name:String!,$cursor:String,$since:DateTime!){repository(owner:$owner,name:$name){issues(first:${size},after:$cursor,states:CLOSED,filterBy:{since:$since},orderBy:{field:UPDATED_AT,direction:DESC}){nodes{${common}} ${info}}} rateLimit{remaining resetAt}}`;
 const commentsSource = (size: number) =>
   `query($owner:String!,$name:String!,$number:Int!,$cursor:String){repository(owner:$owner,name:$name){issueOrPullRequest(number:$number){... on Issue{comments(first:${size},after:$cursor){nodes{${commentFields}} ${info}}}}}}`;
 
@@ -132,21 +147,165 @@ const pageOf = (value: unknown): { nodes: unknown[]; more: boolean; cursor: stri
 const failureText = (error: unknown): string =>
   error instanceof Error ? error.message : String(error);
 
+/** A closed issue being read: its comments so far and the cursor of the next page (null: done). */
+interface Entry {
+  issue: Issue;
+  comments: Comment[];
+  next: string | null;
+  /**
+   * While a changed issue's history is reread, the question records known before the reread.
+   * They stay visible (with an unknown outcome) until the reread completes (Codex, #609).
+   */
+  earlier?: Comment[];
+  /** Set when GitHub stopped returning the issue; its history stays incomplete. */
+  unavailable?: string;
+}
+/** The comments to fold: those reread so far, plus earlier ones not yet reread. */
+const known = (e: Entry): Comment[] => {
+  if (!e.earlier) return e.comments;
+  const reread = new Set(e.comments.map((c) => c.databaseId ?? c.url));
+  return [...e.comments, ...e.earlier.filter((c) => !reread.has(c.databaseId ?? c.url))];
+};
+/** One scan's progress. Nothing here is a GitHub snapshot: pages are observed over time. */
+export interface ClosedScanState {
+  startedAt: string;
+  generation: number;
+  /** Baseline inventory cursor; null before the first page. */
+  inventoryCursor: string | null;
+  inventoryDone: boolean;
+  /** Issues still being hydrated, and hydrated ones that carry a question or resolution marker. */
+  entries: Map<string, Entry>;
+  /** Every closed issue URL seen in this scan. */
+  seen: Set<string>;
+  watermark: string | null;
+  /** An incremental pass in progress: its `since`, its start and its cursor. */
+  refresh: { since: string; startedAt: string; cursor: string | null; listed: boolean } | null;
+  lastUsed: number;
+}
+
+const freshState = (now: Date): ClosedScanState => ({
+  startedAt: now.toISOString(),
+  generation: 0,
+  inventoryCursor: null,
+  inventoryDone: false,
+  entries: new Map(),
+  seen: new Set(),
+  watermark: null,
+  refresh: null,
+  lastUsed: now.getTime(),
+});
+
+/** One served project/repository's scan, with a lock so concurrent requests do not interleave. */
+export interface ClosedScanSlot {
+  readonly key: string;
+  readonly instance: string;
+  readonly retentionMs: number;
+  state: ClosedScanState | null;
+  /** Why the last state was discarded; reported once by the next read. */
+  lost: string | null;
+  lock: Promise<unknown>;
+}
+
 /**
- * Read closed issues and their question records within the bounds. `exclude` holds URLs already
- * read as open in the snapshot, which keep the open-ticket contract.
+ * In-memory scan progress for `pdb serve` (#414): one slot per served project and repository,
+ * kept while used within `retentionMs`. Restarting the server, a manual refresh or idle expiry
+ * loses it, and the next read says so and starts again.
+ */
+export class ClosedQuestionStore {
+  readonly instance = randomUUID();
+  private readonly slots = new Map<string, ClosedScanSlot>();
+  constructor(readonly retentionMs: number) {}
+  slot(project: string | undefined, repository: string): ClosedScanSlot {
+    const key = `${project ?? ""}\u0000${repository.toLowerCase()}`;
+    let slot = this.slots.get(key);
+    if (!slot) {
+      slot = {
+        key,
+        instance: this.instance,
+        retentionMs: this.retentionMs,
+        state: null,
+        lost: null,
+        lock: Promise.resolve(),
+      };
+      this.slots.set(key, slot);
+    }
+    return slot;
+  }
+  /** Discard progress (manual refresh, login change) so the next read restarts and says why. */
+  reset(repository: string | undefined, why: string): void {
+    for (const slot of this.slots.values())
+      if (!repository || slot.key.endsWith(`\u0000${repository.toLowerCase()}`))
+        if (slot.state) {
+          slot.state = null;
+          slot.lost = why;
+        }
+  }
+}
+
+const continuationId = (slot: ClosedScanSlot | undefined, repository: string, s: ClosedScanState) =>
+  createHash("sha256")
+    .update(
+      JSON.stringify([
+        slot?.instance ?? "unsaved",
+        slot?.key ?? repository,
+        s.startedAt,
+        s.generation,
+      ]),
+    )
+    .digest("hex")
+    .slice(0, 24);
+
+/**
+ * Read closed issues and their question records within the bounds. `exclude` holds URLs read as
+ * open in the snapshot, which keep the open-ticket contract. With a slot, the scan continues
+ * where the previous request stopped, then refreshes incrementally once its baseline is done.
  */
 export async function discoverClosedQuestions(
   repository: string,
   runtime: ClosedQuestionRuntime,
   exclude: ReadonlySet<string> = new Set(),
 ): Promise<ClosedQuestions> {
+  const slot = runtime.slot;
+  if (!slot) return scan(repository, runtime, exclude, undefined);
+  const run = slot.lock.then(() => scan(repository, runtime, exclude, slot));
+  slot.lock = run.catch(() => undefined);
+  return run;
+}
+
+async function scan(
+  repository: string,
+  runtime: ClosedQuestionRuntime,
+  exclude: ReadonlySet<string>,
+  slot: ClosedScanSlot | undefined,
+): Promise<ClosedQuestions> {
   const bounds: ClosedQuestionBounds = { ...closedQuestionPolicy, ...runtime.bounds };
   const now = runtime.now ?? (() => new Date());
   const signal = runtime.signal;
   const [owner, name] = repository.split("/");
-  const startedAt = now().toISOString();
+  const requestStart = now();
   const warnings: string[] = [];
+
+  // Continue the slot's scan, or start one, saying why when earlier progress is gone.
+  let origin: ClosedSourceCoverage["scan"]["origin"] = "fresh";
+  let restartReason: string | null = null;
+  let state = slot?.state ?? null;
+  if (slot && state && requestStart.getTime() - state.lastUsed > slot.retentionMs) {
+    state = null;
+    slot.lost = `the previous scan was idle longer than ${Math.round(slot.retentionMs / 1000)}s and expired`;
+  }
+  if (state) origin = "continued";
+  else {
+    if (slot?.lost) {
+      origin = "restarted";
+      restartReason = slot.lost;
+      slot.lost = null;
+    }
+    state = freshState(requestStart);
+    if (slot) slot.state = state;
+  }
+  state.lastUsed = requestStart.getTime();
+  const s = state;
+
   let used = 0;
   let permissionGaps = 0;
   const take = () => {
@@ -178,216 +337,213 @@ export async function discoverClosedQuestions(
     : undefined;
   const trust = budgetedRest && runtime.trustWith ? runtime.trustWith(budgetedRest) : runtime.trust;
 
-  // 1. Inventory: closed issues, newest update first. GraphQL `issues` excludes pull requests.
-  const issues = new Map<string, Issue>();
-  const hasNext = new Map<string, string | null>();
+  /** A listed issue replaces what the scan knew of it: its comments are reread from page one. */
+  const observe = (node: Issue) => {
+    if (node.state !== "CLOSED") return;
+    s.seen.add(node.url);
+    const before = s.entries.get(node.url);
+    const next = node.comments.pageInfo.hasNextPage
+      ? (node.comments.pageInfo.endCursor ?? "")
+      : null;
+    s.entries.set(node.url, {
+      issue: node,
+      comments: [...node.comments.nodes],
+      next,
+      // Only earlier question records are kept: an earlier resolution not yet reread may have
+      // been edited or deleted, so it never settles anything until reread (Codex, #609).
+      ...(before && next !== null
+        ? {
+            earlier: known(before).filter((c) => (c.body ?? "").includes(questionMarkerPrefix)),
+          }
+        : {}),
+    });
+  };
+
   let pages = 0;
   let rows = 0;
-  let inventoryComplete = false;
   let failure: string | null = null;
-  let cursor: string | null = null;
+  const phase: ClosedSourceCoverage["phase"] = s.watermark ? "refresh" : "baseline";
   try {
-    while (pages < bounds.inventoryPages) {
-      signal?.throwIfAborted();
-      const page = pageOf(
-        prop(await request(inventorySource(bounds.pageSize), cursor ? { cursor } : {}), "issues"),
-      );
-      pages++;
-      rows += page.nodes.length;
-      for (const node of page.nodes as Issue[]) {
-        // Pages of a mutable list can shift: deduplicate, keeping the first observation.
-        if (node.state !== "CLOSED" || exclude.has(node.url) || issues.has(node.url)) continue;
-        issues.set(node.url, node);
-        if (node.comments.pageInfo.hasNextPage)
-          hasNext.set(node.url, node.comments.pageInfo.endCursor);
+    // 1. List: the baseline inventory, or after it an overlapping `since` pass. A cursor only
+    // advances after its page was read, so a failure or the bound never skips a page.
+    if (phase === "baseline" && !s.inventoryDone)
+      while (pages < bounds.inventoryPages) {
+        signal?.throwIfAborted();
+        const page = pageOf(
+          prop(
+            await request(
+              inventorySource(bounds.pageSize),
+              s.inventoryCursor ? { cursor: s.inventoryCursor } : {},
+            ),
+            "issues",
+          ),
+        );
+        pages++;
+        rows += page.nodes.length;
+        // Pages of a mutable list can shift: the first observation of an issue in a scan stays.
+        for (const node of page.nodes as Issue[]) if (!s.seen.has(node.url)) observe(node);
+        if (!page.more || !page.cursor) {
+          s.inventoryDone = true;
+          break;
+        }
+        s.inventoryCursor = page.cursor;
       }
-      if (!page.more || !page.cursor) {
-        inventoryComplete = true;
-        break;
+    if (phase === "refresh") {
+      if (!s.refresh) {
+        const since = new Date(Date.parse(s.watermark!) - bounds.overlapSeconds * 1000);
+        s.refresh = {
+          since: since.toISOString(),
+          startedAt: requestStart.toISOString(),
+          cursor: null,
+          listed: false,
+        };
       }
-      cursor = page.cursor;
+      const r = s.refresh;
+      while (!r.listed && pages < bounds.inventoryPages) {
+        signal?.throwIfAborted();
+        const page = pageOf(
+          prop(
+            await request(sinceSource(bounds.pageSize), {
+              since: r.since,
+              ...(r.cursor ? { cursor: r.cursor } : {}),
+            }),
+            "issues",
+          ),
+        );
+        pages++;
+        rows += page.nodes.length;
+        // A changed issue is refolded from its current state.
+        for (const node of page.nodes as Issue[]) observe(node);
+        if (!page.more || !page.cursor) r.listed = true;
+        else r.cursor = page.cursor;
+      }
     }
   } catch (error) {
     signal?.throwIfAborted();
     if (!(error instanceof BudgetExhausted)) failure = `inventory: ${failureText(error)}`;
   }
-  if (!inventoryComplete)
-    warnings.push(
-      failure
-        ? `${repository}: the closed-issue inventory failed after ${pages} page(s) (${failure}); questions on unread closed tickets are unknown.`
-        : `${repository}: closed tickets beyond the ${rows} most recently updated were not read (bound: ${bounds.inventoryPages} page(s) of ${bounds.pageSize}); questions on them are unknown, not absent.`,
-    );
 
-  // 2. Hydrate truncated comment histories, one page per source in rotation.
-  const comments = new Map<string, Comment[]>(
-    [...issues].map(([url, issue]) => [url, [...issue.comments.nodes]]),
-  );
+  // 2. Hydrate truncated comment histories, one page per source in rotation. One source's
+  // failure never stops the others; a source GitHub no longer returns (deleted, transferred,
+  // inaccessible) stops being queued and is reported, so it cannot stall the scan (Codex, #609).
   let commentPages = 0;
-  const queue = [...hasNext.keys()];
-  try {
-    while (queue.length && commentPages < bounds.commentPages) {
-      signal?.throwIfAborted();
-      const url = queue.shift()!;
-      const issue = issues.get(url)!;
-      const page = pageOf(
-        prop(
-          await request(commentsSource(bounds.pageSize), {
-            number: issue.number,
-            ...(hasNext.get(url) ? { cursor: hasNext.get(url)! } : {}),
-          }),
-          "issueOrPullRequest",
-          "comments",
-        ),
-      );
-      commentPages++;
-      comments.get(url)!.push(...(page.nodes as Comment[]));
-      if (page.more && page.cursor) {
-        hasNext.set(url, page.cursor);
-        queue.push(url);
-      } else hasNext.delete(url);
-    }
-  } catch (error) {
+  const queue = [...s.entries].filter(([, e]) => e.next !== null).map(([url]) => url);
+  const failed: string[] = [];
+  while (queue.length && commentPages < bounds.commentPages) {
     signal?.throwIfAborted();
-    if (!(error instanceof BudgetExhausted))
-      failure = [failure, `comments: ${failureText(error)}`].filter(Boolean).join("; ");
+    const url = queue.shift()!;
+    const entry = s.entries.get(url)!;
+    let target: unknown;
+    try {
+      target = prop(
+        await request(commentsSource(bounds.pageSize), {
+          number: entry.issue.number,
+          ...(entry.next ? { cursor: entry.next } : {}),
+        }),
+        "issueOrPullRequest",
+      );
+    } catch (error) {
+      signal?.throwIfAborted();
+      if (error instanceof BudgetExhausted) break;
+      failed.push(`${url}: ${failureText(error)}`);
+      continue;
+    }
+    commentPages++;
+    if (target === null || target === undefined || prop(target, "comments") === undefined) {
+      entry.next = null;
+      entry.unavailable =
+        "GitHub no longer returns this issue (deleted, transferred or inaccessible)";
+      // Questions known before stay visible with an unknown outcome (Codex, #609).
+      continue;
+    }
+    let page: ReturnType<typeof pageOf>;
+    try {
+      page = pageOf(prop(target, "comments"));
+    } catch (error) {
+      failed.push(`${url}: ${failureText(error)}`);
+      continue;
+    }
+    entry.comments.push(...(page.nodes as Comment[]));
+    if (page.more && page.cursor) {
+      entry.next = page.cursor;
+      queue.push(url);
+    } else {
+      entry.next = null;
+      delete entry.earlier;
+    }
   }
-  const pending = [...hasNext.keys()];
+  if (failed.length)
+    failure = [failure, `comments: ${failed.join("; ")}`].filter(Boolean).join("; ");
+  const pending = [...s.entries].filter(([, e]) => e.next !== null).map(([url]) => url);
+  const unavailable = [...s.entries].filter(([, e]) => e.unavailable);
+  for (const [url, e] of unavailable)
+    warnings.push(
+      `${url}: ${e.unavailable}; its comment history could not be completed, so questions found on it have an unknown resolution.`,
+    );
+  // Fully hydrated issues without any marker hold nothing to fold: keep only their URL. An
+  // unavailable issue is kept, so its unread history is reported on every read until relisted.
+  for (const [url, e] of s.entries)
+    if (
+      e.next === null &&
+      !e.unavailable &&
+      !known(e).some((c) => (c.body ?? "").includes("<!-- github-triage:"))
+    )
+      s.entries.delete(url);
+
+  // 3. Advance the watermark only past fully read listings and comment histories.
+  if (!failure && !pending.length) {
+    if (phase === "baseline" && s.inventoryDone) {
+      s.watermark = s.startedAt;
+      s.generation++;
+    } else if (phase === "refresh" && s.refresh?.listed) {
+      s.watermark = s.refresh.startedAt;
+      s.refresh = null;
+      s.generation++;
+    }
+  }
+  const listingDone = phase === "baseline" ? s.inventoryDone : !s.refresh;
+  if (failure)
+    warnings.push(
+      `${repository}: the closed-ticket read failed (${failure}); questions on unread closed tickets are unknown. Progress is kept and the next read retries.`,
+    );
+  else if (phase === "baseline" && !s.inventoryDone)
+    warnings.push(
+      `${repository}: closed tickets beyond the ${s.seen.size} read so far were not read (bound: ${bounds.inventoryPages} page(s) of ${bounds.pageSize} per read); questions on them are unknown, not absent.${slot ? " The next read continues the scan." : ""}`,
+    );
+  else if (phase === "refresh" && s.refresh && !s.refresh.listed)
+    warnings.push(
+      `${repository}: closed tickets changed since ${s.refresh.since} were not all read within the bound; changes to their questions are unknown. The next read continues the refresh.`,
+    );
   for (const url of pending)
     warnings.push(
       `${url}: closed ticket's comment history was not fully read within the bound; its questions and their resolutions are unknown.`,
     );
+  if (restartReason)
+    warnings.push(`${repository}: closed-ticket scan restarted: ${restartReason}.`);
 
-  // 3. Fold each source's question records and explicit outcomes.
-  const counts = {
-    noOutcome: 0,
-    unknown: 0,
-    resolved: 0,
-    withdrawn: 0,
-    untrusted: 0,
-    unverified: 0,
-  };
+  // 4. Fold each source's question records and explicit outcomes.
+  const counts = emptyQuestionCounts();
   const sources: ClosedSource[] = [];
-  for (const [url, issue] of issues) {
+  for (const [url, entry] of s.entries) {
     signal?.throwIfAborted();
-    const all = comments.get(url)!;
-    if (!all.some((c) => (c.body ?? "").includes(questionMarkerPrefix))) continue;
-    const historyComplete = !hasNext.has(url);
-    const candidates: { comment: Comment; record: HumanRecord }[] = [];
-    for (const comment of all) {
-      const record = parseQuestionRecord(comment);
-      if (!record) continue;
-      const marker = parseQuestionMarker(comment.body ?? "");
-      if (
-        marker?.version === 2 &&
-        (marker.repository.toLowerCase() !== repository.toLowerCase() ||
-          marker.issue !== issue.number)
-      ) {
-        warnings.push(
-          `${url}: question record ${comment.url} is bound to ${marker.repository}#${marker.issue}; ignored.`,
-        );
-        continue;
-      }
-      if (marker?.version === "malformed") {
-        counts.unverified++;
-        warnings.push(
-          `${url}: question record ${comment.url} has a malformed marker (${marker.why}); ignored.`,
-        );
-        continue;
-      }
-      candidates.push({ comment, record });
-    }
-    if (!candidates.length) continue;
-    if (!trust) {
-      counts.unverified += candidates.length;
-      warnings.push(
-        `${url}: question record authors' permissions were not read; questions on this closed ticket are unverified.`,
-      );
-      continue;
-    }
-    const ordered = all.filter(
-      (c) => typeof c.databaseId === "number" && typeof c.createdAt === "string",
-    ) as ActivityComment[];
-    const questionIds = new Map(
-      candidates
-        .filter((c) => typeof c.comment.databaseId === "number")
-        .map((c) => [String(c.comment.databaseId), c.record.opId]),
+    if (exclude.has(url)) continue;
+    const comments = known(entry);
+    if (!comments.some((c) => (c.body ?? "").includes(questionMarkerPrefix))) continue;
+    const folded = await foldSourceQuestions(
+      repository,
+      entry.issue,
+      comments,
+      entry.next === null && !entry.unavailable,
+      trust,
+      counts,
+      warnings,
+      "this closed ticket",
     );
-    const folded = foldQuestionResolutions(
-      await classifyMarkers(
-        ordered,
-        { repository, issue: issue.number },
-        trust,
-        parseResolutionComment,
-      ),
-      questionIds,
-    );
-    for (const gap of folded.unknown)
-      warnings.push(`${url}: a question-resolution record could not be verified (${gap}).`);
-    // A question is its marker: retries and copies by trusted authors are one question whose
-    // canonical source is the oldest trusted comment, and an explicit outcome on any of those
-    // comments settles it (Codex, #607). Only trusted comments join a question, so an untrusted
-    // copy can neither hide nor answer the original.
-    const questions = new Map<string, { record: HumanRecord; ids: (string | null)[] }>();
-    for (const { comment, record } of candidates) {
-      const authority = await trust(comment);
-      if (authority.status === "untrusted") {
-        counts.untrusted++;
-        continue;
-      }
-      if (authority.status === "unknown") {
-        counts.unverified++;
-        warnings.push(
-          `${url}: authority of the question record ${record.url} on this closed ticket could not be verified (${authority.why}).`,
-        );
-        continue;
-      }
-      const id = typeof comment.databaseId === "number" ? String(comment.databaseId) : null;
-      const known = questions.get(record.marker);
-      if (known) known.ids.push(id);
-      else questions.set(record.marker, { record, ids: [id] });
-    }
-    const facts: QuestionRecordFact[] = [];
-    const records: HumanRecord[] = [];
-    if (
-      [...questions.values()].some((q) => q.record.version === 1) &&
-      issue.labels.pageInfo.hasNextPage
-    )
-      warnings.push(
-        `${url}: closed ticket's labels are truncated; whether its legacy question is resolved is unknown.`,
-      );
-    // Newest question first, as items list them.
-    for (const { record, ids } of [...questions.values()].reverse()) {
-      const outcome = ids.map((id) => (id ? folded.outcomes.get(id) : undefined)).find(Boolean);
-      const missingId = ids.includes(null);
-      const state: NonNullable<QuestionRecordFact["outcome"]> = outcome
-        ? outcome.op === "resolve"
-          ? "resolved"
-          : "withdrawn"
-        : missingId || !historyComplete || folded.unknown.length
-          ? "unknown"
-          : "none";
-      if (state === "resolved") counts.resolved++;
-      else if (state === "withdrawn") counts.withdrawn++;
-      else if (state === "unknown") counts.unknown++;
-      else counts.noOutcome++;
-      if (state === "unknown" && missingId)
-        warnings.push(
-          `${url}: question record ${record.url} has no comment id; its resolution is unknown.`,
-        );
-      facts.push({ trust: "trusted", to: record.to, version: record.version, outcome: state });
-      // The policy decides per source; the item lists only records it could be asking about, so a
-      // legacy v1 question resolved by label removal is never shown beside a v2 one (Codex, #607).
-      const legacyResolved =
-        record.version === 1 &&
-        !issue.labels.pageInfo.hasNextPage &&
-        !issue.labels.nodes.some((l) => legacyQuestionLabels.includes(l.name));
-      if ((state === "none" || state === "unknown") && !legacyResolved) records.push(record);
-    }
-    if (facts.length)
+    if (folded.questions.length)
       sources.push({
-        issue: { ...issue, comments: { ...issue.comments, nodes: all } },
-        facts,
-        records,
+        issue: { ...entry.issue, comments: { ...entry.issue.comments, nodes: comments } },
+        facts: folded.questions.map((q) => q.fact),
+        records: folded.open,
       });
   }
   if (permissionGaps)
@@ -396,16 +552,26 @@ export async function discoverClosedQuestions(
     );
   const coverage: ClosedSourceCoverage = {
     read: true,
-    complete: inventoryComplete && !pending.length && !failure && !warnings.length,
+    complete: listingDone && !pending.length && !failure && !warnings.length,
     bounds,
     requests: used,
-    inventory: { pages, rows, complete: inventoryComplete },
-    discovered: issues.size,
-    hydrated: issues.size - pending.length,
+    inventory: { pages, rows, complete: s.inventoryDone },
+    phase,
+    scan: {
+      continuation: continuationId(slot, repository, s),
+      origin,
+      restartReason,
+      startedAt: s.startedAt,
+      generation: s.generation,
+      watermark: s.watermark,
+      refreshSince: s.refresh?.since ?? null,
+    },
+    discovered: s.seen.size,
+    hydrated: s.seen.size - pending.length,
     pending,
     permissionGaps,
     records: counts,
-    startedAt,
+    startedAt: requestStart.toISOString(),
     fetchedAt: now().toISOString(),
     failure,
   };
