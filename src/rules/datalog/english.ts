@@ -50,7 +50,7 @@ const bindings = new Set(["+", "-", "*", "/", "str"]);
 export const viewerFacts = ["agent", "role", "platform", "order"] as const;
 
 interface Context {
-  bundle: PolicyBundle;
+  bundle: Pick<PolicyBundle, "lexicon" | "schema" | "constants" | "denials">;
   problems: string[];
   /** Literal attributes seen, for the lexicon completeness check. */
   attributes: Set<string>;
@@ -186,6 +186,23 @@ function clause(f: Form, where: string, ctx: Context): Clause {
   }
   ctx.problems.push(`${where}: unsupported clause ${JSON.stringify(f)}`);
   return { type: "compare", op: "?", args: [] };
+}
+
+/** Shared structural front end for separately scoped native project clauses (#514). */
+export function compileEnglishClauses(
+  forms: readonly unknown[],
+  source: string,
+  vocabulary: Pick<PolicyBundle, "lexicon" | "schema" | "constants">,
+): Clause[] {
+  const ctx: Context = {
+    bundle: { ...vocabulary, denials: {} },
+    problems: [],
+    attributes: new Set(),
+    viewer: new Set(),
+  };
+  const compiled = forms.map((form, i) => clause(form, `${source}[${i}]`, ctx));
+  if (ctx.problems.length) throw new EnglishCompileError(ctx.problems);
+  return compiled;
 }
 
 /** Predicates called anywhere in the clauses, in first-call order. */
