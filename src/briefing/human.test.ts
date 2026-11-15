@@ -571,6 +571,38 @@ describe("human briefing role (#457)", () => {
       );
     });
 
+    it("treats an arbitrary reply as no answer, and an edited or unknown-author outcome as unverified", async () => {
+      const asked = record("owner", ["Answered by chat?"], { v2: 36 });
+      const reply: Comment = {
+        ...by("owner"),
+        databaseId: 99036,
+        url: `https://github.com/${repo}/issues/36#issuecomment-99036`,
+        createdAt: "2026-11-12T12:00:00Z",
+        body: "Yes, go with the first option.",
+      };
+      const chat = await human([], [], { closed: [closedIssue(36, [], [asked, reply])] });
+      expect(chat.view.items[0]).toMatchObject({ resolution: "unresolved" });
+
+      const q = record("owner", ["Edited answer?"], { v2: 37 });
+      const edited: Comment = {
+        ...outcome(37, q, "resolve"),
+        lastEditedAt: "2026-11-12T13:00:00Z",
+        editor: { __typename: "User", login: "outsider" },
+      };
+      const ghostQ = record("owner", ["Ghost answer?"], { v2: 38 });
+      const ghost = outcome(38, ghostQ, "resolve", { author: "ghost" });
+      const { view } = await human([], [], {
+        closed: [closedIssue(37, [], [q, edited]), closedIssue(38, [], [ghostQ, ghost])],
+        trust: trustAll({ outsider: "read", ghost: "unknown" }),
+      });
+      // Neither outcome is trusted: both questions stay visible, and coverage says why.
+      expect(rows(view).sort()).toEqual([
+        "orphaned-question#37:to-you",
+        "orphaned-question#38:explicit",
+      ]);
+      expect(view.coverage.complete).toBe(false);
+    });
+
     it("keeps legacy v1 label resolution: labelled stays, labels removed is answered", async () => {
       const labelled = closedIssue(25, ["question"], [record("designer-a", ["Legacy?"])]);
       const cleared = closedIssue(26, [], [record("designer-a", ["Cleared?"])]);
