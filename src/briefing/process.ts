@@ -75,6 +75,11 @@ export const commandRegistry: readonly CommandSpec[] = [
     template: "pdb estimate N --size S --rationale TEXT",
     mutatesGitHub: true,
   },
+  {
+    name: "issue create",
+    template: "pdb issue create --title TEXT",
+    mutatesGitHub: true,
+  },
   { name: "who", template: "pdb who N", mutatesGitHub: false },
   { name: "process", template: PROCESS_COMMAND, mutatesGitHub: false },
   // Changes only the local repository settings file, never GitHub.
