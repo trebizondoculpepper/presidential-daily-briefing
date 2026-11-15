@@ -148,7 +148,7 @@ export function snapshotFollowUpFacts(pr: PullRequest, warnings: string[]): Foll
   return {
     draft: !!pr.isDraft,
     complete:
-      !warnings.some((w) => w.startsWith(pr.url)) &&
+      !warnings.some((w) => w.startsWith(`${pr.url}:`)) && // not /pull/12 for /pull/1 (#448)
       !!pr.reviewThreads &&
       !pr.reviewThreads.pageInfo?.hasNextPage,
     failing: checks.some((c) => workflow.failure.includes(c.outcome)),

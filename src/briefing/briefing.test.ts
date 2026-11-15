@@ -14,6 +14,7 @@ import {
 import type { Issue, PullRequest, Snapshot } from "../github/types.js";
 import { issue, page, pr, repo, snapshot, time } from "../testing/snapshots.js";
 import { brief } from "../testing/briefing.js";
+import { snapshotFollowUpFacts } from "../workflow/deliveryread.js";
 
 describe("registered action analysis", () => {
   it("shows ownership conflicts, stale ready labels and absent readiness", () => {
@@ -72,6 +73,24 @@ describe("registered action analysis", () => {
     );
     expect(data.pullRequests[0]?.headRefOid).toBe("abc123");
     expect(data.actions.items[0]?.next).toContain("not approval");
+  });
+  it("marks a PR incomplete only for warnings about that PR, not a longer number (#448)", () => {
+    const pull = pr();
+    const withWarning = (warning: string) => ({
+      ...snapshot([], [pull]),
+      warnings: [warning],
+    });
+    const inspects = (s: Snapshot) =>
+      brief(s).actions.items.some((item) => item.rule === "pr-inspect-merge");
+    expect(
+      inspects(withWarning(`${pull.url}2: reviews exceed 100; review/merge evidence incomplete.`)),
+    ).toBe(true);
+    expect(
+      inspects(withWarning(`${pull.url}: reviews exceed 100; review/merge evidence incomplete.`)),
+    ).toBe(false);
+    const facts = (warning: string) => snapshotFollowUpFacts(pull, [warning]).complete;
+    expect(facts(`${pull.url}2: reviews exceed 100.`)).toBe(true);
+    expect(facts(`${pull.url}: reviews exceed 100.`)).toBe(false);
   });
   it("keeps stable ordering and reports omitted actions instead of silently hiding them", () => {
     const source = snapshot([issue(3), issue(2), issue(1)], []);

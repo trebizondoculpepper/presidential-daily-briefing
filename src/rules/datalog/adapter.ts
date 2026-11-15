@@ -174,7 +174,8 @@ function normalize(
         "merge-state": pr.mergeStateStatus,
         "review-decision": pr.reviewDecision ?? "",
         "pr-complete":
-          !snapshot.warnings.some((w) => w.startsWith(pr.url)) &&
+          // Warnings are `${url}: …`; the separator stops /pull/1 matching /pull/12 (#448).
+          !snapshot.warnings.some((w) => w.startsWith(`${pr.url}:`)) &&
           !!rollup &&
           !rollup.contexts.pageInfo.hasNextPage &&
           !pr.reviewThreads.pageInfo.hasNextPage &&
