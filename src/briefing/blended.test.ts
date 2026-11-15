@@ -208,6 +208,20 @@ describe("blended comparator bands (#248)", () => {
     expect(compare(facts[0]!, facts[0]!)).toBe(0);
   });
 
+  it("an unparseable createdAt sorts last and never reorders valid candidates (#450)", () => {
+    const same = { createdAt: "2026-02-01T00:00:00Z" };
+    const make = () => [
+      fact(1, "implement", ["current", "M"], ["current", "M"], { createdAt: "not a date" }),
+      fact(2, "implement", ["current", "M"], ["current", "M"], same),
+      fact(3, "implement", ["current", "M"], ["current", "M"], same),
+    ];
+    for (const mode of ["impact", "oldest", "newest"] as const) {
+      const facts = make();
+      for (const input of [facts, [facts[1]!, facts[0]!, facts[2]!], [...facts].reverse()])
+        expect(order(input, mode)).toEqual(["implement#2", "implement#3", "implement#1"]);
+    }
+  });
+
   it("coalesces unclaimed pickup into band 6 by age under explicit oldest/newest", () => {
     const facts = [
       fact(1, "implement", ["current", "XL"], ["current", "XS"], {

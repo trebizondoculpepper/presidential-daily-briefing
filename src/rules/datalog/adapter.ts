@@ -115,6 +115,12 @@ function normalize(
       .every((p) => !p.closingIssuesReferences.pageInfo.hasNextPage),
   );
   for (const [id, s] of objects) {
+    // A NaN sort key breaks the comparator's total order (#450): refuse, naming the subject.
+    if (!Number.isFinite(Date.parse(s.createdAt)))
+      throw new DatalogError(
+        "invalid-facts",
+        `${s.url} has createdAt ${JSON.stringify(s.createdAt)}, which is not a timestamp`,
+      );
     const a = assessments.get(s.url);
     const pr = snapshot.pullRequests.find((p) => p.url === s.url) ?? null;
     for (const [k, v] of Object.entries({
