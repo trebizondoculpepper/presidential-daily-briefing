@@ -24,7 +24,7 @@ import type { MetricView } from "../briefing/assessments.js";
 import { complexityMetric, impactMetric } from "../estimation/metrics.js";
 import { closureOf } from "./deliverydoctor.js";
 import type { Closure } from "./deliverydoctor.js";
-import { classifyFollowUp, reportFollowUpFacts } from "./deliveryread.js";
+import { classifyFollowUp, memberFollowUp, reportFollowUpFacts } from "./deliveryread.js";
 import type { DeliverableView, DeliveryView, FollowUp } from "./deliveryread.js";
 import { excerpt, pullRequestStatus } from "./prstatus.js";
 import type { PrStatusReport } from "./prstatus.js";
@@ -274,15 +274,23 @@ function prRow(
   };
 }
 
-function withStatus(row: TicketPullRequest, r: PrStatusReport): TicketPullRequest {
+function withStatus(
+  row: TicketPullRequest,
+  r: PrStatusReport,
+  member: DeliverableView | null,
+  closure: Closure,
+): TicketPullRequest {
   const p = r.pullRequest;
   const intended = targetBranch(row.intendedTarget);
   const open = p.state === "OPEN";
-  // Fresh current-head evidence decides an open PR's follow-up; a settled member keeps the
-  // evaluator's (merged, closed-unmerged, off-target).
-  const [followUp, followUpWhy] = open
-    ? classifyFollowUp(reportFollowUpFacts(r))
-    : [row.followUp, row.followUpWhy];
+  const facts = reportFollowUpFacts(r);
+  // Shared classifiers only: a required member exactly as `pr N` decides it (closure cleanup and
+  // settled members keep the delivery view's); an associated PR from its fresh evidence.
+  const [followUp, followUpWhy]: [FollowUp | null, string | null] = member
+    ? memberFollowUp(member, closure, open, facts)
+    : open
+      ? classifyFollowUp(facts)
+      : [null, null];
   return {
     ...row,
     detail: "read",
@@ -338,6 +346,8 @@ export async function readTicketStatus(
       staleHours: options.staleHours,
       now: options.now,
       nativeEdges: true,
+      // --limit-prs bounds the first hydration pass too: nothing beyond it is read in detail.
+      hydrationLimit: limitPrs,
       ...(signal ? { signal } : {}),
       ...(options.locate ? { locate: options.locate } : {}),
     },
@@ -454,7 +464,13 @@ export async function readTicketStatus(
   results.forEach((outcome, index) => {
     const id = detailed[index];
     const prSubject = `${id.repository}#${id.number}`;
-    if (outcome.state === "done") rows[index] = withStatus(rows[index], outcome.value);
+    if (outcome.state === "done")
+      rows[index] = withStatus(
+        rows[index],
+        outcome.value,
+        detailed[index].member,
+        closureOf(issue.state, issue.stateReason),
+      );
     else if (outcome.state === "failed") {
       const failure = quotaRefusal(outcome.error)
         ? "rate-limited"

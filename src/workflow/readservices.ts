@@ -204,6 +204,8 @@ export async function readWhoWith(
     signal?: AbortSignal;
     locate?: FocusOptions["locate"];
     nativeEdges?: boolean;
+    /** Total PRs this read may hydrate, linked first, then members (`ticket --limit-prs`). */
+    hydrationLimit?: number;
   },
   boundaries: DeliveryBoundaries,
   query: Query,
@@ -218,6 +220,7 @@ export async function readWhoWith(
       signal,
       ...(locate ? { locate } : {}),
       ...(options.nativeEdges ? { nativeEdges: true } : {}),
+      ...(options.hydrationLimit !== undefined ? { hydrationLimit: options.hydrationLimit } : {}),
     },
     query,
     meter.now,
@@ -236,6 +239,10 @@ export async function readWhoWith(
     // concurrency and quota stop). A member not read stays unknown in its follow-up.
     const scoped = { ...snapshot, issues: snapshot.issues.filter((i) => i.number === number) };
     diagnosis = await diagnoseDelivery(scoped, metered);
+    // Linked PRs already read count against the hydration limit; members get the rest.
+    const attempted = meter.coverage.filter(
+      (c) => c.source === "pull-request" && c.state !== "not-requested",
+    ).length;
     snapshot.pullRequests.push(
       ...(await hydrateMembers(
         repository,
@@ -245,6 +252,9 @@ export async function readWhoWith(
         meter,
         options.signal,
         query,
+        options.hydrationLimit === undefined
+          ? undefined
+          : Math.max(0, options.hydrationLimit - attempted),
       )),
     );
   }
@@ -311,6 +321,8 @@ async function hydrateMembers(
   meter: ReadMeter,
   signal: AbortSignal | undefined,
   query: Query,
+  /** At most this many members are read; the rest are not-requested and warned about. */
+  limit?: number,
 ) {
   const d = diagnosis.issues.get(number);
   const evaluated = d?.evaluation?.perDeliverable ?? [];
@@ -330,6 +342,16 @@ async function hydrateMembers(
     if (!held.has(n))
       targets.set(n, { number: n, url: `https://github.com/${match[1]}/pull/${n}` });
   });
+  if (limit !== undefined)
+    for (const t of [...targets.values()].slice(limit)) {
+      targets.delete(t.number);
+      meter.cover("pull-request", `${repository}#${t.number}`, "not-requested", {
+        omission: `beyond the hydration limit`,
+      });
+      snapshot.warnings.push(
+        `${t.url}: delivery member pull request not read (beyond the limit); its evidence is unknown.`,
+      );
+    }
   if (!targets.size) return [];
   // A refusal during the delivery diagnosis stops here: no member is read after it.
   if (meter.refused) {
