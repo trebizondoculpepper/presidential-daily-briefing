@@ -767,14 +767,14 @@ async function ghCommentPost(args: string[]): Promise<{ url: string | null }> {
  * Read back the newest comments on the target for this exact frozen body written by the
  * authenticated viewer. Another author's copy, a substring or another ticket never counts.
  */
-async function ghCommentReceipt(target: {
-  repository: string;
-  number: number;
-  body: string;
-}): Promise<CommentReceipt> {
+export async function ghCommentReceipt(
+  target: { repository: string; number: number; body: string },
+  since: Date,
+  query: Query = ghQuery,
+): Promise<CommentReceipt> {
   const [owner, name] = target.repository.split("/");
-  const data = await ghQuery(
-    `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){comments(last:100){pageInfo{hasPreviousPage} nodes{url body viewerDidAuthor}}}}}`,
+  const data = await query(
+    `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){comments(last:100){pageInfo{hasPreviousPage} nodes{url body viewerDidAuthor createdAt}}}}}`,
     { owner: owner ?? "", name: name ?? "", number: target.number },
   );
   const comments = prop(data, "repository", "issue", "comments");
@@ -783,6 +783,9 @@ async function ghCommentReceipt(target: {
   const matches = nodes.filter(
     (n) =>
       prop(n, "viewerDidAuthor") === true &&
+      // Bound to this attempt: created no earlier than its first dispatch (allowing 5s of
+      // clock skew), so an identical earlier comment never counts as this write's receipt.
+      Date.parse(String(prop(n, "createdAt"))) >= since.getTime() - RECEIPT_SKEW_MS &&
       typeof prop(n, "body") === "string" &&
       sameCommentBody(prop(n, "body") as string, target.body),
   );
@@ -794,6 +797,8 @@ async function ghCommentReceipt(target: {
   // A just-sent comment is among the newest 100; older history is irrelevant to this receipt.
   return { status: "absent" };
 }
+
+const RECEIPT_SKEW_MS = 5_000;
 
 /** Production comment boundary: bounded recovery over the REST POST and its read-back. */
 export const ghCommentRun = withCommentRecovery({
