@@ -228,8 +228,12 @@ describe("serve diagnostics (#459)", () => {
       });
       expect(post.status).toBe(405);
       // A secret-looking parameter value is never reflected.
-      expect((await s.get("api/v1/diagnostics/projects?token_ghp_abc=1")).text).not.toContain(
-        "ghp_abc=",
+      const reflected = await s.get("api/v1/diagnostics/projects?ghp_abc=1&%2FUsers%2Fme=2");
+      expect(reflected.status).toBe(400);
+      expect(reflected.text).not.toContain("ghp_abc");
+      expect(reflected.text).not.toContain("/Users/me");
+      expect(JSON.parse(reflected.text).error.message).toBe(
+        "Unknown parameter; allowed: limit, cursor.",
       );
       expect(s.collects).toEqual([]);
     } finally {

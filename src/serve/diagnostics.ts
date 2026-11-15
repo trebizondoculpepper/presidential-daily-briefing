@@ -100,9 +100,8 @@ export function diagnosticsApi(
     const values = new Map<string, string>();
     for (const [name, value] of context.url.searchParams) {
       if (!accepted[view].includes(name))
-        throw invalid(
-          `Unknown parameter ${JSON.stringify(name).slice(0, 40)}; allowed: ${accepted[view].join(", ") || "none"}.`,
-        );
+        // Never reflect a supplied name: it may hold a credential or a local path.
+        throw invalid(`Unknown parameter; allowed: ${accepted[view].join(", ") || "none"}.`);
       if (values.has(name)) throw invalid(`${name} may be given once.`);
       values.set(name, value);
     }
