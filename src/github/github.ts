@@ -896,6 +896,11 @@ export interface FocusOptions {
   meter: ReadMeter;
   locate?: (repository: string, number: number) => Promise<IssueDiagnosis>;
   signal?: AbortSignal;
+  /**
+   * Also read the issue's direct native edges (`pdb ticket N`, #197): selected with the issue,
+   * continuations completed under the same meter. Otherwise they are `not-requested`.
+   */
+  nativeEdges?: boolean;
 }
 /**
  * One issue and the open pull requests in the same repository that would close it
@@ -952,7 +957,7 @@ export async function collectIssueFocus(
       prop(
         await read(
           issueQuery,
-          `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){${common} stateReason ${closedBy}}}}`,
+          `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){${common} stateReason ${closedBy}${options.nativeEdges ? ` ${nativeFields}` : ""}}}}`,
           { number },
         ),
         "issue",
@@ -975,8 +980,25 @@ export async function collectIssueFocus(
     warnings.push(`${issue.url}: labels exceed 100; label analysis incomplete.`);
     meter.cover("labels", subject, "partial", { omission: "labels beyond the first 100" });
   } else meter.cover("labels", subject, "complete");
-  for (const source of ["native-blocked-by", "native-blocking"])
-    meter.cover(source, subject, "not-requested", { omission: "not needed for ownership" });
+  if (options.nativeEdges) {
+    const sources = ["native-blocked-by", "native-blocking"];
+    try {
+      // Throws unless both edge lists match their totals, so success is complete.
+      await completeNative(issue, repository, meter.query(base, "native-blocked-by", subject));
+      for (const source of sources) meter.cover(source, subject, "complete");
+    } catch (error) {
+      signal?.throwIfAborted();
+      // Unknown edges are never "no blockers": the facts drop them, and coverage says why.
+      delete issue.issueDependenciesSummary;
+      delete issue.blockedBy;
+      delete issue.blocking;
+      const failure = quotaRefusal(error) ? "rate-limited" : "read-failed";
+      warnings.push(`${issue.url}: native dependencies could not be read (${failure}); unknown.`);
+      for (const source of sources) meter.cover(source, subject, "failed", { failure });
+    }
+  } else
+    for (const source of ["native-blocked-by", "native-blocking"])
+      meter.cover(source, subject, "not-requested", { omission: "not needed for ownership" });
 
   // Linked open PRs, from the issue side of the closing link; bounded pages.
   // An absent connection is not "no PR": it stays an unread continuation (partial).
