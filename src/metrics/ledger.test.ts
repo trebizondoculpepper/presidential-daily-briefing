@@ -32,11 +32,12 @@ const comment = (body: string, at: string, login = "writer", id = nextId++): Com
   includesCreatedEdit: false,
   editor: null,
 });
-const claim = (agent: string, at: string, login = "writer") =>
+const claim = (agent: string, at: string, login = "writer", id?: number) =>
   comment(
     `Claimed by \`${agent}\` with \`pdb claim\`.\n\n${claimMarkerFor(repo, n, agent)}`,
     at,
     login,
+    id,
   );
 const release = (agent: string, at: string, login = "writer") =>
   comment(
@@ -341,6 +342,16 @@ describe("ticket ledger", () => {
     const unread = { ...claim("alice", t(1)), lastEditedAt: undefined };
     const unknown = await ticketLedger(withComments([unread]), trust, now);
     expect(unknown.firstPickup["claim-marker"]).toMatchObject({ status: "unknown" });
+  });
+
+  it("breaks same-instant ties by numeric comment id, not text", async () => {
+    const later = claim("bob", t(1), "writer", 100);
+    const earlier = claim("alice", t(1), "writer", 99);
+    const l = await ticketLedger(withComments([later, earlier]), trust, now);
+    expect(l.firstPickup["claim-marker"]).toMatchObject({ status: "found", agent: "alice" });
+    expect(
+      l.events.filter((e) => e.kind === "picked-up").map((e) => e.kind === "picked-up" && e.agent),
+    ).toEqual(["alice", "bob"]);
   });
 
   it("counts a comment seen twice once", async () => {
