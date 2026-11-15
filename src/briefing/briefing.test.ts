@@ -209,7 +209,7 @@ describe("designer groups: decision needed vs agreed-needs-documentation (#40)",
     const compact = compactBriefing(data, { limit: 10 }, expanded);
     expect(compact.sections["decision-needed"].items).toEqual([decide.url, both.url]);
     expect(compact.sections["documentation-needed"].items).toEqual([record.url, both.url]);
-    const text = compactText(compact, 50000);
+    const text = compactText(compact, 50000, { context: true });
     expect(text).toContain("DECISION NEEDED (2)");
     expect(text).toContain("AGREED, NEEDS DOCUMENTATION (2)");
     expect(text).toContain(`which flag name?" Source: ${decide.url}#c1 Next:`);

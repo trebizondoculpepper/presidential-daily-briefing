@@ -266,7 +266,7 @@ describe("estimation queue and briefing visibility from size labels (#122, #152)
     expect(full.indexOf("ESTIMATION (requested)")).toBeGreaterThan(0);
     expect(full.indexOf("ESTIMATION (requested)")).toBeLessThan(full.indexOf("NEXT ACTIONS"));
     let plain = "";
-    await main([], async (t) => void (plain = t), runtime);
+    await main(["--context"], async (t) => void (plain = t), runtime);
     expect(plain.indexOf("ESTIMATION (optional")).toBeGreaterThan(plain.indexOf("NEXT STEPS"));
     // #247: the side-by-side line replaces the old size parenthetical in text.
     expect(plain).toContain(

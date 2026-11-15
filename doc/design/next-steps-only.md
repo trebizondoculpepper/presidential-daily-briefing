@@ -1,7 +1,7 @@
 # Next steps are the default role view
 
 Owner decision, 2026-11-14; issue #353. This contract changes presentation,
-not ranking or permission to act. Implementation ships separately after review.
+not ranking or permission to act. Implemented in #355: CLI `--context`, MCP `context`.
 
 ## Purpose
 

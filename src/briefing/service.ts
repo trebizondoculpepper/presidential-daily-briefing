@@ -43,6 +43,11 @@ export interface PresentOptions extends Omit<BriefingOptions, "estimation" | "as
   engineSetting?: EngineSetting;
   /** Compact text budget. */
   maxChars: number;
+  /**
+   * Expanded compact text: background sections, totals and evaluator metadata (#355). Off by
+   * default, when the text holds only the next steps; never changes the JSON or the actions.
+   */
+  context?: boolean;
   /** Registered role view (#1) shaping the compact briefing. */
   role?: string;
   /** Workflow guide (#71) for the compact briefing; omitted means no `process` object. */
@@ -215,9 +220,11 @@ export async function presentBriefing(
     decisionEngine,
     ...(delivery.tickets.length || !delivery.complete ? { delivery } : {}),
   };
-  const engineHeader = experimental
-    ? `Decision engine: Datalog (policy ${experimental.decisionEngine.policyVersion}; ${experimental.decisionEngine.rulesHash.slice(0, 12)})\n`
-    : "";
+  // The engine banner is evaluator metadata: context only, or the expanded --full report (#355).
+  const engineHeader =
+    experimental && (options.context || !compact)
+      ? `Decision engine: Datalog (policy ${experimental.decisionEngine.policyVersion}; ${experimental.decisionEngine.rulesHash.slice(0, 12)})\n`
+      : "";
   // Delivery omissions reach the text through the renderers' own bounded INCOMPLETE warnings
   // (a few lines plus "N more warning(s) omitted; use --json"), inside the same budget as the
   // ranked steps. The JSON keeps every warning.
@@ -229,6 +236,7 @@ export async function presentBriefing(
         ? compactText(
             { ...compact, completeness: report.completeness },
             Math.max(0, options.maxChars - engineHeader.length),
+            { context: options.context },
           )
         : textReport({ ...expanded, completeness: report.completeness })),
     complete: report.completeness.complete,
@@ -351,6 +359,8 @@ export interface BriefingRequest {
   role?: string;
   /** Pickup order (#260), as CLI --order. */
   order?: PickupOrder;
+  /** Expanded compact text (#355), as CLI --context; never changes the report. */
+  context?: boolean;
   /** Cancellation: stops collection and terminates running gh child processes. */
   signal?: AbortSignal;
 }
@@ -398,6 +408,7 @@ export async function readBriefing(
     {
       limit: request.limit,
       maxChars: request.maxChars,
+      context: request.context,
       agent: request.agent,
       issue: request.issue,
       ...(request.role ? { role: request.role } : {}),

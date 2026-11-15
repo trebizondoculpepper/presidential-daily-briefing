@@ -578,13 +578,22 @@ function impactEstimationReport(
 export function compactText(
   report: CompactBriefing & { process?: BriefingProcess },
   maxChars = 10000,
+  { context = false }: { context?: boolean } = {},
 ): string {
   const subjects = new Map(report.subjects.map((s) => [s.url, s]));
-  const lines = [
-    `Presidential Daily Briefing: ${report.repository}`,
-    `Fetched ${report.freshness.fetchedAt} — ${report.freshness.offline ? "OFFLINE CACHE; live verification unavailable" : "LIVE fetch window"}`,
-    `${report.summary.issues} issues; ${report.summary.pullRequests} PRs; ${report.summary.findings} findings on ${report.summary.distinctSubjects} subjects.`,
-  ];
+  // Next steps only by default (doc/design/next-steps-only.md, #355): the ranked list, a short
+  // repository/role identifier and material warnings. Background sections, totals, assessment
+  // counts and unrequested estimation need `context`. A focused --issue intake keeps its detail.
+  const brief = !context && !report.detail;
+  const lines = brief
+    ? [
+        `${report.repository} — ${report.role ? `${report.role.name} ` : ""}next steps (fetched ${report.freshness.fetchedAt}${report.freshness.offline ? "; OFFLINE CACHE, live verification unavailable" : ""})`,
+      ]
+    : [
+        `Presidential Daily Briefing: ${report.repository}`,
+        `Fetched ${report.freshness.fetchedAt} — ${report.freshness.offline ? "OFFLINE CACHE; live verification unavailable" : "LIVE fetch window"}`,
+        `${report.summary.issues} issues; ${report.summary.pullRequests} PRs; ${report.summary.findings} findings on ${report.summary.distinctSubjects} subjects.`,
+      ];
   if (report.guidance.includes(unfocusedIdentityNotice)) lines.push(unfocusedIdentityNotice);
   const rows: string[] = [];
   const shown = new Set<string>();
@@ -613,6 +622,20 @@ export function compactText(
   const estimation = report.estimation;
   const estimationRows = (): void => {
     if (estimation.status === "disabled") return;
+    if (brief && !estimation.requested) {
+      // Sizing problems that need inspection are material warnings, not background (#355).
+      if (
+        estimation.status !== "available" ||
+        estimation.findings.length ||
+        estimation.conflicts.total ||
+        estimation.unknown
+      )
+        rows.push(
+          `\nESTIMATION WARNING: ${estimation.detail}`,
+          ...estimation.findings.map((f) => `- ${f.rule}: ${f.detail} Next: ${f.next.join(" | ")}`),
+        );
+      return;
+    }
     if (
       !estimation.requested &&
       !estimation.queue?.total &&
@@ -649,6 +672,7 @@ export function compactText(
         `- #${s.number} ${s.title} — ${item.kind} (${item.reasonCodes.join(", ")})${s.assessments ? `\n  ${assessmentsText(s.assessments)}` : ""}${why ? `\n  Why: ${why}` : ""}${item.nextCommand ? `\n  Next: ${item.nextCommand}${item.thenCommand ? `\n  Then: ${item.thenCommand}` : ""}` : `\n  Inspect: ${item.inspection ?? s.detailCommand}`}\n  ${item.target}`,
       );
     }
+    if (brief) return;
     // Hidden, never deleted, when impact.enabled is false.
     if (
       impact &&
@@ -676,10 +700,16 @@ export function compactText(
   const impact = "impactEstimation" in report ? report.impactEstimation : undefined;
   if (ranked) rankedRows(ranked, impact);
   else add("NEXT STEPS", report.actions, roleReasons);
+  if (brief && !(ranked ? ranked.total : report.actions.total))
+    rows.push(
+      report.completeness.complete
+        ? "\nNo next steps found."
+        : "\nNo next steps found, but evidence is incomplete: this does not mean no work exists.",
+    );
   // With a ranked queue, estimates appear in NEXT STEPS itself; no "offered below" pointer.
-  if (!ranked && estimation.offered && !estimation.requested)
+  if (!brief && !ranked && estimation.offered && !estimation.requested)
     rows.push("- No higher-priority work: estimation is offered below (optional).");
-  if (report.role) {
+  if (report.role && !brief) {
     lines.push(`Role ${report.role.name}: ${report.role.question}`);
     for (const section of report.role.sections) {
       const reasons = new Map(section.items.map((row) => [row.url, row.reason]));
@@ -694,7 +724,7 @@ export function compactText(
     "decision-needed": "DECISION NEEDED",
     "documentation-needed": "AGREED, NEEDS DOCUMENTATION",
   };
-  if (!report.role)
+  if (!report.role && !brief)
     for (const [name, section] of Object.entries(report.sections))
       add(titles[name] ?? name.toUpperCase(), section);
   if (!estimation.requested) estimationRows();
@@ -707,8 +737,9 @@ export function compactText(
     lines.push(
       `INCOMPLETE: ${warnings.length - shownWarnings} more warning(s) omitted; use --json for all.`,
     );
-  const notice =
-    "\nMore context omitted by text budget; use --json, --full, --issue N or --max-chars.\n";
+  const notice = brief
+    ? "\nMore next steps omitted by text budget; use --max-chars, --json or --context.\n"
+    : "\nMore context omitted by text budget; use --json, --full, --issue N or --max-chars.\n";
   // The workflow-guide footer (config diagnostics plus the pointer or omission notice) is
   // required output, so its space is reserved before evidence rows are allocated (#71).
   const guide = report.process;

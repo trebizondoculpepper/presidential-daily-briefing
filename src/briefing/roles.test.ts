@@ -412,7 +412,7 @@ describe("role-shaped briefings (#1, doc/design/briefings.md)", () => {
   it("renders the role in text and rejects unknown roles", async () => {
     const { compactText } = await import("./compact.js");
     const r = await compact(snapshot([issue(60)], []), { limit: 5, role: "implementer" });
-    const text = compactText(r);
+    const text = compactText(r, 10000, { context: true });
     expect(text).toMatch(/Role implementer: What action advances implementation most\?/);
     expect(text).toMatch(/\nPICKUP \(1\)/);
     expect(text).not.toMatch(/\nAVAILABLE/);

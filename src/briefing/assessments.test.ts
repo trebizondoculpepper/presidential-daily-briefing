@@ -440,7 +440,7 @@ describe("side-by-side assessments (#247)", () => {
       markerTrust(permissionLookup(repo, permissions())),
     );
     const lines = presented.text.split("\n");
-    expect(presented.text).toContain("More context omitted by text budget");
+    expect(presented.text).toContain("More next steps omitted by text budget");
     lines.forEach((line, i) => {
       if (/^- #\d+ Ticket \d+/.test(line)) expect(lines[i + 1]).toMatch(/^ {2}impact /);
     });

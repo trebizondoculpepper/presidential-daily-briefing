@@ -419,6 +419,7 @@ async function present(
     config?: string;
     estimate?: boolean;
     issues?: () => Issue[];
+    context?: boolean;
   } = {},
 ) {
   const snapshot = await collect(repo, {}, queryFor(extra.issues ?? fixture), () => new Date(time));
@@ -430,6 +431,7 @@ async function present(
     ...(role ? { role } : {}),
     ...(extra.order ? { order: extra.order } : {}),
     ...(extra.estimate ? { estimate: true } : {}),
+    ...(extra.context ? { context: true } : {}),
   };
   const presented = await presentBriefing(
     snapshot,
@@ -595,7 +597,7 @@ describe("implementer estimation counts and NEXT STEPS (#259)", () => {
   });
 
   it("renders the ranked queue as NEXT STEPS with kinds, reasons and commands", async () => {
-    const { text, report } = await present("implementer", { limit: 3 });
+    const { text, report } = await present("implementer", { limit: 3, context: true });
     const steps = text.slice(text.indexOf("NEXT STEPS"));
     expect(steps).toMatch(/^NEXT STEPS \(10; 7 omitted\)/);
     expect(steps).toContain("— implement (easy-win, impact-current, complexity-current)");
