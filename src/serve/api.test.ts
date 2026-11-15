@@ -9,7 +9,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { main } from "../cli.js";
 import { TOML_CONFIG_PATH } from "../config/config.js";
 import type { ConfigFileSystem, GitRunner } from "../config/config.js";
-import { collect, ghQueryFailure, IssueUnavailable } from "../github/github.js";
+import { collect, collectIssueFocus, ghQueryFailure, IssueUnavailable } from "../github/github.js";
 import { dependencyReport } from "../github/dependencies.js";
 import type { Query } from "../github/github.js";
 import { RateLimitError } from "../github/dependencies.js";
@@ -106,6 +106,7 @@ async function setup(
   args: string[] = ["--repo", repo],
   overrides: {
     collect?: ServeReadRuntime["collect"];
+    collectIssueFocus?: ServeReadRuntime["collectIssueFocus"];
     authContext?: ServeRuntime["authContext"];
     queryWith?: ServeReadRuntime["queryWith"];
     dependencyReport?: ServeReadRuntime["dependencyReport"];
@@ -133,6 +134,11 @@ async function setup(
   const base: ServeReadRuntime["collect"] = (repository, options) =>
     collect(repository, options, query, () => clock.now());
   const read: ServeReadRuntime = {
+    // The focused `who` read over the same facts (#367).
+    collectIssueFocus:
+      overrides.collectIssueFocus ??
+      ((repository, number, options) =>
+        collectIssueFocus(repository, number, options, query, () => clock.now())),
     collect: (repository, options) => {
       calls.collect.push({ repository, options: { ...options, signal: undefined } });
       return (overrides.collect ?? base)(repository, options);
@@ -223,6 +229,8 @@ async function cliJson(args: string[]): Promise<Record<string, unknown>> {
     async (text) => void (out += text),
     {
       collect: (repository, options) => collect(repository, options, query, () => new Date(start)),
+      collectIssueFocus: (repository, number, options) =>
+        collectIssueFocus(repository, number, options, query, () => new Date(start)),
       currentRepository: async () => repo,
       dependencyReport: async () => {
         throw new Error("not used");
@@ -299,7 +307,9 @@ describe("pdb serve read API (#373)", () => {
       );
       const who = await call(s.running.port, "/api/v1/issues/1/who?staleHours=24");
       expect(who.json.view).toBe("who");
-      expect(who.json.result).toEqual(await cliJson(["who", "1", "--stale-hours", "24"]));
+      expect(timeless(who.json.result)).toEqual(
+        timeless(await cliJson(["who", "1", "--stale-hours", "24"])),
+      );
       const team = await call(s.running.port, "/api/v1/team");
       expect(team.json.view).toBe("team");
       expect(team.json.result).toEqual(await cliJson(["team"]));
@@ -652,7 +662,7 @@ describe("pdb serve classifies GitHub failures by structured signals (#373 revie
 
 describe("pdb serve maps domain errors (#373 review)", () => {
   it("who answers an unavailable issue with its diagnosis, not a 500", async () => {
-    const s = await setup(["--repo", repo], { collect: moved("someone/else") });
+    const s = await setup(["--repo", repo], { collectIssueFocus: moved("someone/else") });
     try {
       const reply = await call(s.running.port, "/api/v1/issues/7/who");
       expect(reply.status).toBe(200);
@@ -1256,6 +1266,57 @@ describe("pdb serve failure behaviour (#373)", () => {
       expect(s.calls.collect).toHaveLength(1);
       s.clock.advance(121_000);
       expect((await call(s.running.port, "/api/v1/briefing")).status).toBe(200);
+    } finally {
+      await s.close();
+    }
+  });
+
+  it("who stopped by a linked-PR quota refusal starts the cooldown and is not cached", async () => {
+    let focused = 0;
+    const s = await setup(["--repo", repo], {
+      // A linked-PR read refused for quota: the focused read returns, incomplete, instead of
+      // throwing (#367), so only its collection's quota signal reaches serve.
+      collectIssueFocus: async (repository, number, options) => {
+        focused++;
+        // The ticket is read, then its linked PR's read is refused for quota.
+        const snapshot = await collectIssueFocus(
+          repository,
+          number,
+          options,
+          query,
+          () => new Date(start),
+        );
+        await options.meter
+          .query(
+            async () => {
+              throw new RateLimitError("rate limited", { retryAfterSeconds: 120 });
+            },
+            "pull-request",
+            `${repository}#9`,
+          )("query{x}", {})
+          .catch(() => undefined);
+        options.meter.notAttempted.push(`https://github.com/${repository}/pull/9`);
+        return snapshot;
+      },
+    });
+    try {
+      const first = await call(s.running.port, "/api/v1/issues/1/who");
+      expect(first.status).toBe(200);
+      expect(first.json.status).toBe("incomplete");
+      expect(first.json.result.collection.quota).toEqual({
+        retryAfterSeconds: 120,
+        resetAt: null,
+      });
+      // The cooldown is in force for every live read, as after a thrown RateLimitError.
+      const during = await call(s.running.port, "/api/v1/briefing");
+      expect(during.json.error.code).toBe("GITHUB_RATE_LIMITED");
+      expect(during.headers["retry-after"]).toBe("120");
+      expect(s.calls.collect).toHaveLength(0);
+      s.clock.advance(121_000);
+      // The incomplete answer was not cached as fresh: the next who read runs again.
+      const after = await call(s.running.port, "/api/v1/issues/1/who");
+      expect(after.json.freshness.source).not.toBe("cached");
+      expect(focused).toBe(2);
     } finally {
       await s.close();
     }

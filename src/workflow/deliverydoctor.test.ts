@@ -31,6 +31,9 @@ import {
   withDeliveryCompleteness,
 } from "./deliveryread.js";
 import { readBriefing } from "../briefing/service.js";
+import { readWho, readWhoLive } from "./readservices.js";
+import { permissionLookup } from "../github/github.js";
+import { RateLimitError } from "../github/dependencies.js";
 import type { PrStatusReport } from "./prstatus.js";
 import type { TeamAgent } from "./team.js";
 
@@ -180,6 +183,32 @@ const trust: TrustDecision = markerTrust(async (login) => permissions[login] ?? 
 
 /** Live PRs by number: open, draft, merged (merge oid), closed; absent means unreadable. */
 type LivePr = "open" | "draft" | "closed" | { merged: string };
+/** One PR in the snapshot's shape: complete pages, no checks or reviews. */
+const snapshotPr = (n: number, s: LivePr): PullRequest => {
+  const empty = { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } };
+  return {
+    number: n,
+    title: `PR ${n}`,
+    body: "",
+    url: prLink(n),
+    state: typeof s === "object" ? "MERGED" : s === "closed" ? "CLOSED" : "OPEN",
+    createdAt: time,
+    updatedAt: time,
+    isDraft: s === "draft",
+    headRefOid: `head${n}`,
+    headRefName: `b${n}`,
+    baseRefName: "main",
+    mergeable: "MERGEABLE",
+    mergeStateStatus: "BLOCKED",
+    reviewDecision: null,
+    labels: empty,
+    comments: empty,
+    closingIssuesReferences: empty,
+    reviewThreads: empty,
+    reviews: empty,
+    commits: { nodes: [{ commit: { statusCheckRollup: null } }] },
+  };
+};
 function live(prs: Record<number, LivePr>, compare: Record<string, string> = {}) {
   const calls = { query: 0, rest: 0 };
   return {
@@ -187,6 +216,13 @@ function live(prs: Record<number, LivePr>, compare: Record<string, string> = {})
     rt: {
       query: async (q: string, v: Record<string, unknown>) => {
         calls.query++;
+        // A focused who read hydrates open delivery members (#367).
+        if (q.includes("pullRequest(number")) {
+          const n = Number(v.number);
+          return {
+            repository: { pullRequest: prs[n] === undefined ? null : snapshotPr(n, prs[n]) },
+          };
+        }
         if (!q.includes("resource(")) return { repository: { defaultBranchRef: { name: "main" } } };
         const n = Number(String(v.url).split("/").pop());
         const s = prs[n];
@@ -1331,11 +1367,183 @@ describe("delivery, responsibility and closure on read surfaces (#192)", () => {
     });
   });
 
+  describe("focused who reads delivery members without a closing link (#367)", () => {
+    const writerRest = async (path: string, fake: ReturnType<typeof live>) =>
+      path.includes("/collaborators/")
+        ? { status: 200, body: { user: { login: "writer" }, role_name: "write" } }
+        : fake.rt.rest(path);
+    /** The old who: a full snapshot holding every open PR of the repository. */
+    const fullWho = async (ticket: Issue, prs: Record<number, LivePr>) => {
+      const fake = live(prs);
+      const rest = (path: string) => writerRest(path, fake);
+      const full = {
+        ...snapshot([ticket]),
+        pullRequests: Object.entries(prs)
+          .filter(([, s]) => s === "open" || s === "draft")
+          .map(([n, s]) => snapshotPr(Number(n), s)),
+      };
+      return readWho(
+        full,
+        ticket.number,
+        { staleHours: 48, now: new Date(time), offline: false },
+        {
+          trust: markerTrust(permissionLookup(repo, rest)),
+          live: { query: fake.rt.query as never, rest },
+        },
+      );
+    };
+    /** The focused who: the ticket alone, members hydrated by the read itself. */
+    const focusedWho = async (ticket: Issue, prs: Record<number, LivePr>) => {
+      const fake = live(prs);
+      const sources: string[] = [];
+      const query = (async (q: string, v: Record<string, unknown>) => {
+        sources.push(q);
+        return fake.rt.query(q, v);
+      }) as never;
+      const rest = (path: string) => writerRest(path, fake);
+      const read = await readWhoLive(
+        repo,
+        ticket.number,
+        { staleHours: 48, now: new Date(time) },
+        {
+          trust: markerTrust(permissionLookup(repo, rest)),
+          trustWith: (r) => markerTrust(permissionLookup(repo, r)),
+          live: { query, rest },
+        },
+        query,
+        () => new Date(time),
+        async () => ({ ...snapshot([ticket]), pullRequests: [] }),
+      );
+      return { read, sources };
+    };
+    const deliveryFacts = (report: object) => {
+      const r = report as Record<string, unknown>;
+      return { closure: r.closure, delivery: r.delivery, responsibility: r.responsibility };
+    };
+
+    it("reads a required member that has no Closes link and evaluates its follow-up", async () => {
+      // PR 701 is a required member by the trusted record but does not close #70.
+      const ticket = issue(70, ["bug"], [submitted(70, [701])]);
+      const { read, sources } = await focusedWho(ticket, { 701: "open" });
+      expect(sources.some((q) => q.includes("pullRequest(number"))).toBe(true);
+      const { delivery } = read.report as unknown as {
+        delivery: { deliverables: { followUpWhy: string }[] };
+      };
+      expect(delivery.deliverables[0].followUpWhy).not.toMatch(/not in this read/);
+      expect(read.report.collection.coverage.find((c) => c.subject === `${repo}#701`)?.state).toBe(
+        "complete",
+      );
+      // No closing link, so it is not an ownership PR.
+      expect(read.report.pullRequests).toEqual([]);
+    });
+
+    it("matches the full-snapshot who for delivery, responsibility and closure", async () => {
+      const cases: [string, Issue, Record<number, LivePr>][] = [
+        [
+          "open member, no closing link",
+          issue(71, ["bug"], [submitted(71, [711])]),
+          { 711: "open" },
+        ],
+        ["draft member", issue(72, ["bug"], [submitted(72, [721])]), { 721: "draft" }],
+        ["merged member", issue(73, ["bug"], [submitted(73, [731])]), { 731: { merged: "m731" } }],
+        ["closed unmerged member", issue(74, ["bug"], [submitted(74, [741])]), { 741: "closed" }],
+        [
+          "two members, one merged",
+          issue(75, ["bug"], [submitted(75, [751, 752])]),
+          { 751: "open", 752: { merged: "m752" } },
+        ],
+        ["no delivery record", issue(76, ["bug"]), {}],
+      ];
+      for (const [name, ticket, prs] of cases) {
+        const full = await fullWho(ticket, prs);
+        const { read } = await focusedWho(ticket, prs);
+        expect(deliveryFacts(read.report), name).toEqual(deliveryFacts(full.report));
+        expect(read.complete, name).toBe(full.complete);
+      }
+    });
+
+    it("a refusal during the delivery diagnosis stops before any member read", async () => {
+      const ticket = issue(78, ["bug"], [submitted(78, [781])]);
+      const fake = live({ 781: "open" });
+      const sent: string[] = [];
+      // The record author's permission lookup is refused for quota, with Retry-After.
+      const rest = async (path: string): Promise<RestAnswer> => {
+        sent.push(path);
+        return path.includes("/collaborators/")
+          ? ({
+              status: 403,
+              body: {},
+              evidence: {
+                category: "rate-limited",
+                observation: { retryAfterSeconds: 90, retryAt: null, resetAt: null },
+              },
+            } as never)
+          : fake.rt.rest(path);
+      };
+      const query = (async (q: string, v: Record<string, unknown>) => {
+        sent.push(q);
+        return fake.rt.query(q, v);
+      }) as never;
+      const read = await readWhoLive(
+        repo,
+        78,
+        { staleHours: 48, now: new Date(time) },
+        {
+          trust: markerTrust(permissionLookup(repo, rest)),
+          trustWith: (r) => markerTrust(permissionLookup(repo, r)),
+          live: { query, rest },
+        },
+        query,
+        () => new Date(time),
+        async () => ({ ...snapshot([ticket]), pullRequests: [] }),
+      );
+      // Nothing after the refused lookup: no member PR, no other request.
+      expect(sent.filter((p) => p.includes("/collaborators/"))).toHaveLength(1);
+      expect(sent.at(-1)).toContain("/collaborators/");
+      expect(sent.some((q) => q.includes("pullRequest(number"))).toBe(false);
+      expect(read.report.collection.quota).toEqual({ retryAfterSeconds: 90, resetAt: null });
+      expect(read.complete).toBe(false);
+    });
+
+    it("a member that cannot be read stays unknown and makes the answer incomplete", async () => {
+      const ticket = issue(77, ["bug"], [submitted(77, [771])]);
+      const fake = live({ 771: "open" });
+      const rest = (path: string) => writerRest(path, fake);
+      const query = (async (q: string, v: Record<string, unknown>) => {
+        if (q.includes("pullRequest(number")) throw new RateLimitError("rate limited");
+        return fake.rt.query(q, v);
+      }) as never;
+      const read = await readWhoLive(
+        repo,
+        77,
+        { staleHours: 48, now: new Date(time) },
+        {
+          trust: markerTrust(permissionLookup(repo, rest)),
+          trustWith: (r) => markerTrust(permissionLookup(repo, r)),
+          live: { query, rest },
+        },
+        query,
+        () => new Date(time),
+        async () => ({ ...snapshot([ticket]), pullRequests: [] }),
+      );
+      const { delivery } = read.report as unknown as {
+        delivery: { deliverables: { followUp: string }[] };
+      };
+      expect(delivery.deliverables[0].followUp).toBe("unknown");
+      expect(read.complete).toBe(false);
+      expect(read.report.collection.quota).not.toBeNull();
+      expect(read.report.collection.coverage.find((c) => c.subject === `${repo}#771`)?.state).toBe(
+        "failed",
+      );
+    });
+  });
+
   it("who and team add delivery, responsibility and closure through the CLI", async () => {
     const snap = snapshot([issue(72, ["bug"], [submitted(72, [92])])]);
     const fake = live({ 92: "open" });
     const runtime = {
       collect: async () => snap,
+      collectIssueFocus: async () => snap,
       currentRepository: async () => repo,
       now: () => new Date(time),
       query: fake.rt.query as never,
@@ -1439,6 +1647,7 @@ describe("delivery, responsibility and closure on read surfaces (#192)", () => {
     });
     const runtime = (snap: Snapshot, fake: ReturnType<typeof live>, extra = {}) => ({
       collect: async () => snap,
+      collectIssueFocus: async () => snap,
       dependencyReport: async () => ({}) as never,
       now: () => new Date(time),
       query: fake.rt.query as never,
