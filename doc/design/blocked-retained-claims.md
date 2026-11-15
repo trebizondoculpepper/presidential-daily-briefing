@@ -211,9 +211,15 @@ marker from doc/reports/closed-question-discovery.md in place of the v1 marker:
 keeping the same prefix and 16-hex operation id, so retries still match v1 records and
 existing readers still find the record. The shared reader (`parseQuestionMarker`)
 returns v1, an exact v2 binding, or malformed (never read as legacy); the human view
-ignores copied and malformed records with warnings. v2 questions keep the label-based
-resolution of v1 until the explicit `question resolve/withdraw` commands ship with the
-wait/resume transitions, so no question becomes unanswerable in the meantime.
+ignores copied and malformed records with warnings.
+
+Implementation note (#412, slice 2b): `pdb question resolve|withdraw N --agent NAME
+--question URL --why TEXT` appends the question-resolution v1 record after checking that
+the URL is a readable question on this issue by a write-authorised author with no earlier
+trusted outcome (a retry is a no-op; unknown evidence refuses). Consuming these records in
+the human view, so that v2 questions stop resolving by label removal, is part of the shared
+facts and projections of #413/#414; until then v2 questions keep v1's label-based
+resolution, so none becomes unanswerable.
 
 Use a separate `github-triage:claim-activity v1` JSON marker. Required fields:
 `v: 1`, `op: wait|resume`, `opId`, `repository`, `issue`, `agent`, `claimStartedAt`,

@@ -34,6 +34,7 @@ import {
   claimText,
   planClaim,
   planNeedsHuman,
+  planQuestionResolution,
   planRelease,
 } from "./workflow/claims.js";
 import { cachedCheckForUpdate } from "./updates/updatecache.js";
@@ -187,6 +188,9 @@ Rollback: pdb config set briefing.engine typescript.
                         the issue as completed; never reopens or merges (complete --help)
   needs-human N --agent NAME --designer NAME --why TEXT --question TEXT... [--dry-run]
                         Record questions for a designer and mark the ticket decision-needed
+  question resolve|withdraw N --agent NAME --question URL --why TEXT [--dry-run]
+                        Record that a needs-human question was answered or withdrawn (explicit,
+                        with a reason; never inferred from replies, labels or closure)
   serve --repo owner/name | --project PATH [--port N]  Foreground local HTTP server: read-only
                         JSON API and HTTP MCP over a short-lived memory cache (serve --help)
   team [--stale-hours N]  Read-only: each agent's claims, linked PRs, activity and warnings
@@ -387,6 +391,48 @@ Exit: 0 done and verified; 2 partly done, conflict, or unverified (see Retry); 1
 /**
  * Arguments for `claim`, `release` and `needs-human` (doc/design/workflow.md).
  */
+export const questionUsage =
+  "Usage: pdb question resolve|withdraw N --agent NAME --question URL --why TEXT [--dry-run] [--json] [--repo owner/name]";
+
+/** Arguments of `question resolve|withdraw` (#412). */
+export function questionArgumentsFor(args: string[]) {
+  const { values, positionals } = parseArgs({
+    args,
+    allowPositionals: true,
+    options: {
+      repo: { type: "string" },
+      json: { type: "boolean" },
+      "dry-run": { type: "boolean" },
+      agent: { type: "string" },
+      question: { type: "string" },
+      why: { type: "string" },
+    },
+  });
+  const [op, issue] = positionals;
+  if (
+    positionals.length !== 2 ||
+    (op !== "resolve" && op !== "withdraw") ||
+    !/^[1-9]\d*$/.test(issue ?? "") ||
+    !values.agent ||
+    !/^[A-Za-z0-9][\w.-]*$/.test(values.agent) ||
+    !values.question ||
+    !values.why?.trim()
+  )
+    throw new Error(questionUsage);
+  if (values.repo && !/^[\w.-]+\/[\w.-]+$/.test(values.repo))
+    throw new Error("--repo must be owner/name.");
+  return {
+    op: op as "resolve" | "withdraw",
+    number: Number(issue),
+    agent: values.agent,
+    question: values.question,
+    why: values.why.trim(),
+    repo: values.repo,
+    json: values.json,
+    dryRun: !!values["dry-run"],
+  };
+}
+
 export function workflowArgumentsFor(command: "claim" | "needs-human" | "release", args: string[]) {
   const { values, positionals } = parseArgs({
     args,
@@ -913,6 +959,24 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
   if (args[0] === "release" && (args[1] === "--help" || args[1] === "-h")) {
     await output(releaseHelp);
     return 0;
+  }
+  if (args[0] === "question") {
+    const values = questionArgumentsFor(args.slice(1));
+    const repository = values.repo ?? (await runtime.currentRepository());
+    const query = runtime.query ?? ghQuery;
+    const permission = permissionLookup(repository, runtime.rest ?? ghRest);
+    // Read live immediately before writing; never act on a cached snapshot.
+    const plan = await planQuestionResolution(repository, values, query, permission);
+    const result =
+      values.dryRun || !plan.ok || plan.noop
+        ? { ...plan, exitCode: plan.ok ? 0 : 1 }
+        : await applyPlan(repository, plan, { run: runtime.ghRun ?? ghRun, query });
+    await output(
+      values.json
+        ? JSON.stringify({ schemaVersion: 1, ...result }, null, 2) + "\n"
+        : claimText(result, values.dryRun),
+    );
+    return result.exitCode;
   }
   if (args[0] === "claim" || args[0] === "needs-human" || args[0] === "release") {
     const values = workflowArgumentsFor(args[0], args.slice(1));
