@@ -71,21 +71,32 @@ export function mappedFrame(
   colno: number | undefined,
 ): { filename: string; lineno: number; colno: number } | undefined {
   if (!built.startsWith("dist/") || !lineno || !colno) return;
-  let realRoot: string;
+  // A malformed shipped map (bad index, bad mappings) must never fail the report: any lookup
+  // or normalisation problem keeps the built location.
   try {
-    realRoot = realpathSync(resolve(root));
+    const map = shippedMap(realpathSync(resolve(root)), built);
+    const entry: unknown = map?.findEntry(lineno - 1, colno - 1);
+    if (typeof entry !== "object" || entry === null) return;
+    const { generatedLine, originalSource, originalLine, originalColumn } = entry as Record<
+      string,
+      unknown
+    >;
+    if (
+      generatedLine !== lineno - 1 ||
+      typeof originalSource !== "string" ||
+      typeof originalLine !== "number" ||
+      typeof originalColumn !== "number"
+    )
+      return;
+    const filename = posix.normalize(posix.join(posix.dirname(built), originalSource));
+    const line = coordinate(originalLine + 1);
+    const column = coordinate(originalColumn + 1);
+    return sourcePath.test(filename) && line && column
+      ? { filename, lineno: line, colno: column }
+      : undefined;
   } catch {
     return;
   }
-  const map = shippedMap(realRoot, built);
-  const entry = map?.findEntry(lineno - 1, colno - 1);
-  if (!entry || !("originalSource" in entry) || entry.generatedLine !== lineno - 1) return;
-  const filename = posix.normalize(posix.join(posix.dirname(built), entry.originalSource));
-  const line = coordinate(entry.originalLine + 1);
-  const column = coordinate(entry.originalColumn + 1);
-  return sourcePath.test(filename) && line && column
-    ? { filename, lineno: line, colno: column }
-    : undefined;
 }
 
 /** Construct, never spread, an event. Error strings and arbitrary event fields stay local. */
