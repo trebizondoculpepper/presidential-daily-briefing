@@ -1278,6 +1278,14 @@ describe("pdb serve failure behaviour (#373)", () => {
       // throwing (#367), so only its collection's quota signal reaches serve.
       collectIssueFocus: async (repository, number, options) => {
         focused++;
+        // The ticket is read, then its linked PR's read is refused for quota.
+        const snapshot = await collectIssueFocus(
+          repository,
+          number,
+          options,
+          query,
+          () => new Date(start),
+        );
         await options.meter
           .query(
             async () => {
@@ -1288,7 +1296,7 @@ describe("pdb serve failure behaviour (#373)", () => {
           )("query{x}", {})
           .catch(() => undefined);
         options.meter.notAttempted.push(`https://github.com/${repository}/pull/9`);
-        return collectIssueFocus(repository, number, options, query, () => new Date(start));
+        return snapshot;
       },
     });
     try {

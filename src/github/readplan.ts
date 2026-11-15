@@ -185,7 +185,45 @@ const bytesOf = (value: unknown): number | null => {
  */
 export const quotaRefusal = (error: unknown): boolean =>
   prop(error, "authentication") !== true &&
-  (prop(error, "rateLimited") === true || prop(error, "evidence", "category") === "rate-limited");
+  (prop(error, "rateLimited") === true || quotaCategory(prop(error, "evidence", "category")));
+
+/** Evidence categories that are a quota refusal: the primary and the secondary rate limit. */
+function quotaCategory(category: unknown): boolean {
+  return category === "rate-limited" || category === "secondary-rate-limit";
+}
+
+/**
+ * Thrown instead of sending a request once this read has seen a quota refusal: nothing is sent
+ * after one (collection-profiles.md, "Stop scheduled reads on a definitive quota failure"). It
+ * carries the refusal's retry evidence and RateLimitError's `rateLimited` discriminator.
+ */
+export class QuotaStopped extends Error {
+  readonly rateLimited = true;
+  constructor(readonly retry: { retryAfterSeconds: number | null; resetAt: string | null }) {
+    super("Not sent: GitHub refused an earlier request of this read for quota.");
+  }
+}
+
+/**
+ * Retry evidence from a refusal: a RateLimitError's `retry`, else the refused response's own
+ * classified headers (Retry-After, or the reset time). Null fields when it carried none.
+ */
+function retryEvidence(refusal: unknown): {
+  retryAfterSeconds: number | null;
+  resetAt: string | null;
+} {
+  const seconds =
+    prop(refusal, "retry", "retryAfterSeconds") ??
+    prop(refusal, "evidence", "observation", "retryAfterSeconds");
+  const reset =
+    prop(refusal, "retry", "resetAt") ??
+    prop(refusal, "evidence", "observation", "retryAt") ??
+    prop(refusal, "evidence", "observation", "resetAt");
+  return {
+    retryAfterSeconds: typeof seconds === "number" ? seconds : null,
+    resetAt: typeof reset === "string" ? reset : null,
+  };
+}
 
 const outcomeOf = (error: unknown, signal?: AbortSignal): Exclude<CallOutcome, "success"> =>
   signal?.aborted || (error instanceof Error && error.name === "AbortError")
@@ -201,8 +239,7 @@ const outcomeOf = (error: unknown, signal?: AbortSignal): Exclude<CallOutcome, "
  */
 export function restOutcome(answer: RestAnswer): CallOutcome {
   const status = answer.status;
-  if (status === 429 || prop(answer, "evidence", "category") === "rate-limited")
-    return "rate-limited";
+  if (status === 429 || quotaCategory(prop(answer, "evidence", "category"))) return "rate-limited";
   return status !== null && ((status >= 200 && status < 300) || status === 304)
     ? "success"
     : "failed";
@@ -219,15 +256,23 @@ export class ReadMeter {
   readonly notAttempted: string[] = [];
   private refusal: ReadCollection["quota"] = null;
   /** Record a quota refusal's structured retry evidence (RateLimitError's `retry`). */
-  private noteRefusal(error: unknown): void {
-    if (!quotaRefusal(error)) return;
-    const seconds = prop(error, "retry", "retryAfterSeconds");
-    const reset = prop(error, "retry", "resetAt");
+  private noteRefusal(refusal: unknown): void {
+    const { retryAfterSeconds, resetAt } = retryEvidence(refusal);
     this.refusal = {
-      retryAfterSeconds:
-        typeof seconds === "number" ? seconds : (this.refusal?.retryAfterSeconds ?? null),
-      resetAt: typeof reset === "string" ? reset : (this.refusal?.resetAt ?? null),
+      retryAfterSeconds: retryAfterSeconds ?? this.refusal?.retryAfterSeconds ?? null,
+      resetAt: resetAt ?? this.refusal?.resetAt ?? null,
     };
+  }
+  /** True once this read has seen a quota refusal; no further request is sent then. */
+  get refused(): boolean {
+    return this.refusal !== null;
+  }
+  /** Refuse to send once refused, recording what was not attempted. */
+  private gate(source: string, subject: string): void {
+    if (!this.refusal) return;
+    const skipped = `${source} ${subject}`;
+    if (!this.notAttempted.includes(skipped)) this.notAttempted.push(skipped);
+    throw new QuotaStopped(this.refusal);
   }
   private rate: ReadTelemetry["rateLimit"] = null;
   private readonly started: number;
@@ -252,6 +297,7 @@ export class ReadMeter {
   /** The query boundary, metered as `source` of `subject`. */
   query(base: Query, source: string, subject: string): Query {
     return async (query, variables) => {
+      this.gate(source, subject);
       const started = this.monotonic();
       const shape = shapeId(query);
       try {
@@ -283,7 +329,7 @@ export class ReadMeter {
         });
         return returned;
       } catch (error) {
-        this.noteRefusal(error);
+        if (quotaRefusal(error)) this.noteRefusal(error);
         this.calls.push({
           source,
           subject,
@@ -302,6 +348,7 @@ export class ReadMeter {
   /** The REST boundary, metered as `source`; the subject is the request path's route. */
   rest(base: Rest, source: string, subject: string): Rest {
     return async (path, options) => {
+      this.gate(source, subject);
       const started = this.monotonic();
       const record = (answer: RestAnswer | null, outcome: CallOutcome) =>
         this.calls.push({
@@ -319,10 +366,13 @@ export class ReadMeter {
         const answer = await base(path, options);
         // A REST boundary answers failures with a status rather than throwing: only a 2xx
         // (or 304) answer is a success; a quota refusal is rate-limited; anything else failed.
-        record(answer, restOutcome(answer));
+        const outcome = restOutcome(answer);
+        // An answered refusal keeps its retry evidence, as a thrown RateLimitError does.
+        if (outcome === "rate-limited") this.noteRefusal(answer);
+        record(answer, outcome);
         return answer;
       } catch (error) {
-        this.noteRefusal(error);
+        if (quotaRefusal(error)) this.noteRefusal(error);
         record(null, outcomeOf(error, this.signal));
         throw error;
       }
@@ -371,13 +421,7 @@ export class ReadMeter {
       bounds: { ...readProfiles[this.profile].bounds },
       coverage: [...(prior?.coverage ?? []), ...this.coverage],
       notAttempted: [...(prior?.notAttempted ?? []), ...this.notAttempted],
-      quota:
-        this.refusal ??
-        prior?.quota ??
-        // A REST answer refused for quota carries no error object: no retry evidence then.
-        (calls.some((c) => c.outcome === "rate-limited")
-          ? { retryAfterSeconds: null, resetAt: null }
-          : null),
+      quota: this.refusal ?? prior?.quota ?? null,
       telemetry: {
         requests: calls.length,
         graphqlRequests: graphql.length,

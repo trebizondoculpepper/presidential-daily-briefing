@@ -1462,6 +1462,49 @@ describe("delivery, responsibility and closure on read surfaces (#192)", () => {
       }
     });
 
+    it("a refusal during the delivery diagnosis stops before any member read", async () => {
+      const ticket = issue(78, ["bug"], [submitted(78, [781])]);
+      const fake = live({ 781: "open" });
+      const sent: string[] = [];
+      // The record author's permission lookup is refused for quota, with Retry-After.
+      const rest = async (path: string): Promise<RestAnswer> => {
+        sent.push(path);
+        return path.includes("/collaborators/")
+          ? ({
+              status: 403,
+              body: {},
+              evidence: {
+                category: "rate-limited",
+                observation: { retryAfterSeconds: 90, retryAt: null, resetAt: null },
+              },
+            } as never)
+          : fake.rt.rest(path);
+      };
+      const query = (async (q: string, v: Record<string, unknown>) => {
+        sent.push(q);
+        return fake.rt.query(q, v);
+      }) as never;
+      const read = await readWhoLive(
+        repo,
+        78,
+        { staleHours: 48, now: new Date(time) },
+        {
+          trust: markerTrust(permissionLookup(repo, rest)),
+          trustWith: (r) => markerTrust(permissionLookup(repo, r)),
+          live: { query, rest },
+        },
+        query,
+        () => new Date(time),
+        async () => ({ ...snapshot([ticket]), pullRequests: [] }),
+      );
+      // Nothing after the refused lookup: no member PR, no other request.
+      expect(sent.filter((p) => p.includes("/collaborators/"))).toHaveLength(1);
+      expect(sent.at(-1)).toContain("/collaborators/");
+      expect(sent.some((q) => q.includes("pullRequest(number"))).toBe(false);
+      expect(read.report.collection.quota).toEqual({ retryAfterSeconds: 90, resetAt: null });
+      expect(read.complete).toBe(false);
+    });
+
     it("a member that cannot be read stays unknown and makes the answer incomplete", async () => {
       const ticket = issue(77, ["bug"], [submitted(77, [771])]);
       const fake = live({ 771: "open" });

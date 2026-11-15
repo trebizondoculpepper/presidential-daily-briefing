@@ -960,6 +960,8 @@ export async function collectIssueFocus(
     );
   } catch (error) {
     signal?.throwIfAborted();
+    // A quota refusal sends nothing more, not even the location diagnosis.
+    if (quotaRefusal(error)) throw error;
     // As collect: only REST's own answer decides; "unknown" keeps the original failure.
     const diagnosis = await locate(repository, number);
     if (diagnosis.state === "unknown") throw error;
