@@ -67,6 +67,41 @@ export const graphQuery = (graph: Graph) => {
     ),
   });
   const query: Query = async (source, variables) => {
+    const cursor = variables.cursor as string | undefined;
+    // Open-issue inventory (#196 deps --top): every known open issue, oldest (lowest) first.
+    if (/issues\(first:\d+/.test(source)) {
+      const size = Number(/issues\(first:(\d+)/.exec(source)?.[1]);
+      const blockingLimit = Number(/blocking\(first:(\d+)\)/.exec(source)?.[1]);
+      const blockedLimit = Number(/blockedBy\(first:(\d+)\)/.exec(source)?.[1]);
+      const open = [
+        ...new Set([...Object.keys(graph.states ?? {}).map(Number), ...graph.edges.flat()]),
+      ]
+        .filter((n) => state(n) === "OPEN")
+        .sort((a, b) => a - b);
+      const start = cursor ? Number(cursor) : 0;
+      calls.push({ number: 0, cursor: `inventory:${start}` });
+      const more = start + size < open.length;
+      const slice = (numbers: number[], limit: number) =>
+        page(numbers.slice(0, limit).map(node), numbers.length > limit);
+      return {
+        repository: {
+          issues: {
+            totalCount: open.length,
+            ...page(
+              open.slice(start, start + size).map((n) => ({
+                ...node(n),
+                updatedAt: time,
+                ...eligibility(n),
+                blockedBy: slice(blockersOf(n), blockedLimit),
+                blocking: slice(dependantsOf(n), blockingLimit),
+              })),
+              more,
+              more ? String(start + size) : null,
+            ),
+          },
+        },
+      };
+    }
     // Batched dependant eligibility (#196): aliases d0..dK, one call per batch.
     if ("n0" in variables) {
       const answer: Record<string, unknown> = {};
@@ -96,7 +131,6 @@ export const graphQuery = (graph: Graph) => {
       return answer;
     }
     const number = Number(variables.number);
-    const cursor = variables.cursor as string | undefined;
     calls.push({ number, cursor });
     if (source.includes("issueOrPullRequest")) {
       if (graph.pullRequests?.[number])
