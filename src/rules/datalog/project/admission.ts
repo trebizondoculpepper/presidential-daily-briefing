@@ -72,6 +72,21 @@ const isScalar = (v: unknown): v is Value =>
   typeof v === "string" || typeof v === "boolean" || (typeof v === "number" && Number.isFinite(v));
 const exactKeys = (o: Record<string, unknown>, keys: readonly string[]) =>
   Object.keys(o).length === keys.length && keys.every((k) => Object.hasOwn(o, k));
+/**
+ * A prototype-free dictionary from a Map: project witness names such as `__proto__` or
+ * `constructor` stay ordinary own keys and can never change the object's prototype.
+ */
+function dictionary<V>(entries: ReadonlyMap<string, V>): Record<string, V> {
+  const out = Object.create(null) as Record<string, V>;
+  for (const [k, v] of entries)
+    Object.defineProperty(out, k, {
+      value: v,
+      enumerable: true,
+      writable: true,
+      configurable: true,
+    });
+  return out;
+}
 const byCodePoint = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 
 /**
@@ -173,7 +188,7 @@ export function admitProjectResult(
       // Placeholders were validated against witness names by the compiler; a literal :why only
       // ever explains why this preference matched and grants no authority.
       const text = pref.why.replace(/\{([^{}]*)\}/g, (_, k: string) => String(bound.get(k)));
-      const facts: Record<string, Value> = Object.fromEntries(bound);
+      const facts: Record<string, Value> = dictionary(bound);
       const list = perAction.get(identity) ?? [];
       list.push({
         id: pref.id,
@@ -183,7 +198,7 @@ export function admitProjectResult(
           priority,
           text,
           facts,
-          omitted: Object.fromEntries(omitted),
+          omitted: dictionary(omitted),
         },
       });
       perAction.set(identity, list);
@@ -285,8 +300,10 @@ export function assertAdmissionPreserved(
     if (protectedBands.has(a.band) && a !== before[i]) fail(`protected action ${id} changed`);
     if (strip(a) !== strip(o)) fail(`action ${id} changed beyond its explanation`);
     if (whyOf(a) !== whyOf(o)) fail(`default explanation of ${id} was overwritten`);
-    const defaultIds = o.why?.ruleIds ?? o.ruleIds ?? [];
-    const ids = a.why?.ruleIds ?? a.ruleIds ?? [];
-    if (defaultIds.some((r, n) => ids[n] !== r)) fail(`default reasons of ${id} were replaced`);
+    // Both rule-ID lists are checked on their own: emptying either cannot pass.
+    const keeps = (defaults: readonly string[] | undefined, ids: readonly string[] | undefined) =>
+      defaults === undefined || (Array.isArray(ids) && defaults.every((r, n) => ids[n] === r));
+    if (!keeps(o.ruleIds, a.ruleIds) || !keeps(o.why?.ruleIds, a.why?.ruleIds))
+      fail(`default reasons of ${id} were replaced`);
   }
 }
