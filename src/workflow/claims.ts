@@ -90,9 +90,18 @@ export interface ClaimAccepted {
   reason?: string;
   changes: PlanStep[];
   notes?: string[];
-  recheck?: { agent: string; release?: { target: string | null } };
+  recheck?: {
+    agent: string;
+    release?: { target: string | null };
+    /** Other claims admitted because each was verified waiting (#412); rechecked after writes. */
+    waiting?: number[];
+  };
   /** Exact command that safely retries or completes this operation. */
   retry?: string;
+  /** needs-human: the question's operation id, which a retained wait binds to (#412). */
+  questionOpId?: string;
+  /** needs-human: whether the caller holds the claim and keeps it (#412). */
+  retainsClaim?: boolean;
 }
 export type ClaimPlan = ClaimRefusal | ClaimAccepted;
 export type ClaimResult =
@@ -141,6 +150,15 @@ export type ReworkAuthority =
   | { path: "delivery" }
   | { refusal: { error: string; prerequisite: string; recovery: string[] } };
 
+/**
+ * The retained-claim admission guard (#412, doc/design/blocked-retained-claims.md), injected so
+ * this module needs no activity reader: given the agent's other open claims, either every one is
+ * verified waiting (the exception, with a line per claim) or the reasons it is not.
+ */
+export type Admission = (
+  others: { number: number; url: string }[],
+) => Promise<{ ok: true; waiting: string[] } | { ok: false; why: string[] }>;
+
 export type ReleaseOutcome = (typeof claimPolicy.outcomes)[number];
 export interface ReleaseRequest {
   number: number;
@@ -156,10 +174,12 @@ export interface NeedsHumanRequest {
   designer: string;
   why: string;
   questions: string[];
+  /** Relinquish the caller's claim after recording the question (#412); kept by default. */
+  release?: boolean;
 }
 
 type Labels = { nodes: { name: string }[]; pageInfo?: { hasNextPage: boolean } };
-interface TicketIssue {
+export interface TicketIssue {
   __typename: "Issue";
   number: number;
   title: string;
@@ -462,7 +482,7 @@ const claimHistoryPages = 3;
  * null when no add event was found; `complete` says whether the whole history was searched, so a
  * null there is a genuine absence rather than unknown evidence.
  */
-async function claimStart(
+export async function claimStart(
   repository: string,
   number: number,
   ownerLabel: string,
@@ -511,7 +531,7 @@ const commentHistoryPages = 5;
  * `complete` is false when the bound was hit first: the needed comments may be unseen, so their
  * absence is unknown evidence, never "nothing there".
  */
-async function commentHistory(
+export async function commentHistory(
   repository: string,
   number: number,
   item: TicketIssue,
@@ -535,13 +555,13 @@ async function commentHistory(
   return { comments, complete: true };
 }
 /** Enough history once the oldest comment read predates `since` (the claim start). */
-const reaches =
+export const reaches =
   (since: string) =>
   (comments: Comment[]): boolean =>
     comments.some((c) => !!c.createdAt && c.createdAt < since);
 
 /** Live read of one ticket plus the agent's open claims. */
-async function readTicket(
+export async function readTicket(
   repository: string,
   number: number,
   agent: string,
@@ -592,7 +612,7 @@ async function readTicket(
  * A refusal: stable ID, current facts, failed prerequisite, recovery commands. Recovery only
  * names implemented commands; anything else is marked as a manual step.
  */
-const refuse = (
+export const refuse = (
   error: string,
   facts: ClaimFacts,
   prerequisite: string,
@@ -619,9 +639,42 @@ export async function planClaim(
   query: GraphQuery = ghQuery,
   permission: PermissionLookup = permissionLookup(repository),
   reworkAuthority?: () => Promise<ReworkAuthority>,
+  admission?: Admission,
+): Promise<ClaimPlan> {
+  const exception: { waiting: number[]; notes: string[] } = { waiting: [], notes: [] };
+  const plan = await planClaimFor(
+    repository,
+    request,
+    query,
+    permission,
+    reworkAuthority,
+    admission,
+    exception,
+  );
+  if (!plan.ok || !exception.waiting.length) return plan;
+  return {
+    ...plan,
+    notes: [...exception.notes, ...(plan.notes ?? [])],
+    ...(plan.recheck ? { recheck: { ...plan.recheck, waiting: exception.waiting } } : {}),
+  };
+}
+
+async function planClaimFor(
+  repository: string,
+  request: ClaimRequest,
+  query: GraphQuery,
+  permission: PermissionLookup,
+  reworkAuthority: (() => Promise<ReworkAuthority>) | undefined,
+  admission: Admission | undefined,
+  exception: { waiting: number[]; notes: string[] },
 ): Promise<ClaimPlan> {
   const { number, agent, branch = null, platform = null, rework = false } = request;
-  const { item, claims, repoLabels } = await readTicket(repository, number, agent, query);
+  const { item, claims, claimsComplete, repoLabels } = await readTicket(
+    repository,
+    number,
+    agent,
+    query,
+  );
   const triage = `pdb --repo ${repository}`;
   // Subcommands are dispatched on the first argument, so they must precede options.
   const command = (text: string): string => `pdb ${text} --repo ${repository}`;
@@ -662,11 +715,27 @@ export async function planClaim(
       [`${triage} --agent ${agent}`],
     );
   const ownOther = claims.filter((c) => c.number !== number);
-  if (ownOther.length)
+  // A retained claim admits another only when every other one is verified waiting on fresh,
+  // complete evidence (#412); anything else keeps the one-active-claim refusal.
+  let verdict: Awaited<ReturnType<Admission>> | null = null;
+  if (ownOther.length && admission) {
+    verdict = claimsComplete
+      ? await admission(ownOther)
+      : { ok: false, why: [`${agent}'s open claims could not be read completely`] };
+    if (verdict.ok) {
+      exception.waiting = ownOther.map((c) => c.number);
+      exception.notes = [
+        `Admitted while retaining ${ownOther.length === 1 ? "a claim" : "claims"} verified waiting: ${verdict.waiting.join("; ")}.`,
+      ];
+    }
+  }
+  if (ownOther.length && !verdict?.ok)
     return refuse(
       "OTHER_ACTIVE_CLAIM",
       { ...facts, activeClaims: ownOther.map((c) => ({ number: c.number, url: c.url })) },
-      `${agent} already has an active claim; one active claim per agent.`,
+      verdict && !verdict.ok
+        ? `${agent} already has a claim that is not verified waiting (${verdict.why.join("; ")}); one active claim per agent.`
+        : `${agent} already has an active claim; one active claim per agent.`,
       [
         // Alternatives are separate executable entries: never a shell comment inside a command,
         // which would swallow the trailing --repo.
@@ -1129,7 +1198,9 @@ export async function planNeedsHuman(
     attention,
     ...(addNeedsDesign ? [claimPolicy.needsDesign] : []),
   ].filter((l) => !label(item, l));
-  const remove = [...swap, ...(label(item, mine) ? [mine] : [])];
+  // The caller's claim is kept by default (#412: the claim waits on the question); --release
+  // relinquishes it explicitly, after the question is durable.
+  const remove = [...swap, ...(request.release && label(item, mine) ? [mine] : [])];
   const notes: string[] = ignoredNote(posted.ignored);
   if (!already && posted.unverified.length)
     notes.push(
@@ -1137,6 +1208,10 @@ export async function planNeedsHuman(
     );
   if (held.length)
     notes.push(`Readiness ${held.join(", ")} kept; not replaced with ${claimPolicy.needsDesign}.`);
+  if (!request.release && label(item, mine))
+    notes.push(
+      `${mine} is kept (#412): after the question is saved, a wait bound to it is recorded before the labels change. Use --release to relinquish the claim instead.`,
+    );
   const changes: PlanStep[] = [];
   if (!already)
     changes.push({
@@ -1177,7 +1252,15 @@ export async function planNeedsHuman(
         ...remove.flatMap((l) => ["--remove-label", l]),
       ],
     });
-  return { ok: true, noop: !changes.length, facts, changes, notes };
+  return {
+    ok: true,
+    noop: !changes.length,
+    facts,
+    changes,
+    notes,
+    questionOpId: opId,
+    retainsClaim: !request.release && label(item, mine),
+  };
 }
 
 /** Live state of a supplied pull request URL; null when it cannot be verified. */
@@ -1191,6 +1274,57 @@ async function readPullRequest(url: string, query: GraphQuery): Promise<string |
   } catch {
     return null;
   }
+}
+
+/**
+ * The authenticated account and whether it would author a trusted record: every planner that
+ * appends a marker checks this first, or its record would be ignored by every reader.
+ */
+export async function viewerAuthority(
+  query: GraphQuery,
+  permission: PermissionLookup,
+): Promise<{ viewer: Actor | null; authority: Authority }> {
+  let viewer: Actor | null = null;
+  try {
+    viewer =
+      ((await query("query{viewer{__typename login}}", {})) as { viewer?: Actor | null }).viewer ??
+      null;
+  } catch {
+    viewer = null;
+  }
+  const authority: Authority = viewer?.login
+    ? await commentAuthority(
+        { body: "", author: viewer, lastEditedAt: null, includesCreatedEdit: false, editor: null },
+        permission,
+      )
+    : { status: "unknown", why: "the authenticated account could not be read" };
+  return { viewer, authority };
+}
+
+/** The question marker of a needs-human comment readable on this issue (v1, or v2 bound here). */
+export function readableQuestion(
+  body: string,
+  repository: string,
+  number: number,
+): { version: 1 | 2; opId: string } | null {
+  const m = parseQuestionMarker(body);
+  if (m?.version === 1) return m;
+  if (
+    m?.version === 2 &&
+    m.repository.toLowerCase() === repository.toLowerCase() &&
+    m.issue === number
+  )
+    return m;
+  return null;
+}
+
+/** A needs-human comment URL on this repository and issue: its comment id, or null. */
+export function questionCommentId(url: string, repository: string, number: number): string | null {
+  const m =
+    /^https:\/\/github\.com\/([^/\s]+\/[^/\s#]+)\/issues\/(\d+)#issuecomment-(\d{1,20})$/.exec(url);
+  return m && m[1]!.toLowerCase() === repository.toLowerCase() && Number(m[2]) === number
+    ? m[3]!
+    : null;
 }
 
 export interface QuestionResolutionRequest {
@@ -1219,41 +1353,20 @@ export async function planQuestionResolution(
   const { number, agent, op, question, why } = request;
   const triage = `pdb --repo ${repository}`;
   const retry = `pdb question ${op} ${number} --agent ${agent} --question ${question} --why ${shellQuote(why)} --repo ${repository}`;
-  const target =
-    /^https:\/\/github\.com\/([^/\s]+\/[^/\s#]+)\/issues\/(\d+)#issuecomment-(\d{1,20})$/.exec(
-      question,
-    );
-  if (
-    !target ||
-    target[1]!.toLowerCase() !== repository.toLowerCase() ||
-    Number(target[2]) !== number
-  )
+  const questionId = questionCommentId(question, repository, number);
+  if (!questionId)
     return refuse(
       "QUESTION_NOT_ON_ISSUE",
       { number },
       `--question must be a needs-human comment on ${repository}#${number} (…/issues/${number}#issuecomment-ID).`,
       [`${triage} --issue ${number}`],
     );
-  const questionCommentId = target[3]!;
   const { item } = await readTicket(repository, number, agent, query);
   if (!item)
     return refuse("TICKET_NOT_FOUND", { number }, `#${number} must exist.`, [`${triage} --json`]);
   // The record's author is the authenticated account: it must pass the same authority rule the
   // readers apply, or the posted record would be ignored and the question stay open.
-  let viewer: Actor | null = null;
-  try {
-    viewer =
-      ((await query("query{viewer{__typename login}}", {})) as { viewer?: Actor | null }).viewer ??
-      null;
-  } catch {
-    viewer = null;
-  }
-  const writer = viewer?.login
-    ? await commentAuthority(
-        { body: "", author: viewer, lastEditedAt: null, includesCreatedEdit: false, editor: null },
-        permission,
-      )
-    : { status: "unknown" as const, why: "the authenticated account could not be read" };
+  const { viewer, authority: writer } = await viewerAuthority(query, permission);
   if (writer.status !== "trusted")
     return refuse(
       "MARKER_UNVERIFIED",
@@ -1276,30 +1389,25 @@ export async function planQuestionResolution(
     repository,
     number,
     item,
-    (c) => c.some((x) => String(x.databaseId) === questionCommentId),
+    (c) => c.some((x) => String(x.databaseId) === questionId),
     query,
   );
-  const found = history.comments.find((x) => String(x.databaseId) === questionCommentId);
+  const found = history.comments.find((x) => String(x.databaseId) === questionId);
   if (!found)
     return refuse(
       history.complete ? "QUESTION_NOT_FOUND" : "EVIDENCE_INCOMPLETE",
       facts,
       history.complete
-        ? `No comment ${questionCommentId} on #${number}.`
+        ? `No comment ${questionId} on #${number}.`
         : "The comment history is longer than the bounded read, so the question could not be found; nothing is posted.",
       [`${triage} --issue ${number}`],
     );
-  const marker = parseQuestionMarker(found.body);
-  const readable =
-    marker?.version === 1 ||
-    (marker?.version === 2 &&
-      marker.repository.toLowerCase() === repository.toLowerCase() &&
-      marker.issue === number);
-  if (!marker || !readable)
+  const marker = readableQuestion(found.body, repository, number);
+  if (!marker)
     return refuse(
       "NOT_A_QUESTION",
       facts,
-      `Comment ${questionCommentId} is not a readable needs-human question record on this issue.`,
+      `Comment ${questionId} is not a readable needs-human question record on this issue.`,
       [`${triage} --issue ${number}`],
     );
   const authority = await commentAuthority(found, permission);
@@ -1317,7 +1425,7 @@ export async function planQuestionResolution(
         "question-resolution",
         repository.toLowerCase(),
         number,
-        questionCommentId,
+        questionId,
         op,
         agent,
       ]),
@@ -1334,7 +1442,7 @@ export async function planQuestionResolution(
     (c) => commentAuthority(c, permission),
     parseResolutionComment,
   );
-  const folded = foldQuestionResolutions(classified, new Map([[questionCommentId, questionOpId]]));
+  const folded = foldQuestionResolutions(classified, new Map([[questionId, questionOpId]]));
   // Unverifiable records could hold an earlier, different first outcome: never settle past them.
   if (folded.unknown.length)
     return refuse(
@@ -1343,7 +1451,7 @@ export async function planQuestionResolution(
       `An earlier resolution record could not be verified (${folded.unknown.join("; ")}); nothing is posted.`,
       [`${triage} --issue ${number}`],
     );
-  const outcome = folded.outcomes.get(questionCommentId);
+  const outcome = folded.outcomes.get(questionId);
   if (outcome) {
     const mine = classified.find(
       (c) =>
@@ -1356,14 +1464,14 @@ export async function planQuestionResolution(
         ok: true,
         facts,
         noop: true,
-        reason: `Already recorded: question ${questionCommentId} was ${outcome.op}d (comment ${outcome.comment}).`,
+        reason: `Already recorded: question ${questionId} was ${outcome.op}d (comment ${outcome.comment}).`,
         changes: [],
         retry,
       };
     return refuse(
       "QUESTION_ALREADY_SETTLED",
       facts,
-      `Question ${questionCommentId} was already ${outcome.op}d by ${outcome.agent} (comment ${outcome.comment}); the first explicit outcome stands.`,
+      `Question ${questionId} was already ${outcome.op}d by ${outcome.agent} (comment ${outcome.comment}); the first explicit outcome stands.`,
       [`${triage} --issue ${number}`],
     );
   }
@@ -1373,7 +1481,7 @@ export async function planQuestionResolution(
     opId,
     repository,
     issue: number,
-    questionCommentId,
+    questionCommentId: questionId,
     questionOpId,
     agent,
     reason: why,
@@ -1717,7 +1825,16 @@ export async function planRelease(
 export async function applyPlan(
   repository: string,
   plan: ClaimPlan,
-  { run = ghRun, query = ghQuery }: { run?: GhRun; query?: GraphQuery } = {},
+  {
+    run = ghRun,
+    query = ghQuery,
+    stillWaiting,
+  }: {
+    run?: GhRun;
+    query?: GraphQuery;
+    /** Re-verify claims admitted as waiting (#412): the problems found, empty when all still wait. */
+    stillWaiting?: (numbers: number[]) => Promise<string[]>;
+  } = {},
 ): Promise<ClaimResult> {
   if (!plan.ok) return { ...plan, exitCode: 1 };
   const steps: PlanStep[] = plan.changes.map((c) => ({ ...c, status: "pending" }));
@@ -1774,10 +1891,16 @@ export async function applyPlan(
           );
         if (others.length)
           problems.push(`another claim appeared concurrently: ${others.join(", ")}`);
-        if (elsewhere.length)
+        // Claims admitted as verified waiting must still be waiting after the write; any other
+        // claim of this agent (a concurrent winner) is a conflict, never resolved automatically.
+        const admitted = new Set(stillWaiting ? (plan.recheck.waiting ?? []) : []);
+        const unexpected = elsewhere.filter((c) => !admitted.has(c.number));
+        if (unexpected.length)
           problems.push(
-            `${plan.recheck.agent} now also claims ${elsewhere.map((c) => `#${c.number}`).join(", ")}; one active claim per agent`,
+            `${plan.recheck.agent} now also claims ${unexpected.map((c) => `#${c.number}`).join(", ")}; one active claim per agent`,
           );
+        const retained = elsewhere.filter((c) => admitted.has(c.number)).map((c) => c.number);
+        if (retained.length && stillWaiting) problems.push(...(await stillWaiting(retained)));
       }
       if (problems.length)
         conflict = `${problems.join("; ")}. Coordinate on the tickets; nothing was removed.`;

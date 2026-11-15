@@ -358,7 +358,7 @@ describe("claim and needs-human (doc/design/workflow.md)", () => {
     expect(result.steps!.map((s) => s.status)).toEqual(["done", "done"]);
     expect(result.unverified).toMatch(/could not be re-checked/);
   });
-  it("records questions first, then marks decision-needed and releases only the caller's claim", async () => {
+  it("records questions first, then marks decision-needed and, with --release, releases only the caller's claim", async () => {
     const env = fake({
       labels: ["status:ready", "agent:kavya", "agent:other"],
       repoLabels: ["question", "status:needs-design"],
@@ -371,6 +371,7 @@ describe("claim and needs-human (doc/design/workflow.md)", () => {
         designer: "nicole",
         why: "Contract is ambiguous.",
         questions: ["Which file?", "Which default?"],
+        release: true,
       },
       env.query,
     );
@@ -400,6 +401,21 @@ describe("claim and needs-human (doc/design/workflow.md)", () => {
     expect(edit.join(" ")).toContain("--remove-label status:ready");
     expect(edit.join(" ")).toContain("--remove-label agent:kavya");
     expect(edit.join(" ")).not.toContain("agent:other");
+  });
+  it("keeps the caller's claim by default (#412): the claim waits on the question", async () => {
+    const env = fake({
+      labels: ["status:ready", "agent:kavya"],
+      repoLabels: ["question", "status:needs-design", "design:decision-needed", "attention:nicole"],
+    });
+    const plan = await planNeedsHuman(
+      repo,
+      { number: 7, agent: "kavya", designer: "nicole", why: "w", questions: ["q"] },
+      env.query,
+    );
+    await applyPlan(repo, plan, env);
+    const edit = env.writes.at(-1)!.join(" ");
+    expect(edit).toContain("--remove-label status:ready");
+    expect(edit).not.toContain("agent:kavya");
   });
   it("changes nothing when the questions comment fails, and keeps a deliberate blocked state", async () => {
     const env = fake({
