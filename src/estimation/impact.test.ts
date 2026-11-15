@@ -451,13 +451,13 @@ describe("estimate --metric impact records and revises (#245)", () => {
     expect(t.json().status).toBe("unchanged");
     expect(t.remote.comments).toHaveLength(1);
   });
-  it("a complexity write never touches impact labels, and it reads no comment authority", async () => {
+  it("a complexity write never touches impact labels, and reads comment authority like impact (#269)", async () => {
     const t = harness({ labels: ["impact:S", "impact:bogus", "complexity:L"] });
     expect(await t.call("--size", "M", "--rationale", "few modules", "--json")).toBe(0);
     expect(t.json()).toMatchObject({ kind: "complexity-estimate", schemaVersion: 2 });
     expect(t.names()).toEqual(["impact:S", "impact:bogus", "complexity:M"]);
-    expect(t.trustCalls).toEqual([]);
-    expect(t.queries[0]).not.toContain("__typename");
+    expect(t.trustCalls).toEqual([]); // no provenance marker to judge
+    expect(t.queries[0]).toContain("author { __typename login }");
   });
   it("re-records an identical stale record (old guidance version), then retries unchanged", async () => {
     const old = comment(provenanceComment(impactRecord({ guidanceVersion: 0 })));
@@ -582,7 +582,7 @@ describe("complexity estimate output stays byte-compatible (#245 regression)", (
     const args = ["--size", "M", "--rationale", "r", "--agent", "a", "--assumption", "x"];
     expect(await t.call(...args, "--reference", "#1")).toBe(0);
     expect(t.queries[0]).toBe(
-      "query($owner: String!, $name: String!, $label: String!) {\n  repository(owner: $owner, name: $name) { id label(name: $label) { id name }\n    issue(number: 7) { id state labels(first: 100) { pageInfo { hasNextPage } nodes { id name } }\n      comments(last: 100) { pageInfo { hasPreviousPage startCursor } nodes { body } } } } }",
+      "query($owner: String!, $name: String!, $label: String!) {\n  repository(owner: $owner, name: $name) { id label(name: $label) { id name }\n    issue(number: 7) { id state labels(first: 100) { pageInfo { hasNextPage } nodes { id name } }\n      comments(last: 100) { pageInfo { hasPreviousPage startCursor } nodes { body createdAt author { __typename login } lastEditedAt includesCreatedEdit editor { __typename login } } } } } }",
     );
     expect(t.mutations[0]!.vars).toEqual({
       repository: "R_1",

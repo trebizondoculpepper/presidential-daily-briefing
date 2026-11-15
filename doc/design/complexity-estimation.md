@@ -29,7 +29,7 @@ With complete label evidence: no recognized size is unestimated, one is estimate
 
 ## Provenance trust consistency
 
-[complexity-provenance-trust.md](complexity-provenance-trust.md) (#269) is the reviewed replacement for unchecked complexity history when implemented. Current labels remain size authority; only verified-author explanation/freshness/idempotency evidence is trusted. This is separate from the already-delivered impact writer.
+[complexity-provenance-trust.md](complexity-provenance-trust.md) (#269) replaces unchecked complexity history and is implemented. Current labels remain size authority; only verified-author explanation/freshness/idempotency evidence is trusted. This is separate from the already-delivered impact writer.
 
 ## Recording and revising an estimate
 
