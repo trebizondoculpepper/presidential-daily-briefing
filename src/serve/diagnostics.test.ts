@@ -360,7 +360,7 @@ describe("serve diagnostics (#459)", () => {
         policyVersion: expect.any(Number),
         rulesHash: expect.stringMatching(/^[0-9a-f]{64}$/),
         validation: { state: "build-checked" },
-        englishRules: { cli: "pdb rules", page: null },
+        englishRules: { cli: "pdb rules", page: "/rules" },
       });
       expect(rules.supportedRoles).toEqual(
         expect.arrayContaining(["implementer", "designer", "human"]),

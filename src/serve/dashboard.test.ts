@@ -202,6 +202,7 @@ describe("dashboard page and script (#374)", () => {
     const page = dashboardPage();
     expect(page).toContain('<script src="/dashboard.js" defer></script>');
     expect(page).toContain('<link rel="stylesheet" href="/dashboard.css">');
+    expect(page).toContain('<a id="rules-link" href="/rules">Project rules</a>');
     expect(page).not.toMatch(/<script>|<style|\sstyle=|\son[a-z]+=|https?:\/\//);
     expect(dashboardCss).not.toMatch(/url\(|@import/);
     expect(dashboardSecurityPolicy).toContain("default-src 'none'");
@@ -215,6 +216,7 @@ describe("dashboard page and script (#374)", () => {
     const element = (id: string) => ({
       id,
       value: "",
+      href: "",
       innerHTML: "",
       textContent: "",
       selectedIndex: 0,
@@ -229,10 +231,9 @@ describe("dashboard page and script (#374)", () => {
       },
     });
     const elements = new Map(
-      ["repo", "role", "agent", "state", "actions", "selection", "refresh"].map((id) => [
-        id,
-        element(id),
-      ]),
+      ["repo", "role", "agent", "state", "actions", "selection", "refresh", "rules-link"].map(
+        (id) => [id, element(id)],
+      ),
     );
     elements.get("role")!.value = "implementer";
     const fetched: string[] = [];
@@ -278,6 +279,8 @@ describe("dashboard page and script (#374)", () => {
     expect(browser.elements.get("actions")!.innerHTML).toContain("#1 Fix &lt;b&gt;bold");
     expect(browser.elements.get("state")!.innerHTML).toContain("Observed");
     expect(browser.shown.url).toBe("?repo=o%2Fr&role=designer");
+    // The rules page link (#392) follows the selected project, encoded, on the same origin.
+    expect(browser.elements.get("rules-link")!.href).toBe("/rules?repo=o%2Fr");
     // Refresh asks the server to bypass its cache for this one view.
     browser.listeners.get("refresh:click")!();
     await settle();
