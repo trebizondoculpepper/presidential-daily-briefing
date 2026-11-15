@@ -343,6 +343,16 @@ describe("--section and the MCP section input report the same section (#311)", (
       });
       expect(bad.isError).toBe(true);
       expect(JSON.stringify(bad.content)).toMatch(/must be one of: addressed, pr-follow-up/);
+      // Role omitted: validated after the default role resolves, with the same choices.
+      const deferred = await client.callTool({
+        name: "triage_briefing",
+        arguments: { section: "nope" },
+      });
+      const envelope = boundedEnvelope.parse(deferred.structuredContent);
+      expect(envelope.error).toMatchObject({
+        code: "invalid-argument",
+        message: expect.stringMatching(/--section for role implementer must be one of: addressed/),
+      });
     } finally {
       await client.close();
     }

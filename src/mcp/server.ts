@@ -1,4 +1,5 @@
 import { BriefingEngineError } from "../config/engine-setting.js";
+import { BriefingArgumentError } from "../briefing/compact.js";
 /**
  * Read-only MCP adapter (doc/design/mcp.md, #25): the server factory and its tools over the
  * shared read service; no mutation, shell, file-path, cache or checkpoint routes are
@@ -532,6 +533,10 @@ export function createServer(
         !signal.aborted
       )
         return errorResult(tool, view, selection, args.number, error.code, error.message);
+      // #311: an argument the resolved role rejects (for example a section ID under the
+      // default role) is the caller's to fix, with the supported choices; not a GitHub failure.
+      if (error instanceof BriefingArgumentError && !signal.aborted)
+        return errorResult(tool, view, selection, args.number, "invalid-argument", error.message);
       const code: FailureCode =
         error instanceof Failure || error instanceof BriefingEngineError
           ? error.code
