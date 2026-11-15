@@ -64,11 +64,19 @@ const closed = (n: number, comments: Comment[], updatedAt = "2026-11-10T00:00:00
 });
 
 /** A mutable GitHub: closed issues listed newest update first, with `since` filtering. */
-function gh(initial: Issue[]) {
-  const state = { issues: [...initial] };
+function gh(initial: Issue[], later: Record<number, Comment[]> = {}) {
+  const state = { issues: [...initial], later };
   const calls: string[] = [];
   const query: Query = async (source, variables) => {
     const size = Number(/first:(\d+)/.exec(source)![1]);
+    if (source.includes("issueOrPullRequest")) {
+      calls.push(`comments #${variables.number}`);
+      return {
+        repository: {
+          issueOrPullRequest: { comments: page(state.later[Number(variables.number)] ?? []) },
+        },
+      } as never;
+    }
     const since = variables.since === undefined ? null : String(variables.since);
     calls.push(
       since
@@ -266,5 +274,32 @@ describe("closed-ticket scans kept between serve requests (#414)", () => {
       const read = await discoverClosedQuestions(repo, runtime(g, now, undefined));
       expect(read.coverage).toMatchObject({ discovered: 1, scan: { origin: "fresh" } });
     }
+  });
+
+  it("keeps questions visible while a changed long history is reread (Codex, #609)", async () => {
+    const late = question(9, "On the second page?");
+    const long = (updatedAt: string): Issue => ({
+      ...closed(9, [], updatedAt),
+      comments: page([], true, "p1"),
+    });
+    const g = gh([long("2026-11-10T00:00:00Z")], { 9: [late] });
+    const { c, now } = clockAt("2026-11-15T12:00:00Z");
+    const slot = new ClosedQuestionStore(30 * 60_000).slot(undefined, repo);
+    const baseline = await discoverClosedQuestions(repo, runtime(g, now, slot, {}));
+    expect(baseline.coverage.complete).toBe(true);
+    expect(baseline.sources[0]!.facts[0]!.outcome).toBe("none");
+    // The issue changes; this refresh may list it but not reread its later page.
+    g.state.issues[0] = long("2026-11-15T12:01:00Z");
+    c.t = Date.parse("2026-11-15T12:02:00Z");
+    const refresh = await discoverClosedQuestions(repo, runtime(g, now, slot, { commentPages: 0 }));
+    expect(refresh.coverage.complete).toBe(false);
+    expect(refresh.sources.map((x) => x.issue.number)).toEqual([9]);
+    expect(refresh.sources[0]!.facts[0]!.outcome).toBe("unknown");
+    // Once the reread completes the earlier copy is dropped and the question is current again.
+    const done = await discoverClosedQuestions(repo, runtime(g, now, slot, {}));
+    expect(done.coverage.complete).toBe(true);
+    expect(done.sources[0]!.facts).toEqual([
+      { trust: "trusted", to: "owner", version: 2, outcome: "none" },
+    ]);
   });
 });
