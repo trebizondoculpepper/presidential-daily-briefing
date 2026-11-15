@@ -48,6 +48,7 @@ import type {
   StatusSource,
 } from "./serve/types.js";
 import { defaultRulesPageRuntime, rulesPage } from "./serve/rules-page.js";
+import { setupPage, setupScript } from "./serve/setup-page.js";
 import {
   dashboardCss,
   dashboardPage,
@@ -176,6 +177,8 @@ const dashboardFiles = (): Map<string, { type: string; body: string }> =>
     // The consolidated ticket detail (#454): another static page under the same policy.
     ["/ticket", { type: "text/html; charset=utf-8", body: ticketPage() }],
     ["/ticket.js", { type: "text/javascript; charset=utf-8", body: ticketScript() }],
+    // Copy buttons of the agent setup page (#391); the page works without it.
+    ["/setup.js", { type: "text/javascript; charset=utf-8", body: setupScript() }],
   ]);
 
 /**
@@ -329,6 +332,23 @@ export async function startServe(
         response.end(request.method === "HEAD" ? undefined : file.body);
         return;
       }
+      if (path === "/setup") {
+        // The agent setup page (#391): local only, no GitHub request, nothing written.
+        if (request.method !== "GET" && request.method !== "HEAD")
+          throw new HttpFailure(405, "METHOD_NOT_ALLOWED", "Use GET.", [], {
+            allow: "GET, HEAD",
+          });
+        const page = setupPage(context.url.searchParams, facts.url, served, selectRepository);
+        response.writeHead(page.status, {
+          "content-type": "text/html; charset=utf-8",
+          "cache-control": "no-store",
+          "x-content-type-options": "nosniff",
+          "referrer-policy": "no-referrer",
+          "content-security-policy": dashboardSecurityPolicy,
+        });
+        response.end(request.method === "HEAD" ? undefined : page.html);
+        return;
+      }
       if (path === "/rules") {
         // The compiled policy page (#392): local only, no GitHub request, no background work.
         if (request.method !== "GET" && request.method !== "HEAD")
@@ -451,6 +471,7 @@ export function banner(facts: ServerFacts): string {
     `  cache: memory only, ttl ${facts.ttlMs / 60_000}m; restart clears it`,
     `  mcp: ${facts.url}mcp`,
     `  rules: ${facts.url}rules`,
+    `  agent setup: ${facts.url}setup`,
     "  stop: Ctrl-C",
     "",
   ].join("\n");
