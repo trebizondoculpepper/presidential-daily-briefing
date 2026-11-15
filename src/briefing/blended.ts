@@ -17,6 +17,7 @@
 import type { AssessmentState, MetricView, SubjectAssessments } from "./assessments.js";
 import type { ComplexitySize } from "../estimation/complexity.js";
 import type { PickupOrder } from "./ranking.js";
+import { compareCreatedAt } from "./ranking.js";
 
 export const blendedPolicyVersion = 1 as const;
 
@@ -130,7 +131,6 @@ export function classify(
 /** Immediate-unlock score used for ordering: assessment never unblocks implementation itself. */
 const unlockScore = (a: ActionFacts): number =>
   assessmentKinds.includes(a.kind) || a.kind === "inspect-assessment" ? 0 : a.unlocks;
-const created = (a: ActionFacts): number => Date.parse(a.createdAt);
 const identity = (a: ActionFacts, b: ActionFacts): number =>
   a.repository.localeCompare(b.repository) ||
   a.number - b.number ||
@@ -162,7 +162,7 @@ export function compareActions(order: PickupOrder = "impact") {
       const pb = cb.reasonCodes.includes("age-order");
       if (pa !== pb) return Number(pa) - Number(pb);
       if (pa) {
-        const age = order === "oldest" ? created(a) - created(b) : created(b) - created(a);
+        const age = compareCreatedAt(a.createdAt, b.createdAt, order === "oldest" ? 1 : -1);
         return age || identity(a, b);
       }
     }
@@ -172,7 +172,7 @@ export function compareActions(order: PickupOrder = "impact") {
       unlockScore(b) - unlockScore(a) ||
       Number(b.own) - Number(a.own) ||
       Number(b.incomplete) - Number(a.incomplete) ||
-      created(a) - created(b) ||
+      compareCreatedAt(a.createdAt, b.createdAt) ||
       identity(a, b)
     );
   };
