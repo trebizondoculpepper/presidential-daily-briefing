@@ -12,6 +12,8 @@ import { dependencyReport, RateLimitError } from "../github/dependencies.js";
 import type { Comment, Issue, Page, PullRequest } from "../github/types.js";
 import { issue as baseIssue, pr as basePr, repo, time } from "../testing/snapshots.js";
 import { readPullRequest } from "./readservices.js";
+import { deliveryMarker } from "./delivery.js";
+import type { DeliveryRecord } from "./delivery.js";
 
 const clock = () => new Date(time);
 const issueUrl = (n: number) => `https://github.com/${repo}/issues/${n}`;
@@ -235,7 +237,61 @@ describe("--issue N keeps the full compatibility profile (#367)", () => {
       "open-issues",
       "open-pull-requests",
       "issue",
+      // No delivery boundary in this run: delivery was not read, so it is not known.
+      "delivery-records",
     ]);
     expect(report.collection.telemetry.cost).toBe(log.length);
+  });
+
+  it("counts the delivery and permission reads made while presenting the intake", async () => {
+    const w = world();
+    const one = w.issues.get(1)!;
+    // A delivery record makes presenting the intake look up its author's permission.
+    w.issues.set(1, {
+      ...one,
+      comments: page([
+        note(
+          issueUrl(1),
+          1,
+          deliveryMarker({
+            v: 1,
+            op: "submit",
+            opId: "op-1",
+            repository: repo,
+            issue: 1,
+            agent: "ana",
+            deliverables: [],
+            issuedAt: time,
+          } as unknown as DeliveryRecord),
+          1,
+        ),
+      ]),
+    });
+    const { query, log } = fake(w);
+    const restPaths: string[] = [];
+    let out = "";
+    await main(
+      ["--issue", "1", "--json", "--repo", repo, "--no-update-check"],
+      async (t) => void (out = t),
+      {
+        collect: (r, o) => collect(r, o, query, clock),
+        currentRepository: async () => repo,
+        query,
+        rest: async (path) => {
+          restPaths.push(path);
+          return { status: 404, body: { message: "Not Found" } };
+        },
+        now: clock,
+        updateCheck: async () => ({ status: "disabled" }) as never,
+      },
+    );
+    const { telemetry, coverage } = JSON.parse(out).collection;
+    // Every GraphQL and REST request of the command, not only the snapshot read.
+    expect(telemetry.graphqlRequests).toBe(log.length);
+    expect(telemetry.restRequests).toBe(restPaths.length);
+    expect(telemetry.requests).toBe(log.length + restPaths.length);
+    expect(restPaths.some((p) => p.includes("/collaborators/"))).toBe(true);
+    expect(telemetry.failures).toMatchObject({ failed: restPaths.length });
+    expect(coverage.map((c: { source: string }) => c.source)).toContain("delivery-records");
   });
 });
