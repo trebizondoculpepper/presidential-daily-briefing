@@ -397,6 +397,8 @@ async function presentHuman(
 /** GitHub-facing boundaries of a live read; tests inject credential-free fakes. */
 export interface ReadRuntime {
   collect: typeof collect;
+  /** Test seam for the lazily loaded Datalog engine; defaults to importing it (#346). */
+  loadEngine?: () => Promise<Pick<typeof import("../rules/datalog/datalog.js"), "evaluateDatalog">>;
   dependencyReport: typeof dependencyReport;
   estimation?: LabelEstimationRuntime;
   /**
@@ -545,7 +547,7 @@ export async function readBriefing(
       ? markerTrust(permissionLookup(request.repository, runtime.rest, request.signal))
       : undefined,
     request.signal,
-    undefined,
+    runtime.loadEngine,
     // Delivery requests are bound to the request's cancellation signal, like collection.
     runtime.rest && (runtime.queryWith || runtime.query)
       ? {

@@ -35,6 +35,33 @@ export type EngineFailureCause =
   | { category: "missing-module"; module: string | null }
   | { category: "unknown" };
 
+/** Safe, bounded cause for API and MCP error bodies: validated fields only, no message text. */
+export interface SafeEngineCause {
+  category: "missing-module";
+  /** A validated package specifier, or null when the name could not be shown safely. */
+  module: string | null;
+  /** Delivered recovery commands. */
+  recovery: string[];
+}
+
+export const missingModuleRecovery = ["npm ci", "pdb doctor"];
+
+/** The structured cause of a missing engine module, or null for any other engine failure. */
+export function safeEngineCause(error: unknown): SafeEngineCause | null {
+  if (!(error instanceof BriefingEngineError)) return null;
+  const cause = error.engineCause;
+  if (cause?.category !== "missing-module") return null;
+  const module =
+    cause.module !== null && cause.module.length <= 214 && packageSpecifier.test(cause.module)
+      ? cause.module
+      : null;
+  return { category: "missing-module", module, recovery: [...missingModuleRecovery] };
+}
+
+/** One sentence naming the cause, built only from the safe fields. */
+export const safeEngineCauseText = (cause: SafeEngineCause) =>
+  `Missing module ${cause.module ?? "(name not shown)"}: in a PDB source checkout run npm ci at its root, or reinstall the published package; pdb doctor checks dependencies.`;
+
 /** A bare npm package specifier (optionally scoped): never a path. */
 const packageSpecifier = /^(?:@[a-z0-9][\w.-]*\/)?[a-z0-9][\w.-]*$/i;
 
