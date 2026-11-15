@@ -135,6 +135,33 @@ const realSleep = (ms: number, signal?: AbortSignal): Promise<void> =>
     signal?.addEventListener("abort", abort, { once: true });
   });
 
+/**
+ * The one wait formula for a throttled comment (REST and GraphQL alike), as a time in ms:
+ *
+ *   earliest = max(valid Retry-After, exhausted primary reset, 60s default if no valid Retry-After)
+ *
+ * A Retry-After (seconds or HTTP date) is valid only when it lies in the future; a zero, past or
+ * unparsable one is not permission to retry now. The primary reset counts only when the same
+ * response showed remaining 0 (the transport sets `resetAt` only then) and lies in the future.
+ * Without a valid Retry-After the secondary default always applies, even beside a sooner reset.
+ */
+export function retryWait(
+  attempt: { retryAfterSeconds: number | null; retryAt: string | null; resetAt?: string | null },
+  at: number,
+  defaultDelayMs: number = commentRecoveryPolicy.defaultDelayMs,
+): { earliest: number; defaultDelay: boolean } {
+  const future = (ms: number): number | null => (Number.isFinite(ms) && ms > at ? ms : null);
+  const retryAfter = [
+    attempt.retryAfterSeconds !== null ? future(at + attempt.retryAfterSeconds * 1000) : null,
+    attempt.retryAt ? future(Date.parse(attempt.retryAt)) : null,
+  ].filter((v): v is number => v !== null);
+  const reset = attempt.resetAt ? future(Date.parse(attempt.resetAt)) : null;
+  const defaultDelay = retryAfter.length === 0;
+  const bounds = [...retryAfter, ...(reset !== null ? [reset] : [])];
+  if (defaultDelay) bounds.push(at + defaultDelayMs);
+  return { earliest: Math.max(...bounds), defaultDelay };
+}
+
 /** Post one frozen comment with the bounded recovery of doc/design/comment-write-recovery.md. */
 export async function postCommentWithRecovery(
   b: CommentRecoveryBoundaries,
@@ -280,22 +307,8 @@ export async function postCommentWithRecovery(
       );
     }
 
-    // Throttled: the earliest retry is the latest of every applicable lower bound.
-    const at = now();
-    const bounds: number[] = [];
-    // Only a bound in the future is timing evidence: a zero Retry-After, a past HTTP date or an
-    // already-passed reset is not permission to retry now, so the safe default applies instead.
-    const future = (ms: number) => {
-      if (Number.isFinite(ms) && ms > at) bounds.push(ms);
-    };
-    if (attempt.retryAfterSeconds !== null) future(at + attempt.retryAfterSeconds * 1000);
-    // Wall-clock bounds are compared on the injected clock's own scale.
-    future(attempt.retryAt ? Date.parse(attempt.retryAt) : NaN);
-    // An exhausted primary quota on the same response is a lower bound too: never earlier.
-    future(attempt.resetAt ? Date.parse(attempt.resetAt) : NaN);
-    const defaultDelay = bounds.length === 0;
-    if (defaultDelay) bounds.push(at + policy.defaultDelayMs);
-    const earliest = Math.max(...bounds);
+    // Throttled: the earliest retry, from the single wait formula shared by REST and GraphQL.
+    const { earliest, defaultDelay } = retryWait(attempt, now(), policy.defaultDelayMs);
     const retryAt = new Date(earliest).toISOString();
     const category = attempt.secondary ? "secondary-rate-limit" : "rate-limited";
     const throttled = (why: string) =>
