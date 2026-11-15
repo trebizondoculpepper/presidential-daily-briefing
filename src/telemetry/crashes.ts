@@ -1,6 +1,7 @@
 /** Optional fatal-only reporting; doc/design/sentry-crash-reporting.md. */
-import { realpathSync } from "node:fs";
-import { isAbsolute, relative, resolve, sep } from "node:path";
+import { readFileSync, realpathSync, statSync } from "node:fs";
+import { SourceMap } from "node:module";
+import { isAbsolute, join, posix, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { NodeOptions } from "@sentry/node";
 
@@ -29,12 +30,63 @@ function location(filename: string | undefined, root: string): string | undefine
     return;
   }
   if (local.startsWith("../") || isAbsolute(local)) return;
-  if (/^src\/(?:[a-zA-Z0-9_-]+\/)*[a-zA-Z0-9_-]+\.(?:ts|js)$/.test(local)) return local;
+  if (sourcePath.test(local)) return local;
   if (/^dist\/(?:cli|mcp|datalog-[a-zA-Z0-9_-]+)\.mjs$/.test(local)) return local;
   return;
 }
 const coordinate = (value: number | undefined) =>
   Number.isSafeInteger(value) && value! > 0 && value! <= 10_000_000 ? value : undefined;
+
+const sourcePath = /^src\/(?:[a-zA-Z0-9_-]+\/)*[a-zA-Z0-9_-]+\.(?:ts|js)$/;
+/** Largest shipped map read at crash time; a larger file is not ours and is not parsed. */
+const MAX_MAP_BYTES = 32 * 1024 * 1024;
+const maps = new Map<string, SourceMap | null>();
+/**
+ * The shipped map beside a verified built file (`dist/X.mjs.map`, never a `sourceMappingURL`
+ * the file names), parsed once. Null when missing, oversized or unreadable.
+ */
+function shippedMap(root: string, built: string): SourceMap | null {
+  const path = join(root, `${built}.map`);
+  if (!maps.has(path)) {
+    let map: SourceMap | null = null;
+    try {
+      if (statSync(path).size <= MAX_MAP_BYTES)
+        map = new SourceMap(JSON.parse(readFileSync(path, "utf8")));
+    } catch {
+      map = null;
+    }
+    maps.set(path, map);
+  }
+  return maps.get(path)!;
+}
+/**
+ * Maps a built-bundle frame to its public `src/` location through the package's own shipped
+ * map. Only an exact generated-line hit with an allowlisted `src/` origin counts; anything else
+ * keeps the built location.
+ */
+export function mappedFrame(
+  root: string,
+  built: string,
+  lineno: number | undefined,
+  colno: number | undefined,
+): { filename: string; lineno: number; colno: number } | undefined {
+  if (!built.startsWith("dist/") || !lineno || !colno) return;
+  let realRoot: string;
+  try {
+    realRoot = realpathSync(resolve(root));
+  } catch {
+    return;
+  }
+  const map = shippedMap(realRoot, built);
+  const entry = map?.findEntry(lineno - 1, colno - 1);
+  if (!entry || !("originalSource" in entry) || entry.generatedLine !== lineno - 1) return;
+  const filename = posix.normalize(posix.join(posix.dirname(built), entry.originalSource));
+  const line = coordinate(entry.originalLine + 1);
+  const column = coordinate(entry.originalColumn + 1);
+  return sourcePath.test(filename) && line && column
+    ? { filename, lineno: line, colno: column }
+    : undefined;
+}
 
 /** Construct, never spread, an event. Error strings and arbitrary event fields stay local. */
 export function sanitizeCrash(
@@ -53,9 +105,12 @@ export function sanitizeCrash(
       stacktrace: {
         frames: (e.stacktrace?.frames ?? []).slice(-50).flatMap((f) => {
           const filename = location(f.filename, root);
-          return filename
-            ? [{ filename, lineno: coordinate(f.lineno), colno: coordinate(f.colno), in_app: true }]
-            : [];
+          if (!filename) return [];
+          const lineno = coordinate(f.lineno);
+          const colno = coordinate(f.colno);
+          // A packaged frame reads as its public source location when the shipped map has it.
+          const mapped = mappedFrame(root, filename, lineno, colno);
+          return [mapped ? { ...mapped, in_app: true } : { filename, lineno, colno, in_app: true }];
         }),
       },
     }));
