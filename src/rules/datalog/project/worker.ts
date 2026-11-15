@@ -47,53 +47,82 @@ export interface WorkerOptions {
   limits?: Partial<WorkerLimits>;
 }
 
-// Plain JavaScript, evaluated as the worker's entry. It may use only worker_threads, module (to
-// load DataScript from the resolved path) and DataScript; no fs, network or child processes.
-const workerSource = `"use strict";
-const { parentPort, workerData } = process.getBuiltinModule("node:worker_threads");
-const ds = process.getBuiltinModule("node:module").createRequire(workerData.datascript)(workerData.datascript);
-parentPort.postMessage({ type: "ready" });
-parentPort.once("message", (job) => {
-  try {
-    const db = ds.init_db(job.datoms, job.schema);
-    const ids = new Map();
-    for (const [e, a, v] of job.datoms) if (a === "pdb.action-id") ids.set(e, v);
+/** What the worker entry receives as workerData; every input it uses arrives here or by message. */
+export interface WorkerData {
+  /** Resolved path of the pinned DataScript module. */
+  datascript: string;
+  tuples: number;
+  outputChars: number;
+}
+/** The untrusted messages the entry posts; runProjectWorker validates each one. */
+export type WorkerMessage =
+  | { type: "ready" }
+  | { type: "result"; text: string }
+  | { type: "error"; code: "result-limit" | "output-limit" | "query-failed" };
+
+/**
+ * The worker entry. It must stay self-contained: it is serialized with Function.prototype.toString
+ * and evaluated in the worker, so it may not reference anything from this module's scope (not
+ * even type-erased helpers or named inner functions a transpiler could wrap). It reaches only
+ * worker_threads, module (to load DataScript from the resolved path) and DataScript; no fs,
+ * network or child processes. worker.test.ts runs the serialized source in an isolated context.
+ */
+export function workerEntry(): void {
+  const threads = process.getBuiltinModule("node:worker_threads");
+  const data = threads.workerData as WorkerData;
+  const port = threads.parentPort!;
+  const ds = process.getBuiltinModule("node:module").createRequire(data.datascript)(
+    data.datascript,
+  ) as typeof import("datascript").default;
+  const post = (message: WorkerMessage): void => port.postMessage(message);
+  post({ type: "ready" });
+  port.once("message", (job: WorkerJob) => {
     let tuples = 0;
-    const count = (n) => {
-      tuples += n;
-      if (tuples > workerData.tuples) throw Object.assign(new Error("too many tuples"), { code: "result-limit" });
-    };
-    const preferences = job.preferences.map((p) => {
-      const matched = ds.q(p.matchQuery, db, job.rules).map(([a]) => a);
-      const found = ds.q(p.query, db, job.rules);
-      count(matched.length + found.length);
-      return {
-        id: p.id,
-        matched,
-        rows: found.map(([a, value]) => {
-          const witnesses = p.witnesses.map(([name, q]) => {
+    try {
+      const db = ds.init_db([...job.datoms], job.schema);
+      const ids = new Map<number, string>();
+      for (const [e, a, v] of job.datoms) if (a === "pdb.action-id") ids.set(e, String(v));
+      const preferences = [];
+      for (const p of job.preferences) {
+        const matched = ds.q(p.matchQuery, db, job.rules).map(([a]) => a);
+        const found = ds.q(p.query, db, job.rules);
+        tuples += matched.length + found.length;
+        if (tuples > data.tuples) return post({ type: "error", code: "result-limit" });
+        const rows = [];
+        for (const [a, value] of found) {
+          const witnesses: [string, unknown[]][] = [];
+          for (const [name, q] of p.witnesses) {
             const values = ds.q(q, db, job.rules, a).flat();
-            count(values.length);
-            return [name, values];
-          });
-          return [a, ids.has(a) ? ids.get(a) : null, value, Object.fromEntries(witnesses)];
-        }),
-      };
-    });
-    const text = JSON.stringify({
-      version: 1,
-      generation: job.generation,
-      effectiveRulesHash: job.effectiveRulesHash,
-      projectRulesHash: job.projectRulesHash,
-      preferences,
-    });
-    if (text.length > workerData.outputChars) parentPort.postMessage({ type: "error", code: "output-limit" });
-    else parentPort.postMessage({ type: "result", text });
-  } catch (e) {
-    parentPort.postMessage({ type: "error", code: e && e.code === "result-limit" ? "result-limit" : "query-failed" });
-  }
-});
-`;
+            tuples += values.length;
+            if (tuples > data.tuples) return post({ type: "error", code: "result-limit" });
+            witnesses.push([name, values]);
+          }
+          const entity = Number(a);
+          rows.push([
+            a,
+            ids.has(entity) ? ids.get(entity) : null,
+            value,
+            Object.fromEntries(witnesses),
+          ]);
+        }
+        preferences.push({ id: p.id, matched, rows });
+      }
+      const text = JSON.stringify({
+        version: 1,
+        generation: job.generation,
+        effectiveRulesHash: job.effectiveRulesHash,
+        projectRulesHash: job.projectRulesHash,
+        preferences,
+      });
+      if (text.length > data.outputChars) post({ type: "error", code: "output-limit" });
+      else post({ type: "result", text });
+    } catch {
+      post({ type: "error", code: "query-failed" });
+    }
+  });
+}
+/** The fixed worker source: the compiled entry, invoked once. */
+export const workerSource = `"use strict";(${workerEntry.toString()})();`;
 
 const datascriptPath = () => createRequire(import.meta.url).resolve("datascript");
 const errorCodes = new Set(["result-limit", "output-limit", "query-failed"]);
