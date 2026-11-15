@@ -14,7 +14,7 @@ import type { CommentAttempt, CommentReceipt } from "./commentwrite.js";
 import { parseGhResponse } from "./evidence.js";
 import { applyPlan, claimText } from "../workflow/claims.js";
 import type { ClaimPlan } from "../workflow/claims.js";
-import { AuthenticationError } from "./github.js";
+import { AuthenticationError, mutationMeta } from "./github.js";
 import { ghCommentReceipt, RateLimitError } from "./dependencies.js";
 
 const T0 = Date.parse("2026-11-15T12:00:00Z");
@@ -331,6 +331,43 @@ describe("classifying a comment write from structured signals (#345)", () => {
     expect(classifyCommentResponse(response(502, [], {}))).toMatchObject({ kind: "unknown" });
     expect(classifyCommentResponse(null, { timedOut: true })).toMatchObject({ kind: "unknown" });
     expect(classifyCommentResponse(null, { exitCode: 1 })).toMatchObject({ kind: "unknown" });
+  });
+  it("treats a server-side or unregistered addComment error as acceptance unknown", () => {
+    for (const type of ["INTERNAL", "SERVICE_UNAVAILABLE", "SOMETHING_NEW"])
+      expect(
+        classifyAddComment({ data: { addComment: null }, errors: [{ type, message: "x" }] }, null),
+      ).toMatchObject({ kind: "unknown" });
+    expect(
+      classifyAddComment({ data: null, errors: [{ type: "FORBIDDEN", message: "x" }] }, null),
+    ).toMatchObject({ kind: "refused", category: "access" });
+    expect(
+      classifyAddComment({ data: null, errors: [{ type: "NOT_FOUND", message: "x" }] }, null),
+    ).toMatchObject({ kind: "refused" });
+  });
+  it("keeps an exhausted reset on a throttled GraphQL comment and waits for the later", async () => {
+    const reset = Math.floor(T0 / 1000) + 40;
+    const meta = mutationMeta(
+      parseGhResponse(
+        `HTTP/2.0 200 OK\r\nRetry-After: 10\r\nX-RateLimit-Remaining: 0\r\nX-RateLimit-Reset: ${reset}\r\n\r\n{}`,
+      ),
+    );
+    expect(meta).toMatchObject({
+      retryAfterSeconds: 10,
+      resetAt: new Date(reset * 1000).toISOString(),
+    });
+    const attempt = classifyAddComment(
+      {
+        data: { addComment: null },
+        errors: [{ type: "UNPROCESSABLE", message: "was submitted too quickly" }],
+        response: meta,
+      },
+      null,
+    );
+    expect(attempt).toMatchObject({ kind: "throttled", secondary: true, resetAt: meta.resetAt });
+    const t = scripted([attempt, attempt]);
+    const r = await postCommentWithRecovery(t.boundaries);
+    expect(t.sleeps).toEqual([40_000]);
+    expect(r).toMatchObject({ status: "throttled", resetAt: meta.resetAt });
   });
   it("classifies GraphQL addComment answers by type, never by a body phrase", () => {
     expect(

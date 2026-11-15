@@ -545,6 +545,8 @@ export interface MutationResponseMeta {
   status: number | null;
   retryAfterSeconds: number | null;
   retryAt: string | null;
+  /** The primary quota's reset, only when this same response showed remaining 0. */
+  resetAt?: string | null;
   requestId: string | null;
 }
 
@@ -553,6 +555,9 @@ export interface MutationResponseMeta {
  * rate-limit or UNPROCESSABLE "submitted too quickly" error is throttling; other typed errors
  * are definite refusals; an untyped error (transport failure) or a missing result is unknown.
  */
+/** GraphQL error types that prove the comment was rejected (client-side), never accepted. */
+const definiteTypes = new Set(["UNPROCESSABLE", "FORBIDDEN", "NOT_FOUND"]);
+
 export function classifyAddComment(
   answer: {
     data: unknown;
@@ -568,6 +573,8 @@ export function classifyAddComment(
     secondary,
     retryAfterSeconds: meta?.retryAfterSeconds ?? null,
     retryAt: meta?.retryAt ?? null,
+    // Kept beside Retry-After: recovery waits for the later of the two.
+    resetAt: meta?.resetAt ?? null,
     requestId: meta?.requestId ?? null,
   });
   const types = answer.errors.map((e) => e.type);
@@ -577,14 +584,17 @@ export function classifyAddComment(
   if (
     meta &&
     (meta.status === 403 || meta.status === 429) &&
-    (meta.retryAfterSeconds !== null || meta.retryAt !== null)
+    (meta.retryAfterSeconds !== null || meta.retryAt !== null) &&
+    !meta.resetAt
   )
     return throttled(true);
-  const typed = answer.errors.find((e) => typeof e.type === "string");
+  // Only clearly client-side types are definite rejections; INTERNAL or any other server-side
+  // or unregistered type without a comment URL leaves acceptance unknown.
+  const typed = answer.errors.find((e) => e.type !== undefined && definiteTypes.has(e.type));
   if (typed)
     return {
       kind: "refused",
-      category: typed.type === "FORBIDDEN" ? "access" : "validation",
+      category: typed.type === "UNPROCESSABLE" ? "validation" : "access",
       message: `${typed.type}: ${typed.message ?? "GitHub returned an error"}`,
     };
   return {
