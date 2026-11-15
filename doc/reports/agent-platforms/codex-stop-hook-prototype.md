@@ -74,7 +74,20 @@ synthetically; do not promote them to native observations.
 The owner also directed the final integration to invoke installed `pdb` directly,
 with any shell/PowerShell wrapper forwarding only arguments/stdin/status. The
 checkout-specific bundled helper remains trial scaffolding, not the final setup.
-A separate documentation-first CLI contract and packaged implementation are still
-required. Preserve the trusted local definition until deliberately replacing it;
+A separate documentation-first CLI contract and packaged implementation were
+required; see the follow-up below. Preserve the trusted local definition until deliberately replacing it;
 a changed definition must pass normal native trust again. #398 remains open for
 these delivery and validation boundaries.
+
+## Packaged interface follow-up
+
+The forwarding-only contract was reviewed and merged separately in #571. The
+implementation now supplies `pdb rebrief codex-stop`; see `doc/rebrief.md` and
+`pdb rebrief codex-stop --help`. Its package owns stdin decoding, context/session
+validation, cancellation/deadline and native framing over the existing shared
+CLI/core. Tests install the packed artifact outside a checkout, with no source
+loader, exercise literal arguments/stdin/failure/deadline, and obtain a native
+blocking response through credential-free fake GitHub facts. These are artifact
+checks, not another model-visible native trial. The installed/trusted experimental
+hook remains unchanged, as requested; the new command is not silently substituted
+into its trusted definition. A deliberate replacement requires native review/trust.
