@@ -56,11 +56,14 @@ const run = (source: string) => {
  * policy, so deleting a guard from decisions.edn cannot silently change the expectation. A new
  * rule must be added here; changing a rule's audience is a deliberate edit of this table.
  * `pr-action` is the policy's PR audience: implementers, and a designer for a design PR they are
- * responsible for (rules.edn `pr-action`).
+ * responsible for (rules.edn `pr-action`). `agents` is every role except human.
  */
 const audience: Record<
   string,
-  { role: "implementer" | "designer" | "pr-action" | "any"; kind: "issue" | "pr" | "any" }
+  {
+    role: "implementer" | "designer" | "human" | "pr-action" | "agents" | "any";
+    kind: "issue" | "pr" | "any";
+  }
 > = {
   "D-ATTENTION": { role: "any", kind: "any" },
   "D-PR-FAIL": { role: "pr-action", kind: "pr" },
@@ -84,9 +87,14 @@ const audience: Record<
   "D-DESIGN": { role: "designer", kind: "issue" },
   "D-UNFAVORABLE": { role: "implementer", kind: "issue" },
   "D-OWN-UNFAVORABLE": { role: "implementer", kind: "issue" },
-  "D-INSPECT": { role: "any", kind: "issue" },
+  "D-INSPECT": { role: "agents", kind: "issue" },
+  "D-HUMAN-ASK-YOU": { role: "human", kind: "issue" },
+  "D-HUMAN-ASK": { role: "human", kind: "issue" },
+  "D-HUMAN-UNVERIFIED": { role: "human", kind: "issue" },
+  "D-HUMAN-DECIDE": { role: "human", kind: "issue" },
+  "D-HUMAN-SIGNOFF": { role: "human", kind: "pr" },
 };
-const roles = ["implementer", "designer"] as const;
+const roles = ["implementer", "designer", "human"] as const;
 
 describe("rule audience: roles and subject kinds (#469)", () => {
   it("pins every decision rule's audience", () => {
@@ -100,7 +108,9 @@ describe("rule audience: roles and subject kinds (#469)", () => {
       const guarded =
         role === "pr-action"
           ? d.clauses.includes("(pr-action ?t)")
-          : d.clauses.includes(`[1 "role" "${role}"]`);
+          : role === "agents"
+            ? d.clauses.includes('[(not= ?role "human")]')
+            : d.clauses.includes(`[1 "role" "${role}"]`);
       expect(guarded, `${d.id} lost its ${role} guard`).toBe(true);
     }
   });
@@ -128,6 +138,7 @@ describe("rule audience: roles and subject kinds (#469)", () => {
           const allowed =
             meant.role === "any" ||
             meant.role === role ||
+            (meant.role === "agents" && role !== "human") ||
             (meant.role === "pr-action" && (role === "implementer" || own));
           expect(allowed, where).toBe(true);
           expect(meant.kind === "any" || meant.kind === kindOf.get(d.subject), where).toBe(true);

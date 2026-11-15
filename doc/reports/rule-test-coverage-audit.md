@@ -111,6 +111,8 @@ The script is about 60 lines over `buildPolicy` and `runScenario`, and could bec
 
 Rerunning the mutation run against both gives 107 mutants, all killed.
 
+After the human role landed (#468), the table gained the five `D-HUMAN-*` rules and the `agents` audience, because `D-INSPECT` now excludes humans. The run then had 134 mutants. Two new negatives in `guard-negatives.edn` cover `D-HUMAN-SIGNOFF`: a closed PR, and a clean PR with an unreviewed head. That leaves one survivor, dropping `(open ?t)` from `D-HUMAN-SIGNOFF`. It is an equivalent mutant: a closed PR is never selected even without the clause, because the selection rules already require an open subject. The closed-PR scenario stays as a statement of intent.
+
 ## Follow-ups
 
 - #469: cross-role and cross-kind negatives (the 26 surviving mutants); done, see the update above.
