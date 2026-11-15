@@ -120,8 +120,8 @@ function rebriefCheck(eventId: string): CoreResult {
   };
 }
 
-function rebriefAck(eventId: string, fingerprint: string): void {
-  pdb([
+function rebriefAck(eventId: string, fingerprint: string): boolean {
+  const out = pdb([
     "ack",
     "--state-dir",
     STATE,
@@ -140,6 +140,8 @@ function rebriefAck(eventId: string, fingerprint: string): void {
     "--fingerprint",
     fingerprint,
   ]);
+  const d = firstDecision(out);
+  return d?.decision === "stop" && d?.reason === "acknowledged";
 }
 
 interface TurnEvents {
@@ -266,7 +268,7 @@ async function main(): Promise<void> {
   const sameSessionResumed =
     delivered.session !== undefined && delivered.session === turn.sessionId;
   const deliveredToSameSession = receivedNonce && receivedAction && sameSessionResumed;
-  if (deliveredToSameSession) rebriefAck(eventId, core.fingerprint);
+  const acked = deliveredToSameSession && rebriefAck(eventId, core.fingerprint);
   process.stdout.write(
     JSON.stringify({
       result: "continue",
@@ -276,7 +278,7 @@ async function main(): Promise<void> {
       eventId,
       receivedNonce,
       receivedAction,
-      acked: deliveredToSameSession,
+      acked,
       actionId: core.actionId.slice(0, 60),
       fingerprint: core.fingerprint.slice(0, 16),
       turnSawTool: turn.sawTool,
