@@ -9,7 +9,7 @@
  */
 
 /** Version of this model's own shape. */
-export const ENGLISH_MODEL_VERSION = 1;
+export const ENGLISH_MODEL_VERSION = 2;
 
 /** A clause argument: a variable, a literal value, or DataScript's `_` wildcard. */
 export type Term = { var: string } | { lit: string | number | boolean } | { wild: true };
@@ -21,6 +21,7 @@ export type Term = { var: string } | { lit: string | number | boolean } | { wild
 export type FactScope = "viewer" | "constant" | "context" | "entity";
 
 export type Clause =
+  | { type: "dynamic-fact"; entity: Term; attribute: Term; value: Term }
   | {
       type: "fact";
       scope: FactScope;

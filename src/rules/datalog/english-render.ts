@@ -47,6 +47,8 @@ function factText(c: Extract<Clause, { type: "fact" }>): string {
 /** One clause on one line; nested groups are inlined. */
 export function clauseText(c: Clause): string {
   switch (c.type) {
+    case "dynamic-fact":
+      return `a fact has entity ${termText(c.entity)}, attribute ${termText(c.attribute)} and value ${termText(c.value)}`;
     case "fact":
       return factText(c);
     case "call":
