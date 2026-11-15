@@ -148,11 +148,9 @@ function clause(f: Form, where: string, ctx: Context): Clause {
         };
       case "and":
         if (items.length < 2) ctx.problems.push(`${where}: empty and`);
-        // A bare `and` outside an `or` is a conjunction; keep it as a one-alternative group.
         return {
-          type: "or",
-          join: null,
-          alternatives: [items.slice(1).map((c, i) => clause(c, `${where} and[${i}]`, ctx))],
+          type: "and",
+          body: items.slice(1).map((c, i) => clause(c, `${where} and[${i}]`, ctx)),
         };
       case null:
         ctx.problems.push(`${where}: unsupported list clause`);
@@ -196,7 +194,7 @@ export function callsOf(clauses: Clause[]): string[] {
     for (const c of cs)
       if (c.type === "call") {
         if (!out.includes(c.predicate)) out.push(c.predicate);
-      } else if (c.type === "not") walk(c.body);
+      } else if (c.type === "not" || c.type === "and") walk(c.body);
       else if (c.type === "or") for (const alt of c.alternatives) walk(alt);
   };
   walk(clauses);
@@ -300,9 +298,59 @@ function compileQuery(
 }
 
 /** The decision's :when clauses: the match query's :where after the template's own clauses. */
-function decisionClauses(text: string, where: string, ctx: Context): Clause[] {
-  const form = readOne(`[${text}]`, where);
-  return Array.isArray(form) ? form.map((c, i) => clause(c, `${where}[${i}]`, ctx)) : [];
+/** The where-clauses of a complete query string, compiled in order. */
+function whereClauses(text: string, where: string, ctx: Context): Clause[] {
+  const form = readOne(text, where);
+  if (!Array.isArray(form)) return [];
+  const at = form.findIndex((f) => kw(f) === "where");
+  return at < 0 ? [] : form.slice(at + 1).map((c, i) => clause(c, `${where}[${i}]`, ctx));
+}
+
+/**
+ * A decision's condition is exactly what the engine runs: its complete match query, so the
+ * shared :match template (e.g. foreground(?t)) is part of every rule's English.
+ */
+function decisionClauses(
+  d: { query: string; clauses: string },
+  where: string,
+  ctx: Context,
+): { clauses: Clause[]; templateClauses: number } {
+  const clauses = whereClauses(d.query, where, ctx);
+  const own = readOne(`[${d.clauses}]`, where);
+  const templateClauses = clauses.length - (Array.isArray(own) ? own.length : 0);
+  if (templateClauses < 0) ctx.problems.push(`${where}: match query lacks the :when clauses`);
+  return { clauses, templateClauses: Math.max(templateClauses, 0) };
+}
+
+/** Prints compiled clauses back as canonical EDN, to prove the model is the engine's query. */
+export function clauseEdn(c: Clause): string {
+  const t = (x: Term) =>
+    "var" in x
+      ? x.var
+      : "wild" in x
+        ? "_"
+        : typeof x.lit === "string"
+          ? JSON.stringify(x.lit)
+          : String(x.lit);
+  const join = (j: string[] | null) => (j ? ` [${j.join(" ")}]` : "");
+  const alt = (a: Clause[]) =>
+    a.length === 1 ? clauseEdn(a[0]) : `(and ${a.map(clauseEdn).join(" ")})`;
+  switch (c.type) {
+    case "fact":
+      return `[${t(c.entity)} ${JSON.stringify(c.attribute)} ${t(c.value)}]`;
+    case "call":
+      return `(${[c.predicate, ...c.args.map(t)].join(" ")})`;
+    case "compare":
+      return `[(${[c.op, ...c.args.map(t)].join(" ")})]`;
+    case "bind":
+      return `[(${[c.fn, ...c.args.map(t)].join(" ")}) ${c.result}]`;
+    case "not":
+      return `(${c.join ? "not-join" : "not"}${join(c.join)} ${c.body.map(clauseEdn).join(" ")})`;
+    case "or":
+      return `(${c.join ? "or-join" : "or"}${join(c.join)} ${c.alternatives.map(alt).join(" ")})`;
+    case "and":
+      return `(and ${c.body.map(clauseEdn).join(" ")})`;
+  }
 }
 
 /** Witness clauses: everything after :where in the witness query. */
@@ -358,7 +406,7 @@ const countClauses = (cs: Clause[]): number =>
     (n, c) =>
       n +
       1 +
-      (c.type === "not"
+      (c.type === "not" || c.type === "and"
         ? countClauses(c.body)
         : c.type === "or"
           ? c.alternatives.reduce((m, a) => m + countClauses(a), 0)
@@ -401,7 +449,7 @@ export function compileEnglish(bundle: PolicyBundle): EnglishPolicy {
   ];
   const decisions: CompiledDecision[] = bundle.definitions.map((d, index) => {
     const where = `policy/decisions.edn ${d.id} :when`;
-    const clauses = decisionClauses(d.clauses, where, ctx);
+    const { clauses, templateClauses } = decisionClauses(d, where, ctx);
     const evidence: CompiledEvidence[] = Object.entries(d.witnesses).map(([name, q]) => ({
       name,
       scope: "rule",
@@ -415,6 +463,7 @@ export function compileEnglish(bundle: PolicyBundle): EnglishPolicy {
       codes: d.codes,
       roles: requiredRoles(clauses),
       clauses,
+      templateClauses,
       calls: callsOf(clauses),
       evidence,
       source: { file: "policy/decisions.edn", index },

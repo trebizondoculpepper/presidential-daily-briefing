@@ -15,7 +15,7 @@ import {
   serialize,
 } from "./build.js";
 import { readOne } from "./edn.js";
-import { compileEnglish, EnglishCompileError } from "./english.js";
+import { clauseEdn, compileEnglish, EnglishCompileError } from "./english.js";
 import { clauseLines, clauseText, conjunctionText, predicateHead } from "./english-render.js";
 import type { EnglishPolicy } from "./english-model.js";
 
@@ -105,7 +105,7 @@ describe("English policy compiler (#416)", () => {
 
   it("names inputs only through the lexicon and keeps entity-1 viewer, constant and context facts apart", () => {
     expect(decisionText(model, "D-EASY")).toBe(
-      `the viewer's role is "implementer" and eligible(?t) and easy(?t) and the viewer's requested order is "impact"`,
+      `foreground(?t) and the viewer's role is "implementer" and eligible(?t) and easy(?t) and the viewer's requested order is "impact"`,
     );
     const largeImpact = model.predicates.find((p) => p.name === "large-impact");
     expect(conjunctionText(largeImpact?.alternatives[0].clauses ?? [])).toBe(
@@ -132,7 +132,7 @@ describe("English policy compiler (#416)", () => {
     expect(conjunctionText(blocker?.clauses ?? [])).toBe("issue(?t) and blocked(?t)");
     const closing = model.denials.find((d) => d.id === "D-DENY-CLOSING-UNKNOWN");
     expect(conjunctionText(closing?.clauses ?? [])).toBe(
-      "issue(?t) and no match for: closing-complete(?t)",
+      "issue(?t) and (no match for: closing-complete(?t))",
     );
   });
 
@@ -155,7 +155,7 @@ describe("English policy compiler (#416)", () => {
     const q = synthetic.queries.find((x) => x.name === "q3");
     expect(q?.clauses.map(clauseText)).toEqual([
       "?t has some kind",
-      `no match (joined on ?t) for: ?t has label ?l and ?t's state is "OPEN"`,
+      `no match (joined on ?t) for: (?t has label ?l and ?t's state is "OPEN")`,
       `at least one of: (1) issue(?t); (2) pr(?t) and ?t's draft flag is false`,
       "?n ≥ 2",
       "?n ≤ 9",
@@ -240,7 +240,7 @@ describe("English policy compiler (#416)", () => {
       ),
     );
     expect(decisionText(edited, "D-EASY")).toBe(
-      `the viewer's role is "implementer" and eligible(?t) and unfavorable(?t) and the viewer's requested order is "oldest"`,
+      `foreground(?t) and the viewer's role is "implementer" and eligible(?t) and unfavorable(?t) and the viewer's requested order is "oldest"`,
     );
     expect(edited.rulesHash).not.toBe(model.rulesHash);
 
@@ -334,5 +334,38 @@ describe("English policy compiler (#416)", () => {
     expect(() =>
       clauseText({ type: "bind", fn: "-", args: [{ var: "?n" }], result: "?m" }),
     ).toThrow("cannot render -");
+  });
+
+  it("compiles each decision as exactly the query the engine runs, match template included (Codex, #478)", () => {
+    for (const [i, d] of bundle.definitions.entries()) {
+      const compiled = model.decisions[i];
+      expect(compiled.id).toBe(d.id);
+      // The model printed back as EDN is the engine's :where, clause for clause.
+      const engineWhere = d.query.slice(d.query.indexOf(":where ") + ":where ".length, -1);
+      expect(compiled.clauses.map(clauseEdn).join(" "), d.id).toBe(engineWhere);
+      expect(compiled.clauses.slice(compiled.templateClauses).map(clauseEdn).join(" "), d.id).toBe(
+        d.clauses,
+      );
+    }
+    const attention = model.decisions.find((d) => d.id === "D-ATTENTION");
+    expect(attention?.templateClauses).toBe(1);
+    expect(conjunctionText(attention?.clauses ?? [])).toBe("foreground(?t) and addressed(?t)");
+  });
+
+  it("delimits nested groups and keeps a single-alternative or-join's variables (CodeRabbit, #478)", () => {
+    const q3 =
+      '[:find ?t :in $ % :where [?t "kind" _] (not (issue ?t) (open ?t)) (or-join [?t] (and (pr ?t) (open ?t))) (and (pr ?t) (not (open ?t))) (not (or (issue ?t) (pr ?t)))]';
+    const m = compileEnglish({ ...bundle, queries: { ...bundle.queries, q3 } });
+    const clauses = m.queries.find((q) => q.name === "q3")?.clauses ?? [];
+    expect(clauses.map(clauseEdn).join(" ")).toBe(q3.slice(q3.indexOf(":where ") + 7, -1));
+    expect(conjunctionText(clauses)).toBe(
+      "?t has some kind and (no match for: (issue(?t) and open(?t))) and (at least one of (joined on ?t): (1) pr(?t) and open(?t)) and (pr(?t) and (no match for: open(?t))) and (no match for: (at least one of: (1) issue(?t); (2) pr(?t)))",
+    );
+    expect(clauseLines(clauses.slice(2, 3))).toEqual([
+      "  - at least one of (joined on ?t):",
+      "      (1) all of:",
+      "          - pr(?t)",
+      "          - open(?t)",
+    ]);
   });
 });
