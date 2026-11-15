@@ -325,6 +325,123 @@ describe("PDB-owned identity store (#319)", () => {
     });
   });
 
+  describe("an explicit name is the way out of an unusable legacy file (#528 review)", () => {
+    type Prepare = (dir: string, legacyPath: string) => Promise<ConfigFileSystem | undefined>;
+    const written =
+      (legacy: string): Prepare =>
+      async (_dir, legacyPath) => {
+        await writeFile(legacyPath, legacy);
+        return undefined;
+      };
+    const cases: [string, Prepare, RegExp][] = [
+      ["malformed", written("[agents\nbroken"), /not valid for identity use/],
+      ["not a table", written("[agents]\ncodex = 3\n"), /is not a table/],
+      [
+        "an invalid name",
+        written('[agents.codex]\nname = "-not valid"\n'),
+        /not a valid agent name/,
+      ],
+      [
+        "tracked",
+        async (dir, legacyPath) => {
+          await writeFile(legacyPath, LEGACY);
+          await git(dir, "add", "--", LEGACY_IDENTITY_FILE);
+          return undefined;
+        },
+        /tracked by Git/,
+      ],
+      [
+        "unreadable",
+        async (_dir, legacyPath) => {
+          await writeFile(legacyPath, LEGACY);
+          return {
+            ...nodeFileSystem,
+            readText: async (path) => {
+              if (path.endsWith(LEGACY_IDENTITY_FILE))
+                throw Object.assign(new Error("denied"), { code: "EACCES" });
+              return nodeFileSystem.readText(path);
+            },
+          };
+        },
+        /could not be read \(EACCES\)/,
+      ],
+    ];
+    if (process.platform !== "win32")
+      cases.push([
+        "a symbolic link",
+        async (dir, legacyPath) => {
+          await writeFile(join(dir, "elsewhere.toml"), LEGACY);
+          await symlink(join(dir, "elsewhere.toml"), legacyPath);
+          return undefined;
+        },
+        /symbolic link/,
+      ]);
+
+    for (const [kind, prepare, reason] of cases)
+      it(`creates the pdb.toml entry past a legacy file that is ${kind}, never importing or writing it`, async () => {
+        await withRepo(async (dir) => {
+          const target = await resolveIdentityTarget(dir, undefined);
+          const legacyPath = join(target.root, LEGACY_IDENTITY_FILE);
+          const fs = await prepare(target.root, legacyPath);
+          const legacyBefore = await readFile(legacyPath, "utf8");
+          // The automatic import (a role set generating or importing a name) still refuses.
+          await expect(
+            setIdentity(target, "codex", "identity.triage_role", "designer", { fs }),
+          ).rejects.toBeInstanceOf(Error);
+          expect(await readdir(target.root)).not.toContain(IDENTITY_FILE);
+          const write = await setIdentity(target, "codex", "identity.name", "chosen_name", { fs });
+          expect(write).toMatchObject({
+            changed: true,
+            createdEntry: true,
+            importedFrom: null,
+            generatedName: null,
+            legacyIgnored: expect.stringMatching(reason),
+          });
+          expect(write.legacyIgnored).not.toMatch(/neither file was changed/);
+          expect(write.record).toMatchObject({ name: "chosen_name", triageRole: null });
+          // The role can now be set on the existing entry, still ignoring the legacy file.
+          const role = await setIdentity(target, "codex", "identity.triage_role", "designer", {
+            fs,
+          });
+          expect(role.record).toMatchObject({ name: "chosen_name", triageRole: "designer" });
+          expect(await readFile(legacyPath, "utf8")).toBe(legacyBefore);
+        });
+      });
+
+    it("reports the ignored legacy file in config set output", async () => {
+      await withRepo(async (dir) => {
+        await writeFile(join(dir, LEGACY_IDENTITY_FILE), "[agents\nbroken");
+        const set = await config(
+          dir,
+          {},
+          "set",
+          "identity.name",
+          "chosen_name",
+          "--entry",
+          "codex",
+          "--json",
+        );
+        expect(set.json()).toMatchObject({
+          importedFrom: null,
+          legacyIgnored: expect.stringContaining("agent-inbox.toml is not valid"),
+        });
+        const text = await config(
+          dir,
+          {},
+          "set",
+          "identity.name",
+          "other_name",
+          "--entry",
+          "claude",
+        );
+        expect(text.text).toMatch(
+          /ignored the legacy identity file \(nothing imported; it was not changed\)/,
+        );
+        expect(await readFile(join(dir, LEGACY_IDENTITY_FILE), "utf8")).toBe("[agents\nbroken");
+      });
+    });
+  });
+
   it("distinguishes ignored from tracked files and refuses tracked identity on either side", async () => {
     await withRepo(async (dir) => {
       const target = await resolveIdentityTarget(dir, undefined);
