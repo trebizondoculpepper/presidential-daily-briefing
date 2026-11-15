@@ -7,7 +7,7 @@
  :rules [[(project-hotfix ?a) [?a "pdb.action-label" "project:priority"]]]
  :preferences [{:id "project-hotfix"
                 :when [(project-hotfix ?a)]
-                :priority [[(+ 0 10) ?value]]
+                :priority [[(+ 0 10) ?value] [(not= ?value 0)]]
                 :why "Project priority label matched: {label}."
                 :witnesses {"label" [[?a "pdb.action-label" "project:priority"]
                                      [(str "project:priority") ?value]]}}]}

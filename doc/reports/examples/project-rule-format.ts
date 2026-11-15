@@ -39,6 +39,7 @@ assert.equal(
   ds.q(query, db, printEdn(rules, "rules")).some(([id]) => id === 101),
   false,
 );
+assert.deepEqual(ds.q("[:find ?value :in $ :where [(+ 0 0) ?value] [(not= ?value 0)]]", db), []);
 console.log(
   "Passed native v1 format fixture: source metadata, helper call, generated admitted-action query and derived integer priority.",
 );
