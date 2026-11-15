@@ -222,6 +222,27 @@ describe("direct dependency impact (#196)", () => {
         }
       }
     expect(checked).toBeGreaterThanOrEqual(8);
+    // deps --top suggestions parse too.
+    for (const agent of [undefined, "kavya_sabbagh"]) {
+      const { query } = graphQuery({
+        states: { 1: { labels: ["status:ready"] } },
+        edges: [[2, 1]],
+      });
+      const top = repositoryImpact(
+        await readDependencyInventory(repo, {}, query, clock),
+        10,
+        { prs: [] },
+        agent,
+      );
+      const commands = [...top.nextAction.matchAll(/pdb [a-z]+ [^).]*/g)].map(([c]) => c.trim());
+      expect(commands).toHaveLength(2);
+      for (const command of commands) expect(() => parse(command), command).not.toThrow();
+      expect(commands[0]).toBe(`pdb claim 1 --repo example/project --agent ${agent ?? "NAME"}`);
+    }
+    expect(depsArgumentsFor(["--top", "--agent", "kavya_sabbagh"])).toMatchObject({
+      top: true,
+      agent: "kavya_sabbagh",
+    });
   });
 
   it("marks a read with a truncated dependant blocker list partial and exits 2", async () => {
@@ -381,7 +402,7 @@ describe("deps --top: repository direct impact (#196)", () => {
     // Never claim or suggest a claimed ticket as new pickup.
     expect(ranked.startNow.map((r) => r.number)).not.toContain(2);
     expect(ranked.nextAction).toMatch(
-      /^Start #1: claim it \(pdb claim 1 --repo example\/project\)/,
+      /^Start #1: claim it \(pdb claim 1 --repo example\/project --agent NAME\)/,
     );
     const text = repositoryImpactText(ranked);
     expect(text).toContain("Can start now (2 of 2;");

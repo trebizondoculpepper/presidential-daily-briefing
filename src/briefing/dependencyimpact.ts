@@ -371,6 +371,7 @@ export function repositoryImpact(
   inventory: DependencyInventory,
   limit = 10,
   context: PickupContext = { prs: [] },
+  agent?: string,
 ): RepositoryImpact {
   // Issues the gates cannot decide from this read (truncated labels or blockers, or a blocker
   // closed as not planned) are neither offered for pickup nor counted as proven unlocks.
@@ -451,7 +452,7 @@ export function repositoryImpact(
   const top = startNow[0];
   const most = completionUnlocks[0];
   const nextAction = top
-    ? `Start #${top.number}: claim it (pdb claim ${top.number}${repoFlag(inventory.repository)}) and implement it; completing it makes ${count(top)} dependant(s) pickable. Check it first with pdb deps ${top.number}${repoFlag(inventory.repository)}.`
+    ? `Start #${top.number}: claim it (${claimCommand(top.number, inventory.repository, agent)}) and implement it; completing it makes ${count(top)} dependant(s) pickable. Check it first with pdb deps ${top.number}${repoFlag(inventory.repository)}.`
     : most
       ? `Nothing is pickable now. #${most.number} unlocks the most when it completes (${count(most)}); it is not pickable because ${most.notPickable.join("; ")}.`
       : "Nothing is pickable now and no open completion is proven to unlock other work.";
