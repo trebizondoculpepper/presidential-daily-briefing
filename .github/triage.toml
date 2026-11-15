@@ -1,0 +1,8 @@
+# Shared pdb repository settings (not secrets, not agent identity).
+# Change them with `pdb config set KEY VALUE`; see `pdb config help`.
+
+schemaVersion = 1
+
+[review]
+policy = "codex-or-coderabbit"
+
