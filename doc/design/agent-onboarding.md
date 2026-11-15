@@ -103,6 +103,17 @@ process summary. #392 and #416 provide that prerequisite; CLI onboarding need on
 the local full-rules command. Full client configuration automation and future
 CLI/MCP capability parity are not prerequisites for a useful prompt.
 
+## Implementation status (#351)
+
+Shipped: the pure builder (`src/briefing/onboarding.ts`), `pdb onboard` with `--repo`,
+`--role`, `--server`, `--install` and `--json` (`src/briefing/onboardcli.ts`), the managed
+section writer (`src/config/agentsguide.ts`, over the locked atomic `updateTextFile` of #382),
+the help and `triage_briefing` pointers, MCP server `instructions` from the same document, and
+the first-use stderr hint. The hint is keyed by `--repo` or the checkout root plus the CLI
+version, stored in `onboarding-hints.json` in the per-user cache, offered only for plain-text
+briefings, and disabled by `PDB_NO_FIRST_USE_HINT` (set by the test, smoke and package runs).
+Not yet shipped: an explicit hint reset command, and the #391 web page.
+
 ## Acceptance
 
 Test missing and existing identity, ambiguous harness, wrong project/root, no

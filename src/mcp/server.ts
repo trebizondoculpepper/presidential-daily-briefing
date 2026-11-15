@@ -20,6 +20,7 @@ import { collect, currentRepository, ghQueryWith, ghRest } from "../github/githu
 import { dependencyReport } from "../github/dependencies.js";
 import { impactGuidanceSummary } from "../estimation/impact.js";
 import { readBriefing, readDependencies } from "../briefing/service.js";
+import { onboardingDocument, onboardingInstructions } from "../briefing/onboarding.js";
 import { catchUp, catchUpLimits } from "../briefing/catchup.js";
 import { collectBriefing, WindowRefusal } from "../briefing/catchupcli.js";
 import { parseDuration } from "../github/changes.js";
@@ -432,7 +433,15 @@ export function createServer(
   runtime: McpRuntime,
   version = "0.0.0",
 ): McpServer {
-  const server = new McpServer({ name: "pdb", version });
+  // Short onboarding instructions from the shared document (#351); clients decide whether to use them.
+  const server = new McpServer(
+    { name: "pdb", version },
+    {
+      instructions: onboardingInstructions(
+        onboardingDocument({ repository: options.repo ?? null }),
+      ),
+    },
+  );
   // Generic path redaction applies only to the service's local diagnostics (doc/design/mcp.md).
   const reader: McpRuntime = { ...runtime, redactDiagnostic: redactLocalText };
 
@@ -588,7 +597,7 @@ export function createServer(
     {
       title: "Triage briefing",
       description:
-        'Datalog next actions by default (implementer view unless role is supplied). Explicit TypeScript rollback: pdb config set briefing.engine typescript. Evidence-linked action briefing for a GitHub repository: what needs attention and what to pick up next. Call at the start of work or with since to catch up. mode "briefing" returns the repository-wide what-changed report for a window (since, or last such as 24h; default last 24h); it never reads or advances a checkpoint. Actions default to ten next steps; catch-up defaults to five rows per section. In actions mode, role (implementer or designer) returns the blended queue for that role (rankedActions, role.next, estimation, impactEstimation) exactly as the CLI --role, and order (impact, oldest, newest) matches CLI --order. role human returns the human briefing (human): questions, attention and sign-offs owed by the human named in agent, explicit before inferred; read-only. The text lists only the next steps; context true adds the background lines (structured data is the same either way). PR acceptance follows the declared review.policy of the repository: undeclared keeps the legacy rule; codex-or-coderabbit accepts an authenticated current-head review from either provider, while a finding from either blocks and CI, protections and authority stay independent.',
+        'Datalog next actions by default (implementer view unless role is supplied). Explicit TypeScript rollback: pdb config set briefing.engine typescript. Evidence-linked action briefing for a GitHub repository: what needs attention and what to pick up next. Call at the start of work or with since to catch up. New to pdb here? `pdb onboard` shows the rules, identity setup and a prompt for agents. mode "briefing" returns the repository-wide what-changed report for a window (since, or last such as 24h; default last 24h); it never reads or advances a checkpoint. Actions default to ten next steps; catch-up defaults to five rows per section. In actions mode, role (implementer or designer) returns the blended queue for that role (rankedActions, role.next, estimation, impactEstimation) exactly as the CLI --role, and order (impact, oldest, newest) matches CLI --order. role human returns the human briefing (human): questions, attention and sign-offs owed by the human named in agent, explicit before inferred; read-only. The text lists only the next steps; context true adds the background lines (structured data is the same either way). PR acceptance follows the declared review.policy of the repository: undeclared keeps the legacy rule; codex-or-coderabbit accepts an authenticated current-head review from either provider, while a finding from either blocks and CI, protections and authority stay independent.',
       inputSchema: briefingInput,
       outputSchema: boundedEnvelope,
       annotations,
