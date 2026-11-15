@@ -51,7 +51,7 @@ Reuse the maintained EDN reader/printer and structural English compiler. Reject
 nil, tagged literals, reader evaluation, characters, unsafe/non-integer numbers,
 multiple forms and unsupported constructs; never silently discard them. Allow
 fact patterns, calls to declared project helpers, and/or/not/or-join/not-join,
-comparisons `=`, `!=`, `<`, `>`, `<=`, `>=`, and bounded scalar bindings using
+comparisons `=`, `not=`, `<`, `>`, `<=`, `>=`, and bounded scalar bindings using
 `+`, `-`, `*`, `/`, `str`. Reuse the current compiler's operand-arity validation;
 results must satisfy the integer priority/scalar witness contract. No aggregates,
 host functions, rule imports, recursion or cyclic helper graph. Duplicate helper
