@@ -92,6 +92,22 @@ if (args[0] === "api" && args[1] === "--include" && args[2] === "rate_limit") {
 }
 if (args[0] !== "api" || args[1] !== "graphql") { process.stderr.write("unsupported"); process.exit(1); }
 const query = (args.find((a) => a.startsWith("query=")) || "");
+const all = [
+  issue(1, ["status:ready", "impact:L", "complexity:S"], "2026-11-01T00:00:00Z"),
+  issue(2, ["status:ready", "impact:XL"], "2026-11-02T00:00:00Z"),
+  issue(3, ["status:needs-design", "complexity:XS"], "2026-11-03T00:00:00Z"),
+  issue(4, ["status:ready", "impact:S", "complexity:M"], "2026-10-01T00:00:00Z"),
+];
+// The routine briefing's shortlist hydration (#368): aliased issue(number:$nK) reads.
+if (query.includes("i0:issue(")) {
+  const repository = {};
+  for (const a of args) {
+    const m = /^n([0-9]+)=([0-9]+)$/.exec(a);
+    if (m) repository["i" + m[1]] = all.find((x) => x.number === Number(m[2])) || null;
+  }
+  process.stdout.write(JSON.stringify({ data: { repository } }));
+  process.exit(0);
+}
 const issues = query.includes("issues(first") ? [
   issue(1, ["status:ready", "impact:L", "complexity:S"], "2026-11-01T00:00:00Z"),
   issue(2, ["status:ready", "impact:XL"], "2026-11-02T00:00:00Z"),

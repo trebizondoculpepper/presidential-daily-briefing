@@ -133,6 +133,11 @@ export type Snapshot = {
    */
   collection?: import("./readplan.js").ReadCollection;
   /**
+   * Routine shortlist hydration (#368): which open items were hydrated and which were only
+   * discovered. Absent in full snapshots, where every open item was read.
+   */
+  shortlist?: import("./shortlist.js").ShortlistRecord;
+  /**
    * The repository's declared review policy (#301), attached by the front end that resolved
    * configuration; never cached or collected from GitHub. Absent: legacy, reported as not read.
    */

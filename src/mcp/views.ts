@@ -91,6 +91,28 @@ const countsLine = (sections: Json): string => {
   return counts.length ? `Sections (totals): ${counts.join(", ")}.` : "Sections: none.";
 };
 
+/** Unread shortlist items listed in an MCP briefing; the total is always given (#368). */
+export const shortlistListed = 10;
+/**
+ * The routine shortlist's coverage (#368), bounded: whether the ordering is provisional, how
+ * many open items went unread, the omission notice and the first few unread items.
+ */
+function shortlistCoverage(report: Json): Json | undefined {
+  if (!report.shortlist) return undefined;
+  const shortlist = obj(report.shortlist);
+  const unread = list(shortlist.notHydrated);
+  return {
+    provisional: shortlist.provisional === true,
+    hydrated: list(shortlist.hydrated).length,
+    notHydratedTotal: unread.length,
+    notHydrated: unread
+      .slice(0, shortlistListed)
+      .map((row) => pick(obj(row), ["number", "url", "kind", "reason"])),
+    notHydratedOmitted: Math.max(0, unread.length - shortlistListed),
+    notice: str(shortlist.notice) || null,
+  };
+}
+
 export function briefingView(
   base: ViewBase,
   report: Json,
@@ -101,6 +123,8 @@ export function briefingView(
     ...pick(report, briefingFields),
     subjects: list(report.subjects).map((subject) => compactSubject(obj(subject))),
   };
+  const shortlist = shortlistCoverage(report);
+  if (shortlist) data.shortlist = shortlist;
   return {
     ...base,
     tool: "triage_briefing",
@@ -110,7 +134,8 @@ export function briefingView(
     sourceCompleteness: completenessOf(report),
     data,
     // Completeness is carried once, in the envelope's bounded sourceCompleteness.
-    protectedPaths: ["guidance"],
+    // The shortlist's coverage (#368) is already bounded and is never pruned away.
+    protectedPaths: ["guidance", "shortlist"],
     // #311: pruning may drop focus rows; `shown` is what this response actually returns.
     fixup: (d) => {
       if (d.focus) {
@@ -158,6 +183,12 @@ export function briefingView(
       const lines = [
         `Presidential Daily Briefing: ${base.repository} — fetched ${str(freshness.fetchedAt)}${freshness.offline ? " (OFFLINE CACHE)" : ""}`,
       ];
+      // #368: unread shortlist items make the ordering provisional; said before any row.
+      const coverage = obj(d.shortlist);
+      if (coverage.provisional === true)
+        lines.push(
+          `PROVISIONAL: ${Number(coverage.notHydratedTotal ?? 0)} open item(s) were discovered but not hydrated; their evidence is unknown, not empty. Inspect one with pdb --issue N (structured data: shortlist).`,
+        );
       // #312: a filtered view says so before any row.
       if (d.filter) {
         const filter = obj(d.filter);
