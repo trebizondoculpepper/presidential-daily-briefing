@@ -159,17 +159,28 @@ describe("fatal telemetry boundary", () => {
     }
   });
   it("keeps the built location when the shipped map is malformed", async () => {
-    const temporary = await mkdtemp(join(tmpdir(), "pdb-map-"));
-    try {
-      await mkdir(join(temporary, "dist"));
-      await writeFile(join(temporary, "dist", "mcp.mjs"), "a\n");
-      await writeFile(join(temporary, "dist", "mcp.mjs.map"), "{not json");
-      const built = event(pathToFileURL(join(temporary, "dist", "mcp.mjs")).href);
-      expect(
-        sanitizeCrash(built, temporary, "mcp")?.exception?.values?.[0]?.stacktrace?.frames,
-      ).toEqual([{ filename: "dist/mcp.mjs", lineno: 10, colno: 2, in_app: true }]);
-    } finally {
-      await rm(temporary, { recursive: true, force: true });
+    // Unparsable JSON, an out-of-range source index, a non-string source and a non-list.
+    for (const [i, text] of [
+      "{not json",
+      JSON.stringify({ version: 3, sources: [], names: [], mappings: "AAAA" }),
+      JSON.stringify({ version: 3, sources: [7], names: [], mappings: "AAAA" }),
+      JSON.stringify({ version: 3, sources: "../src/a.ts", names: [], mappings: "AAAA" }),
+    ].entries()) {
+      const temporary = await mkdtemp(join(tmpdir(), "pdb-map-"));
+      try {
+        await mkdir(join(temporary, "dist"));
+        await writeFile(join(temporary, "dist", "mcp.mjs"), "a\n");
+        await writeFile(join(temporary, "dist", "mcp.mjs.map"), text);
+        expect(mappedFrame(temporary, "dist/mcp.mjs", 1, 1), `case ${i}`).toBeUndefined();
+        const built = event(pathToFileURL(join(temporary, "dist", "mcp.mjs")).href);
+        built.exception!.values![0]!.stacktrace!.frames![0]!.lineno = 1;
+        built.exception!.values![0]!.stacktrace!.frames![0]!.colno = 1;
+        expect(
+          sanitizeCrash(built, temporary, "mcp")?.exception?.values?.[0]?.stacktrace?.frames,
+        ).toEqual([{ filename: "dist/mcp.mjs", lineno: 1, colno: 1, in_app: true }]);
+      } finally {
+        await rm(temporary, { recursive: true, force: true });
+      }
     }
   });
   it("does not load an SDK for absent, disabled or invalid configuration", async () => {
