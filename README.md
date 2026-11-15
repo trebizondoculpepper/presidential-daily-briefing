@@ -235,3 +235,21 @@ pdb --help
 Old executable names remain compatibility aliases in the new package. Existing `triage_*` MCP tool names, repository settings, `triage_role` and hidden workflow-receipt identifiers remain compatible. `PDB_NO_UPDATE_CHECK=1` is the primary update-check opt-out; `GITHUB_TRIAGE_NO_UPDATE_CHECK=1` is still accepted. Historical reports retain their original names and references.
 
 For opt-in native continuation prototypes, see [the shared rebrief core](doc/rebrief.md) (`pdb rebrief --help`). It does not install a hook or start a model.
+
+## Crash reporting
+
+PDB reports unhandled Node crashes to the project's Sentry service by default. Reports
+contain fixed error text, public PDB source locations, mode and installed version, not
+original error messages, ticket content or configuration. The receiving service can see
+network metadata such as source IP. Ordinary handled command errors are not reported.
+
+Set `SENTRY_DISABLED=1` to disable immediately, or create `crash-reporting.toml` in the
+user configuration directory printed by `pdb --help` with:
+
+```toml
+[telemetry.crashes]
+enabled = false
+```
+
+Restart running PDB processes after changing the file. The setting applies to the whole
+process, including shared servers; repository settings cannot override it.

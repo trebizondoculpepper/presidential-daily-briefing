@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+// All ordinary child processes are credential-free; fatal checks explicitly override this.
+process.env.SENTRY_DISABLED = "1";
 /**
  * Credential-free smoke test of the built CLI (dist/cli.mjs).
  *

@@ -1,8 +1,10 @@
-/** Optional fatal-only reporting; doc/design/sentry-crash-reporting.md. */
+/** Fatal-only reporting with a process-wide opt-out; doc/design/sentry-crash-reporting.md. */
 import { readFileSync, realpathSync, statSync } from "node:fs";
 import { SourceMap } from "node:module";
 import { isAbsolute, join, posix, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { crashesEnabled } from "./crash-setting.js";
+import type { CrashConfigReader } from "./crash-setting.js";
 import type { NodeOptions } from "@sentry/node";
 
 type CrashEvent = Parameters<NonNullable<NodeOptions["beforeSend"]>>[0];
@@ -148,6 +150,8 @@ interface Sdk {
     mode: "strict";
   }): ReturnType<typeof import("@sentry/node").onUnhandledRejectionIntegration>;
 }
+export const defaultCrashDsn =
+  "https://cc8b7320a11f8073cf52210bb100fe73@o516097.ingest.us.sentry.io/4512437481046016";
 let initialized = false;
 export async function initializeCrashes(
   mode: Mode,
@@ -155,15 +159,18 @@ export async function initializeCrashes(
   version: string | null | undefined,
   env: Record<string, string | undefined> = process.env,
   load: () => Promise<Sdk> = () => import("@sentry/node"),
+  readConfig?: CrashConfigReader,
 ): Promise<boolean> {
-  if (initialized || env.SENTRY_DISABLED === "1" || !env.SENTRY_DSN) return false;
+  if (initialized || env.SENTRY_DISABLED === "1") return false;
+  if (!(await crashesEnabled(readConfig))) return false;
+  const endpoint = env.SENTRY_DSN ?? defaultCrashDsn;
   try {
-    const dsn = new URL(env.SENTRY_DSN);
+    const dsn = new URL(endpoint);
     if (dsn.protocol !== "https:" || !dsn.username || !/^\/[0-9]+$/.test(dsn.pathname))
       return false;
     const sdk = await load();
     sdk.init({
-      dsn: env.SENTRY_DSN,
+      dsn: endpoint,
       defaultIntegrations: false,
       integrations: [
         sdk.onUncaughtExceptionIntegration({ exitEvenIfOtherHandlersAreRegistered: true }),
