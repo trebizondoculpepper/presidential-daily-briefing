@@ -307,6 +307,15 @@ describe("serve diagnostics (#459)", () => {
     }
   });
 
+  it("config reports a setting given as an argument as such, even when it equals the default", async () => {
+    const { serveArguments: parse } = await import("./options.js");
+    expect(parse(["--repo", "o/r", "--ttl", "5m", "--port", "4372"]).given).toEqual({
+      port: true,
+      ttl: true,
+    });
+    expect(parse(["--repo", "o/r"]).given).toEqual({ port: false, ttl: false });
+  });
+
   it("config shows held server settings and, without a project, the applicable defaults", async () => {
     const s = await setup();
     try {

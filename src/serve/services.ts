@@ -12,7 +12,7 @@ import { ServeCache } from "./cache.js";
 import { HttpFailure } from "./http.js";
 import { diagnosticViews, diagnosticsApi } from "./diagnostics.js";
 import type { RulesDiagnostic, SettingDiagnostic } from "./diagnostics.js";
-import { DEFAULT_PORT, DEFAULT_TTL_MS, STALE_WINDOW_MS } from "./options.js";
+import { STALE_WINDOW_MS } from "./options.js";
 import { MAX_ENTRIES } from "./cache.js";
 import { defaultEngine } from "../config/engine-setting.js";
 import { briefingRoleNames } from "../briefing/roles.js";
@@ -112,9 +112,10 @@ function serveSettings(
   served: readonly { repository: string; project?: string }[],
   repository: string,
 ): { settings: Record<string, SettingDiagnostic>; warnings: string[] } {
-  const held = (value: number, fallback: number): SettingDiagnostic => ({
+  // The source is whether the argument was given, not whether its value equals the default.
+  const held = (value: number, given: boolean | undefined): SettingDiagnostic => ({
     value,
-    source: value === fallback ? "default" : "argument",
+    source: given ? "argument" : "default",
     known: true,
   });
   const local = served.find((s) => s.repository === repository)?.project !== undefined;
@@ -124,8 +125,8 @@ function serveSettings(
       : { value: fallback, source: "default", known: true };
   return {
     settings: {
-      "serve.port": held(options.port, DEFAULT_PORT),
-      "serve.ttlSeconds": held(options.ttlMs / 1000, DEFAULT_TTL_MS / 1000),
+      "serve.port": held(options.port, options.given?.port),
+      "serve.ttlSeconds": held(options.ttlMs / 1000, options.given?.ttl),
       "serve.staleWindowSeconds": { value: STALE_WINDOW_MS / 1000, source: "default", known: true },
       "serve.cacheEntries": { value: MAX_ENTRIES, source: "default", known: true },
       "briefing.engine": repositorySetting(defaultEngine()),
