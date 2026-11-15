@@ -8,12 +8,18 @@
  * Nothing here evaluates a project query; the worker does that, and admission.ts validates it.
  */
 import type { Datom, Schema } from "datascript";
-import { projectionVocabulary } from "./grammar.js";
 
 /** Addressed attention (1) and concrete PR follow-up (2) keep their default position and reasons. */
 export const protectedBands: ReadonlySet<number> = new Set([1, 2]);
 /** Contract v1 input limits; excess is an explicit error, never silent truncation. */
 export const projectionLimits = { actions: 500, datoms: 50_000 } as const;
+/**
+ * The projection database schema; grammar.ts's projectionVocabulary declares the same one for the
+ * compiler. Kept here so the evaluator chunk does not import the build-time EDN reader.
+ */
+export const projectionSchema: Schema = {
+  "pdb.action-label": { ":db/cardinality": ":db.cardinality/many" },
+};
 /** Entity 1 holds viewer facts; action entities begin here with per-evaluation opaque IDs. */
 export const firstActionEntity = 100;
 
@@ -134,7 +140,7 @@ export function projectActions(
   return {
     actions: copy,
     datoms,
-    schema: projectionVocabulary.schema,
+    schema: projectionSchema,
     identities,
     positions,
   };
