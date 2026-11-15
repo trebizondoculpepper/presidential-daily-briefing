@@ -39,7 +39,7 @@ export const pages: Page[] = [
         title: "Evidence includes its limits",
         paragraphs: [
           "A briefing is advice grounded in an observation, not proof that the whole repository is current. Missing permissions, incomplete reads, stale snapshots and unknown estimates must remain visible. Read those notices before acting; absence of evidence is not approval.",
-          "PDB does not promise that an agent will autonomously finish a project. It gives the agent and the person directing it a checkable next step. The command examples below are dated when the release capture pipeline supplies them. Until then, this preview deliberately leaves the output empty.",
+          "PDB does not promise that an agent will autonomously finish a project. It gives the agent and the person directing it a checkable next step. Examples carry their release, observation time and coverage. Read them as dated evidence rather than a live board.",
         ],
       },
     ],
