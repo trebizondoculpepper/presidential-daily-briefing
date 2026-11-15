@@ -194,7 +194,7 @@ describe("ticket detail renderers (#454)", () => {
     expect(html).not.toContain("No native blockers");
     expect(html).toContain('Ticket responsible: <span class="warn">unknown');
     expect(html).toContain("unknown (delivery records not read)");
-    expect(html).toContain("4 comment(s) not read");
+    expect(html).toContain("4 more comment(s) not shown; see the source.");
     // No PR rows and an incomplete linkage is unknown, not "none".
     const empty = render.renderTicket(
       envelope(ticket({ pullRequests: [], coverage: { linkage: { complete: false } } })),
@@ -206,6 +206,122 @@ describe("ticket detail renderers (#454)", () => {
     expect(render.renderState(envelope(ticket(), { status: "incomplete" }), false)).toContain(
       "Incomplete evidence",
     );
+  });
+
+  it("lists every delivery member, commit evidence included, with its own state", () => {
+    const html = render.renderTicket(
+      envelope(
+        ticket({
+          delivery: {
+            verdict: "partial",
+            records: "known",
+            because: [],
+            required: ["o/r#9", "o/r@abc123"],
+            deliverables: [
+              {
+                deliverable: "o/r#9",
+                url: prUrl(9),
+                target: "o/r:main",
+                state: "open",
+                why: "Open.",
+                responsible: "alice",
+                followUp: "none",
+                followUpWhy: "",
+              },
+              {
+                deliverable: "o/r@abc123",
+                url: null,
+                target: "o/r:main",
+                state: "landed",
+                why: "Commit on main.",
+                responsible: null,
+                followUp: "none",
+                followUpWhy: "",
+              },
+            ],
+          },
+        }),
+      ),
+    );
+    expect(html).toContain('data-member-state="landed"');
+    expect(html).toContain("o/r@abc123 → o/r:main: landed");
+    expect(html).toContain("Commit on main.");
+    expect(html).toContain("Required: o/r#9, o/r@abc123");
+    expect(html.match(/data-member-state=/g)).toHaveLength(2);
+  });
+
+  it("separates comments not shown (display trimming) from comments not read (coverage)", () => {
+    const trimmed = render.renderTicket(
+      envelope(
+        ticket({
+          coverage: {
+            linkage: { complete: true },
+            sources: [{ source: "comments", subject: "o/r#1", state: "complete" }],
+            omitted: { pullRequests: [], discussionComments: 7, records: 2 },
+          },
+        }),
+      ),
+    );
+    expect(trimmed).toContain("7 more comment(s) not shown; see the source.");
+    expect(trimmed).toContain("2 more workflow record(s) not shown; see the source.");
+    expect(trimmed).not.toMatch(/not read completely|comment\(s\) not read/);
+    const gap = render.renderTicket(
+      envelope(
+        ticket({
+          coverage: {
+            linkage: { complete: true },
+            sources: [
+              { source: "comments", subject: "o/r#1", state: "partial", omission: "beyond 100" },
+            ],
+            omitted: { pullRequests: [], discussionComments: 0, records: 0 },
+          },
+        }),
+      ),
+    );
+    expect(gap).toContain("Comments of o/r#1 were not read completely (partial: beyond 100)");
+    expect(gap).not.toContain("more comment(s) not shown");
+  });
+
+  it("renders or counts every array of the document", () => {
+    const many = Array.from({ length: 60 }, (_, i) => ({
+      url: issueUrl(100 + i),
+      number: 100 + i,
+      title: "t",
+      state: "OPEN",
+      repository: "o/r",
+    }));
+    const html = render.renderTicket(
+      envelope(
+        ticket({
+          pullRequests: [pr({ blockers: ["a", "b", "c", "d", "e", "f", "g"], warnings: ["w1"] })],
+          dependencies: { known: true, blockedBy: many, blocking: [], verdict: "Blocked." },
+          ownership: {
+            answer: "x",
+            ticketResponsible: "alice",
+            responsibilityKnown: true,
+            recordedOwners: ["alice"],
+          },
+          freshness: { requestedAt: "t0", note: "n" },
+          identity: { agent: "me", platform: "claude", note: "focus only" },
+          coverage: {
+            linkage: { complete: true },
+            sources: [
+              { source: "issue", subject: "o/r#1", state: "complete", observedAt: "t1" },
+              { source: "native-edges", subject: "o/r#1", state: "failed", failure: "x" },
+            ],
+            omitted: { pullRequests: [], discussionComments: 0, records: 0 },
+          },
+        }),
+      ),
+    );
+    expect(html).toContain("2 more blocker(s) not shown");
+    expect(html).toContain("w1");
+    expect(html).toContain("check counts: passed 3");
+    expect(html).toContain("10 more not shown; see the source.");
+    expect(html).toContain("Recorded owners: alice");
+    expect(html.match(/data-source-state=/g)).toHaveLength(2);
+    expect(html).toContain("observed never");
+    expect(html).toContain("platform claude");
   });
 
   it("keeps missing, inaccessible and moved tickets distinct", () => {

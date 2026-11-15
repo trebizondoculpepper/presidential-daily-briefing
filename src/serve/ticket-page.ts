@@ -89,6 +89,9 @@ export function ticketRenderers(): TicketRenderers {
   // Bounds of what is shown; the document's own omissions are always counted.
   const maxWarnings = 10;
   const maxRows = 50;
+  /** Display trimming, never a collection gap: what is cut is counted and points to the source. */
+  const more = (shown: number, total: number, what: string): string =>
+    total > shown ? `<p>${total - shown} more ${what} not shown; see the source.</p>` : "";
 
   const validSelection = (s: TicketSelection): boolean =>
     /^[\w.-]+\/[\w.-]+$/.test(s.repo) &&
@@ -216,16 +219,28 @@ export function ticketRenderers(): TicketRenderers {
     if (p.memberState) facts.push(`delivery member ${escapeHtml(p.memberState)}`);
     if (p.responsible) facts.push(`responsible ${escapeHtml(p.responsible)}`);
     if (p.followUp) facts.push(`follow-up ${escapeHtml(p.followUp)}`);
-    const blockers = list(p.blockers)
-      .slice(0, 5)
-      .map((b) => `<li>${escapeHtml(b)}</li>`)
+    const allBlockers = list(p.blockers);
+    const blockers =
+      allBlockers
+        .slice(0, 5)
+        .map((b) => `<li>${escapeHtml(b)}</li>`)
+        .join("") +
+      (allBlockers.length > 5
+        ? `<li>${allBlockers.length - 5} more blocker(s) not shown; see the source.</li>`
+        : "");
+    const counts = Object.entries(record(record(p.checks).counts))
+      .map(([k, v]) => `${escapeHtml(k)} ${escapeHtml(v)}`)
+      .join(", ");
+    if (counts) facts.push(`check counts: ${counts}`);
+    const rowWarnings = list(p.warnings)
+      .map((w) => `<p class="warn">${escapeHtml(w)}</p>`)
       .join("");
     // Drill-down reads are on demand and only for the selected (served) repository.
     const sameRepo = String(p.repository ?? "").toLowerCase() === repo.toLowerCase();
     const drill = sameRepo
       ? `<button type="button" class="load-pr" data-pr="${escapeHtml(p.number)}">Load current PR status</button><div class="pr-detail" data-pr-detail="${escapeHtml(p.number)}"></div>`
       : `<p>Another repository: inspect with ${code(`pdb pr ${String(p.number ?? "")} --repo ${String(p.repository ?? "")}`)}</p>`;
-    return `<li>${link(p.url, `${identity}${p.title ? ` ${String(p.title)}` : ""}`)} <span class="kind">${relations}</span><p class="why">${facts.join(" · ")}</p>${p.followUpWhy ? `<p class="why">${escapeHtml(p.followUpWhy)}</p>` : ""}${blockers ? `<ul>${blockers}</ul>` : ""}${drill}</li>`;
+    return `<li>${link(p.url, `${identity}${p.title ? ` ${String(p.title)}` : ""}`)} <span class="kind">${relations}</span><p class="why">${facts.join(" · ")}</p>${p.followUpWhy ? `<p class="why">${escapeHtml(p.followUpWhy)}</p>` : ""}${blockers ? `<ul>${blockers}</ul>` : ""}${rowWarnings}${drill}</li>`;
   };
 
   const issueRows = (rows: unknown[]): string =>
@@ -235,7 +250,10 @@ export function ticketRenderers(): TicketRenderers {
         const d = record(raw);
         return `<li>${link(d.url, `${String(d.repository ?? "")}#${String(d.number ?? "")} ${String(d.title ?? "")}`)} (${escapeHtml(d.state)})</li>`;
       })
-      .join("");
+      .join("") +
+    (rows.length > maxRows
+      ? `<li>${rows.length - maxRows} more not shown; see the source.</li>`
+      : "");
 
   const renderTicket = (envelope: unknown): string => {
     const e = record(envelope);
@@ -262,6 +280,34 @@ export function ticketRenderers(): TicketRenderers {
         .map((b) => `<p class="why">${escapeHtml(b)}</p>`)
         .join("")}`,
     );
+    // Every delivery member, PR or not (commit evidence included), with its own state.
+    const members = list(delivery.deliverables);
+    if (members.length)
+      parts.push(
+        `<ul class="deliverables">${members
+          .slice(0, maxRows)
+          .map((raw) => {
+            const m = record(raw);
+            return `<li data-member-state="${escapeHtml(m.state)}">${link(m.url, m.deliverable)} → ${escapeHtml(m.target)}: ${escapeHtml(m.state)}${m.responsible ? ` · responsible ${escapeHtml(m.responsible)}` : ""}${m.followUp ? ` · follow-up ${escapeHtml(m.followUp)}` : ""}${m.why ? `<p class="why">${escapeHtml(m.why)}</p>` : ""}${m.followUpWhy ? `<p class="why">${escapeHtml(m.followUpWhy)}</p>` : ""}</li>`;
+          })
+          .join(
+            "",
+          )}</ul>${more(Math.min(members.length, maxRows), members.length, "deliverable(s)")}`,
+      );
+    const required = list(delivery.required);
+    if (required.length)
+      parts.push(
+        `<p>Required: ${required
+          .slice(0, maxRows)
+          .map(escapeHtml)
+          .join(
+            ", ",
+          )}</p>${more(Math.min(required.length, maxRows), required.length, "required identity(ies)")}`,
+      );
+    if (delivery.records === "unknown" || delivery.records === "unread")
+      parts.push(
+        `<p class="warn">Delivery records ${escapeHtml(delivery.records)}: membership is unknown.</p>`,
+      );
 
     const steps = list(r.nextSteps);
     if (steps.length)
@@ -299,7 +345,9 @@ export function ticketRenderers(): TicketRenderers {
         `<p class="warn">${omittedPrs.length} known pull request(s) not read in detail: ${omittedPrs
           .slice(0, maxRows)
           .map((o) => escapeHtml(record(o).identity))
-          .join(", ")}.</p>`,
+          .join(
+            ", ",
+          )}${omittedPrs.length > maxRows ? ` and ${omittedPrs.length - maxRows} more` : ""}.</p>`,
       );
     parts.push(prSection.join(""));
 
@@ -309,7 +357,11 @@ export function ticketRenderers(): TicketRenderers {
         ownership.responsibilityKnown === false
           ? '<span class="warn">unknown (delivery records not read)</span>'
           : known(ownership.ticketResponsible, "none recorded")
-      }</p>`,
+      }</p>${
+        Array.isArray(ownership.recordedOwners)
+          ? `<p>Recorded owners: ${ownership.recordedOwners.length ? ownership.recordedOwners.map(escapeHtml).join(", ") : "none"}</p>`
+          : '<p class="warn">Recorded owners unknown.</p>'
+      }${ownership.presence ? `<p>${escapeHtml(ownership.presence)}</p>` : ""}`,
     );
 
     const deps = record(r.dependencies);
@@ -329,7 +381,13 @@ export function ticketRenderers(): TicketRenderers {
     const discussion = record(r.discussion);
     const records = list(discussion.records);
     const excerpts = list(discussion.excerpts);
-    const omittedComments = Number(record(coverage.omitted).discussionComments ?? 0);
+    // Comments read but not shown are display trimming; a collection gap is only what the
+    // coverage of the comments source says was not read completely.
+    const trimmedComments = Number(record(coverage.omitted).discussionComments ?? 0);
+    const trimmedRecords = Number(record(coverage.omitted).records ?? 0);
+    const commentGaps = list(coverage.sources)
+      .map(record)
+      .filter((c) => c.source === "comments" && c.state !== "complete");
     parts.push(
       `<details id="discussion"><summary>Discussion (${escapeHtml(discussion.totalComments)} comment(s); excerpts, not summaries)</summary>${discussion.note ? `<p>${escapeHtml(discussion.note)}</p>` : ""}${
         records.length
@@ -349,7 +407,12 @@ export function ticketRenderers(): TicketRenderers {
               })
               .join("")}</ul>`
           : ""
-      }${omittedComments > 0 ? `<p class="warn">${escapeHtml(omittedComments)} comment(s) not read; read the full thread on GitHub.</p>` : ""}<p>${link(r.url, "Full discussion on GitHub")}</p></details>`,
+      }${trimmedRecords > 0 ? `<p>${escapeHtml(trimmedRecords)} more workflow record(s) not shown; see the source.</p>` : ""}${trimmedComments > 0 ? `<p>${escapeHtml(trimmedComments)} more comment(s) not shown; see the source.</p>` : ""}${commentGaps
+        .map(
+          (c) =>
+            `<p class="warn">Comments of ${escapeHtml(c.subject)} were not read completely (${escapeHtml(c.state)}${c.omission ? `: ${escapeHtml(c.omission)}` : ""}); the discussion may be longer than shown.</p>`,
+        )
+        .join("")}<p>${link(r.url, "Full discussion on GitHub")}</p></details>`,
     );
 
     const assessments = record(r.assessments);
@@ -359,6 +422,20 @@ export function ticketRenderers(): TicketRenderers {
       `<h3>Assessments</h3><p>${metric("impact", record(assessments.impact))} · ${metric("complexity", record(assessments.complexity))}</p>`,
     );
 
+    // Per-source coverage and observation times, every one listed.
+    const freshness = record(r.freshness);
+    const sources = list(coverage.sources).map(record);
+    const identity = record(r.identity);
+    parts.push(
+      `<details id="sources"><summary>Sources (${sources.length}; requested ${escapeHtml(freshness.requestedAt)})</summary>${freshness.note ? `<p>${escapeHtml(freshness.note)}</p>` : ""}<ul>${sources
+        .map(
+          (c) =>
+            `<li data-source-state="${escapeHtml(c.state)}">${escapeHtml(c.source)} ${escapeHtml(c.subject)}: ${escapeHtml(c.state)}, observed ${known(c.observedAt, "never")}${c.omission ? ` (${escapeHtml(c.omission)})` : ""}${c.failure ? ` (${escapeHtml(c.failure)})` : ""}</li>`,
+        )
+        .join(
+          "",
+        )}</ul><p>Focus: agent ${known(identity.agent, "none")}, platform ${known(identity.platform, "none")}${identity.note ? `. ${escapeHtml(identity.note)}` : ""}</p></details>`,
+    );
     const links = record(r.links);
     parts.push(
       `<h3>Full sources</h3><ul>${[links.intake, links.dependencies]
