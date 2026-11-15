@@ -2,7 +2,8 @@
  * Read-only agent identity for focused reads (#25, doc/design/mcp.md "Selection and identity").
  *
  * One resolver composes the shared services instead of re-implementing them: the root
- * `agent-inbox.toml` reader (#70, identity.ts) and verified entry resolution (#38, harness.ts).
+ * `pdb.toml` reader with its read-only legacy `agent-inbox.toml` fallback (#70/#319,
+ * identity.ts) and verified entry resolution (#38, harness.ts).
  *
  * Precedence, first match wins:
  * 1. an explicit per-call `agent` (MCP tool argument);
@@ -23,7 +24,7 @@ import type { ConfigFileSystem, GitRunner } from "./config.js";
 import { detectClientEntry, resolveEntry } from "./harness.js";
 import type { Environment } from "./harness.js";
 import { IDENTITY_FILE, readIdentity, resolveIdentityTarget } from "./identity.js";
-import type { TriageRole } from "./identity.js";
+import type { IdentitySource, TriageRole } from "./identity.js";
 
 /** Which input decided the identity. */
 export type ReadIdentitySource =
@@ -44,6 +45,14 @@ export interface ReadIdentity {
   readonly triageRole: TriageRole | null;
   /** Why identity is unresolved, with recovery; null when resolved. */
   readonly diagnostic: string | null;
+  /**
+   * Which local store supplied a persisted name (#319): `pdb`, or `legacy-not-imported` when
+   * it was read from a legacy agent-inbox.toml entry that has not been imported (nothing is
+   * imported by a read). Null when no persisted name was used.
+   */
+  readonly store: Exclude<IdentitySource, "none"> | null;
+  /** Non-secret notice about the store, such as how to import a legacy identity; else null. */
+  readonly storeDiagnostic: string | null;
 }
 
 export interface ReadIdentityOptions {
@@ -71,6 +80,18 @@ const unresolved = (reason: string, entry: string | null = null): ReadIdentity =
   entry,
   triageRole: null,
   diagnostic: `${reason} ${recovery}`,
+  store: null,
+  storeDiagnostic: null,
+});
+
+const explicit = (agent: string, source: "tool" | "startup"): ReadIdentity => ({
+  agent,
+  source,
+  entry: null,
+  triageRole: null,
+  diagnostic: null,
+  store: null,
+  storeDiagnostic: null,
 });
 
 /** Sanitized account of a failure: ConfigError messages carry no paths or values. */
@@ -85,22 +106,8 @@ const SOURCE: Record<"--entry" | "--harness" | "environment", ReadIdentitySource
 
 /** Resolve the identity for one read. Never throws and never writes. */
 export async function resolveReadIdentity(options: ReadIdentityOptions): Promise<ReadIdentity> {
-  if (options.toolAgent)
-    return {
-      agent: options.toolAgent,
-      source: "tool",
-      entry: null,
-      triageRole: null,
-      diagnostic: null,
-    };
-  if (options.startupAgent)
-    return {
-      agent: options.startupAgent,
-      source: "startup",
-      entry: null,
-      triageRole: null,
-      diagnostic: null,
-    };
+  if (options.toolAgent) return explicit(options.toolAgent, "tool");
+  if (options.startupAgent) return explicit(options.startupAgent, "startup");
   if (!options.project)
     return unresolved(
       "No agent was given and no local project is configured, so no local identity entry was read.",
@@ -142,9 +149,21 @@ export async function resolveReadIdentity(options: ReadIdentityOptions): Promise
         : !record.entryExists
           ? `${IDENTITY_FILE} has no [agents.${entry}] entry.`
           : `[agents.${entry}] has no valid name.`;
-      return unresolved(why, entry);
+      const problems = record.entryExists ? [] : record.problems;
+      return unresolved([why, ...problems].join(" "), entry);
     }
-    return { agent: record.name, source, entry, triageRole: record.triageRole, diagnostic: null };
+    return {
+      agent: record.name,
+      source,
+      entry,
+      triageRole: record.triageRole,
+      diagnostic: null,
+      store: record.source === "legacy-not-imported" ? "legacy-not-imported" : "pdb",
+      storeDiagnostic:
+        record.source === "legacy-not-imported"
+          ? `Identity read from the legacy ${record.path} because ${IDENTITY_FILE} has no [agents.${entry}] entry; nothing was imported. Import it once with: pdb config set identity.triage_role ${record.triageRole ?? "implementer|designer"} --entry ${entry}`
+          : null,
+    };
   } catch (error) {
     return unresolved(describe(error));
   }

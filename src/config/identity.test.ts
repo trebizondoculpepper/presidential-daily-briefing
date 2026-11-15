@@ -751,19 +751,24 @@ x = 1
       });
     });
 
-    it("recovers a stale lock left by a crashed writer", async () => {
+    it("never breaks an old-looking lock by age, reporting it as busy with manual recovery (#382)", async () => {
       await withRepo(async (dir) => {
         const target = await resolveIdentityTarget(dir, undefined);
         const lock = join(target.root, IDENTITY_LOCK_FILE);
-        await writeFile(lock, '{"token":"crashed"}');
-        const old = new Date(Date.now() - 60_000);
+        await writeFile(lock, '{"token":"slow-but-live"}');
+        const old = new Date(Date.now() - 3_600_000);
         await utimes(lock, old, old);
-        await setIdentity(target, "codex", "identity.triage_role", "designer", {
-          random: () => 0.1,
-          lockTiming: { waitMs: 2_000, staleMs: 10_000, pollMs: 10 },
+        await expect(
+          setIdentity(target, "codex", "identity.triage_role", "designer", {
+            random: () => 0.1,
+            lockTiming: { waitMs: 150, pollMs: 10 },
+          }),
+        ).rejects.toMatchObject({
+          code: "conflict",
+          recovery: expect.stringContaining(`delete ${IDENTITY_LOCK_FILE}`),
         });
-        expect((await readIdentity(target.root, "codex")).triageRole).toBe("designer");
-        expect(await readdir(dir)).not.toContain(IDENTITY_LOCK_FILE);
+        expect(await readFile(lock, "utf8")).toBe('{"token":"slow-but-live"}');
+        expect(await readdir(dir)).not.toContain(IDENTITY_FILE);
       });
     });
 
@@ -776,7 +781,7 @@ x = 1
         await writeFile(lock, '{"token":"live-holder"}');
         await expect(
           setIdentity(target, "codex", "identity.triage_role", "designer", {
-            lockTiming: { waitMs: 150, staleMs: 60_000, pollMs: 10 },
+            lockTiming: { waitMs: 150, pollMs: 10 },
           }),
         ).rejects.toMatchObject({ code: "conflict", recovery: expect.stringMatching(/^Retry/) });
         expect(await readFile(path, "utf8")).toBe(initial);

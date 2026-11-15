@@ -21,6 +21,7 @@ import {
   mkdir,
   readFile,
   rename,
+  lstat,
   stat,
   unlink,
   writeFile,
@@ -173,7 +174,9 @@ export type ConfigErrorCode =
   | "not-ignored"
   | "identity-unresolved"
   | "duplicate-config"
-  | "partial-conversion";
+  | "partial-conversion"
+  | "unsafe-path"
+  | "legacy-unsafe";
 
 /** A refusal with exact recovery guidance. The file is left untouched. */
 export class ConfigError extends Error {
@@ -199,6 +202,8 @@ export interface ConfigFileSystem {
   fileMode?(path: string): Promise<number | null>;
   /** Set POSIX permission bits; a no-op where unsupported (Windows). */
   setFileMode?(path: string, mode: number): Promise<void>;
+  /** Whether `path` is a symbolic link (not followed); null when missing. Absent: unknown. */
+  isSymbolicLink?(path: string): Promise<boolean | null>;
   /** Modification time in epoch ms, or null when missing; used to judge stale locks. */
   modifiedAt?(path: string): Promise<number | null>;
   remove(path: string): Promise<void>;
@@ -229,6 +234,14 @@ export const nodeFileSystem: ConfigFileSystem = {
   },
   async setFileMode(path, mode) {
     if (process.platform !== "win32") await chmod(path, mode);
+  },
+  async isSymbolicLink(path) {
+    try {
+      return (await lstat(path)).isSymbolicLink();
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw error;
+    }
   },
   async modifiedAt(path) {
     try {

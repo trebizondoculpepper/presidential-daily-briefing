@@ -1,13 +1,19 @@
 /**
- * Repository-local agent identity service (#70, doc/design/identity.md).
+ * Repository-local agent identity service (#70, doc/design/identity.md; PDB-owned store #319,
+ * doc/design/pdb-owned-identity.md).
  *
- * Owns `<working-tree-root>/agent-inbox.toml`: Git root resolution, explicit entry selection,
+ * Owns `<working-tree-root>/pdb.toml`: Git root resolution, explicit entry selection,
  * typed reads of the registered per-agent settings (`identity.name`, `identity.triage_role`)
  * and conflict-detecting atomic writes that preserve every other value and table.
  *
  * - The file lives only at the Git working-tree root (nested directories and linked worktrees
  *   with a `.git` file resolve through Git). There is no parent/sibling/global fallback, and a
  *   remote `--repo` alone never selects local storage: it must agree with the checkout.
+ * - `pdb.toml` is canonical. A legacy Agent Inbox `agent-inbox.toml` at the same root is only
+ *   ever read: read-only lookups may return its matching entry with source
+ *   `legacy-not-imported`, and the first explicit write for an entry absent from `pdb.toml`
+ *   imports that entry's `name` and valid `triage_role` once. The legacy file is never written,
+ *   locked, renamed, untracked or removed.
  * - Reads never create, rewrite or repair anything. Read-only consumers (#38, #64, #25) call
  *   `readIdentity`/`lookupIdentity`.
  * - Writes establish Git exclusion before creating the file (repository-local
@@ -32,8 +38,17 @@ import {
 import type { ConfigFileSystem, GitRunner } from "./config.js";
 import { acquireFileLock, type LockFs, type LockTiming } from "./filelock.js";
 
-/** Root-relative identity file name (shared format with the agent-inbox tooling). */
-export const IDENTITY_FILE = "agent-inbox.toml";
+/** Root-relative canonical identity file name, owned by pdb (#319). */
+export const IDENTITY_FILE = "pdb.toml";
+
+/** Root-relative legacy Agent Inbox identity file: read for import only, never written. */
+export const LEGACY_IDENTITY_FILE = "agent-inbox.toml";
+
+/** Schema version of `pdb.toml`; an absent version is read as 1, a future one is refused. */
+export const IDENTITY_SCHEMA_VERSION = 1;
+
+/** Which store supplied a record's values. */
+export type IdentitySource = "pdb" | "legacy-not-imported" | "none";
 
 /** Permission bits for a newly created identity file (owner read/write only). */
 const PRIVATE_FILE_MODE = 0o600;
@@ -165,10 +180,17 @@ export async function resolveIdentityTarget(
 
 /** The selected entry's registered values. Nothing else from the file is ever returned. */
 export interface IdentityRecord {
-  /** Root-relative path, never an absolute private path. */
-  readonly path: typeof IDENTITY_FILE;
+  /** Root-relative path of the file the values came from, never an absolute private path. */
+  readonly path: typeof IDENTITY_FILE | typeof LEGACY_IDENTITY_FILE;
   readonly entry: string;
+  /**
+   * `pdb` when the entry is in pdb.toml; `legacy-not-imported` when it is absent there and the
+   * values come read-only from a matching legacy agent-inbox.toml entry; otherwise `none`.
+   */
+  readonly source: IdentitySource;
+  /** Whether pdb.toml exists (the legacy file never counts). */
   readonly fileExists: boolean;
+  /** Whether pdb.toml has the selected entry (the legacy file never counts). */
   readonly entryExists: boolean;
   /** Valid stored name, or null when absent/invalid. */
   readonly name: string | null;
@@ -183,28 +205,63 @@ type Table = Record<string, unknown>;
 const isTable = (value: unknown): value is Table =>
   typeof value === "object" && value !== null && !Array.isArray(value) && !(value instanceof Date);
 
-const malformed = (detail: string): ConfigError =>
+const malformed = (detail: string, file: string = IDENTITY_FILE): ConfigError =>
   new ConfigError(
     "malformed",
-    `${IDENTITY_FILE} is not valid for identity use: ${detail}`,
-    `Fix or restore ${IDENTITY_FILE} at the repository root by hand, then retry; nothing was changed.`,
+    `${file} is not valid for identity use: ${detail}`,
+    file === IDENTITY_FILE
+      ? `Fix or restore ${file} at the repository root by hand, then retry; nothing was changed.`
+      : `Fix ${file} at the repository root by hand, or choose the entry and name explicitly (pdb config set identity.name NAME --entry KEY), then retry; nothing was changed and ${file} is never written by pdb.`,
   );
 
-/** Parse the whole document with types preserved (integers as BigInt). Never writes. */
-export function parseIdentityDocument(raw: string): Table {
-  const document = parseTomlTable(raw, malformed);
+const parseAgents = (raw: string, file: string): Table => {
+  const document = parseTomlTable(raw, (detail) => malformed(detail, file));
   if (document.agents !== undefined && !isTable(document.agents)) {
-    throw malformed("'agents' is not a table.");
+    throw malformed("'agents' is not a table.", file);
+  }
+  return document;
+};
+
+/**
+ * Parse the whole pdb.toml document with types preserved (integers as BigInt). Never writes.
+ * A schemaVersion other than 1 (or absent) is refused rather than reinterpreted as version 1.
+ */
+export function parseIdentityDocument(raw: string): Table {
+  const document = parseAgents(raw, IDENTITY_FILE);
+  const version = document.schemaVersion;
+  if (version !== undefined && version !== BigInt(IDENTITY_SCHEMA_VERSION)) {
+    throw new ConfigError(
+      "unsupported-version",
+      `${IDENTITY_FILE} declares a schemaVersion this pdb does not support (supported: ${IDENTITY_SCHEMA_VERSION}); it was not read or changed.`,
+      "Upgrade pdb to a version that supports this identity file, or restore a supported copy by hand, then retry.",
+    );
   }
   return document;
 }
 
-/** Serialise a document. Keys, tables and typed values survive; comments/layout do not. */
-export function serializeIdentityDocument(document: Table): string {
-  return stringify(document, { numbersAsFloat: true });
+/** Parse the legacy Agent Inbox document (no pdb schema metadata). Never writes. */
+export function parseLegacyIdentityDocument(raw: string): Table {
+  return parseAgents(raw, LEGACY_IDENTITY_FILE);
 }
 
-function recordFor(document: Table | null, entry: string): IdentityRecord {
+/**
+ * Serialise a pdb.toml document with `schemaVersion` first. Keys, tables and typed values
+ * survive; comments/layout do not.
+ */
+export function serializeIdentityDocument(document: Table): string {
+  const ordered: Table = Object.create(null);
+  ordered.schemaVersion = BigInt(IDENTITY_SCHEMA_VERSION);
+  for (const [name, value] of Object.entries(document)) {
+    if (name !== "schemaVersion") ordered[name] = value;
+  }
+  return stringify(ordered, { numbersAsFloat: true });
+}
+
+function recordFor(
+  document: Table | null,
+  entry: string,
+  file: typeof IDENTITY_FILE | typeof LEGACY_IDENTITY_FILE = IDENTITY_FILE,
+): IdentityRecord {
   const agents = document?.agents as Table | undefined;
   const table = agents && Object.hasOwn(agents, entry) ? agents[entry] : undefined;
   const problems: string[] = [];
@@ -226,8 +283,9 @@ function recordFor(document: Table | null, entry: string): IdentityRecord {
     }
   }
   return {
-    path: IDENTITY_FILE,
+    path: file,
     entry,
+    source: table !== undefined ? (file === IDENTITY_FILE ? "pdb" : "legacy-not-imported") : "none",
     fileExists: document !== null,
     entryExists: table !== undefined,
     name,
@@ -236,7 +294,22 @@ function recordFor(document: Table | null, entry: string): IdentityRecord {
   };
 }
 
-/** Read-only lookup of one entry. Missing files/entries are reported, never created. */
+/** Describe an unexpected read failure without paths or contents. */
+const unreadable = (file: string, error: unknown): ConfigError =>
+  new ConfigError(
+    "filesystem",
+    `${file} could not be read (${String((error as NodeJS.ErrnoException).code ?? "error")}); nothing was changed.`,
+    `Check access to ${file} at the repository root, then retry.`,
+  );
+
+/**
+ * Read-only lookup of one entry. pdb.toml is canonical: a present entry there (valid or not)
+ * is returned as is and never replaced by legacy data. Only when the entry is absent from
+ * pdb.toml is a matching legacy agent-inbox.toml entry returned, with source
+ * `legacy-not-imported` (nothing is imported). A legacy file that cannot be read or parsed is
+ * reported as a problem, never treated as absent and never written. Missing files/entries are
+ * reported, never created.
+ */
 export async function readIdentity(
   root: string,
   entry: string,
@@ -244,22 +317,69 @@ export async function readIdentity(
 ): Promise<IdentityRecord> {
   validateEntryKey(entry);
   const raw = await fs.readText(join(root, IDENTITY_FILE));
-  return recordFor(raw === null ? null : parseIdentityDocument(raw), entry);
+  const record = recordFor(raw === null ? null : parseIdentityDocument(raw), entry);
+  if (record.entryExists) return record;
+  let legacy: Table | null;
+  try {
+    const legacyRaw = await fs.readText(join(root, LEGACY_IDENTITY_FILE));
+    legacy = legacyRaw === null ? null : parseLegacyIdentityDocument(legacyRaw);
+  } catch (error) {
+    const problem =
+      error instanceof ConfigError
+        ? error.message
+        : unreadable(LEGACY_IDENTITY_FILE, error).message;
+    return { ...record, problems: [...record.problems, `Legacy identity unavailable: ${problem}`] };
+  }
+  const old = recordFor(legacy, entry, LEGACY_IDENTITY_FILE);
+  if (!old.entryExists) return record;
+  if (old.name === null) {
+    return {
+      ...record,
+      problems: [
+        ...record.problems,
+        ...old.problems.map((problem) => `${LEGACY_IDENTITY_FILE}: ${problem}`),
+        ...(old.problems.length ? [] : [`${LEGACY_IDENTITY_FILE} [agents.${entry}] has no name.`]),
+      ],
+    };
+  }
+  return {
+    ...old,
+    fileExists: record.fileExists,
+    entryExists: false,
+    problems: [...record.problems, ...old.problems.map((p) => `${LEGACY_IDENTITY_FILE}: ${p}`)],
+  };
 }
 
+const agentKeys = (document: Table | null): string[] =>
+  document !== null && isTable(document.agents) ? Object.keys(document.agents) : [];
+
 /**
- * Entry keys present in the root file (read-only; empty when the file is absent). Only the
- * keys are returned, never any entry's values, so harness resolution (#38) can tell whether
- * several logical entries share one harness without seeing other agents' data.
+ * Entry keys present in pdb.toml and in a legacy agent-inbox.toml at the same root
+ * (read-only; empty when both are absent). Only the keys are returned, never any entry's
+ * values, so harness resolution (#38) can tell whether several logical entries share one
+ * harness without seeing other agents' data. Both stores count because a legacy-only entry is
+ * still a distinct logical agent that may be imported. A legacy file that cannot be read or
+ * parsed throws (unknown is not absent) unless `canonical` (the entry key the caller would
+ * select) is already in pdb.toml; explicit `--entry` does not need this list.
  */
 export async function listEntryKeys(
   root: string,
   fs: ConfigFileSystem = nodeFileSystem,
+  canonical?: string,
 ): Promise<string[]> {
   const raw = await fs.readText(join(root, IDENTITY_FILE));
-  if (raw === null) return [];
-  const agents = parseIdentityDocument(raw).agents;
-  return isTable(agents) ? Object.keys(agents) : [];
+  const keys = agentKeys(raw === null ? null : parseIdentityDocument(raw));
+  let legacy: string[];
+  try {
+    const legacyRaw = await fs.readText(join(root, LEGACY_IDENTITY_FILE));
+    legacy = agentKeys(legacyRaw === null ? null : parseLegacyIdentityDocument(legacyRaw));
+  } catch (error) {
+    // pdb.toml is canonical: once it holds the entry the caller would select, an unusable
+    // legacy file is not needed to answer and must not block the lookup (#528 review).
+    if (canonical !== undefined && keys.includes(canonical)) return keys;
+    throw error instanceof ConfigError ? error : unreadable(LEGACY_IDENTITY_FILE, error);
+  }
+  return [...keys, ...legacy.filter((key) => !keys.includes(key))];
 }
 
 /** Read-only service for consumers (#38 detection, #64 doctor, #25 MCP): resolve then read. */
@@ -356,9 +476,24 @@ export function generateName(taken: ReadonlySet<string>, random: () => number): 
   );
 }
 
-function namesInUse(document: Table, except: string): Set<string> {
+/**
+ * Names of legacy entries that are still legacy-only: an entry whose key is already in pdb.toml
+ * (imported or renamed there) has been replaced and no longer holds its legacy name.
+ */
+function legacyOnlyNames(legacy: Table | null, current: Table, except: string): Set<string> {
+  const replaced = new Set(agentKeys(current));
   const taken = new Set<string>();
-  const agents = isTable(document.agents) ? document.agents : {};
+  const agents = legacy !== null && isTable(legacy.agents) ? legacy.agents : {};
+  for (const [key, table] of Object.entries(agents)) {
+    if (key !== except && !replaced.has(key) && isTable(table) && typeof table.name === "string") {
+      taken.add(table.name.toLowerCase());
+    }
+  }
+  return taken;
+}
+
+function namesInUse(document: Table | null, except: string, taken = new Set<string>()) {
+  const agents = document !== null && isTable(document.agents) ? document.agents : {};
   for (const [key, table] of Object.entries(agents)) {
     if (key !== except && isTable(table) && typeof table.name === "string") {
       taken.add(table.name.toLowerCase());
@@ -378,17 +513,14 @@ async function gitStatus(git: GitRunner, args: readonly string[], cwd: string) {
   }
 }
 
-/** Git standing of the identity file: tracked, ignored, or neither. Read-only. */
+/** Git standing of an identity file (pdb.toml by default): tracked, ignored, or neither. */
 export async function identityGitState(
   root: string,
   git: GitRunner = nodeGit,
+  file: string = IDENTITY_FILE,
 ): Promise<{ tracked: boolean | null; ignored: boolean | null }> {
-  const tracked = await gitStatus(git, ["ls-files", "--error-unmatch", "--", IDENTITY_FILE], root);
-  const ignored = await gitStatus(
-    git,
-    ["check-ignore", "--quiet", "--no-index", IDENTITY_FILE],
-    root,
-  );
+  const tracked = await gitStatus(git, ["ls-files", "--error-unmatch", "--", file], root);
+  const ignored = await gitStatus(git, ["check-ignore", "--quiet", "--no-index", file], root);
   return {
     tracked: tracked === 0 ? true : tracked === 1 ? false : null,
     ignored: ignored === 0 ? true : ignored === 1 ? false : null,
@@ -402,11 +534,16 @@ const TEMPORARY_RULE = `/${IDENTITY_FILE}.*.tmp`;
 export const IDENTITY_LOCK_FILE = `${IDENTITY_FILE}.lock`;
 const LOCK_RULE = `/${IDENTITY_LOCK_FILE}`;
 /**
- * Writers hold the lock only for local file reads and one rename (Git runs before it), so a
- * few seconds is ample for an interactive command; a lock older than the stale threshold is
- * from a crashed process and is broken.
+ * Writers hold the lock only for local file reads, an import's Git tracking check and one
+ * rename, so a few seconds is ample for an interactive command. The lock is never broken by
+ * age (#382): an old-looking lock may belong to a live, slow writer, so a lock held beyond the
+ * wait is reported as busy with manual recovery instead.
  */
-export const IDENTITY_LOCK_TIMING: LockTiming = { waitMs: 5_000, staleMs: 15_000, pollMs: 25 };
+export const IDENTITY_LOCK_TIMING: LockTiming = {
+  waitMs: 5_000,
+  staleMs: Number.POSITIVE_INFINITY,
+  pollMs: 25,
+};
 
 /** Root-relative temporary copy name; always matched by `TEMPORARY_RULE`. */
 export const temporaryIdentityName = (token: string): string => `${IDENTITY_FILE}.${token}.tmp`;
@@ -523,8 +660,8 @@ export interface IdentityWriteOptions {
   readonly token?: () => string;
   /** Optional precondition: the raw text (null when absent) the caller observed earlier. */
   readonly expectedRaw?: string | null;
-  /** Lock wait/stale bounds; injected for tests. */
-  readonly lockTiming?: LockTiming;
+  /** Lock wait bound; injected for tests. The lock is never broken by age (#382). */
+  readonly lockTiming?: Omit<LockTiming, "staleMs">;
 }
 
 export interface IdentityWriteResult {
@@ -533,6 +670,19 @@ export interface IdentityWriteResult {
   readonly createdEntry: boolean;
   /** The name generated by the initializer for a new entry, if any. */
   readonly generatedName: string | null;
+  /** The legacy file a new entry's name/triage_role were imported from, if any (read only). */
+  readonly importedFrom: typeof LEGACY_IDENTITY_FILE | null;
+  /**
+   * Why an unusable legacy agent-inbox.toml was ignored when an explicit `identity.name` created
+   * the entry (nothing imported, the legacy file unchanged); null otherwise.
+   */
+  readonly legacyIgnored: string | null;
+  /**
+   * Why an explicit name could not be checked against names in agent-inbox.toml (the file
+   * exists but is unreadable or malformed, so its names are unknown); null when it was checked
+   * or there is no legacy file.
+   */
+  readonly legacyNamesUnchecked: string | null;
   /** Whether a repository-local exclude rule was added before writing. */
   readonly excluded: boolean;
   readonly record: IdentityRecord;
@@ -542,7 +692,7 @@ const busy = (): ConfigError =>
   new ConfigError(
     "conflict",
     `Another update to ${IDENTITY_FILE} is in progress (${IDENTITY_LOCK_FILE} is held); nothing was changed.`,
-    `Retry the command. If no other update is running, the lock is broken automatically once older than ${IDENTITY_LOCK_TIMING.staleMs / 1000} seconds.`,
+    `Retry the command. The lock is never removed automatically: if no pdb command is still running (for example one crashed), delete ${IDENTITY_LOCK_FILE} at the repository root yourself, then retry.`,
   );
 
 /** Lock operations over the identity filesystem boundary (exclusive create via writeText). */
@@ -581,17 +731,139 @@ const conflict = (): ConfigError =>
   );
 
 /**
- * Set one registered identity setting on the selected entry, preserving all other data.
- * Setting `identity.triage_role` on an absent file/entry runs the shared initializer: it
- * creates the entry with a generated, locally unique name once. A valid existing name is never
- * regenerated. Equal writes are no-ops. Writes are atomic.
+ * Names held in a legacy agent-inbox.toml, for collision checks only (read only). `raw` is the
+ * text the names came from (null when absent); `unknown` says why they cannot be known.
+ */
+type LegacyNames =
+  | { readonly raw: string | null; readonly document: Table | null; readonly unknown: null }
+  | { readonly raw: null; readonly document: null; readonly unknown: string };
+
+async function readLegacyNames(root: string, fs: ConfigFileSystem): Promise<LegacyNames> {
+  let raw: string | null;
+  try {
+    raw = await fs.readText(join(root, LEGACY_IDENTITY_FILE));
+  } catch (error) {
+    const code = String((error as NodeJS.ErrnoException).code ?? "error");
+    return {
+      raw: null,
+      document: null,
+      unknown: `${LEGACY_IDENTITY_FILE} could not be read (${code})`,
+    };
+  }
+  if (raw === null) return { raw: null, document: null, unknown: null };
+  try {
+    return { raw, document: parseLegacyIdentityDocument(raw), unknown: null };
+  } catch (error) {
+    if (!(error instanceof ConfigError)) throw error;
+    return { raw: null, document: null, unknown: error.message };
+  }
+}
+
+const legacyNameTaken = (name: string, holder: string): ConfigError =>
+  new ConfigError(
+    "conflict",
+    `The name ${JSON.stringify(name)} is already held by another agent entry in ${LEGACY_IDENTITY_FILE}${holder}; nothing was changed.`,
+    "Choose a different name; names identify one logical agent each, including agents not yet imported from the legacy file.",
+  );
+
+/** A legacy entry to import into a new pdb.toml entry, with the bytes it was read from. */
+interface LegacyImport {
+  readonly raw: string;
+  readonly name: string;
+  readonly triageRole: TriageRole | null;
+}
+
+/** An unusable legacy file; `reason` states why without claiming what was (not) written. */
+class LegacyRefusal extends ConfigError {
+  readonly reason: string;
+  constructor(reason: string, recovery: string) {
+    super(
+      "legacy-unsafe",
+      `${reason}; nothing was imported and neither file was changed.`,
+      recovery,
+    );
+    this.reason = reason;
+  }
+}
+
+const legacyRefusal = (detail: string, recovery?: string): ConfigError =>
+  new LegacyRefusal(
+    `${LEGACY_IDENTITY_FILE} ${detail}`,
+    recovery ??
+      `Fix ${LEGACY_IDENTITY_FILE} by hand, or set the name explicitly with pdb config set identity.name NAME --entry KEY, then retry. pdb never writes ${LEGACY_IDENTITY_FILE}.`,
+  );
+
+/**
+ * Read the selected entry of a legacy agent-inbox.toml for a one-time import. Read only: no
+ * lock, write or Git change is ever made to the legacy file. `found` is null when the file or
+ * the entry is absent, or the entry has no name; `document` (the parsed legacy file, or null
+ * when absent) lets a generated name avoid legacy names too. Anything that cannot be judged safe (unreadable,
+ * malformed, symlinked, tracked, Git state unknown, invalid name) refuses instead of letting a
+ * generated name hide the existing identity.
+ */
+async function readLegacyImport(
+  root: string,
+  entry: string,
+  fs: ConfigFileSystem,
+  git: GitRunner,
+): Promise<{ found: LegacyImport | null; document: Table | null }> {
+  const path = join(root, LEGACY_IDENTITY_FILE);
+  let raw: string | null;
+  try {
+    raw = await fs.readText(path);
+  } catch (error) {
+    throw legacyRefusal(
+      `could not be read (${String((error as NodeJS.ErrnoException).code ?? "error")})`,
+    );
+  }
+  if (raw === null) return { found: null, document: null };
+  if ((await fs.isSymbolicLink?.(path)) === true) {
+    throw legacyRefusal("is a symbolic link, so it is not imported");
+  }
+  const document = parseLegacyIdentityDocument(raw);
+  const record = recordFor(document, entry, LEGACY_IDENTITY_FILE);
+  if (!record.entryExists) return { found: null, document };
+  if (record.problems.some((problem) => problem.endsWith("is not a table."))) {
+    throw legacyRefusal(`[agents.${entry}] is not a table`);
+  }
+  const table = (document.agents as Table)[entry] as Table;
+  if (table.name === undefined) return { found: null, document };
+  if (record.name === null || !isAgentName(record.name)) {
+    throw legacyRefusal(`[agents.${entry}] has a name that is not a valid agent name`);
+  }
+  const state = await identityGitState(root, git, LEGACY_IDENTITY_FILE);
+  if (state.tracked === null) {
+    throw legacyRefusal(
+      "could not be checked for Git tracking",
+      "Check that git works in this checkout, then retry.",
+    );
+  }
+  if (state.tracked) {
+    throw legacyRefusal(
+      "is tracked by Git, so its identity is not private",
+      `Decide yourself whether to untrack ${LEGACY_IDENTITY_FILE} (pdb never untracks, commits or writes it), or set the name explicitly with pdb config set identity.name NAME --entry KEY, then retry.`,
+    );
+  }
+  return { found: { raw, name: record.name, triageRole: record.triageRole }, document };
+}
+
+/**
+ * Set one registered identity setting on the selected entry of pdb.toml, preserving all other
+ * data. Resolution for an entry absent from pdb.toml, under the lock:
+ * 1. a valid matching legacy agent-inbox.toml entry supplies the name (unless this call sets
+ *    `identity.name` explicitly) and a valid triage_role (unless this call sets it) — a
+ *    one-time import, read only, never written back;
+ * 2. otherwise setting `identity.triage_role` generates a locally unique name once.
+ * A valid existing pdb.toml name is never regenerated or replaced by legacy data, and a
+ * present-but-invalid pdb.toml entry is never silently replaced. Equal writes are no-ops.
  *
- * Several agents share one file, so read → validate → write → rename runs under a
- * repository-local cross-process lock (`agent-inbox.toml.lock`, Git-ignored before it is
+ * Several agents share one file, so read → resolve/import/generate → validate → write → rename
+ * runs under a repository-local cross-process lock (`pdb.toml.lock`, Git-ignored before it is
  * created). The document is read only after the lock is taken, so a concurrent update to
- * another entry is merged rather than reverted or refused; only this call's change is applied.
- * The unchanged-since-read check before the rename stays as a second guard. A lock held beyond
- * the wait bound refuses with a `conflict` (busy) error and "retry"; the lock is always released.
+ * another entry is merged rather than reverted, and a second same-entry initializer reuses the
+ * first one's name. Before the rename, pdb.toml must be unchanged since it was read and an
+ * imported legacy file must still hold the bytes imported. The lock is never broken by age; a
+ * lock held beyond the wait refuses with a `conflict` (busy) error. The lock is always released.
  */
 export async function setIdentity(
   target: IdentityTarget,
@@ -608,15 +880,29 @@ export async function setIdentity(
   const token =
     options.token ?? (() => `${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}`);
   const path = join(target.root, IDENTITY_FILE);
+  const lockPath = join(target.root, IDENTITY_LOCK_FILE);
+
+  // Never follow a symbolic link out of the verified project (a rename would replace the link,
+  // a lock/temp create would follow it).
+  for (const candidate of [path, lockPath]) {
+    if ((await fs.isSymbolicLink?.(candidate)) === true) {
+      throw new ConfigError(
+        "unsafe-path",
+        `${candidate === path ? IDENTITY_FILE : IDENTITY_LOCK_FILE} is a symbolic link; pdb does not write through links, so nothing was changed.`,
+        `Replace the link with a regular file (or remove it) at the repository root yourself, then retry.`,
+      );
+    }
+  }
 
   // Exclusion of the file, its temporary copy and the lock is established before any of them
   // is written, and before the lock is taken (Git is slow; the lock is held only briefly).
   const temporaryName = temporaryIdentityName(token());
   const excluded = await ensureExcluded(target.root, git, fs, temporaryName);
+  const timing = options.lockTiming ?? IDENTITY_LOCK_TIMING;
   const release = await acquireFileLock(
     lockFs(fs),
-    join(target.root, IDENTITY_LOCK_FILE),
-    options.lockTiming ?? IDENTITY_LOCK_TIMING,
+    lockPath,
+    { ...timing, staleMs: Number.POSITIVE_INFINITY },
     Date.now,
     (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   );
@@ -642,7 +928,8 @@ export async function setIdentity(
         "Choose a different name; names identify one logical agent each.",
       );
     }
-    if (identityValue(before, key) === value) {
+    if (before.entryExists && identityValue(before, key) === value) {
+      // An unchanged value needs no collision check against the legacy file.
       // An unchanged value still refused a tracked file and established missing exclusion
       // above; the identity contents are left untouched.
       return {
@@ -650,18 +937,66 @@ export async function setIdentity(
         createdFile: false,
         createdEntry: false,
         generatedName: null,
+        importedFrom: null,
+        legacyIgnored: null,
+        legacyNamesUnchecked: null,
         excluded,
         record: before,
       };
     }
 
-    if (!isTable(document.agents)) document.agents = Object.create(null);
-    const agents = document.agents as Table;
+    let imported: LegacyImport | null = null;
+    let legacyIgnored: string | null = null;
+    // Names of agents that exist only in the legacy file must not be duplicated (#528 review).
+    const legacyNames = await readLegacyNames(target.root, fs);
+    const legacyTaken = (name: string) =>
+      legacyOnlyNames(legacyNames.document, document, entry).has(name.toLowerCase());
+    let legacyNamesUnchecked: string | null = null;
+    if (field === "name") {
+      if (legacyTaken(value)) throw legacyNameTaken(value, "");
+      legacyNamesUnchecked = legacyNames.unknown;
+    }
     let generatedName: string | null = null;
+    if (!document.agents || !isTable(document.agents)) document.agents = Object.create(null);
+    const agents = document.agents as Table;
     if (!before.entryExists) {
+      let legacy: { found: LegacyImport | null; document: Table | null };
+      try {
+        legacy = await readLegacyImport(target.root, entry, fs, git);
+      } catch (error) {
+        // An explicit name is the way out of an unusable legacy file: nothing is imported or
+        // generated, so nothing can hide the legacy identity. Other writes still refuse.
+        if (field !== "name" || !(error instanceof ConfigError)) throw error;
+        legacyIgnored = error instanceof LegacyRefusal ? error.reason : error.message;
+        legacy = { found: null, document: null };
+      }
+      imported = legacy.found;
       const table: Table = Object.create(null);
-      if (field === "triage_role") {
-        generatedName = generateName(namesInUse(document, entry), options.random ?? Math.random);
+      if (imported !== null) {
+        if (field !== "name") {
+          if (namesInUse(document, entry).has(imported.name.toLowerCase())) {
+            throw new ConfigError(
+              "conflict",
+              `The name ${JSON.stringify(imported.name)} of [agents.${entry}] in ${LEGACY_IDENTITY_FILE} is already used by another entry in ${IDENTITY_FILE}; nothing was imported.`,
+              `Resolve it explicitly: choose a different name with pdb config set identity.name NAME --entry ${entry}, or correct the other entry, then retry.`,
+            );
+          }
+          if (legacyTaken(imported.name)) {
+            throw legacyNameTaken(imported.name, ` besides [agents.${entry}]`);
+          }
+          table.name = imported.name;
+        }
+        if (field !== "triage_role" && imported.triageRole !== null) {
+          table.triage_role = imported.triageRole;
+        }
+      } else if (field === "triage_role") {
+        generatedName = generateName(
+          new Set([
+            ...namesInUse(document, entry),
+            ...legacyOnlyNames(legacy.document, document, entry),
+          ]),
+          options.random ?? Math.random,
+        );
         table.name = generatedName;
       }
       agents[entry] = table;
@@ -670,9 +1005,9 @@ export async function setIdentity(
     const text = serializeIdentityDocument(document);
     assertLosslessRewrite(raw, text);
 
-    // The file may hold other tools' credentials: keep it private. A new file is 0600; a
-    // replaced file keeps its original mode, and the temporary copy is never more permissive
-    // than either. Mode handling is a no-op where unsupported (Windows).
+    // The file holds private names: keep it private. A new file is 0600; a replaced file keeps
+    // its original mode, and the temporary copy is never more permissive than either. Mode
+    // handling is a no-op where unsupported (Windows).
     const originalMode = raw === null ? null : ((await fs.fileMode?.(path)) ?? null);
     const finalMode = originalMode ?? PRIVATE_FILE_MODE;
     const temporary = join(target.root, temporaryName);
@@ -687,6 +1022,25 @@ export async function setIdentity(
     }
     try {
       if ((await fs.readText(path)) !== raw) throw conflict();
+      // Collision checks and imports relied on the legacy bytes: they must be unchanged.
+      // Unknown legacy names were never relied on, so there is nothing to recheck then.
+      const checkedLegacy =
+        imported !== null ||
+        (legacyNames.unknown === null && (generatedName !== null || field === "name"));
+      const legacyNow = checkedLegacy
+        ? await fs.readText(join(target.root, LEGACY_IDENTITY_FILE))
+        : null;
+      if (
+        checkedLegacy &&
+        ((legacyNames.unknown === null && legacyNow !== legacyNames.raw) ||
+          (imported !== null && legacyNow !== imported.raw))
+      ) {
+        throw new ConfigError(
+          "conflict",
+          `${LEGACY_IDENTITY_FILE} changed while this update was checking or importing its identities; nothing was written.`,
+          "Retry the command to import the current legacy identity.",
+        );
+      }
       await fs.rename(temporary, path);
     } catch (error) {
       await fs.remove(temporary).catch(() => undefined);
@@ -698,6 +1052,9 @@ export async function setIdentity(
       createdFile: raw === null,
       createdEntry: !before.entryExists,
       generatedName,
+      importedFrom: imported === null ? null : LEGACY_IDENTITY_FILE,
+      legacyIgnored,
+      legacyNamesUnchecked,
       excluded,
       record: recordFor(parseIdentityDocument(text), entry),
     };

@@ -5,7 +5,8 @@ import { detectClientEntry } from "./harness.js";
 import { resolveReadIdentity, type ReadIdentityOptions } from "./readidentity.js";
 
 const root = "/work/project";
-const identity = join(root, "agent-inbox.toml");
+const identity = join(root, "pdb.toml");
+const legacy = join(root, "agent-inbox.toml");
 const toml = `[agents.codex]
 name = "codex_agent"
 triage_role = "designer"
@@ -71,8 +72,10 @@ describe("verified Codex MCP identity (#402)", () => {
         entry: "codex",
         triageRole: "designer",
         diagnostic: null,
+        store: "pdb",
+        storeDiagnostic: null,
       });
-    expect(t.reads.every((path) => path === identity)).toBe(true);
+    expect(t.reads.every((path) => path === identity || path === legacy)).toBe(true);
     expect(t.writes).toEqual([]);
     expect(
       await t.resolve({ clientName: "codex-mcp-client-extra", env: { CLAUDECODE: "1" } }),
@@ -129,7 +132,7 @@ describe("verified Codex MCP identity (#402)", () => {
 
   it("diagnoses missing, unrelated and malformed identities without borrowing or writing", async () => {
     const cases: [string | null, RegExp][] = [
-      [null, /no agent-inbox.toml/],
+      [null, /no pdb.toml/],
       ['[agents.claude]\nname = "other"\n', /no \[agents.codex\] entry/],
       ['[agents."codex.review"]\nname = "other"\n', /Several logical agent entries/],
       ['[agents.codex]\ntriage_role = "designer"\n', /no valid name/],

@@ -150,6 +150,8 @@ export interface Selection {
   triageRole: string | null;
   entry: string | null;
   identityDiagnostic: string | null;
+  /** Additive (#319): store category of a persisted name; never a path. */
+  identityStore?: "pdb" | "legacy-not-imported";
 }
 
 /** The `serve-read` envelope of every data route. */
@@ -452,6 +454,7 @@ export function readApi(
       triageRole: resolved.triageRole,
       entry: resolved.entry,
       identityDiagnostic: resolved.diagnostic && redactLocalText(resolved.diagnostic),
+      ...(resolved.store ? { identityStore: resolved.store } : {}),
     };
   };
 

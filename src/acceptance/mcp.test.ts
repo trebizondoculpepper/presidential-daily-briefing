@@ -449,9 +449,9 @@ describe("read-only MCP adapter (#25)", async () => {
     });
   });
 
-  describe("read-only identity from the project's agent-inbox.toml", () => {
+  describe("read-only identity from the project's pdb.toml", () => {
     const root = "/work/project";
-    const identityFile = join(root, "agent-inbox.toml");
+    const identityFile = join(root, "pdb.toml");
     const toml = [
       "[agents.claude]",
       'name = "file_claude"',
@@ -569,6 +569,33 @@ describe("read-only MCP adapter (#25)", async () => {
       expect(writes).toEqual([]);
     });
 
+    it("reads a legacy agent-inbox.toml entry as legacy-not-imported, never importing it (#319)", async () => {
+      const legacyFile = join(root, "agent-inbox.toml");
+      const writes: string[] = [];
+      const fs = {
+        readText: async (path: string) =>
+          path === legacyFile ? '[agents.codex]\nname = "legacy_codex"\n' : null,
+        writeText: async (path: string) => void writes.push(path),
+        rename: async (_from: string, to: string) => void writes.push(to),
+        appendText: async (path: string) => void writes.push(path),
+        remove: async (path: string) => void writes.push(path),
+        makeDirectory: async (path: string) => void writes.push(path),
+      };
+      const git = async (args: readonly string[]) =>
+        args[0] === "rev-parse" ? `${root}\n` : `origin\thttps://github.com/${repo}.git (fetch)\n`;
+      const client = await connectAs(fake({ fs, git, env: {} }), { project: root, entry: "codex" });
+      const result = await client.callTool({ name: "triage_briefing", arguments: {} });
+      expect(structured(result).selection).toMatchObject({
+        agent: "legacy_codex",
+        entry: "codex",
+        identityStore: "legacy-not-imported",
+      });
+      expect(text(result)).toMatch(/legacy agent-inbox\.toml \(not imported/);
+      expect(JSON.stringify(result)).not.toContain(root);
+      expect(writes).toEqual([]);
+      await client.close();
+    });
+
     it("focuses the read exactly as the CLI does for the same name", async () => {
       const { runtime } = identityRuntime();
       const client = await connectAs(runtime, { project: root, repo }, "ori-pdb");
@@ -614,7 +641,7 @@ describe("read-only MCP adapter (#25)", async () => {
           "test",
           /no \[agents.missing\] entry/,
         ],
-        [identityRuntime(null), { project: root, entry: "codex" }, "test", /no agent-inbox.toml/],
+        [identityRuntime(null), { project: root, entry: "codex" }, "test", /no pdb.toml/],
         [
           identityRuntime("[agents\nbroken"),
           { project: root, entry: "codex" },
@@ -622,7 +649,7 @@ describe("read-only MCP adapter (#25)", async () => {
           /not valid for identity use/,
         ],
         [
-          identityRuntime(new Error("EACCES /home/secret/agent-inbox.toml")),
+          identityRuntime(new Error("EACCES /home/secret/pdb.toml")),
           { project: root, entry: "codex" },
           "test",
           /could not be read/,
