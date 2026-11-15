@@ -199,6 +199,12 @@ else's work. Resume cannot succeed with another active/resume-required/unknown
 claim, unresolved question or open native blocker. A second new claim requires
 every other retained claim to be verified waiting, not merely a low queue rank.
 
+Implementation note (#412, slice 1, `src/workflow/claimactivity.ts`): comment
+identities (`previousActivity`, `questionCommentId`) are the comment's numeric
+`databaseId` as a decimal string, which collected comments already carry and which
+orders delivery records; GraphQL node IDs are not fetched. Records reject unknown
+fields, and a reason is at most 1000 characters.
+
 Use a separate `github-triage:claim-activity v1` JSON marker. Required fields:
 `v: 1`, `op: wait|resume`, `opId`, `repository`, `issue`, `agent`, `claimStartedAt`,
 `previousActivity` (comment node ID or null), and `reason`. A wait also carries
