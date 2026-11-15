@@ -232,6 +232,9 @@ Rollback: pdb config set briefing.engine typescript.
                         disabled complexity hides it
   --stale-hours N       Flag claims with no ticket/linked-PR activity for N hours (default 48)
   --max-chars N         Compact text budget (default 10000)
+  --context             Add background sections, totals and engine metadata to the text; by
+                        default it holds only the next steps and material warnings (JSON is
+                        always complete)
   --limit N             Next steps (default 10)
   --no-update-check     Skip the npm version check (also ${optOutEnv}=1)
   version               Show the installed version and the update check result
@@ -474,6 +477,7 @@ export function argumentsFor(args: string[]) {
       role: { type: "string" },
       guide: { type: "boolean" },
       "no-guide": { type: "boolean" },
+      context: { type: "boolean" },
       help: { type: "boolean" },
     },
   });

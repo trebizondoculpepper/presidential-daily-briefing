@@ -310,7 +310,7 @@ describe("designer impact queue through collect() (#246)", () => {
   });
 
   it("renders designer NEXT STEPS from the ranked actions with kind, assessments and command", async () => {
-    const { out } = await run(["--role", "designer", "--limit", "3"]);
+    const { out } = await run(["--role", "designer", "--limit", "3", "--context"]);
     const next = out.slice(out.indexOf("NEXT STEPS"), out.indexOf("\nDECISION NEEDED"));
     expect(next).toMatch(/^NEXT STEPS \(7; 4 omitted\)/);
     expect(next).toContain("- #10 Ticket 10 — decide (designer-duty)");

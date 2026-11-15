@@ -231,6 +231,11 @@ export const briefingInput = z
       .optional(),
     /** Pickup order (#260): same as CLI --order; the CLI default is impact. */
     order: z.enum(pickupOrders).optional(),
+    /**
+     * Expanded text (#355, doc/design/next-steps-only.md): same as CLI --context. Text only; the
+     * structured result is the same either way.
+     */
+    context: z.boolean().optional(),
   })
   .superRefine((args, ctx) => {
     for (const key of ["role", "order"] as const)
@@ -520,7 +525,7 @@ export function createServer(
     {
       title: "Triage briefing",
       description:
-        'Datalog next actions by default (implementer view unless role is supplied). Explicit TypeScript rollback: pdb config set briefing.engine typescript. Evidence-linked action briefing for a GitHub repository: what needs attention and what to pick up next. Call at the start of work or with since to catch up. mode "briefing" returns the repository-wide what-changed report for a window (since, or last such as 24h; default last 24h); it never reads or advances a checkpoint. Actions default to ten next steps; catch-up defaults to five rows per section. In actions mode, role (implementer or designer) returns the blended queue for that role (rankedActions, role.next, estimation, impactEstimation) exactly as the CLI --role, and order (impact, oldest, newest) matches CLI --order. role human returns the human briefing (human): questions, attention and sign-offs owed by the human named in agent, explicit before inferred; read-only.',
+        'Datalog next actions by default (implementer view unless role is supplied). Explicit TypeScript rollback: pdb config set briefing.engine typescript. Evidence-linked action briefing for a GitHub repository: what needs attention and what to pick up next. Call at the start of work or with since to catch up. mode "briefing" returns the repository-wide what-changed report for a window (since, or last such as 24h; default last 24h); it never reads or advances a checkpoint. Actions default to ten next steps; catch-up defaults to five rows per section. In actions mode, role (implementer or designer) returns the blended queue for that role (rankedActions, role.next, estimation, impactEstimation) exactly as the CLI --role, and order (impact, oldest, newest) matches CLI --order. role human returns the human briefing (human): questions, attention and sign-offs owed by the human named in agent, explicit before inferred; read-only. The text lists only the next steps; context true adds the background lines (structured data is the same either way).',
       inputSchema: briefingInput,
       outputSchema: boundedEnvelope,
       annotations,
@@ -581,12 +586,14 @@ export function createServer(
                 maxChars: args.maxChars,
                 role: args.role,
                 order: args.order ?? "impact",
+                context: args.context,
                 signal: ctx.mcpReq.signal,
               });
               if (read.kind === "unavailable") throw new Failure("collection-failed");
               return {
                 status: read.complete ? "complete" : "incomplete",
-                build: (base, redact) => briefingView(base, redact(plain(read.report))),
+                build: (base, redact) =>
+                  briefingView(base, redact(plain(read.report)), { context: args.context }),
               };
             },
           ),
