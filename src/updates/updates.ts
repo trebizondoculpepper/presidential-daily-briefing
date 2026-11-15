@@ -26,6 +26,8 @@ export interface InstalledInfo {
   version: string | null;
   installed: boolean;
   reason?: string;
+  /** The package root holding this package's manifest, when found (#309). */
+  root?: string;
 }
 
 export type UpdateCheckResult =
@@ -92,7 +94,7 @@ export async function installedVersion(
     if (!isRecord(manifest) || manifest.name !== packageName) continue;
     const version = manifest.version ?? null;
     // The original JavaScript passed any manifest version through; keep that but require a string.
-    return { version: typeof version === "string" ? version : null, installed };
+    return { version: typeof version === "string" ? version : null, installed, root: dir };
   }
   return readable
     ? { version: null, installed, reason: "package manifest not found" }
