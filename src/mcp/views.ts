@@ -68,6 +68,7 @@ const briefingFields = [
   "guidance",
   "process",
   "decisionEngine",
+  "human",
 ] as const;
 
 const itemsLine = (prefix: string, rows: unknown[]): string[] =>
@@ -123,6 +124,9 @@ export function briefingView(base: ViewBase, report: Json): BoundedView {
         // Beyond the first few, warnings yield before the ranked shortlist; their count remains.
         { path: [warningsList] },
         { path: ["rankedActions", "items"] },
+        // The human briefing (#457) keeps its ranked items longest, like rankedActions.
+        { path: ["human", "coverage", "warnings"] },
+        { path: ["human", "items"] },
         { path: ["estimation", "findings"] },
         { path: ["rankedActions", "decisionEngine", "diagnostics"] },
         { path: ["decisionEngine", "diagnostics"] },
@@ -142,6 +146,24 @@ export function briefingView(base: ViewBase, report: Json): BoundedView {
           `Next actions (${list(ranked.items).length} shown of ${Number(ranked.total ?? 0)}):`,
           ...itemsLine("", list(ranked.items)),
         );
+      }
+      if (d.human) {
+        const human = obj(d.human);
+        const items = list(human.items).map(obj);
+        lines.push(
+          `Human briefing for ${str(human.human) || "(no human named)"} (${items.length} shown of ${Number(human.total ?? 0)}):`,
+          ...items.map(
+            (item, i) =>
+              `${i + 1}. [${item.explicit ? (item.addressed ? "explicit, to you" : "explicit") : "inferred"}] ${str(item.kind)} ${str(item.target)} — ${str(item.reason)} Source: ${str(item.source)}`,
+          ),
+          ...list(human.notices).map(String),
+        );
+        if (!items.length && Number(human.total ?? 0) === 0)
+          lines.push(
+            obj(human.coverage).complete === true
+              ? "No human input is waiting."
+              : "No human input found; coverage is incomplete.",
+          );
       }
       const targets = list(obj(d.actions).items).map(String);
       if (targets.length) lines.push(`Action targets: ${targets.join(" ")}`);

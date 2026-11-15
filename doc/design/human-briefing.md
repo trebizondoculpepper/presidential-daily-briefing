@@ -1,6 +1,6 @@
 # Human briefing: explicit questions, approvals and unblock actions
 
-Contract for #457 (parent #42). This is the documentation-first contract; it does not claim the behaviour has shipped. The dashboard page #458 and the minimal HTTP MCP slice #390 consume the projection defined here; neither may build its own. Unresolved questions on closed tickets are #414 and are deliberately not duplicated here.
+Contract for #457 (parent #42). Delivered: `src/briefing/human.ts` (record reading, trust and projection), the `D-HUMAN-*` decisions in `src/rules/datalog/policy/decisions.edn` with scenarios in `scenarios/human-briefing.edn`, and the shared `presentBriefing` path used by the CLI, MCP and `pdb serve`. The dashboard page #458 and the minimal HTTP MCP slice #390 consume the projection defined here; neither may build its own. Unresolved questions on closed tickets are #414 and are deliberately not duplicated here.
 
 ## Why
 
@@ -84,12 +84,13 @@ The compact report for `--role human` carries a `human` object instead of the ag
 - `reason` is the record's `Why:` line, or the rule's explanation for inferred items.
 - `blocks` lists the subject itself and its open native dependents (issues it blocks) for an issue, or the issues a PR closes. Truncated `blocking` evidence is reported in `blocks.unknown`, never as "blocks nothing".
 - `source` is the focused link: the record comment's URL for a question, otherwise the issue or PR URL.
+- Parked tickets are included: parking defers agent work, not a question waiting on the human. When more blocked or closed subjects exist than are listed, `blocks.unknown` says how many were omitted; that is display trimming, not incompleteness.
 - One subject appears once. When several rules match a subject (for example `attention:NAME` and a trusted question routed to the human), the item takes the first-ranked position, keeps every rule ID, and is explicit and addressed if any matching rule is.
 - No item carries a claim, estimate or merge command. The human view never grants claim rights, reserves work or performs a write; next steps are reading the source link or `pdb --repo R --issue N`/`pdb pr N --repo R`. Answering and signing off through a UI is later scope.
 
 ## Resolved and superseded records
 
-A question is current only while its ticket is open and still carries `question` or `design:decision-needed`. Removing those labels is how a participant marks it resolved (workflow.md, "Human questions"); a trusted record on a ticket without them is counted as `resolved` and produces no item. A record is never treated as resolved because of a later comment, a PR merge or closure of the ticket.
+A question is current only while its ticket is open and still carries `question` or `design:decision-needed`. Removing those labels is how a participant marks it resolved (workflow.md, "Human questions"); a trusted record on a ticket without them is counted as `resolved` and produces no item, but only when the ticket's labels were read completely; with truncated labels the record is counted as `unknown` and coverage is incomplete. Records are parsed with the same format `pdb needs-human` writes (`questionRecordBody`/`parseQuestionRecordBody` in `src/workflow/claims.ts`), so multiline questions and reasons are kept. A record is never treated as resolved because of a later comment, a PR merge or closure of the ticket.
 
 The newest trusted record on a ticket supersedes older trusted records there: a new needs-human call states the questions still outstanding, which is also how a partial answer is recorded. Older records are counted as `superseded` and stay reachable through the ticket. Exact repeats of a record (the same marker) are one record. #412 plans durable question IDs and waiting records; when they ship, resolution can bind to IDs instead of labels, and this projection reads them through the same fact boundary.
 
@@ -106,7 +107,7 @@ Explicit items therefore precede inferred ones, and addressed items precede ever
 
 `limit` (CLI `--limit`, MCP and API `limit`) applies after ranking, with `total` and `omitted`. The MCP version-2 envelope prunes `human.items` from the end within its byte budget and reports the omission. The text rendering lists the ranked items with their kind, explicit/inferred status, what is requested, what is blocked and the source, and says "No human input is waiting" only when the evidence is complete.
 
-`coverage.complete` is false, with a warning naming the subject, when any of these hold: a ticket's comment history is longer than the collected first page (an unseen newer record could change the questions); labels are truncated; `blocking` is truncated; permissions could not be read (offline, or no REST boundary), which makes every record `unverified`; or the snapshot itself is incomplete. Missing evidence is never read as "nothing needed", "answered" or "approved". Closed tickets are outside this slice and listed in `coverage.excluded`; #414 owns their unresolved questions.
+`coverage.complete` is false, with a warning naming the subject, when any of these hold: a ticket's comment history is longer than the collected first page (an unseen newer record could change the questions); labels are truncated; `blocking` or a PR's closing references are truncated; a record's authority is unknown (a failed permission lookup or an unverifiable editor); a current record's questions cannot be read; permissions could not be read (offline, or no REST boundary), which makes every record `unverified`; or the snapshot itself is incomplete. Missing evidence is never read as "nothing needed", "answered" or "approved". Closed tickets are outside this slice and listed in `coverage.excluded`; #414 owns their unresolved questions.
 
 ## Interactions
 

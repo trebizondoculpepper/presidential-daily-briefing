@@ -55,7 +55,7 @@ import {
 } from "./views.js";
 import type { ViewBase } from "./views.js";
 import { pickupOrders } from "../briefing/ranking.js";
-import { roleNames } from "../briefing/roles.js";
+import { briefingRoleNames } from "../briefing/roles.js";
 
 /** Startup selection. Client roots remain a separately tested follow-up (#25). */
 export interface McpOptions {
@@ -225,8 +225,8 @@ export const briefingInput = z
     /** Registered role view (#260, doc/design/mcp.md "Role views"): same as CLI --role. */
     role: z
       .string()
-      .refine((name) => roleNames().includes(name), {
-        message: `role must be one of ${roleNames().join(", ")}`,
+      .refine((name) => briefingRoleNames().includes(name), {
+        message: `role must be one of ${briefingRoleNames().join(", ")}`,
       })
       .optional(),
     /** Pickup order (#260): same as CLI --order; the CLI default is impact. */
@@ -520,7 +520,7 @@ export function createServer(
     {
       title: "Triage briefing",
       description:
-        'Datalog next actions by default (implementer view unless role is supplied). Explicit TypeScript rollback: pdb config set briefing.engine typescript. Evidence-linked action briefing for a GitHub repository: what needs attention and what to pick up next. Call at the start of work or with since to catch up. mode "briefing" returns the repository-wide what-changed report for a window (since, or last such as 24h; default last 24h); it never reads or advances a checkpoint. Actions default to ten next steps; catch-up defaults to five rows per section. In actions mode, role (implementer or designer) returns the blended queue for that role (rankedActions, role.next, estimation, impactEstimation) exactly as the CLI --role, and order (impact, oldest, newest) matches CLI --order.',
+        'Datalog next actions by default (implementer view unless role is supplied). Explicit TypeScript rollback: pdb config set briefing.engine typescript. Evidence-linked action briefing for a GitHub repository: what needs attention and what to pick up next. Call at the start of work or with since to catch up. mode "briefing" returns the repository-wide what-changed report for a window (since, or last such as 24h; default last 24h); it never reads or advances a checkpoint. Actions default to ten next steps; catch-up defaults to five rows per section. In actions mode, role (implementer or designer) returns the blended queue for that role (rankedActions, role.next, estimation, impactEstimation) exactly as the CLI --role, and order (impact, oldest, newest) matches CLI --order. role human returns the human briefing (human): questions, attention and sign-offs owed by the human named in agent, explicit before inferred; read-only.',
       inputSchema: briefingInput,
       outputSchema: boundedEnvelope,
       annotations,
@@ -571,7 +571,11 @@ export function createServer(
             async (selection, rt) => {
               const read = await readBriefing(rt, {
                 repository: selection.repository,
-                agent: selection.agent ?? undefined,
+                // The human role names its human only explicitly (doc/design/human-briefing.md).
+                agent:
+                  args.role === "human" && selection.identitySource !== "tool"
+                    ? undefined
+                    : (selection.agent ?? undefined),
                 since: args.since ? new Date(args.since).toISOString() : undefined,
                 limit: args.limit ?? (args.mode === "briefing" ? catchUpLimits.limit.default : 10),
                 maxChars: args.maxChars,

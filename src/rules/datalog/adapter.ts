@@ -28,8 +28,20 @@ import {
 
 export { DatalogError, rulesHash, compareKeys } from "./engine.js";
 
+/**
+ * One needs-human question record as a fact (doc/design/human-briefing.md, #457): its trust and
+ * routing only. The host reads and trusts the comment; the policy decides what it means.
+ */
+export interface QuestionRecordFact {
+  trust: "trusted" | "unverified";
+  /** The record's `Designer:` routing name; "" when it could not be read. */
+  to: string;
+}
 export interface DatalogOptions {
-  role: BlendedRole;
+  /** `human` is the human briefing role (#457); its decisions are not agent actions. */
+  role: BlendedRole | "human";
+  /** Human role only: question records per issue URL. Absent for the agent roles. */
+  questionRecords?: ReadonlyMap<string, readonly QuestionRecordFact[]>;
   agent?: string;
   platform?: string;
   order?: PickupOrder;
@@ -172,6 +184,12 @@ function normalize(
     for (const p of s.closedByPullRequestsReferences?.nodes ?? [])
       if (p.state === "OPEN") put(id, "closing", ids.get(p.url) ?? nextId++);
     for (const agent of options.responsible?.get(s.url) ?? []) put(id, "responsible", agent);
+    for (const record of options.questionRecords?.get(s.url) ?? []) {
+      const r = nextId++;
+      put(id, "question-record", r);
+      put(r, "record-trust", record.trust);
+      put(r, "record-to", record.to);
+    }
     if (pr) {
       const rollup = pr.commits.nodes[0]?.commit.statusCheckRollup;
       for (const [k, v] of Object.entries({
@@ -234,8 +252,11 @@ export function evaluateDatalog(
   options.signal?.throwIfAborted();
   const clock = options.now ?? performance.now.bind(performance),
     started = clock();
-  if (!["implementer", "designer"].includes(options.role))
-    throw new DatalogError("unsupported-role", "use --role implementer or --role designer");
+  if (!["implementer", "designer", "human"].includes(options.role))
+    throw new DatalogError(
+      "unsupported-role",
+      "use --role implementer, --role designer or --role human",
+    );
   if (subjectsOf(snapshot).length > maxSubjects)
     throw new DatalogError(
       "experimental-scope-exceeded",
@@ -285,7 +306,8 @@ export function evaluateDatalog(
       id: `${snapshot.repository} ${subject.url} ${decision.kind}`,
       kind: decision.kind as ActionKind,
       target: subject.url,
-      role: options.role,
+      // The human role's decisions are projected by briefing/human.ts, never ranked as agent work.
+      role: options.role as BlendedRole,
       band: decision.band as Band,
       reasonCodes: decision.codes,
       evidence: [

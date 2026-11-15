@@ -22,7 +22,7 @@ import {
   ghRun,
   planDependencyChange,
 } from "./github/dependencies.js";
-import { roleNames, roleRegistry } from "./briefing/roles.js";
+import { briefingRoleNames } from "./briefing/roles.js";
 import { doctorStaleHours, ticketDoctor, ticketDoctorText } from "./workflow/ticketdoctor.js";
 import { diagnoseClosedDrift, diagnoseDelivery } from "./workflow/deliverydoctor.js";
 import { deliveryRead, withDeliveryCompleteness } from "./workflow/deliveryread.js";
@@ -213,7 +213,10 @@ Rollback: pdb config set briefing.engine typescript.
                         Presentation only: never authority; addressed attention always shown.
                         Both roles rank NEXT STEPS as one blended queue (rankedActions): attention,
                         PR follow-up, designer duties, easy wins, assessments (estimate-complexity
-                        or assess-impact, blocked tickets included), ordinary, unfavorable work
+                        or assess-impact, blocked tickets included), ordinary, unfavorable work.
+                        --role human lists the questions, attention requests and sign-offs a
+                        human (named with --agent NAME) is asked for, explicit before inferred,
+                        with what each blocks; read-only, never a claim
   --platform P          Your platform (e.g. claude-code); platform:* tickets need a match.
                         Without it, restricted tickets are inspection context, not pickup
   --order MODE          Pickup order only: impact (default: urgency, immediate unlocks,
@@ -476,10 +479,14 @@ export function argumentsFor(args: string[]) {
   });
   if (values.guide && values["no-guide"])
     throw new Error("Use either --guide or --no-guide, not both.");
-  if (values.role !== undefined && !roleRegistry.has(values.role))
-    throw new Error(`--role must be one of ${roleNames().join(", ")}.`);
+  if (values.role !== undefined && !briefingRoleNames().includes(values.role))
+    throw new Error(`--role must be one of ${briefingRoleNames().join(", ")}.`);
   if (values.role !== undefined && values.full)
     throw new Error("--role shapes the compact briefing; it cannot be combined with --full.");
+  if (values.role === "human" && (values.issue || values.estimate))
+    throw new Error(
+      "--role human is a repository view of human input; it cannot be combined with --issue or --estimate.",
+    );
   if (values.repo && !/^[\w.-]+\/[\w.-]+$/.test(values.repo))
     throw new Error("--repo must be owner/name.");
   const order = values.order ?? "impact";
