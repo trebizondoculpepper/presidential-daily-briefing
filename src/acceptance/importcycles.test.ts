@@ -17,8 +17,6 @@ const src = join(dirname(fileURLToPath(import.meta.url)), "..");
 const known: string[][] = [
   ["github/dependencies", "github/github"],
   ["estimation/complexitylabels", "estimation/estimate", "estimation/estimation"],
-  // pdb serve (#373): the serve/* modules import types from serve.ts; #445 breaks it.
-  ["serve", "serve/api", "serve/cache", "serve/mcp", "serve/services"],
 ];
 
 /** Non-test TypeScript modules: no tests, no declaration files, nothing from src/testing/. */

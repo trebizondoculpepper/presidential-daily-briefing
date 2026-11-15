@@ -157,7 +157,7 @@ Measured over non-test modules at `7384969`:
 
 Each remaining group stays inside one directory.
 
-Added after the moves: `serve`, `serve/api`, `serve/cache`, `serve/mcp` and `serve/services` from `pdb serve` (#373, measured at `49ecaf6`). Every edge back into `serve.ts` is type-only; #445 removes the group by moving the shared serve types into `serve/types.ts`.
+~~Added after the moves: `serve`, `serve/api`, `serve/cache`, `serve/mcp` and `serve/services` from `pdb serve` (#373, measured at `49ecaf6`).~~ Removed by #445: the shared serve interfaces (including `ServeReadRuntime`) moved into `serve/types.ts`, which imports no `serve` module except the self-contained rules page's runtime type; `serve.ts` and `serve/api.ts` re-export them for existing importers.
 
 The moves must not add a cycle or merge further modules into an existing group. `src/acceptance/importcycles.test.ts` (#436) enforces this: it computes the strongly connected groups over non-test modules (static, type-only and `import()` edges) and fails on a new group or a module joining a known one. A shrunken or broken group also fails until the pinned list in the test and this section are updated, so the list only tightens. Breaking a remaining group is follow-up work, and each such change needs its own focused ticket.
 

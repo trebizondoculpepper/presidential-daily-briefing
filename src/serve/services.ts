@@ -4,7 +4,7 @@
  */
 import { collect, ghQueryWith, ghRest } from "../github/github.js";
 import { dependencyReport } from "../github/dependencies.js";
-import type { ServeExtensions, ServeRuntime } from "../serve.js";
+import type { ServeExtensions, ServeRuntime } from "./types.js";
 import { readApi, selectRepository } from "./api.js";
 import type { ServeReadRuntime } from "./api.js";
 import { randomUUID } from "node:crypto";
