@@ -381,7 +381,16 @@ export class ReadMeter {
   private refusal: ReadCollection["quota"] = null;
   /** Record a quota refusal's structured retry evidence (RateLimitError's `retry`). */
   private noteRefusal(refusal: unknown): void {
-    const { retryAfterSeconds, resetAt } = retryEvidence(refusal);
+    this.noteQuotaRefusal(retryEvidence(refusal));
+  }
+  /** Restore a shared fact read's refusal without inventing another network request. */
+  noteQuotaRefusal({
+    retryAfterSeconds,
+    resetAt,
+  }: {
+    retryAfterSeconds?: number | null;
+    resetAt?: string | null;
+  }): void {
     this.refusal = {
       retryAfterSeconds: retryAfterSeconds ?? this.refusal?.retryAfterSeconds ?? null,
       resetAt: resetAt ?? this.refusal?.resetAt ?? null,

@@ -1,3 +1,4 @@
+import { cachedIssueFacts } from "./issue-facts.js";
 /**
  * The `pdb serve` JSON read API (doc/design/serve.md "Read API", #373).
  *
@@ -40,6 +41,7 @@ import type {
 } from "../github/github.js";
 import type { dependencyReport as DependencyReportFn } from "../github/dependencies.js";
 import { legacyTreeText, notReadText, treeIncompleteText } from "../github/dependencies.js";
+import { readProfiles } from "../github/readplan.js";
 import type { Snapshot } from "../github/types.js";
 import { localPaths, redactLocalText, redactPaths } from "../mcp/redact.js";
 import { markerTrust } from "../workflow/delivery.js";
@@ -310,8 +312,8 @@ function cliCommand(view: View, repository: string, number?: number): string {
 const refreshScopes = {
   all: undefined,
   // The briefing, issue, who and team views share collected snapshots.
-  briefing: ["collect"],
-  issues: ["collect"],
+  briefing: ["collect", "discovery", "issue-facts"],
+  issues: ["collect", "discovery", "issue-facts"],
   who: ["collect", "who"],
   team: ["collect"],
   deps: ["deps"],
@@ -337,15 +339,70 @@ export function cachedBoundaries(
   const cachedCollect: typeof Collect = (repository, collectOptions) => {
     const { signal, ...coverage } = collectOptions ?? {};
     return cache.read(
-      { repository, collector: "collect", coverage },
+      {
+        repository,
+        collector: "collect",
+        coverage: {
+          ...coverage,
+          profile: "compatibility-full-v1",
+          version: readProfiles["compatibility-full-v1"].version,
+        },
+      },
       (inner) => runtime.collect(repository, { ...coverage, signal: inner }),
       signal,
     );
   };
+  const cachedShortlist: ServeReadRuntime["collectShortlist"] = runtime.collectShortlist
+    ? (repository, options, _query, now) =>
+        runtime.collectShortlist!(
+          repository,
+          {
+            ...options,
+            issueFacts: (request, produce, signal) =>
+              cachedIssueFacts(cache, guardedQueryWith, request, produce, signal),
+            discovery: (request, produce, signal) =>
+              cache.read(
+                {
+                  repository,
+                  collector: "discovery",
+                  coverage: {
+                    profile: "briefing-shortlist-v1",
+                    version: readProfiles["briefing-shortlist-v1"].version,
+                    source: request.source,
+                    pageSize: request.pageSize,
+                    pages: request.pages,
+                  },
+                },
+                (inner) => {
+                  if (!guardedQueryWith)
+                    throw new CollectionError(
+                      "GITHUB_UNAVAILABLE",
+                      "No GitHub reader is configured.",
+                    );
+                  return produce(guardedQueryWith(inner), inner);
+                },
+                signal,
+                (facts) => facts.complete,
+              ),
+          },
+          guardedQueryWith?.(options.signal),
+          now,
+        )
+    : undefined;
   const cachedDependencies: typeof DependencyReportFn = (repository, number, depOptions) => {
     const { signal, ...coverage } = depOptions ?? {};
     return cache.read(
-      { repository, collector: "deps", coverage: { n: number, ...coverage } },
+      {
+        repository,
+        collector: "deps",
+        coverage: {
+          n: number,
+          ...coverage,
+          profile: coverage.tree ? "dependency-tree-v1" : "dependency-direct-v1",
+          version:
+            readProfiles[coverage.tree ? "dependency-tree-v1" : "dependency-direct-v1"].version,
+        },
+      },
       async (inner) => {
         const report = await runtime.dependencyReport(repository, number, {
           ...coverage,
@@ -385,6 +442,7 @@ export function cachedBoundaries(
 
   return {
     collect: cachedCollect,
+    collectShortlist: cachedShortlist,
     dependencyReport: cachedDependencies,
     rest: memoRest,
     queryWith: memoQueryWith,
@@ -419,6 +477,7 @@ export function readApi(
     servedSet.some((s) => s.repository.toLowerCase() === repository.toLowerCase());
   const {
     collect: cachedCollect,
+    collectShortlist: cachedShortlist,
     dependencyReport: cachedDependencies,
     rest: memoRest,
     queryWith: memoQueryWith,
@@ -430,6 +489,7 @@ export function readApi(
 
   const readRuntime = (project: string | undefined, repository: string): ReadRuntime => ({
     collect: cachedCollect,
+    collectShortlist: cachedShortlist,
     dependencyReport: cachedDependencies,
     rest: memoRest,
     queryWith: memoQueryWith,
@@ -967,7 +1027,12 @@ export function readApi(
                 {
                   repository: served.repository,
                   collector: "who",
-                  coverage: { n: number, profile: "issue-detail-v1", staleHours },
+                  coverage: {
+                    n: number,
+                    profile: "issue-detail-v1",
+                    version: readProfiles["issue-detail-v1"].version,
+                    staleHours,
+                  },
                 },
                 async (inner) => {
                   const result = await readWhoLive(
