@@ -1112,11 +1112,16 @@ describe("pdb serve cache races (#373)", () => {
     const cache = makeCache(clock, () => "old");
     let finish!: (value: string) => void;
     const key = { repository: "o/r", collector: "c", coverage: {} };
-    const pending = cache.read(key, () => new Promise<string>((done) => (finish = done)));
+    const pending = cache.track(false, () =>
+      cache.read(key, () => new Promise<string>((done) => (finish = done))),
+    );
     await until(() => finish !== undefined);
     expect(cache.refresh("o/r")).toBe(0);
     finish("before-refresh");
-    expect(await pending).toBe("before-refresh");
+    expect(await pending).toMatchObject({
+      value: "before-refresh",
+      freshness: [{ source: "stale", stale: true, refreshError: { code: "CACHE_INVALIDATED" } }],
+    });
     expect(cache.status().entries).toBe(0);
     cache.close();
   });
