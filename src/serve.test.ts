@@ -175,7 +175,7 @@ const stubRuntime = {
 } as unknown as Runtime;
 
 describe("pdb serve lifecycle (#373)", () => {
-  it("binds 127.0.0.1, prints the banner and answers health, status and the placeholder", async () => {
+  it("binds 127.0.0.1, prints the banner and answers health, status and the dashboard", async () => {
     const h = harness();
     const run = runServe(["--repo", "example/one", "--port", "0"], h.runtime);
     await until(() => h.out.length > 0);
@@ -202,12 +202,24 @@ describe("pdb serve lifecycle (#373)", () => {
       repositories: [{ repository: "example/one", default: true, observedAt: null }],
       cache: { entries: 0, hits: 0, misses: 0, inflight: 0 },
     });
+    // The dashboard (#374): page, stylesheet and script, same-origin under a strict CSP.
     const page = await call(port, "/");
     expect(page.status).toBe(200);
     expect(page.headers["content-type"]).toBe("text/html; charset=utf-8");
+    expect(page.headers["content-security-policy"]).toContain("script-src 'self'");
     expect(page.body).toContain("/api/v1/status");
-    expect(page.body).toContain("#374");
-    expect(page.body).not.toMatch(/<script|https?:\/\/(?!127)/);
+    expect(page.body).not.toMatch(/<script>|https?:\/\/(?!127)/);
+    const script = await call(port, "/dashboard.js");
+    expect(script.status).toBe(200);
+    expect(script.headers["content-type"]).toBe("text/javascript; charset=utf-8");
+    expect(script.body).toContain("/api/v1/briefing");
+    expect((await call(port, "/dashboard.css")).headers["content-type"]).toBe(
+      "text/css; charset=utf-8",
+    );
+    // A bookmarked selection reloads; anything else in the query is still refused.
+    expect((await call(port, "/?repo=example%2Fone&role=designer&agent=me")).status).toBe(200);
+    expect((await call(port, "/?debug=1")).status).toBe(400);
+    expect((await call(port, "/dashboard.js?repo=x")).status).toBe(400);
     expect((await call(port, "/nope")).status).toBe(404);
     expect((await call(port, "/healthz?x=1")).status).toBe(400);
     const post = await call(port, "/healthz", { method: "POST" });
