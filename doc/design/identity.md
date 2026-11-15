@@ -1,5 +1,11 @@
 # Persistent repository-local agent identity
 
+The later PDB-owned store and one-time import contract is
+[pdb-owned-identity.md](pdb-owned-identity.md) (#319). It supersedes this document's
+filename/write destination when implemented. This document records the existing
+Agent Inbox-compatible behavior and the shared resolver/write safeguards; do not
+claim the new filename is installed before #319 ships.
+
 ## Owner decision and why
 
 An agent needs a stable name when it returns to the same repository. Keep the existing `agent-inbox.toml` format at the Git working-tree root. Reuse that file and names if present; setup creates it if absent. It is local, non-versioned and Git-ignored. Sharing the filename/format requires no external service, installed application, network check-in or personal infrastructure. The earlier interpretation that the local identity file itself was retired is superseded.
