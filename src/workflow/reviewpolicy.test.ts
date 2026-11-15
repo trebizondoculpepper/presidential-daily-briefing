@@ -311,3 +311,79 @@ describe("declared, legacy, undeclared and unknown policy", () => {
     );
   });
 });
+
+describe("review findings (#556 review)", () => {
+  const thread = (author: { __typename?: string; login: string }) => ({
+    author,
+    url: "https://t/1",
+  });
+  it("a later COMMENTED review keeps a CodeRabbit change request outstanding", () => {
+    const r = run(
+      evidence({
+        comments: [codexReceipt()],
+        reviews: [rabbitReview("CHANGES_REQUESTED"), rabbitReview("COMMENTED")],
+      }),
+    );
+    expect(r.detail.providers[1].state).toBe("findings");
+    expect(r.headReviewed).toBe(false);
+  });
+  it("only a later APPROVED or DISMISSED review clears it", () => {
+    const approved = run(
+      evidence({
+        reviews: [
+          rabbitReview("CHANGES_REQUESTED"),
+          rabbitReview("COMMENTED"),
+          rabbitReview("APPROVED"),
+        ],
+      }),
+    );
+    expect(approved.headReviewed).toBe(true);
+    const dismissed = run(
+      evidence({
+        comments: [codexReceipt()],
+        reviews: [rabbitReview("CHANGES_REQUESTED"), rabbitReview("DISMISSED")],
+      }),
+    );
+    expect(dismissed.headFindings).toBe(false);
+    expect(dismissed.headReviewed).toBe(true);
+  });
+  it("an unauthenticated Codex findings marker cannot veto declared coverage", () => {
+    for (const author of [user("chatgpt-codex-connector"), { login: "chatgpt-codex-connector" }]) {
+      const r = run(
+        evidence({
+          comments: [codexReceipt(head, "completed", true, author)],
+          reviews: [rabbitReview("APPROVED")],
+        }),
+      );
+      expect(r.headFindings).toBe(false);
+      expect(r.headReviewed).toBe(true);
+      expect(r.detail.unknowns.join()).toMatch(/ignored a Codex review-state marker/);
+    }
+    // Legacy keeps its login-only rule.
+    expect(
+      evaluateReviewPolicy(
+        legacy,
+        evidence({
+          comments: [codexReceipt(head, "completed", true, user("chatgpt-codex-connector"))],
+        }),
+      ).headFindings,
+    ).toBe(true);
+  });
+  it("incomplete evidence never reports headReviewed beside unknown coverage", () => {
+    const r = run(evidence({ comments: [codexReceipt()], complete: false }));
+    expect(r.headReviewed).toBe(false);
+    expect(r.detail.coverage).toBe("unknown");
+  });
+  it("an unresolved thread opened by a provider is a finding; another author's is not", () => {
+    const flagged = run(
+      evidence({ comments: [codexReceipt()], unresolvedThreads: [thread(bot("coderabbitai"))] }),
+    );
+    expect(flagged.headFindings).toBe(true);
+    expect(flagged.headReviewed).toBe(false);
+    expect(
+      run(
+        evidence({ comments: [codexReceipt()], unresolvedThreads: [thread(user("coderabbitai"))] }),
+      ).headReviewed,
+    ).toBe(true);
+  });
+});
