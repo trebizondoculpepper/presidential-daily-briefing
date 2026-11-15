@@ -442,6 +442,104 @@ describe("PDB-owned identity store (#319)", () => {
     });
   });
 
+  describe("names held only in agent-inbox.toml are never duplicated (#528 review)", () => {
+    it("refuses an explicit name held by another legacy-only agent, on create and rename", async () => {
+      await withRepo(async (dir) => {
+        await writeFile(join(dir, LEGACY_IDENTITY_FILE), LEGACY);
+        const target = await resolveIdentityTarget(dir, undefined);
+        await expect(
+          setIdentity(target, "gemini", "identity.name", "Legacy_Claude"),
+        ).rejects.toMatchObject({
+          code: "conflict",
+          message: expect.stringContaining(LEGACY_IDENTITY_FILE),
+        });
+        expect(await readdir(dir)).not.toContain(IDENTITY_FILE);
+        await setIdentity(target, "gemini", "identity.name", "gemini_agent");
+        await expect(
+          setIdentity(target, "gemini", "identity.name", "legacy_codex"),
+        ).rejects.toMatchObject({ code: "conflict" });
+        expect((await readIdentity(dir, "gemini")).name).toBe("gemini_agent");
+        // The same entry's own legacy name is not a collision.
+        const own = await setIdentity(target, "codex", "identity.name", "legacy_codex");
+        expect(own).toMatchObject({ changed: true, legacyNamesUnchecked: null });
+      });
+    });
+
+    it("refuses an import whose name another legacy entry also holds", async () => {
+      await withRepo(async (dir) => {
+        const legacy = '[agents.codex]\nname = "twin"\n\n[agents.claude]\nname = "twin"\n';
+        await writeFile(join(dir, LEGACY_IDENTITY_FILE), legacy);
+        const target = await resolveIdentityTarget(dir, undefined);
+        await expect(
+          setIdentity(target, "codex", "identity.triage_role", "designer"),
+        ).rejects.toMatchObject({
+          code: "conflict",
+          message: expect.stringContaining("besides [agents.codex]"),
+        });
+        expect(await readdir(dir)).not.toContain(IDENTITY_FILE);
+        expect(await readFile(join(dir, LEGACY_IDENTITY_FILE), "utf8")).toBe(legacy);
+      });
+    });
+
+    it("generates names that avoid every legacy name", async () => {
+      await withRepo(async (dir) => {
+        await writeFile(join(dir, LEGACY_IDENTITY_FILE), '[agents.other]\nname = "amara_abara"\n');
+        const target = await resolveIdentityTarget(dir, undefined);
+        let calls = 0;
+        const write = await setIdentity(target, "codex", "identity.triage_role", "designer", {
+          random: () => (calls++ < 2 ? 0 : 0.99),
+        });
+        expect(write.generatedName).not.toBe("amara_abara");
+      });
+    });
+
+    it("allows an explicit name when legacy names are unknown, reporting the unchecked collision", async () => {
+      await withRepo(async (dir) => {
+        await writeFile(join(dir, LEGACY_IDENTITY_FILE), "[agents\nbroken");
+        const target = await resolveIdentityTarget(dir, undefined);
+        await setIdentity(target, "codex", "identity.name", "first_name");
+        // A rename of an existing entry: the legacy file is not otherwise consulted.
+        const rename = await setIdentity(target, "codex", "identity.name", "second_name");
+        expect(rename).toMatchObject({
+          changed: true,
+          legacyIgnored: null,
+          legacyNamesUnchecked: expect.stringContaining("agent-inbox.toml is not valid"),
+        });
+        const text = await config(
+          dir,
+          {},
+          "set",
+          "identity.name",
+          "third_name",
+          "--entry",
+          "codex",
+        );
+        expect(text.text).toContain("could not check the name against agent-inbox.toml names");
+        expect(await readFile(join(dir, LEGACY_IDENTITY_FILE), "utf8")).toBe("[agents\nbroken");
+      });
+    });
+
+    it("refuses an explicit name if the legacy file changes during the collision check", async () => {
+      await withRepo(async (dir) => {
+        const target = await resolveIdentityTarget(dir, undefined);
+        const legacyPath = join(target.root, LEGACY_IDENTITY_FILE);
+        await writeFile(legacyPath, '[agents.other]\nname = "someone"\n');
+        const fs: ConfigFileSystem = {
+          ...nodeFileSystem,
+          writeText: async (file, text, mode) => {
+            await nodeFileSystem.writeText(file, text, mode);
+            if (file.endsWith(".tmp"))
+              await writeFile(legacyPath, '[agents.other]\nname = "picked"\n');
+          },
+        };
+        await expect(
+          setIdentity(target, "codex", "identity.name", "picked", { fs }),
+        ).rejects.toMatchObject({ code: "conflict" });
+        expect(await readdir(target.root)).not.toContain(IDENTITY_FILE);
+      });
+    });
+  });
+
   it("distinguishes ignored from tracked files and refuses tracked identity on either side", async () => {
     await withRepo(async (dir) => {
       const target = await resolveIdentityTarget(dir, undefined);
