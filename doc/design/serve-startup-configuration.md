@@ -88,9 +88,12 @@ capability out of config/help/status/logs, and remove only this instance's recor
 on shutdown. It is not a GitHub credential or persisted cache. Never trust PID or
 file age alone as proof a process is PDB or is dead.
 
-Serialize startup/registration with a short bounded profile lock. Re-read config
-and discovery under the lock. Probe only the recorded local endpoint with a short
-timeout; do not scan ports or kill a conflicting process. Bind failures retain
+Serialize listener/discovery startup with a short bounded profile lock; serialize
+configuration updates with a separate config-file lock. Re-read config/discovery
+under the startup lock, then release it before registration HTTP calls. Never hold
+a client-side config lock while waiting for a server that needs that same lock.
+Probe only the recorded local endpoint with a short timeout; do not scan ports or
+kill a conflicting process. Bind failures retain
 existing clear exit codes and never silently choose a different stable port.
 
 Verify a recorded server before sending registration or local paths: an instance
@@ -108,10 +111,12 @@ local. A remote bind flag never makes this control API public. No GitHub mutatio
 shell commands or arbitrary file reads are exposed. Same-user/root compromise is
 outside this local discovery guarantee; do not advertise loopback as user auth.
 
-For an existing instance, persist the merged valid registration set and have the
-server acknowledge its observed revision/served set. Registration is idempotent;
-if notification fails after persistence, report partial/pending application and
-give a retry, not a false success. The next invocation reconciles from config.
+For an existing instance, ask the verified server to merge/persist valid
+registrations through the config service and acknowledge its observed revision/
+served set. Registration is idempotent. `config set` writes under the config lock,
+releases that lock and then notifies the server to reload. If persistence succeeds
+but application/acknowledgment fails, report partial/pending application and give a
+retry, not a false success. The next invocation reconciles from config.
 The server reuses one registration/config service, not a separate TOML reader.
 No registered project is prefetched. Preserve existing cache entries for unchanged
 contexts and invalidate a changed selected root/config context safely.
