@@ -901,6 +901,11 @@ export interface FocusOptions {
    * continuations completed under the same meter. Otherwise they are `not-requested`.
    */
   nativeEdges?: boolean;
+  /**
+   * At most this many PRs are hydrated (`pdb ticket N --limit-prs`, #197); the rest are never
+   * read, recorded `not-requested` and warned about, so ownership evidence is incomplete.
+   */
+  hydrationLimit?: number;
 }
 /**
  * One issue and the open pull requests in the same repository that would close it
@@ -1043,9 +1048,18 @@ export async function collectIssueFocus(
         .map((ref) => [ref.number, ref]),
     ).values(),
   ];
+  const limit = options.hydrationLimit ?? targets.length;
+  for (const ref of targets.slice(limit)) {
+    meter.cover("pull-request", `${repository}#${ref.number}`, "not-requested", {
+      omission: `beyond the hydration limit of ${limit}`,
+    });
+    warnings.push(
+      `${ref.url}: linked pull request not read (beyond the limit of ${limit}); its evidence is unknown.`,
+    );
+  }
   const pullRequests = await hydratePullRequests(
     repository,
-    targets,
+    targets.slice(0, limit),
     { meter, signal, warnings, role: "linked" },
     base,
   );

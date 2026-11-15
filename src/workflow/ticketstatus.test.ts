@@ -162,6 +162,8 @@ interface World {
 /** One GraphQL boundary for the focused issue read, closing references, PR status and delivery. */
 function fake(w: World) {
   const log: string[] = [];
+  /** PR numbers any pull-request read asked for (hydration and status alike). */
+  const prReads: number[] = [];
   const rate = (q: string) =>
     q.includes("pdbReadRate")
       ? { pdbReadRate: { cost: 1, remaining: 4000, resetAt: "2026-11-14T11:00:00Z" } }
@@ -179,6 +181,7 @@ function fake(w: World) {
         ...rate(q),
       };
     if (q.includes("pullRequest(number")) {
+      prReads.push(n);
       if (w.rateLimitPr?.has(n)) throw new RateLimitError("API rate limit exceeded");
       if (w.failPr?.has(n)) throw new Error("GitHub query failed.");
       const p = w.prs[n];
@@ -218,7 +221,7 @@ function fake(w: World) {
     trustWith: (r: typeof rest) => markerTrust(permissionLookup(repo, r)),
     live: { query, rest },
   };
-  return { query, rest, boundaries, log };
+  return { query, rest, boundaries, log, prReads };
 }
 
 const read = (w: World, limitPrs?: number, withDelivery = true) => {
@@ -230,7 +233,7 @@ const read = (w: World, limitPrs?: number, withDelivery = true) => {
     withDelivery ? f.boundaries : {},
     f.query,
     clock,
-  ).then((r) => ({ ...r, log: f.log }));
+  ).then((r) => ({ ...r, log: f.log, prReads: f.prReads }));
 };
 const row = (r: TicketStatus, n: number) => r.pullRequests.find((p) => p.number === n)!;
 
@@ -296,6 +299,40 @@ describe("pdb ticket N (#197)", () => {
     ]);
     expect(r.text).toMatch(/EVIDENCE INCOMPLETE/);
     expect(r.text).toMatch(/#22 .*status omitted/);
+  });
+
+  it("--limit-prs bounds the first hydration pass: PRs beyond it are never read", async () => {
+    const issue = ticket(1, [submitted(1, [member(25)])]);
+    const r = await read(
+      {
+        issue,
+        prs: { 25: { state: "OPEN" }, 26: { state: "OPEN" }, 27: { state: "OPEN" } },
+        links: [26, 27].map((n) => ({ number: n, url: prLink(n), state: "OPEN" })),
+      },
+      1,
+    );
+    // Only one PR is ever read, by any pass; the others stay listed as unknown.
+    expect(new Set(r.prReads).size).toBe(1);
+    expect(r.report.pullRequests.filter((p) => p.detail === "read")).toHaveLength(1);
+    expect(r.report.pullRequests.filter((p) => p.detail === "omitted")).toHaveLength(2);
+    expect(r.complete).toBe(false);
+  });
+
+  it("keeps the shared closure-cleanup follow-up for an open member of a not-planned ticket", async () => {
+    for (const reason of ["NOT_PLANNED", "DUPLICATE"]) {
+      const issue = ticket(1, [submitted(1, [member(35)])], {
+        state: "CLOSED",
+        stateReason: reason,
+      });
+      const r = await read({ issue, prs: { 35: { state: "OPEN" } }, links: [] });
+      const member35 = r.report.delivery.deliverables.find((d) => d.deliverable === `${repo}#35`)!;
+      expect(member35.followUpWhy).toMatch(/closure cleanup/);
+      expect(row(r.report, 35)).toMatchObject({
+        detail: "read",
+        followUp: member35.followUp,
+        followUpWhy: member35.followUpWhy,
+      });
+    }
   });
 
   it("current-head acceptance, stale approval, failed and pending checks come from pr-status", async () => {

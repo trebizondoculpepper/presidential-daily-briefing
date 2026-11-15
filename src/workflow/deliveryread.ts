@@ -523,6 +523,23 @@ export interface PrDelivery {
   complete: boolean;
   omissions: string[];
 }
+/**
+ * One required member's follow-up given fresh `pr N` evidence: the fresh report decides ordinary
+ * follow-up of an open or draft member; closure cleanup (S5, the issue closed not planned,
+ * duplicate or other) and settled members keep the delivery view's. Shared by `pr N` and
+ * `ticket N` so neither recomputes it.
+ */
+export function memberFollowUp(
+  member: Pick<DeliverableView, "state" | "followUp" | "followUpWhy">,
+  closure: Closure,
+  open: boolean,
+  facts: FollowUpFacts,
+): [FollowUp, string] {
+  const cleanup = closure !== "open" && closure !== "closed-completed";
+  const own = open && !cleanup && (member.state === "open" || member.state === "draft");
+  return own ? classifyFollowUp(facts) : [member.followUp, member.followUpWhy];
+}
+
 export function prDelivery(
   prUrl: string,
   facts: FollowUpFacts,
@@ -551,13 +568,9 @@ export function prDelivery(
       ...read.closures.map(({ number, closure }) => {
         const view = views.get(number) ?? null;
         const member = view?.deliverables.find((m) => m.url?.toLowerCase() === prUrl.toLowerCase());
-        // This PR's follow-up comes from this report's own fresh, structured evidence.
-        const [fresh, freshWhy] = classifyFollowUp(facts);
-        // The fresh report decides ordinary follow-up; closure cleanup (S5) keeps the view's.
-        const cleanup = closure !== "open" && closure !== "closed-completed";
-        const own =
-          !!member && open && !cleanup && (member.state === "open" || member.state === "draft");
-        const followUp: FollowUp | null = !member ? null : own ? fresh : member.followUp;
+        const [followUp, why] = member
+          ? memberFollowUp(member, closure, open, facts)
+          : [null, null];
         return {
           number,
           repository,
@@ -567,7 +580,7 @@ export function prDelivery(
           delivery: view ? view.delivery : null,
           ticketResponsible: view?.responsibility?.ticket ?? null,
           followUp,
-          followUpWhy: !member ? null : own ? freshWhy : member.followUpWhy,
+          followUpWhy: why,
         };
       }),
       ...outside,
