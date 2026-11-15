@@ -10,6 +10,7 @@ import {
   describeCheckout,
   gitInvocation,
   gitWith,
+  type GitResult,
   type GitRunner,
 } from "./checkout.js";
 
@@ -181,7 +182,7 @@ describe("source checkout freshness (#309)", () => {
     const s = await probe(shallow);
     expect(s.comparison).toMatchObject({
       state: "unknown",
-      reason: "shallow history",
+      reason: expect.stringMatching(/shallow/),
       behind: null,
     });
   });
@@ -210,25 +211,43 @@ describe("source checkout freshness (#309)", () => {
     expect(s).toMatchObject({ lastFetch: null, stale: null });
   });
 
-  it("invalidates the upstream comparison too when HEAD moves", async () => {
-    let heads = 0;
-    const moving: GitRunner = async (args) => {
+  /** A scripted Git: the first matching prefix answers; `refIds` serve successive captures. */
+  const scripted = (opts: {
+    symref?: GitResult;
+    captures?: string[];
+    rows?: string;
+    remotes?: string;
+  }): GitRunner => {
+    let capture = 0;
+    return async (args) => {
       const a = args.join(" ");
       if (a.startsWith("rev-parse --show-toplevel"))
         return { ok: true, stdout: "/r\n.git\n.git\nfalse" };
-      if (a.startsWith("rev-parse --verify -q HEAD"))
-        return { ok: true, stdout: heads++ ? "b".repeat(40) : "a".repeat(40) };
-      if (a.startsWith("symbolic-ref")) return { ok: true, stdout: "feat" };
+      if (a.startsWith("symbolic-ref"))
+        return opts.symref ?? { ok: true, stdout: "refs/heads/feat" };
+      if (a === "remote") return { ok: true, stdout: opts.remotes ?? "origin" };
       if (a.startsWith("for-each-ref"))
         return {
           ok: true,
           stdout:
-            "refs/remotes/origin/HEAD\torigin/main\t\nrefs/remotes/origin/main\t\t\nrefs/heads/feat\t\torigin/feat",
+            opts.rows ??
+            "refs/remotes/origin/HEAD\trefs/remotes/origin/main\t\t\nrefs/remotes/origin/main\t\t\t\nrefs/heads/feat\t\trefs/remotes/origin/feat\torigin",
         };
+      if (a.startsWith("rev-parse HEAD^{commit}")) {
+        const list = opts.captures ?? [];
+        return { ok: true, stdout: list[Math.min(capture++, list.length - 1)] };
+      }
       if (a.startsWith("rev-list")) return { ok: true, stdout: "1\t0" };
-      return { ok: false, reason: "failed" };
+      return { ok: false, reason: "failed", code: 128 };
     };
-    const s = await probe("x", { git: moving, mtime: async () => null });
+  };
+  const [h1, h2, r1, r2, u1] = ["1", "2", "3", "4", "5"].map((c) => c.repeat(40));
+
+  it("invalidates both comparisons when HEAD moves", async () => {
+    const s = await probe("x", {
+      git: scripted({ captures: [[h1, r1, u1].join("\n"), [h2, r1, u1].join("\n")] }),
+      mtime: async () => null,
+    });
     expect(s.comparison).toMatchObject({
       state: "unknown",
       reason: expect.stringMatching(/changed/),
@@ -238,6 +257,46 @@ describe("source checkout freshness (#309)", () => {
       state: "unknown",
       reason: expect.stringMatching(/changed/),
     });
+  });
+
+  it("invalidates the counts when a compared ref moves, even with HEAD still", async () => {
+    const steady = await probe("x", {
+      git: scripted({ captures: [[h1, r1, u1].join("\n")] }),
+      mtime: async () => null,
+    });
+    expect(steady.comparison).toMatchObject({
+      state: "behind",
+      fullRef: "refs/remotes/origin/main",
+    });
+    const moved = await probe("x", {
+      git: scripted({ captures: [[h1, r1, u1].join("\n"), [h1, r2, u1].join("\n")] }),
+      mtime: async () => null,
+    });
+    expect(moved.comparison).toMatchObject({
+      state: "unknown",
+      reason: expect.stringMatching(/changed/),
+    });
+    expect(moved.upstream?.state).toBe("unknown");
+  });
+
+  it("treats only a real 'not a symbolic ref' as detached; other failures are unknown", async () => {
+    const run = (symref: GitResult) =>
+      probe("x", {
+        git: scripted({ symref, captures: [h1 + "\n" + r1] }),
+        mtime: async () => null,
+      });
+    expect(await run({ ok: false, reason: "failed", code: 1 })).toMatchObject({
+      detached: true,
+      branch: null,
+    });
+    for (const failed of [
+      { ok: false, reason: "timeout" } as const,
+      { ok: false, reason: "failed", code: 128 } as const,
+    ]) {
+      const s = await run(failed);
+      expect(s).toMatchObject({ detached: null, branch: null });
+      expect(describeCheckout(s)[0]).toContain("HEAD state unknown");
+    }
   });
 
   it("still compares the upstream on the origin/main fallback path within the call budget", async () => {
@@ -307,6 +366,59 @@ describe("source checkout freshness (#309)", () => {
     }
   });
 
+  it("uses the configured remote, not an assumed origin", async () => {
+    const { work } = await cloned();
+    git(work, "remote", "rename", "origin", "upstream");
+    let s = await probe(work);
+    expect(s).toMatchObject({ remote: "upstream" });
+    expect(s.comparison).toMatchObject({
+      ref: "upstream/main",
+      fullRef: "refs/remotes/upstream/main",
+      state: "equal",
+    });
+
+    // Two remotes: the branch upstream's remote decides; detached, nothing does.
+    const second = await cloned();
+    git(work, "remote", "add", "fork", pathToFileURL(second.origin).href);
+    git(work, "fetch", "-q", "fork");
+    s = await probe(work);
+    expect(s).toMatchObject({ remote: "upstream" });
+    git(work, "checkout", "-q", "--detach");
+    s = await probe(work);
+    expect(s).toMatchObject({ remote: null, detached: true });
+    expect(s.comparison).toMatchObject({
+      state: "unknown",
+      reason: expect.stringMatching(/several remotes/),
+    });
+  });
+
+  it("compares full ref names, so a local branch named origin/main cannot shadow the remote ref", async () => {
+    const { origin, work } = await cloned();
+    await commit(origin);
+    git(work, "fetch", "-q");
+    git(work, "branch", "origin/main", "HEAD");
+    const s = await probe(work);
+    expect(s.comparison).toMatchObject({
+      fullRef: "refs/remotes/origin/main",
+      state: "behind",
+      behind: 1,
+    });
+  });
+
+  it("keeps every transport refused even when configuration allows one", async () => {
+    const inv = gitInvocation([], {
+      GIT_ALLOW_PROTOCOL: "file:https",
+      GIT_PROTOCOL_FROM_USER: "1",
+      GIT_SSH_COMMAND: "x",
+    });
+    expect(inv.env).toMatchObject({ GIT_ALLOW_PROTOCOL: "", GIT_PROTOCOL_FROM_USER: "0" });
+    expect(inv.env.GIT_SSH_COMMAND).toBeUndefined();
+    const { work } = await cloned();
+    git(work, "config", "protocol.file.allow", "always");
+    git(work, "config", "protocol.allow", "always");
+    expect(await gitWith("git", ["fetch", "origin"], work, 5000)).toMatchObject({ ok: false });
+  });
+
   it("never probes an npm installation, and honours the opt-out", async () => {
     let calls = 0;
     const counting: GitRunner = async () => {
@@ -348,6 +460,7 @@ describe("main() and the checkout probe (#309)", () => {
     status: "checkout" as const,
     branch: "main",
     detached: false,
+    remote: "origin",
     commit: "a".repeat(40),
     comparison: {
       ref: "origin/main",
@@ -379,6 +492,21 @@ describe("main() and the checkout probe (#309)", () => {
     } as never).catch(() => undefined);
     return err;
   };
+
+  it("reports the source installation root in version --json, as in the text", async () => {
+    const { main } = await import("../cli.js");
+    let out = "";
+    await main(["version", "--json", "--offline"], async (t) => void (out += t), {
+      collect: async () => ({}),
+      currentRepository: async () => "o/r",
+      updateCheck: async () => ({ status: "skipped", reason: "" }),
+      checkoutCheck: async () => behind,
+      stderr: () => {},
+    } as never);
+    const doc = JSON.parse(out);
+    expect(doc.installation).toEqual(expect.any(String));
+    expect(doc.checkout.comparison.state).toBe("behind");
+  });
 
   it("the suite disables the real probe", () => {
     expect(process.env.PDB_NO_CHECKOUT_CHECK).toBe("1");
