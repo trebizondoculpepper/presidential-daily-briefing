@@ -41,9 +41,12 @@ attachments, transactions, tags or extras. Error text may contain tokens or issu
 
 Keep only known PDB source-relative `src/` paths with safe filename components and
 finite positive line/column numbers, or the public built cli.mjs/mcp.mjs/chunk basename.
-Drop external/unknown/absolute locations. Windows separators and file URLs must be
-normalized before matching; basename allowlisting must not turn arbitrary private paths
-into plausible source evidence. Use a fixed exception type/message rather than arbitrary
+Convert file URLs with the platform URL-to-path routine, normalize separators, then
+relativize against a trusted PDB installation/source root derived from the executing
+module location, never caller cwd or its repository root. Match that relative result
+against the known src/ allowlist. Reject escaping, still-absolute, external or unknown
+locations. For built frames, retain only verified files under that same installation
+root; basename allowlisting must not turn arbitrary private paths into source evidence. Use a fixed exception type/message rather than arbitrary
 user-controlled Error.name. Root event labels are fixed mode plus release metadata from
 the installed package; unknown release omitted. Environment is a fixed `node` label,
 not arbitrary inherited user text. Fingerprinting uses retained stack locations.
