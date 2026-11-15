@@ -13,7 +13,8 @@ import { questionMarker } from "../workflow/claims.js";
 import { resolutionMarker } from "../workflow/claimactivity.js";
 import { markerTrust } from "../workflow/delivery.js";
 import { permissions } from "../testing/fakegh.js";
-import { by, issue, page, repo } from "../testing/snapshots.js";
+import { by, issue, page, repo, snapshot } from "../testing/snapshots.js";
+import { readBriefing } from "./service.js";
 
 let id = 1000;
 function question(n: number, text: string): Comment {
@@ -323,5 +324,36 @@ describe("closed-ticket scans kept between serve requests (#414)", () => {
     expect(refresh.sources[0]!.facts[0]!.outcome).toBe("unknown");
     const done = await discoverClosedQuestions(repo, runtime(g, now, slot, {}));
     expect(done.sources[0]!.facts[0]!.outcome).toBe("none");
+  });
+
+  it("reads the scan through the uncached boundary, never memoised pages (Codex, #609)", async () => {
+    const g = gh([closed(1, [question(1, "Q?")])]);
+    const memoised: string[] = [];
+    const slot = new ClosedQuestionStore(30 * 60_000).slot(undefined, repo);
+    const read = await readBriefing(
+      {
+        collect: async () => snapshot([issue(3)], []),
+        dependencyReport: (async () => {
+          throw new Error("not used");
+        }) as never,
+        rest: async () => ({
+          status: 200,
+          body: { role_name: "write", user: { login: "agent-account" } },
+        }),
+        queryWith: () => async (source) => {
+          memoised.push(source);
+          return { repository: { pullRequest: null } } as never;
+        },
+        closedQueryWith: () => g.query,
+        closedQuestions: slot,
+        now: () => new Date("2026-11-15T12:00:00Z"),
+        guide: { cwd: "/nonexistent-414" },
+      },
+      { repository: repo, role: "human", agent: "owner", limit: 10, maxChars: 10000 },
+    );
+    expect(read.kind).toBe("report");
+    expect(g.calls).toEqual(["inventory start"]);
+    expect(memoised.some((q) => q.includes("states:CLOSED"))).toBe(false);
+    expect(slot.state?.watermark).not.toBeNull();
   });
 });

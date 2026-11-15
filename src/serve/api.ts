@@ -438,6 +438,8 @@ export function readApi(
     ...(runtime.loadEngine ? { loadEngine: runtime.loadEngine } : {}),
     ...projectReaders(runtime, project, repository),
     closedQuestions: cache.closedQuestions.slot(project, repository),
+    // The scan's reads bypass page memoisation: its watermark must not outrun the evidence.
+    ...(guardedQueryWith ? { closedQueryWith: guardedQueryWith } : {}),
   });
 
   /** Boundaries with the served repository's declared review policy (#301). */
