@@ -221,6 +221,18 @@ the human view, so that v2 questions stop resolving by label removal, is part of
 facts and projections of #413/#414; until then v2 questions keep v1's label-based
 resolution, so none becomes unanswerable.
 
+Implementation note (#412, slice 2c, `src/workflow/retained.ts`): `claim wait` and `claim
+resume` append the activity records; `claim` takes an injected admission guard that re-reads
+each other retained claim (ownership, label generation, activity fold, and for a wait its bound
+blocker: a dependency still an open native blocker, a question still without a trusted explicit
+outcome). Only verified waiting admits; a cleared blocker is `resume-required`; anything else is
+unknown. The post-write recheck re-verifies admitted waits and reports a conflict otherwise.
+`needs-human` keeps the claim unless `--release`: the CLI posts the question, reads it back by
+operation id, records the bound wait, and only then changes labels; a failed wait leaves the
+labels unchanged and the same command retries idempotently. A claim already waiting on another
+blocker keeps that wait. A wait's question must be on the same issue. Resume also refuses while
+any v2 question recorded during the claim is open; legacy v1 questions keep label resolution.
+
 Use a separate `github-triage:claim-activity v1` JSON marker. Required fields:
 `v: 1`, `op: wait|resume`, `opId`, `repository`, `issue`, `agent`, `claimStartedAt`,
 `previousActivity` (comment node ID or null), and `reason`. A wait also carries
