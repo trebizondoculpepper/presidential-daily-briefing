@@ -57,6 +57,7 @@ import {
 } from "./serve/dashboard.js";
 import { ticketPage, ticketPageParameters, ticketScript } from "./serve/ticket-page.js";
 import { humanPage, humanScript } from "./serve/human-page.js";
+import { quotasPage, quotasScript } from "./serve/quotas-page.js";
 
 export { serveHelp } from "./serve/options.js";
 
@@ -182,6 +183,8 @@ const dashboardFiles = (): Map<string, { type: string; body: string }> =>
     ["/setup.js", { type: "text/javascript; charset=utf-8", body: setupScript() }],
     // The human attention view (#458): its page is rendered per request, its script is static.
     ["/human.js", { type: "text/javascript; charset=utf-8", body: humanScript() }],
+    // The account-scoped quota meters (#548): the page reads nothing until Refresh.
+    ["/quotas.js", { type: "text/javascript; charset=utf-8", body: quotasScript() }],
   ]);
 
 /**
@@ -365,6 +368,25 @@ export async function startServe(
           runtime.rulesPage ?? defaultRulesPageRuntime(),
           selectRepository,
         );
+        response.writeHead(page.status, {
+          "content-type": "text/html; charset=utf-8",
+          "cache-control": "no-store",
+          "x-content-type-options": "nosniff",
+          "referrer-policy": "no-referrer",
+          "content-security-policy": dashboardSecurityPolicy,
+        });
+        response.end(request.method === "HEAD" ? undefined : page.html);
+        return;
+      }
+      if (path === "/quotas") {
+        if (request.method !== "GET" && request.method !== "HEAD")
+          throw new HttpFailure(405, "METHOD_NOT_ALLOWED", "Use GET.", [], {
+            allow: "GET, HEAD",
+          });
+        const page = quotasPage(context.url.searchParams, {
+          host: facts.auth.host,
+          login: facts.auth.login,
+        });
         response.writeHead(page.status, {
           "content-type": "text/html; charset=utf-8",
           "cache-control": "no-store",
