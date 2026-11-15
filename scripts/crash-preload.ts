@@ -24,7 +24,7 @@ const trigger = new RegExp(process.env.PDB_CRASH_TRIGGER ?? "(?!)");
 
 type Respond = (response: IncomingMessage) => void;
 const recorder = (options: RequestOptions, respond: Respond): ClientRequest => {
-  if (options?.hostname !== "sentry.example.invalid")
+  if (options?.hostname !== (process.env.PDB_CRASH_INGEST_HOST ?? "sentry.example.invalid"))
     throw new Error("crash-preload: refused a network request");
   const chunks: Buffer[] = [];
   const request = new Writable({
