@@ -52,6 +52,7 @@ function scripted(outcomes: (CommentAttempt | "lost")[], receipts?: CommentRecei
       readBack: async (): Promise<CommentReceipt> =>
         receipts?.shift() ??
         (posted.length ? { status: "found", url: "https://c/found" } : { status: "absent" }),
+      guard: async () => "unchanged",
       now: () => clock,
       sleep: async (ms: number) => {
         sleeps.push(ms);
@@ -226,6 +227,26 @@ describe("classifying a comment write from structured signals (#345)", () => {
       ),
     ).toMatchObject({ kind: "throttled", secondary: true, retryAfterSeconds: 30 });
   });
+  it("keeps an exhausted primary reset on a secondary refusal and waits for the later", async () => {
+    const reset = Math.floor(T0 / 1000) + 45;
+    const attempt = classifyCommentResponse(
+      response(
+        403,
+        ["Retry-After: 10", "X-RateLimit-Remaining: 0", `X-RateLimit-Reset: ${reset}`],
+        { documentation_url: "https://docs.github.com/rest#secondary-rate-limits" },
+      ),
+    );
+    expect(attempt).toMatchObject({
+      kind: "throttled",
+      secondary: true,
+      retryAfterSeconds: 10,
+      resetAt: new Date(reset * 1000).toISOString(),
+    });
+    const t = scripted([attempt, attempt]);
+    const r = await postCommentWithRecovery(t.boundaries);
+    expect(t.sleeps).toEqual([45_000]);
+    expect(r).toMatchObject({ status: "throttled", resetAt: new Date(reset * 1000).toISOString() });
+  });
   it("treats 5xx, timeouts and a missing response as acceptance unknown", () => {
     expect(classifyCommentResponse(response(502, [], {}))).toMatchObject({ kind: "unknown" });
     expect(classifyCommentResponse(null, { timedOut: true })).toMatchObject({ kind: "unknown" });
@@ -252,7 +273,7 @@ describe("classifying a comment write from structured signals (#345)", () => {
 
 describe("the shared gh write boundary (#345)", () => {
   const comment = ["issue", "comment", "7", "--repo", "o/r", "--body", "hello <!-- op:1 -->"];
-  function boundary(failures: unknown[], landed: string[] = []) {
+  function boundary(failures: unknown[], landed: string[] = [], onWait?: () => void) {
     const calls: string[][] = [];
     const sleeps: number[] = [];
     let clock = T0;
@@ -280,6 +301,7 @@ describe("the shared gh write boundary (#345)", () => {
       sleep: async (ms) => {
         sleeps.push(ms);
         clock += ms;
+        onWait?.();
       },
     });
     return { run, calls, sleeps, landed };
@@ -313,7 +335,7 @@ describe("the shared gh write boundary (#345)", () => {
   });
   it("retries a throttled comment with the same frozen arguments", async () => {
     const b = boundary([throttle()]);
-    await b.run(comment);
+    await b.run(comment, { guard: async () => "same" });
     expect(b.calls).toEqual([comment, comment]);
     expect(b.sleeps).toEqual([2000]);
     expect(b.landed).toHaveLength(1);
@@ -337,20 +359,73 @@ describe("the shared gh write boundary (#345)", () => {
     expect(b.landed).toHaveLength(1);
   });
 
-  it("applyPlan reports a still-throttled comment as partial with when to retry", async () => {
-    const b = boundary([throttle(), throttle()]);
-    const plan: ClaimPlan = {
+  it("does not retry a throttled comment whose command supplies no re-check", async () => {
+    const b = boundary([throttle()]);
+    const error = await b.run(comment).catch((e: unknown) => e);
+    expect((error as CommentWriteError).recovery).toMatchObject({
+      status: "throttled",
+      attempts: 1,
+    });
+    expect((error as CommentWriteError).message).toContain("Retry after");
+    expect(b.calls).toHaveLength(1);
+    expect(b.sleeps).toEqual([]);
+  });
+
+  /** A fake ticket read through the command's own injected query. */
+  function ticket() {
+    const state = {
+      state: "OPEN",
+      labels: ["status:ready"],
+      assignees: [] as string[],
+      comments: 3,
+    };
+    const query = async () => ({
+      repository: {
+        issue: {
+          state: state.state,
+          labels: {
+            totalCount: state.labels.length,
+            nodes: state.labels.map((name) => ({ name })),
+          },
+          assignees: { nodes: state.assignees.map((login) => ({ login })) },
+          comments: { totalCount: state.comments },
+        },
+      },
+    });
+    return { state, query };
+  }
+  const plan = (step: string, retry: string) =>
+    ({
       ok: true,
       noop: false,
       facts: { number: 7, url: "https://github.com/o/r/issues/7", title: "t" },
       changes: [
         { step: "comment", command: comment },
-        { step: "label", command: ["issue", "edit", "7", "--repo", "o/r", "--add-label", "x"] },
+        { step, command: ["issue", "edit", "7", "--repo", "o/r", "--add-label", "x"] },
       ],
       notes: [],
-      retry: "pdb release 7 --outcome done",
-    } as unknown as ClaimPlan;
-    const result = await applyPlan("o/r", plan, { run: b.run });
+      retry,
+    }) as unknown as ClaimPlan;
+
+  it("applyPlan retries after the wait when the ticket is unchanged", async () => {
+    const t = ticket();
+    const b = boundary([throttle()]);
+    const result = await applyPlan("o/r", plan("label", "pdb claim 7"), {
+      run: b.run,
+      query: t.query,
+    });
+    const steps = "steps" in result ? result.steps! : [];
+    expect(steps[0]!.status).toBe("done");
+    expect(b.landed.filter((x) => x === comment.at(-1))).toHaveLength(1);
+    expect(b.sleeps).toEqual([2000]);
+  });
+  it("applyPlan reports a still-throttled comment as partial with when to retry", async () => {
+    const t = ticket();
+    const b = boundary([throttle(), throttle()]);
+    const result = await applyPlan("o/r", plan("label", "pdb release 7 --outcome done"), {
+      run: b.run,
+      query: t.query,
+    });
     expect(result.exitCode).toBe(1);
     const steps = "steps" in result ? result.steps! : [];
     expect(steps.map((s) => s.status)).toEqual(["failed", "skipped"]);
@@ -360,5 +435,39 @@ describe("the shared gh write boundary (#345)", () => {
     expect(text).toContain(`Throttled by GitHub: re-run after ${steps[0]!.recovery!.retryAt}`);
     expect(text).not.toContain("Retry (safe;");
     expect(b.landed).toHaveLength(0);
+  });
+  it("claim: does not post when someone else claims the ticket during the wait", async () => {
+    const t = ticket();
+    const b = boundary([throttle()], [], () => {
+      t.state.labels.push("agent:someone-else");
+      t.state.assignees.push("someone-else");
+    });
+    const result = await applyPlan("o/r", plan("label", "pdb claim 7"), {
+      run: b.run,
+      query: t.query,
+    });
+    const steps = "steps" in result ? result.steps! : [];
+    expect(steps.map((s) => s.status)).toEqual(["failed", "skipped"]);
+    expect(steps[0]!.recovery).toMatchObject({ status: "conflict", attempts: 1 });
+    expect(steps[0]!.reason).toContain("changed during the wait");
+    expect(b.calls).toHaveLength(1);
+    expect(b.landed).toHaveLength(0);
+  });
+  it("release: does not post when the ticket is closed or a record appears during the wait", async () => {
+    for (const change of [
+      (s: { state: string }) => void (s.state = "CLOSED"),
+      (s: { comments: number }) => void (s.comments += 1),
+    ]) {
+      const t = ticket();
+      const b = boundary([throttle()], [], () => change(t.state));
+      const result = await applyPlan("o/r", plan("label", "pdb release 7 --outcome done"), {
+        run: b.run,
+        query: t.query,
+      });
+      expect(result.exitCode).toBe(1);
+      const steps = "steps" in result ? result.steps! : [];
+      expect(steps[0]!.recovery).toMatchObject({ status: "conflict" });
+      expect(b.calls).toHaveLength(1);
+    }
   });
 });

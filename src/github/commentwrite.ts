@@ -25,8 +25,10 @@ export type CommentAttempt =
       kind: "throttled";
       secondary: boolean;
       retryAfterSeconds: number | null;
-      /** An HTTP-date Retry-After, or an exhausted quota's reset, as ISO. */
+      /** An HTTP-date Retry-After, as ISO. */
       retryAt: string | null;
+      /** The primary quota's reset, only when this same response showed it exhausted. */
+      resetAt?: string | null;
       requestId: string | null;
     }
   /** Definitely refused and not retryable (validation, permission, authentication). */
@@ -64,6 +66,12 @@ export interface CommentRecoveryBoundaries {
   readBack?: () => Promise<CommentReceipt>;
   /** Fresh operation guards after a wait: null when still applicable, else why not. */
   stillApplicable?: () => Promise<string | null>;
+  /**
+   * A fresh read of the command's guarded state, compared before and after the wait: any
+   * difference (claimed elsewhere, closed, labels changed, a record appeared) stops the retry.
+   * Without this or `stillApplicable` a throttled comment is never retried.
+   */
+  guard?: () => Promise<string>;
   /** Monotonic-enough milliseconds (production: Date.now). */
   now?: () => number;
   /** Abortable wait (production: a timer). */
@@ -90,6 +98,8 @@ export interface CommentRecovery {
   waitedMs: number;
   /** Earliest time a retry may be sent (ISO), when throttled. */
   retryAt: string | null;
+  /** The exhausted primary quota's reset reported by the refusing response (ISO). */
+  resetAt: string | null;
   /** The retry time is the conservative default, not GitHub's own timing. */
   defaultDelay: boolean;
   requestId: string | null;
@@ -140,6 +150,7 @@ export async function postCommentWithRecovery(
     attempts,
     waitedMs,
     retryAt: null,
+    resetAt: null,
     defaultDelay: false,
     requestId: null,
     url: null,
@@ -200,6 +211,9 @@ export async function postCommentWithRecovery(
     const retryAtMs = attempt.retryAt ? Date.parse(attempt.retryAt) : NaN;
     // Wall-clock bounds are compared on the injected clock's own scale.
     if (Number.isFinite(retryAtMs)) bounds.push(retryAtMs);
+    // An exhausted primary quota on the same response is a lower bound too: never earlier.
+    const resetMs = attempt.resetAt ? Date.parse(attempt.resetAt) : NaN;
+    if (Number.isFinite(resetMs)) bounds.push(resetMs);
     const defaultDelay = bounds.length === 0;
     if (defaultDelay) bounds.push(at + policy.defaultDelayMs);
     const earliest = Math.max(...bounds);
@@ -209,12 +223,28 @@ export async function postCommentWithRecovery(
       done(
         "throttled",
         `GitHub's ${attempt.secondary ? "secondary (content-creation) rate limit" : "rate limit"} refused the comment after ${attempts} attempt${attempts === 1 ? "" : "s"}${why}; nothing was posted. Retry after ${retryAt}${defaultDelay ? " (a default delay: GitHub reported no retry time)" : ""}.`,
-        { category, retryAt, defaultDelay, requestId: attempt.requestId },
+        {
+          category,
+          retryAt,
+          resetAt: attempt.resetAt ?? null,
+          defaultDelay,
+          requestId: attempt.requestId,
+        },
       );
     if (!attempt.secondary) return throttled("");
     if (attempts >= policy.maxAttempts) return throttled("");
     if (earliest - start > policy.deadlineMs)
       return throttled(" (the required wait exceeds the recovery deadline)");
+    // No way to re-check this command's guards after a wait: never retry it blind.
+    if (!b.guard && !b.stillApplicable) return throttled("");
+    let before: string | null = null;
+    if (b.guard) {
+      try {
+        before = await b.guard();
+      } catch {
+        return throttled(" (its state could not be read before waiting)");
+      }
+    }
 
     try {
       const ms = Math.max(0, earliest - now());
@@ -239,7 +269,15 @@ export async function postCommentWithRecovery(
     if (found) return found;
     if (receipt.status === "unreadable" && b.readBack)
       return throttled(" (the ticket could not be re-read before retrying)");
-    const conflict = b.stillApplicable ? await b.stillApplicable().catch(() => "unreadable") : null;
+    let conflict = b.stillApplicable
+      ? await b.stillApplicable().catch(() => "its state could not be re-read")
+      : null;
+    if (!conflict && b.guard) {
+      const after = await b.guard().catch(() => null);
+      if (after === null) conflict = "its state could not be re-read";
+      else if (after !== before)
+        conflict = "the ticket changed during the wait (state, labels or comments)";
+    }
     if (conflict)
       return done(
         "conflict",
@@ -274,6 +312,7 @@ export function attemptFromError(error: unknown): CommentAttempt {
       secondary: evidence?.category === "secondary-rate-limit",
       retryAfterSeconds: retry.retryAfterSeconds ?? null,
       retryAt: retry.resetAt ?? null,
+      resetAt: evidence?.observation.remaining === 0 ? evidence.observation.resetAt : null,
       requestId: evidence?.observation.requestId ?? null,
     };
   }
@@ -307,6 +346,12 @@ export function commentCommand(
   return { repository, number, body: text };
 }
 
+/** Per-write options a command passes to the shared gh boundary. */
+export interface CommentCallOptions {
+  /** Fresh read of the command's guarded state; without it a throttled comment is not retried. */
+  guard?: () => Promise<string>;
+}
+
 export interface CommentRunOptions {
   /** One raw dispatch of the frozen command; throws on failure (classified by its fields). */
   dispatch: (args: string[]) => Promise<unknown>;
@@ -329,8 +374,8 @@ export interface CommentRunOptions {
  */
 export function withCommentRecovery(
   options: CommentRunOptions,
-): (args: string[]) => Promise<CommentRecovery | undefined> {
-  return async (args) => {
+): (args: string[], call?: CommentCallOptions) => Promise<CommentRecovery | undefined> {
+  return async (args, call) => {
     const target = commentCommand(args);
     if (!target) {
       await options.dispatch(args);
@@ -351,6 +396,7 @@ export function withCommentRecovery(
         }
       },
       ...(options.readBack ? { readBack: () => options.readBack!(target) } : {}),
+      ...(call?.guard ? { guard: call.guard } : {}),
       ...(options.now ? { now: options.now } : {}),
       ...(options.sleep ? { sleep: options.sleep } : {}),
       ...(options.signal ? { signal: options.signal } : {}),
@@ -410,16 +456,16 @@ export function classifyCommentResponse(
     kind: "throttled",
     secondary,
     retryAfterSeconds: o.retryAfterSeconds,
+    retryAt: o.retryAt,
     // A quota reset is a lower bound only when this same response shows the quota exhausted.
-    retryAt: o.retryAt ?? (c.quotaEvidence === "exhausted" ? o.resetAt : null),
+    resetAt: o.remaining === 0 ? o.resetAt : null,
     requestId: o.requestId,
   });
   const status = response.status;
   if (c.category === "secondary-rate-limit") return throttled(true);
   if (status === 422 && isRecordLike(body) && tooQuickly(body.errors)) return throttled(true);
   // GitHub's secondary limits answer 403/429 with Retry-After while quota remains.
-  if ((status === 403 || status === 429) && timed && c.quotaEvidence !== "exhausted")
-    return throttled(true);
+  if ((status === 403 || status === 429) && timed && o.remaining !== 0) return throttled(true);
   if (c.category === "rate-limited") return throttled(false);
   if (c.category === "authentication")
     return {
