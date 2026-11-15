@@ -83,7 +83,7 @@ Cloudflare Pages/Netlify would add an external connection and are unnecessary fo
 this four-page static site. This is a recommendation, not an assertion that either
 external account is connected.
 
-Read-only checks on 2026-11-15 found `private: false`, `has_pages: false` and current
+Initial design-time read-only checks on 2026-11-15 (superseded operationally below) found `private: false`, `has_pages: false` and current
 GitHub-login repository admin permission. `GET .../pages` returned 404. DNS CNAME
 and A queries for `pdb.stodge.org` returned NXDOMAIN. DNS-provider ownership/access
 was not established; GitHub admin access does not imply DNS control. No setting
@@ -97,6 +97,22 @@ URL live. Do not direct the CNAME at a repository URL/path or add a wildcard.
 Follow [GitHub's custom-domain setup order](https://docs.github.com/en/pages/configuring-a-custom-domain-for-your-github-pages-site/managing-a-custom-domain-for-your-github-pages-site)
 to avoid leaving a dangling domain. DNS/Pages changes and live deployment belong
 to #602, not this design task.
+
+### Current hosting and domain preservation (#621/#622)
+
+By 2026-11-15 22:46 UTC the owner-authorized manual preview was served from
+`gh-pages` `/` with custom domain `pdb.stodge.org`, an approved certificate and
+HTTPS enforcement. All four routes/assets and default GitHub redirects were
+verified. This is not evidence that #602's released-artifact workflow shipped.
+
+Follow the [deployment runbook](../runbooks/public-website-deployment.md) to preserve
+the binding. #602's target remains custom Actions Pages publishing: retain the
+Pages API custom-domain setting and HTTPS enforcement, without appending a CNAME
+file to #601's already-hashed artifact. Branch mode instead requires its root CNAME
+and a reviewed artifact/schema plan if retained. Source-mode migration is explicit;
+normal builds/retries do not recreate domains or change DNS. Preflight and post-host
+checks verify the custom root, nested routes, actual assets, default GitHub redirects
+and the deployed manifest/version. All release/source/order guarantees below remain.
 
 ## Release identity and handoff
 
