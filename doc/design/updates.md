@@ -25,3 +25,7 @@ Implementation defaults (#65): cache file `update-check.json` (schema version 1,
 Inject registry/clock/filesystem: compare equal/older/newer stable/prerelease versions; absent channel/version; timeouts/errors; offline/opt-out; stdout validity; first use/expiry; failed-attempt throttle; concurrent processes/stale lock; corrupt/unwritable cache; notification deduplication after an upgrade. Measure startup overhead. Default timeout and lock TTL are implementation choices documented and tested with bounded limits, not new product decisions.
 
 The prior `GITHUB_TRIAGE_NO_UPDATE_CHECK` environment variable remains a compatibility alias after the Presidential Daily Briefing rename. New output and update commands use the new package and `pdb`.
+
+## Source checkouts (#309)
+
+A source checkout, including one reached through `npm link`, skips the npm registry check and instead gets the local-Git freshness probe in `src/updates/checkout.ts`, as specified in [source-install-diagnostics.md](source-install-diagnostics.md). `pdb version` (and `--json`) shows the branch or detached HEAD, commit, ahead/behind counts against the remote's symbolic default ref (or a labelled `origin/main` fallback), the branch's own upstream when different, and the FETCH_HEAD time with a stale flag after 24 hours. Ordinary invocations print one stderr line only when the checkout is proven behind or diverged. The probe never fetches; it suggests `git fetch`. Limits: at most 8 Git calls, 1 s each, 3 s overall; anything unproven is reported as unknown. The same opt-outs disable it.
