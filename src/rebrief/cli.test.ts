@@ -363,6 +363,97 @@ describe("rebrief CLI/private state", () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+  it("lets a user cancellation during state-lock release suppress a prepared offer", async () => {
+    let text = "",
+      offered = false;
+    const controller = new AbortController();
+    const transport = serviceTransport({
+      ...noLocalProject(repo),
+      collect: async () => {
+        const stamp = new Date().toISOString();
+        return {
+          ...snapshot([issue(1, ["status:ready", "platform:codex"])], []),
+          startedAt: stamp,
+          fetchedAt: stamp,
+        };
+      },
+      dependencyReport,
+    });
+    const args = [
+      ...common,
+      "--repo",
+      repo,
+      "--state-dir",
+      join(tmpdir(), "unused-injected-state"),
+      "--event",
+      "late-cancel",
+      "--enabled",
+      "--reason",
+      "natural",
+    ];
+    expect(
+      await runRebrief(
+        ["check", ...args],
+        async (s) => {
+          text = s;
+        },
+        {
+          signal: controller.signal,
+          transport: () => transport,
+          state: async (_path, work) => {
+            const result = await work(initialize({ ...context, repository: repo }), async () => {});
+            offered =
+              !!result &&
+              typeof result === "object" &&
+              "decision" in result &&
+              result.decision === "continue";
+            controller.abort(); // an interruption while the store releases its lock
+            return result;
+          },
+        },
+      ),
+    ).toBe(0);
+    expect(offered).toBe(true);
+    expect(JSON.parse(text)).toMatchObject({
+      decision: "stop",
+      reason: expect.stringMatching(/^cancelled/),
+      briefing: null,
+    });
+  });
+  it("bounds an unresponsive state store by the total CLI deadline", async () => {
+    let text = "";
+    const args = [
+      ...common,
+      "--state-dir",
+      join(tmpdir(), "unused-injected-state"),
+      "--event",
+      "slow-store",
+      "--enabled",
+      "--reason",
+      "natural",
+      "--deadline-ms",
+      "10",
+    ];
+    expect(
+      await runRebrief(
+        ["check", ...args],
+        async (s) => {
+          text = s;
+        },
+        {
+          state: async () => new Promise<never>(() => {}),
+          transport: () => {
+            throw new Error("no transport call");
+          },
+        },
+      ),
+    ).toBe(0);
+    expect(JSON.parse(text)).toMatchObject({
+      decision: "stop",
+      reason: "cancelled-or-deadline",
+      briefing: null,
+    });
+  });
   it("help/error are structured and never echo private state errors", async () => {
     let text = "";
     const output = async (s: string) => {

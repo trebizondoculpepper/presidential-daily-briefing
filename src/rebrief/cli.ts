@@ -74,6 +74,19 @@ export async function runRebrief(
     process.on("SIGINT", abort);
     process.on("SIGTERM", abort);
   }
+  const cancellable = async <T>(work: Promise<T>): Promise<T> => {
+    let cancel: () => void = () => {};
+    const aborted = new Promise<never>((_, reject) => {
+      cancel = () => reject(new Error("cancelled"));
+    });
+    if (controller.signal.aborted) cancel();
+    else controller.signal.addEventListener("abort", cancel, { once: true });
+    try {
+      return await Promise.race([work, aborted]);
+    } finally {
+      controller.signal.removeEventListener("abort", cancel);
+    }
+  };
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     const mode = args[0];
@@ -195,23 +208,13 @@ export async function runRebrief(
       };
       input.agent = identity.agent ?? "";
     };
-    await Promise.race([
-      setup(),
-      new Promise<never>((_, reject) => {
-        if (controller.signal.aborted) reject(new Error("cancelled"));
-        else
-          controller.signal.addEventListener("abort", () => reject(new Error("cancelled")), {
-            once: true,
-          });
-      }),
-    ]);
+    await cancellable(setup());
     if (!input.agent) {
       await emit(stopped(input, "missing-identity"));
       return 0;
     }
-    const result = await (runtime.state ?? withPrivateState)(
-      values["state-dir"],
-      async (state, save) => {
+    const result = await cancellable(
+      (runtime.state ?? withPrivateState)(values["state-dir"], async (state, save) => {
         if (controller.signal.aborted) return stopped(input, "cancelled");
         if (mode === "init") {
           if (state) return stopped(input, "state-exists");
@@ -244,9 +247,9 @@ export async function runRebrief(
         const decision = await session.evaluate(input, { transport }, controller.signal);
         if (session.state && session.state.context === contextKey(input)) await save(session.state);
         return controller.signal.aborted ? stopped(input, "cancelled") : decision;
-      },
+      }),
     );
-    await emit(result);
+    await emit(controller.signal.aborted ? stopped(input, "cancelled") : result);
     return 0;
   } catch {
     await emit(

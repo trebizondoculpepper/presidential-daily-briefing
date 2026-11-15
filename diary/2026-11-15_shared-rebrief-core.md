@@ -11,3 +11,7 @@ Validation: full suite 1,945 passed with one existing skip; focused rebrief case
 Codex review found that validation stripped native unlock fields before fingerprinting. Preserved unlock counts/unknown evidence, assessment fields and band in the validated semantic action; added an acknowledged-session regression for changed native unlock evidence while action identity/order and subject metadata stay fixed.
 
 Final compatibility check preserved the canonical/legacy identity resolver notice in CLI JSON, including bounded legacy-not-imported recovery, without importing or writing configuration. Added a legacy-read regression.
+
+Added a final pre-emission cancellation check and injected regression for a user stop arriving while the state store releases its lock, after a continue result was prepared. The offer is discarded from stdout.
+
+The same total-deadline cancellation race now wraps state-store waits as well as setup/read; a nonresponsive injected store returns a normal stop instead of delaying the CLI outcome indefinitely. Lock recovery remains explicit, never age-based.
