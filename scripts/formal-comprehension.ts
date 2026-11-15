@@ -16,7 +16,7 @@ import {
   type PolicyFacts,
 } from "../src/rules/datalog/engine.js";
 import { rulesHashOf } from "../src/rules/datalog/hash.js";
-import { readScenarios, runScenario } from "../src/rules/datalog/runner.js";
+import { readScenarios, differences, RuleDecisionFailure } from "../src/rules/datalog/runner.js";
 
 const hash = (text: string): string => createHash("sha256").update(text).digest("hex");
 const ascii = (value: unknown): string =>
@@ -283,11 +283,17 @@ export async function prepareExperiment(root: string) {
     .sort()
     .flatMap((file) => readScenarios(readFileSync(join(dir, file), "utf8"), file));
   for (const scenario of all) {
-    runScenario(scenario, policy);
     const input = { viewer: scenario.viewer, datoms: scenario.datoms };
+    // Reuse this result for both exhaustive scenario validation and projection parity.
+    const original = evaluatePolicy(input, { policy });
+    const failures = differences(scenario, original);
+    if (failures.length)
+      throw new RuleDecisionFailure(
+        `${scenario.file}:${scenario.line} ${scenario.id}: ${failures.join("; ")}`,
+      );
     if (
       !isDeepStrictEqual(
-        decisionsOnly(evaluatePolicy(input, { policy })),
+        decisionsOnly(original),
         decisionsOnly(evaluatePolicy(input, { policy: formal })),
       )
     ) {
