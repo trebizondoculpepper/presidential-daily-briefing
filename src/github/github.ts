@@ -1398,13 +1398,7 @@ async function ghGraphql(
     if (include) {
       const response = parseGhResponse(body);
       body = response.body;
-      const o = quotaObservation(response.headers);
-      meta = {
-        status: response.status,
-        retryAfterSeconds: o.retryAfterSeconds,
-        retryAt: o.retryAt,
-        requestId: o.requestId,
-      };
+      meta = mutationMeta(response);
     }
     parsed = JSON.parse(body);
   } catch {
@@ -1416,6 +1410,19 @@ async function ghGraphql(
     data: prop(parsed, "data"),
     errors: Array.isArray(errors) ? errors.filter(isRecord) : [],
     ...(meta ? { response: meta } : {}),
+  };
+}
+
+/** A mutation response's status and allowlisted retry evidence, from its own headers (#345). */
+export function mutationMeta(response: GhResponse): MutationResponseMeta {
+  const o = quotaObservation(response.headers);
+  return {
+    status: response.status,
+    retryAfterSeconds: o.retryAfterSeconds,
+    retryAt: o.retryAt,
+    // An exhausted primary quota's reset is a lower bound alongside Retry-After.
+    resetAt: o.remaining === 0 ? o.resetAt : null,
+    requestId: o.requestId,
   };
 }
 
