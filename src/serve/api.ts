@@ -18,7 +18,13 @@ import { pickupOrders } from "../briefing/ranking.js";
 import type { PickupOrder } from "../briefing/ranking.js";
 import { readBriefing } from "../briefing/service.js";
 import type { ReadRuntime } from "../briefing/service.js";
-import { IssueUnavailable, permissionLookup, SubjectUnavailable } from "../github/github.js";
+import {
+  collectIssueFocus as CollectIssueFocus,
+  IssueUnavailable,
+  locateIssue,
+  permissionLookup,
+  SubjectUnavailable,
+} from "../github/github.js";
 import type {
   collect as Collect,
   Query,
@@ -30,7 +36,12 @@ import type { dependencyReport as DependencyReportFn } from "../github/dependenc
 import type { Snapshot } from "../github/types.js";
 import { localPaths, redactLocalText, redactPaths } from "../mcp/redact.js";
 import { markerTrust } from "../workflow/delivery.js";
-import { readPullRequest, readReviewHistory, readTeam, readWho } from "../workflow/readservices.js";
+import {
+  readPullRequest,
+  readReviewHistory,
+  readTeam,
+  readWhoLive,
+} from "../workflow/readservices.js";
 import type { DeliveryBoundaries } from "../workflow/readservices.js";
 import { defaultStaleHours } from "../workflow/team.js";
 import type { RequestContext, Routes, ServedRepository, ServerFacts } from "../serve.js";
@@ -43,6 +54,8 @@ import type { ServeOptions } from "./options.js";
 /** GitHub-facing boundaries the read API uses; tests inject credential-free fakes. */
 export interface ServeReadRuntime {
   collect: typeof Collect;
+  /** Focused `who` read (issue-detail-v1, #367); default: the gh collector over queryWith. */
+  collectIssueFocus?: typeof CollectIssueFocus;
   dependencyReport: typeof DependencyReportFn;
   rest?: Rest;
   queryWith?: (signal?: AbortSignal) => Query;
@@ -275,7 +288,7 @@ const refreshScopes = {
   // The briefing, issue, who and team views share collected snapshots.
   briefing: ["collect"],
   issues: ["collect"],
-  who: ["collect"],
+  who: ["collect", "who"],
   team: ["collect"],
   deps: ["deps"],
   prs: ["pr", "pr-history"],
@@ -748,12 +761,60 @@ export function readApi(
         if (sub === "/who") {
           await dataRoute(context, "who", ["staleHours"], number, async (values, served) => {
             const staleHours = positiveParam(values, "staleHours") ?? defaultStaleHours;
-            let snapshot: Snapshot;
+            const focus = runtime.collectIssueFocus ?? CollectIssueFocus;
+            if (!runtime.collectIssueFocus && !guardedQueryWith)
+              throw new CollectionError("GITHUB_UNAVAILABLE", "No GitHub reader is configured.");
+            let read: { report: unknown; complete: boolean };
             try {
-              snapshot = await cachedCollect(served.repository, {
-                issue: number,
-                signal: context.signal,
-              });
+              // issue-detail-v1 (#367): only the ticket, its linked open PRs and its delivery
+              // records; the whole report is the cached result, keyed by profile and options.
+              read = await cache.read<Awaited<ReturnType<typeof readWhoLive>>>(
+                {
+                  repository: served.repository,
+                  collector: "who",
+                  coverage: { n: number, profile: "issue-detail-v1", staleHours },
+                },
+                async (inner) => {
+                  const result = await readWhoLive(
+                    served.repository,
+                    number,
+                    {
+                      staleHours,
+                      now: runtime.now(),
+                      signal: inner,
+                      ...(guardedRest
+                        ? {
+                            locate: (repository: string, n: number) =>
+                              locateIssue(repository, n, (p, o) =>
+                                guardedRest(p, { ...o, signal: o?.signal ?? inner }),
+                              ),
+                          }
+                        : {}),
+                    },
+                    boundaries(served.repository, inner),
+                    guardedQueryWith
+                      ? guardedQueryWith(inner)
+                      : async () => {
+                          throw new CollectionError(
+                            "GITHUB_UNAVAILABLE",
+                            "No GitHub reader is configured.",
+                          );
+                        },
+                    runtime.now,
+                    focus,
+                  );
+                  // A quota refusal the read stopped on (it returns an incomplete answer rather
+                  // than throwing) starts the same cooldown as a thrown RateLimitError, before
+                  // this collection slot is released.
+                  const quota = result.report.collection.quota;
+                  if (quota) cache.noteQuotaRefusal(quota);
+                  return result;
+                },
+                context.signal,
+                // Delivery is read inside this result: only a complete one is stored, and never
+                // one that stopped on a quota refusal.
+                (result) => result.complete && !result.report.collection.quota,
+              );
             } catch (error) {
               // As the issue route: a missing, transferred or inaccessible issue is answered
               // with its diagnosis, never a server error.
@@ -763,12 +824,6 @@ export function readApi(
                 result: { schemaVersion: 1, kind: "issue-unavailable", ...error.diagnosis },
               };
             }
-            const read = await readWho(
-              snapshot,
-              number,
-              { staleHours, now: runtime.now(), offline: false },
-              boundaries(served.repository, context.signal),
-            );
             return { status: read.complete ? "complete" : "incomplete", result: read.report };
           });
           return true;
