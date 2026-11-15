@@ -356,6 +356,10 @@ export function prStatus(
       url: r.url,
     })),
     comments: comments.map((c) => ({ author: c.author, body: c.body, url: c.url })),
+    unresolvedThreads: unresolved.map((t) => ({
+      author: t.first?.nodes[0]?.author,
+      url: t.first?.nodes[0]?.url ?? pr.url,
+    })),
     checks: (rollup?.contexts.nodes ?? [])
       .filter((c) => c.__typename === "CheckRun")
       .map((c) => ({
