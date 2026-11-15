@@ -5,9 +5,18 @@
  * `../src/` sources: an absolute or machine-specific path (a build directory, a home folder)
  * fails the build instead of shipping. Embedded source text is removed; the maps carry
  * positions only, which is all crash-frame mapping needs.
+ *
+ * The bundles keep no `sourceMappingURL` comment, so nothing discovers the maps automatically:
+ * with NODE_OPTIONS=--enable-source-maps, Node would otherwise rewrite installed stacks to
+ * `<install>/src/*.ts` files that are not packaged, and the crash sanitiser (which reads the
+ * map beside each verified bundle itself) would have to drop those frames.
  */
 import { readdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+
+/** The bundler's trailing map reference for `file`, on its own line. */
+const reference = (file: string) =>
+  new RegExp(`\\n//# sourceMappingURL=${file.replace(/[.]/g, "\\.")}\\.map\\s*$`);
 
 const dist = process.argv[2] ?? "dist";
 const publicSource =
@@ -34,5 +43,15 @@ for (const name of maps) {
     );
   delete map.sourcesContent;
   await writeFile(path, JSON.stringify(map));
-  console.log(`ok   ${path}: ${map.sources.length} public sources, no embedded source text`);
+  const bundle = join(dist, name.slice(0, -".map".length));
+  const code = await readFile(bundle, "utf8");
+  if (code.includes("sourceMappingURL=")) {
+    const stripped = code.replace(reference(name.slice(0, -".map".length)), "\n");
+    if (stripped.includes("sourceMappingURL="))
+      throw new Error(`${bundle} has an unexpected sourceMappingURL reference.`);
+    await writeFile(bundle, stripped);
+  }
+  console.log(
+    `ok   ${path}: ${map.sources.length} public sources, no embedded source text, not referenced by its bundle`,
+  );
 }
