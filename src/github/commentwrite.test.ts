@@ -268,6 +268,41 @@ describe("postCommentWithRecovery (#345)", () => {
     ).toMatchObject({ status: "conflict" });
     expect(moved.posts()).toBe(1);
   });
+  it("cancellation during the pre-retry read-back stops at once: no re-check, no retry", async () => {
+    const controller = new AbortController();
+    const t = scripted([secondary({ retryAfterSeconds: 1 })]);
+    let rechecks = 0;
+    const r = await postCommentWithRecovery({
+      ...t.boundaries,
+      signal: controller.signal,
+      readBack: () => {
+        setTimeout(() => controller.abort(), 0);
+        return new Promise<CommentReceipt>(() => {});
+      },
+      stillApplicable: async () => {
+        rechecks += 1;
+        return null;
+      },
+    });
+    expect(r).toMatchObject({ status: "cancelled", acceptance: "not-accepted", attempts: 1 });
+    expect(rechecks).toBe(0);
+    expect(t.posts()).toBe(1);
+  });
+  it("cancellation during a lost reply's read-back reports may-have-been-posted", async () => {
+    const controller = new AbortController();
+    const t = scripted(["lost"]);
+    const r = await postCommentWithRecovery({
+      ...t.boundaries,
+      signal: controller.signal,
+      readBack: () => {
+        setTimeout(() => controller.abort(), 0);
+        return new Promise<CommentReceipt>(() => {});
+      },
+    });
+    expect(r).toMatchObject({ status: "cancelled", acceptance: "unknown", attempts: 1 });
+    expect(r.message).toContain("may have been posted");
+    expect(t.posts()).toBe(1);
+  });
   it("cancellation during the wait prevents any new dispatch", async () => {
     const controller = new AbortController();
     const t = scripted([secondary({ retryAfterSeconds: 1 })]);

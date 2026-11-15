@@ -89,6 +89,7 @@ export interface CommentRecoveryBoundaries {
 }
 
 const TIMED_OUT = Symbol("deadline");
+const CANCELLED = Symbol("cancelled");
 
 export type CommentRecoveryStatus =
   | "posted"
@@ -189,13 +190,24 @@ export async function postCommentWithRecovery(
   };
   const deadlineTimer = b.deadlineTimer ?? realSleep;
   /** Race in-flight work against what remains of the overall deadline. */
-  const within = async <T>(work: () => Promise<T>): Promise<T | typeof TIMED_OUT> => {
+  const within = async <T>(
+    work: () => Promise<T>,
+  ): Promise<T | typeof TIMED_OUT | typeof CANCELLED> => {
+    if (b.signal?.aborted) return CANCELLED;
     const remaining = start + policy.deadlineMs - now();
     if (remaining <= 0) return TIMED_OUT;
     const stop = new AbortController();
+    // Cancellation ends any pending read or send at once (the in-flight request may still land).
+    const cancelled = new Promise<typeof CANCELLED>((resolve) => {
+      b.signal?.addEventListener("abort", () => resolve(CANCELLED), {
+        once: true,
+        signal: stop.signal,
+      });
+    });
     try {
       return await Promise.race([
         work(),
+        cancelled,
         deadlineTimer(remaining, stop.signal).then(
           (): typeof TIMED_OUT => TIMED_OUT,
           () => new Promise<never>(() => {}),
@@ -209,7 +221,7 @@ export async function postCommentWithRecovery(
     if (!b.readBack) return { status: "unreadable" };
     try {
       const receipt = await within(b.readBack);
-      return receipt === TIMED_OUT ? { status: "unreadable" } : receipt;
+      return receipt === TIMED_OUT || receipt === CANCELLED ? { status: "unreadable" } : receipt;
     } catch {
       return { status: "unreadable" };
     }
@@ -220,11 +232,22 @@ export async function postCommentWithRecovery(
   if (b.guard) {
     try {
       const read = await within(b.guard);
-      before = read === TIMED_OUT ? null : read;
+      before = read === TIMED_OUT || read === CANCELLED ? null : read;
     } catch {
       before = null;
     }
   }
+  /** Cancellation stops recovery at once: no further read, re-check or send. */
+  const cancelledNow = (mayHaveLanded: boolean) =>
+    mayHaveLanded
+      ? done(
+          "cancelled",
+          "Cancelled after the comment was sent; it may have been posted. Inspect the ticket before re-running.",
+          { acceptance: "unknown" },
+        )
+      : done("cancelled", "Cancelled during recovery; nothing was posted.", {
+          acceptance: "not-accepted",
+        });
   for (;;) {
     if (b.signal?.aborted)
       return done("cancelled", "Cancelled before the comment was sent; nothing was posted.", {
@@ -232,6 +255,7 @@ export async function postCommentWithRecovery(
       });
     attempts += 1;
     const attempt = await within(b.post);
+    if (attempt === CANCELLED) return cancelledNow(true);
     // The deadline passed with the POST in flight: it may still land, so never call it failed.
     if (attempt === TIMED_OUT)
       return done(
@@ -239,13 +263,14 @@ export async function postCommentWithRecovery(
         "The recovery deadline passed while the comment was being sent; it may have been posted. Inspect the ticket before re-running.",
       );
     if (attempt.kind === "posted") return done("posted", "Posted.", { url: attempt.url });
+    if (b.signal?.aborted) return cancelledNow(attempt.kind === "unknown");
     if (attempt.kind === "refused")
       return done("refused", attempt.message, { category: attempt.category });
     if (attempt.kind === "unknown") {
       // Acceptance unknown: a receipt proves the post, but its absence never permits a repost.
-      if (b.signal?.aborted)
-        return done("unknown", `${attempt.message} The comment may have been posted.`);
-      const found = fromReceipt(await readBack(), attempt.message);
+      const receipt = await readBack();
+      if (receipt.status !== "found" && b.signal?.aborted) return cancelledNow(true);
+      const found = fromReceipt(receipt, attempt.message);
       return (
         found ??
         done(
@@ -314,6 +339,8 @@ export async function postCommentWithRecovery(
       });
     // Before any retry: a receipt means it already landed; an unreadable history stops.
     const receipt = await readBack();
+    // Throttled attempts were refused, so a cancellation here means nothing was posted.
+    if (receipt.status !== "found" && b.signal?.aborted) return cancelledNow(false);
     const found = fromReceipt(receipt, "Throttled");
     if (found) return found;
     if (receipt.status === "unreadable" && b.readBack)
@@ -321,15 +348,17 @@ export async function postCommentWithRecovery(
     const reread = "its state could not be re-read within the deadline";
     let conflict = b.stillApplicable
       ? await within(b.stillApplicable).then(
-          (v) => (v === TIMED_OUT ? reread : v),
+          (v) => (v === TIMED_OUT || v === CANCELLED ? reread : v),
           () => reread,
         )
       : null;
+    if (b.signal?.aborted) return cancelledNow(false);
     if (!conflict && b.guard) {
       const after = await within(b.guard).then(
-        (v) => (v === TIMED_OUT ? null : v),
+        (v) => (v === TIMED_OUT || v === CANCELLED ? null : v),
         () => null,
       );
+      if (b.signal?.aborted) return cancelledNow(false);
       if (after === null) conflict = reread;
       else if (after !== before)
         conflict = "the ticket changed during the wait (state, labels or comments)";
