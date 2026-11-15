@@ -52,14 +52,27 @@ export function clauseText(c: Clause): string {
     case "call":
       return `${c.predicate}(${c.args.map(termText).join(", ")})`;
     case "compare": {
-      const [a, b] = c.args.map(termText);
-      return `${a} ${comparisonWords[c.op] ?? c.op} ${b}`;
+      // Every operand is shown. Clojure compares a chain pairwise (a < b < c), and not= with
+      // several operands means they are not all equal. The compiler rejects other shapes; this
+      // throws rather than print a partial condition if one ever reaches it.
+      const word = comparisonWords[c.op];
+      const args = c.args.map(termText);
+      if (!word || args.length < 2)
+        throw new Error(`cannot render comparison ${c.op} with ${args.length} operand(s)`);
+      if (c.op === "not=")
+        return args.length === 2
+          ? `${args[0]} is not ${args[1]}`
+          : `not all of ${args.join(", ")} are equal`;
+      return args.join(` ${word} `);
     }
     case "bind":
+      if (c.fn === "str" && !c.args.length) throw new Error("cannot render str with no operands");
       if (c.fn === "str")
         return c.args.length === 1
           ? `${c.result} is the text ${termText(c.args[0])}`
           : `${c.result} is the text joining ${c.args.map(termText).join(", ")}`;
+      if (c.args.length < 2)
+        throw new Error(`cannot render ${c.fn} with ${c.args.length} operand(s)`);
       return `${c.result} = ${c.args.map(termText).join(` ${c.fn} `)}`;
     case "not":
       return `no match${joinText(c.join)} for: ${conjunctionText(c.body)}`;
@@ -96,3 +109,7 @@ export function clauseLines(clauses: Clause[], indent = "  "): string[] {
   }
   return lines;
 }
+
+/** A predicate head with the given alternative's own variables, e.g. `blocked(?t)`. */
+export const predicateHead = (name: string, params: string[]): string =>
+  `${name}(${params.join(", ")})`;

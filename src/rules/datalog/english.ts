@@ -127,22 +127,27 @@ function clause(f: Form, where: string, ctx: Context): Clause {
     };
     switch (head) {
       case "not":
+        if (items.length < 2) ctx.problems.push(`${where}: empty not`);
         return { type: "not", join: null, body: body(items.slice(1)) };
       case "not-join":
+        if (items.length < 3) ctx.problems.push(`${where}: empty not-join`);
         return {
           type: "not",
           join: joinVars(items[1], where, ctx),
           body: body(items.slice(2)),
         };
       case "or":
+        if (items.length < 2) ctx.problems.push(`${where}: empty or`);
         return { type: "or", join: null, alternatives: items.slice(1).map(group) };
       case "or-join":
+        if (items.length < 3) ctx.problems.push(`${where}: empty or-join`);
         return {
           type: "or",
           join: joinVars(items[1], where, ctx),
           alternatives: items.slice(2).map(group),
         };
       case "and":
+        if (items.length < 2) ctx.problems.push(`${where}: empty and`);
         // A bare `and` outside an `or` is a conjunction; keep it as a one-alternative group.
         return {
           type: "or",
@@ -165,8 +170,15 @@ function clause(f: Form, where: string, ctx: Context): Clause {
     if (!call) return fact(f, where, ctx);
     const fn = sym(call[0]);
     const args = call.slice(1).map((a) => term(a, where, ctx));
-    if (fn && comparisons.has(fn) && f.length === 1) return { type: "compare", op: fn, args };
+    // Every operand is rendered; arities the renderer cannot state exactly are rejected here:
+    // a one-operand comparison is trivially true, and unary - and / mean negation and reciprocal.
+    if (fn && comparisons.has(fn) && f.length === 1) {
+      if (args.length < 2) ctx.problems.push(`${where}: ${fn} needs at least two operands`);
+      return { type: "compare", op: fn, args };
+    }
     if (fn && bindings.has(fn) && f.length === 2) {
+      if (fn === "str" ? args.length < 1 : args.length < 2)
+        ctx.problems.push(`${where}: ${fn} with ${args.length} operand(s) is not supported`);
       const result = sym(f[1]);
       if (result?.startsWith("?")) return { type: "bind", fn, args, result };
     }
@@ -211,7 +223,12 @@ function compileRuleSet(
       ctx.problems.push(`${where}: expected [(name ?args) clauses...]`);
       return;
     }
-    const params = head.slice(1).map((p) => sym(p) ?? "?");
+    const params = head.slice(1).map((p) => {
+      const v = sym(p);
+      if (!v?.startsWith("?"))
+        ctx.problems.push(`${where}: ${name} head arguments must be variables`);
+      return v ?? "?";
+    });
     const clauses = rule.slice(1).map((c, i) => clause(c, `${where} ${name}[${i}]`, ctx));
     let predicate = byName.get(name);
     if (!predicate) {
@@ -219,7 +236,7 @@ function compileRuleSet(
       byName.set(name, predicate);
     } else if (predicate.params.length !== params.length)
       ctx.problems.push(`${where}: ${name} is defined with a different arity`);
-    predicate.alternatives.push({ clauses, source: { file, index } });
+    predicate.alternatives.push({ params, clauses, source: { file, index } });
   });
   const predicates = [...byName.values()];
   for (const p of predicates) p.calls = callsOf(p.alternatives.flatMap((a) => a.clauses));
@@ -262,6 +279,7 @@ function compileQuery(
     if (!v?.startsWith("?")) ctx.problems.push(`${where}: unsupported :find element`);
     return v ?? "?";
   });
+  if (!find.length) ctx.problems.push(`${where}: query has no :find`);
   const inputs = (parts.get("in") ?? []).map((f) => {
     const s = sym(f);
     if (s) return s;
