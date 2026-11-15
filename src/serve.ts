@@ -153,6 +153,8 @@ export type Routes = (context: RequestContext) => Promise<boolean>;
 export interface StatusSource {
   cache(): Record<string, number>;
   repositories(): Record<string, { observedAt: string | null; lastError: unknown }>;
+  /** Additive capability metadata: the read-only diagnostic URLs installed (#459). */
+  diagnostics?(): string[];
 }
 
 const emptyStatus: StatusSource = {
@@ -298,6 +300,7 @@ export async function startServe(
     ttlSeconds: options.ttlMs / 1000,
     auth: { host: facts.auth.host, login: facts.auth.login },
     cache: status.cache(),
+    ...(status.diagnostics ? { diagnostics: status.diagnostics() } : {}),
   });
 
   const handle = async (request: IncomingMessage, response: ServerResponse): Promise<void> => {

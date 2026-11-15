@@ -83,6 +83,8 @@ Routes (read-only; every data route accepts repo=owner/name and refresh=true):
   GET  /api/v1/status, /healthz           Status and cache counters; liveness
   /mcp                                    HTTP MCP: the four pdb-mcp read-only tools
   GET  /                                  Read-only dashboard: pick project and role, see next steps
+  GET  /api/v1/diagnostics/projects|cache|inflight[?repo=&limit=&cursor=]
+                                          Read-only state of the server itself; never collects
 Results carry freshness (live, cached or stale); a stale result is always incomplete.
 HTTP MCP example (verified with Claude Code; doc/reports/serve-http-mcp-acceptance.md):
   claude mcp add --transport http pdb http://127.0.0.1:${DEFAULT_PORT}/mcp
