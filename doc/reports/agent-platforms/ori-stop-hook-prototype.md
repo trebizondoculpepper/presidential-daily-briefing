@@ -35,7 +35,7 @@ The disposable adapter is a small TypeScript watcher committed at `scripts/ori-s
 1. runs a disposable work turn in an owned headless session,
 2. waits for `turn.succeeded` on that session's jsonl stream,
 3. calls the shared core (`pdb rebrief check`) for the natural-stop decision,
-4. on `continue`, resumes the **same session** (`ori code --resume <id> -p "<briefing>"`),
+4. on `continue`, resumes the **same session** (`ori code --resume <id> -p "<briefing>"`), passing the core's returned `actionId` as explicit structured data alongside the briefing (the rendered briefing text does not itself print the full action id; see #570 review),
 5. verifies the model echoed a synthetic nonce it could only read from the fixture and the briefing's first action id,
 6. acknowledges delivery (`pdb rebrief ack`) only then.
 
