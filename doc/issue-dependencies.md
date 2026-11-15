@@ -94,7 +94,7 @@ The repository-wide routine answer (#196), from direct edges only (profile `depe
 - _completion that unlocks the most, not pickable now_: blocked, claimed or otherwise unpickable open work ordered by proven unlocks, with why it is not pickable;
 - _next action_: one concrete step.
 
-Each list shows at most `--limit` entries (default 10, at most 50) and the total. Unknown impact (a truncated dependant list, a dependant not read, a platform restriction without a viewer platform) is shown as a lower bound, never zero. If the page cap or a quota refusal stops the inventory, the answer is labelled **provisional**, says how many open issues were read out of GitHub's count, and exits 2. It never reorders started work: finish-first (#182) and the briefing still decide what comes first, and claiming re-checks ownership live.
+Open issues the gates cannot decide from this read (more than 100 labels, a blocker closed as not planned, or a truncated blocker list) are never offered for pickup: they are listed as _undecided_ with the reason, and as dependants they count as unknown impact. Suggested commands name `--repo`. Each list shows at most `--limit` entries (default 10, at most 50) and the total. Unknown impact (a truncated dependant list, a dependant not read, a platform restriction without a viewer platform) is shown as a lower bound, never zero. If the page cap or a quota refusal stops the inventory, the answer is labelled **provisional**, says how many open issues were read out of GitHub's count, and exits 2. It never reorders started work: finish-first (#182) and the briefing still decide what comes first, and claiming re-checks ownership live.
 
 ### `deps add` and `deps remove`: change dependencies
 

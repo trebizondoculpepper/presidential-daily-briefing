@@ -358,6 +358,8 @@ export interface RepositoryImpact {
   /** Open work not pickable now, ordered by the unlocks its completion proves. */
   completionUnlocks: (RankedImpact & { notPickable: string[] })[];
   completionUnlocksTotal: number;
+  /** Open issues the pickup gates cannot decide from this read; never offered for pickup. */
+  undecided: (ImpactDependant & { reason: string })[];
   nextAction: string;
   policy: string;
   transitive: { computed: false; how: string };
@@ -370,11 +372,31 @@ export function repositoryImpact(
   limit = 10,
   context: PickupContext = { prs: [] },
 ): RepositoryImpact {
-  const issues = inventory.issues;
+  // Issues the gates cannot decide from this read (truncated labels or blockers, or a blocker
+  // closed as not planned) are neither offered for pickup nor counted as proven unlocks.
+  const undecidedReason = new Map<string, string>();
+  for (const issue of inventory.issues) {
+    const why = undecidable(
+      issue.labels,
+      issue.blockedBy?.nodes ?? [],
+      !!issue.blockedBy?.pageInfo.hasNextPage,
+    );
+    if (why)
+      undecidedReason.set(`${repositoryOf(issue.url, inventory.repository)}#${issue.number}`, why);
+  }
+  const issues = inventory.issues.filter(
+    (issue) =>
+      !undecidedReason.has(`${repositoryOf(issue.url, inventory.repository)}#${issue.number}`),
+  );
   const byUrl = new Map(issues.map((issue) => [issue.url, issue]));
   const missing = inventory.complete ? undefined : "dependant not in the partial inventory read";
   const unknownOf = (reasons: string[]) =>
-    missing ? reasons.map((r) => r.replace("not in this snapshot", missing)) : reasons;
+    reasons.map((r) => {
+      const m = /^dependant (\S+#\d+) not in this snapshot$/.exec(r);
+      const why = m && undecidedReason.get(m[1]);
+      if (why) return `dependant ${m[1]} pickup unknown (${why})`;
+      return missing ? r.replace("not in this snapshot", missing) : r;
+    });
   const ranked = rankPickup(issues, { ...context, order: "impact" });
   const startNow = ranked.slice(0, limit).map((r) => ({
     ...identity(r.issue),
@@ -383,7 +405,7 @@ export function repositoryImpact(
     urgency: r.urgency,
   }));
   const eligible = new Set(ranked.map((r) => r.issue.url));
-  const blocked = issues
+  const blocked = inventory.issues
     .filter((issue) => !eligible.has(issue.url))
     .map((issue) => ({
       issue,
@@ -402,8 +424,23 @@ export function repositoryImpact(
     ...identity(issue),
     unlocks: impact.unlocks.map((d) => d.number),
     unknown: unknownOf(impact.unknown),
-    notPickable: gate.reasons,
+    notPickable: [
+      ...gate.reasons,
+      ...[
+        undecidedReason.get(`${repositoryOf(issue.url, inventory.repository)}#${issue.number}`),
+      ].filter((r): r is string => !!r),
+    ],
   }));
+  const undecided = inventory.issues
+    .filter((issue) =>
+      undecidedReason.has(`${repositoryOf(issue.url, inventory.repository)}#${issue.number}`),
+    )
+    .map((issue) => ({
+      ...identity(issue),
+      reason: undecidedReason.get(
+        `${repositoryOf(issue.url, inventory.repository)}#${issue.number}`,
+      )!,
+    }));
   const provisionalReasons = inventory.complete
     ? []
     : [
@@ -414,7 +451,7 @@ export function repositoryImpact(
   const top = startNow[0];
   const most = completionUnlocks[0];
   const nextAction = top
-    ? `Start #${top.number}: claim it (pdb claim ${top.number}) and implement it; completing it makes ${count(top)} dependant(s) pickable. Check it first with pdb deps ${top.number}.`
+    ? `Start #${top.number}: claim it (pdb claim ${top.number}${repoFlag(inventory.repository)}) and implement it; completing it makes ${count(top)} dependant(s) pickable. Check it first with pdb deps ${top.number}${repoFlag(inventory.repository)}.`
     : most
       ? `Nothing is pickable now. #${most.number} unlocks the most when it completes (${count(most)}); it is not pickable because ${most.notPickable.join("; ")}.`
       : "Nothing is pickable now and no open completion is proven to unlock other work.";
@@ -430,6 +467,7 @@ export function repositoryImpact(
     startNowTotal: ranked.length,
     completionUnlocks,
     completionUnlocksTotal: blocked.length,
+    undecided: undecided.slice(0, limit),
     nextAction: `${inventory.complete ? "" : "Provisional: "}${nextAction}`,
     policy: finishFirst,
     transitive: { computed: false, how: transitiveHow },
@@ -463,6 +501,13 @@ export function repositoryImpactText(impact: RepositoryImpact): string {
               `${i + 1}. #${r.number} ${r.title} — ${unlockText(r)}; not pickable: ${r.notPickable.join("; ")}`,
           )
         : ["  none"]),
+      ...(impact.undecided.length
+        ? [
+            "",
+            "Undecided (inspect before pickup):",
+            ...impact.undecided.map((r) => `  #${r.number} ${r.title} — ${r.reason}`),
+          ]
+        : []),
       "",
       `Transitive reach: ${impact.transitive.how}`,
       impact.policy,
