@@ -109,7 +109,11 @@ export function classify(
     "wait-claim": [8, "waiting"],
   };
   // An own claim whose activity is unknown is inspected ahead of new work (D-OWN-UNKNOWN).
-  if (a.kind === "inspect" && a.extraReasonCodes?.includes("own-claim-unknown"))
+  if (
+    a.kind === "inspect" &&
+    (a.extraReasonCodes?.includes("own-claim-unknown") ||
+      a.extraReasonCodes?.includes("owned-incomplete"))
+  )
     return { band: 3, boosted: false, reasonCodes: ["own-claim", "inspection"] };
   const known = fixed[a.kind];
   if (known) return { band: known[0], boosted: false, reasonCodes: [known[1]] };
@@ -167,7 +171,9 @@ const retainedPreference = (a: ActionFacts): number =>
       ? 1
       : a.kind === "inspect" && a.extraReasonCodes?.includes("own-claim-unknown")
         ? 2
-        : 3;
+        : a.kind === "inspect" && a.extraReasonCodes?.includes("owned-incomplete")
+          ? 3
+          : 4;
 
 export function compareActions(order: PickupOrder = "impact") {
   return (a: ActionFacts, b: ActionFacts): number => {
@@ -500,6 +506,24 @@ export function roleCandidates(input: CandidateInput): ActionFacts[] {
     }
   }
   const owned = input.retained?.ownedClaims;
+  // An incomplete inventory with one observed claim: inspect ownership (D-OWNED-INCOMPLETE).
+  const only = owned?.urls[0];
+  if (
+    input.role === "implementer" &&
+    owned &&
+    owned.urls.length === 1 &&
+    !owned.complete &&
+    only &&
+    (!input.isParked(only) || input.isAddressed(only))
+  ) {
+    const f = facts(only, "inspect");
+    if (f)
+      out.push({
+        ...f,
+        extraReasonCodes: ["owned-incomplete"],
+        why: "Your claim inventory is incomplete and only this claim was observed; inspect your ownership before claiming more work.",
+      });
+  }
   // One review row on the first listed claim (unparked first), shown when it is foreground, as
   // the Datalog rule's owned-review-subject.
   const first = owned?.urls[0];

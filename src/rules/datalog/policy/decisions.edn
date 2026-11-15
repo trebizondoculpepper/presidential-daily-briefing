@@ -225,6 +225,14 @@
    :codes ["own-claim" "review-owned-work" "inspection"]
    :witnesses {"ownedClaims" [[1 "owned-claims" ?value]]}}
 
+  {:id "D-OWNED-INCOMPLETE"
+   :kind "inspect"
+   :band 3
+   :preference 3
+   :when [[1 "role" "implementer"] [1 "owned-review-subject" ?t] (own-issue ?t) [1 "owned-claims" 1] [1 "owned-claims-complete" false]]
+   :why "Your claim inventory is incomplete and only this claim was observed; inspect your ownership before claiming more work."
+   :codes ["own-claim" "inspection"]}
+
   {:id "D-OWN-UNKNOWN"
    :kind "inspect"
    :band 3
