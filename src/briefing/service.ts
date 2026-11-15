@@ -47,6 +47,8 @@ export interface PresentOptions extends Omit<BriefingOptions, "estimation" | "as
   engineSetting?: EngineSetting;
   /** Compact text budget. */
   maxChars: number;
+  /** Advancing timer for read durations (#367); default `performance.now`. Not `now`. */
+  monotonic?: () => number;
   /**
    * Expanded compact text: background sections, totals and evaluator metadata (#355). Off by
    * default, when the text holds only the next steps; never changes the JSON or the actions.
@@ -103,7 +105,13 @@ export async function presentBriefing(
   // (permission lookups and delivery evidence) are metered after its snapshot read.
   const intakeMeter =
     options.issue && snapshot.collection
-      ? new ReadMeter("compatibility-full-v1", "issue-intake", () => now, undefined, signal)
+      ? new ReadMeter(
+          "compatibility-full-v1",
+          "issue-intake",
+          () => now,
+          options.monotonic ?? (() => performance.now()),
+          signal,
+        )
       : undefined;
   if (intakeMeter) {
     const subject = `${snapshot.repository}#${options.issue}`;

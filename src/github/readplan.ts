@@ -28,8 +28,6 @@ const prop = (value: unknown, ...path: string[]): unknown => {
   }
   return at;
 };
-/** The rate-limit text dependencies.ts `isRateLimit` matches. */
-const rateLimitText = /rate limit|abuse detection|HTTP 429|retry-after/i;
 
 /** Registered read profiles and the sources and bounds each declares. */
 export const readProfiles = {
@@ -172,33 +170,37 @@ const bytesOf = (value: unknown): number | null => {
     return null;
   }
 };
+/**
+ * Quota refusal from structured evidence only, never message text (gh's general advice mentions
+ * rate limits on unrelated failures). RateLimitError carries `rateLimited`, AuthenticationError
+ * carries `authentication`; those discriminators are matched structurally because this module
+ * cannot import the collectors without an import cycle. Same-response evidence classified as
+ * `rate-limited` also counts. An authentication failure is never a quota refusal.
+ */
+export const quotaRefusal = (error: unknown): boolean =>
+  prop(error, "authentication") !== true &&
+  (prop(error, "rateLimited") === true || prop(error, "evidence", "category") === "rate-limited");
+
 const outcomeOf = (error: unknown, signal?: AbortSignal): Exclude<CallOutcome, "success"> =>
   signal?.aborted || (error instanceof Error && error.name === "AbortError")
     ? "cancelled"
-    : prop(error, "evidence", "category") === "rate-limited" || prop(error, "rateLimited") === true
+    : quotaRefusal(error)
       ? "rate-limited"
       : "failed";
 
-/** The outcome of an answered REST request, from its own status and classified evidence. */
+/**
+ * The outcome of an answered REST request, from its HTTP status and its classified same-response
+ * evidence only: 2xx or 304 is a success, 429 or `rate-limited` evidence is a quota refusal, and
+ * anything else (401, 403, 404, 5xx, no status) failed. The body's message is never read.
+ */
 export function restOutcome(answer: RestAnswer): CallOutcome {
   const status = answer.status;
-  const message = prop(answer.body, "message");
-  if (
-    status === 429 ||
-    prop(answer, "evidence", "category") === "rate-limited" ||
-    (status === 403 && typeof message === "string" && rateLimitText.test(message))
-  )
+  if (status === 429 || prop(answer, "evidence", "category") === "rate-limited")
     return "rate-limited";
   return status !== null && ((status >= 200 && status < 300) || status === 304)
     ? "success"
     : "failed";
 }
-
-/** True when a failure is a definitive quota refusal: stop scheduling further reads. */
-export const quotaRefusal = (error: unknown): boolean =>
-  prop(error, "rateLimited") === true ||
-  prop(error, "evidence", "category") === "rate-limited" ||
-  (error instanceof Error && rateLimitText.test(error.message));
 
 /**
  * Records every request of one read and its per-source coverage. Wrap each boundary with the
@@ -212,7 +214,10 @@ export class ReadMeter {
   private rate: ReadTelemetry["rateLimit"] = null;
   private readonly started: number;
   readonly monotonic: () => number;
-  /** Durations come from `monotonic`, default the injected clock, so tests are deterministic. */
+  /**
+   * Durations come from `monotonic` (default `performance.now`), an advancing timer kept apart
+   * from `now`, which only stamps observation times and may be a fixed clock.
+   */
   constructor(
     readonly profile: ReadProfile,
     readonly operation: string,
@@ -220,7 +225,7 @@ export class ReadMeter {
     monotonic?: () => number,
     readonly signal?: AbortSignal,
   ) {
-    this.monotonic = monotonic ?? (() => now().getTime());
+    this.monotonic = monotonic ?? (() => performance.now());
     this.started = this.monotonic();
   }
   get version(): number {

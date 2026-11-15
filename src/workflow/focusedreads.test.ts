@@ -12,6 +12,10 @@ import { dependencyReport, RateLimitError } from "../github/dependencies.js";
 import type { Comment, Issue, Page, PullRequest } from "../github/types.js";
 import { issue as baseIssue, pr as basePr, repo, time } from "../testing/snapshots.js";
 import { readPullRequest } from "./readservices.js";
+import { presentBriefing } from "../briefing/service.js";
+import { markerTrust } from "./delivery.js";
+import { permissionLookup } from "../github/github.js";
+import type { ReadCollection } from "../github/readplan.js";
 import { deliveryMarker } from "./delivery.js";
 import type { DeliveryRecord } from "./delivery.js";
 
@@ -292,6 +296,55 @@ describe("--issue N keeps the full compatibility profile (#367)", () => {
     expect(telemetry.requests).toBe(log.length + restPaths.length);
     expect(restPaths.some((p) => p.includes("/collaborators/"))).toBe(true);
     expect(telemetry.failures).toMatchObject({ failed: restPaths.length });
+    // Presentation reads are timed with an advancing timer although the clock is fixed.
+    const presented = telemetry.calls.filter((c: { source: string }) =>
+      ["permissions", "delivery-records"].includes(c.source),
+    );
+    expect(presented.length).toBeGreaterThan(0);
     expect(coverage.map((c: { source: string }) => c.source)).toContain("delivery-records");
+  });
+
+  it("times presentation reads with the injected monotonic timer, not the fixed clock", async () => {
+    const w = world();
+    const one = w.issues.get(1)!;
+    w.issues.set(1, {
+      ...one,
+      comments: page([
+        note(
+          issueUrl(1),
+          1,
+          deliveryMarker({
+            v: 1,
+            op: "submit",
+            opId: "op-1",
+            repository: repo,
+            issue: 1,
+            agent: "ana",
+            deliverables: [],
+            issuedAt: time,
+          } as unknown as DeliveryRecord),
+          1,
+        ),
+      ]),
+    });
+    const { query } = fake(w);
+    const snapshot = await collect(repo, { issue: 1 }, query, clock);
+    const rest = async () => ({ status: 404, body: {} });
+    let tick = 0;
+    const { report } = await presentBriefing(
+      snapshot,
+      { issue: 1, limit: 10, maxChars: 4000, monotonic: () => (tick += 5) },
+      undefined,
+      clock(),
+      undefined,
+      markerTrust(permissionLookup(repo, rest)),
+      undefined,
+      undefined,
+      { query, rest, trustWith: (r) => markerTrust(permissionLookup(repo, r)) },
+    );
+    const calls = (report as unknown as { collection: ReadCollection }).collection.telemetry.calls;
+    const presented = calls.filter((c) => c.source === "permissions");
+    expect(presented.length).toBeGreaterThan(0);
+    for (const c of presented) expect(c.durationMs).toBe(5);
   });
 });

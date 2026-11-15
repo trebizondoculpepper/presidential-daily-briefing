@@ -208,6 +208,13 @@ function call(
   });
 }
 
+/**
+ * The same JSON with measured read durations zeroed (#367): durations come from an advancing
+ * timer, so two reads of the same facts differ only there.
+ */
+const timeless = (value: unknown): unknown =>
+  JSON.parse(JSON.stringify(value), (key: string, v: unknown) => (key === "durationMs" ? 0 : v));
+
 /** The CLI's --json output for the same flags and the same injected facts. */
 async function cliJson(args: string[]): Promise<Record<string, unknown>> {
   let out = "";
@@ -287,7 +294,9 @@ describe("pdb serve read API (#373)", () => {
     try {
       const issueReply = await call(s.running.port, "/api/v1/issues/1?agent=me");
       expect(issueReply.json.view).toBe("issue");
-      expect(issueReply.json.result).toEqual(await cliJson(["--issue", "1", "--agent", "me"]));
+      expect(timeless(issueReply.json.result)).toEqual(
+        timeless(await cliJson(["--issue", "1", "--agent", "me"])),
+      );
       const who = await call(s.running.port, "/api/v1/issues/1/who?staleHours=24");
       expect(who.json.view).toBe("who");
       expect(who.json.result).toEqual(await cliJson(["who", "1", "--stale-hours", "24"]));
