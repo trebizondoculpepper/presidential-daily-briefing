@@ -39,7 +39,16 @@ export interface DeliveryBoundaries {
   trustWith?: (rest: Rest) => TrustDecision;
   live?: { query: Query; rest: Rest };
   signal?: AbortSignal;
+  /**
+   * The repository's declared review policy (#301), resolved by the front end from its verified
+   * project; absent: legacy, reported as not read. Every read using these boundaries applies it.
+   */
+  reviewPolicy?: DeclaredReviewPolicy;
 }
+
+/** The snapshot with the boundaries' declared review policy attached (#301). */
+const withPolicy = (snapshot: Snapshot, boundaries: DeliveryBoundaries): Snapshot =>
+  boundaries.reviewPolicy ? { ...snapshot, reviewPolicy: boundaries.reviewPolicy } : snapshot;
 
 /** One read: the versioned report, its text rendering, and whether its evidence is complete. */
 export interface ServiceRead<T> {
@@ -58,6 +67,7 @@ export async function readTeam(
   options: { staleHours: number; now: Date; offline: boolean },
   boundaries: DeliveryBoundaries,
 ) {
+  snapshot = withPolicy(snapshot, boundaries);
   const view = teamView(snapshot, options);
   // #192: responsibilities per agent (S18 inventory), including agents with no claim.
   const read = deliveryRead(snapshot, await diagnoseDelivery(snapshot, boundaries));
@@ -83,6 +93,7 @@ export async function readWho(
   /** A diagnosis of this ticket already made over the same boundaries; read when absent. */
   diagnosis?: DeliveryDiagnosis,
 ) {
+  snapshot = withPolicy(snapshot, boundaries);
   const ownership = ticketOwnership(snapshot, number, options);
   // #192: delivery, responsibility and closure from the shared fold and evaluator.
   // Only the requested issue is evaluated, so the evaluation cap can never skip it.
@@ -213,7 +224,7 @@ export async function readWhoWith(
   focus: typeof collectIssueFocus,
 ) {
   const { locate, signal } = options;
-  const snapshot = await focus(
+  const focused = await focus(
     repository,
     number,
     {
@@ -226,6 +237,7 @@ export async function readWhoWith(
     query,
     meter.now,
   );
+  const snapshot = withPolicy(focused, boundaries);
   const subject = `${repository}#${number}`;
   // A definitive quota refusal while hydrating linked PRs stops the read: no delivery, permission
   // or legacy-release request is sent after it. Those sources are reported not read, and the
@@ -393,8 +405,8 @@ export async function readPullRequest(
   query: Query,
   boundaries: DeliveryBoundaries,
   now?: () => Date,
-  /** Declared review policy (#301); absent: legacy, reported as not read. */
-  reviewPolicy?: DeclaredReviewPolicy,
+  /** Declared review policy (#301); default: the boundaries' policy. */
+  reviewPolicy: DeclaredReviewPolicy | undefined = boundaries.reviewPolicy,
 ) {
   // pr-status-v1 (#367): the selected PR, then delivery of the issues it closes; nothing else.
   const meter = new ReadMeter("pr-status-v1", "pr", now, undefined, boundaries.signal);

@@ -360,6 +360,26 @@ describe("pdb ticket N (#197)", () => {
     expect(row(r.report, 43).followUp).not.toBe("none");
   });
 
+  it("applies the declared review policy from the boundaries to every PR row (#301)", async () => {
+    const world = {
+      issue: ticket(1),
+      prs: { 40: { state: "OPEN", approvedOn: "head40" } },
+      links: [{ number: 40, url: prLink(40), state: "OPEN" }],
+    } as World;
+    const f = fake(world);
+    const r = await readTicketStatus(
+      repo,
+      1,
+      { staleHours: 48, now: clock() },
+      { ...f.boundaries, reviewPolicy: { state: "declared", policy: "codex-or-coderabbit" } },
+      f.query,
+      clock,
+    );
+    // A non-provider approval is legacy coverage, not either-provider coverage.
+    expect(row(r.report, 40).review?.headReviewed).toBe(false);
+    expect((await read(world)).report.pullRequests[0].review?.headReviewed).toBe(true);
+  });
+
   it("a feature-branch target mismatch and a closed-unmerged PR stay visible", async () => {
     const issue = ticket(1, [submitted(1, [member(50, "release")])]);
     const r = await read({
