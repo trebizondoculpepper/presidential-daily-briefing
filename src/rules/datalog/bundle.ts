@@ -58,9 +58,19 @@ export interface DecisionRule {
   witnesses: Record<string, string>;
 }
 
+/**
+ * schema.edn :lexicon: a phrase naming each input attribute and viewer fact, for the English
+ * compiler. It names inputs only and never describes a rule. The engine does not read it.
+ */
+export interface Lexicon {
+  attributes: Record<string, string>;
+  viewer: Record<string, string>;
+}
+
 export interface PolicyBundle {
   generatedFrom: string;
   policyVersion: number;
+  lexicon: Lexicon;
   schema: Schema;
   constants: Record<string, (string | number | boolean)[]>;
   /** rules.edn as one canonical EDN vector. */

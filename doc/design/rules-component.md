@@ -120,13 +120,13 @@ The upstream project has no separate JavaScript language reference for queries. 
 
 Each file holds exactly one top-level EDN form:
 
-| File                   | Form                                                                                                                                            |
-| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| `policy/rules.edn`     | Vector of rule clauses: today's `clauses`                                                                                                       |
-| `policy/ordering.edn`  | Map: `:overrides` (declared winner/loser precedence exceptions, #416), `:comparison` (vector of key names) and `:rules` (today's `sortClauses`) |
-| `policy/queries.edn`   | Map from query keyword to query form: q0–q7, the key queries, the named queries and the 4 now embedded in `datalog.ts`                          |
-| `policy/decisions.edn` | Vector of decision maps (below)                                                                                                                 |
-| `policy/schema.edn`    | Map: `:policy-version`, `:many` (cardinality-many attributes), `:constants` (name → vector), `:common-witnesses`, `:eligibility-witnesses`      |
+| File                   | Form                                                                                                                                                                                                              |
+| ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `policy/rules.edn`     | Vector of rule clauses: today's `clauses`                                                                                                                                                                         |
+| `policy/ordering.edn`  | Map: `:overrides` (declared winner/loser precedence exceptions, #416), `:comparison` (vector of key names) and `:rules` (today's `sortClauses`)                                                                   |
+| `policy/queries.edn`   | Map from query keyword to query form: q0–q7, the key queries, the named queries and the 4 now embedded in `datalog.ts`                                                                                            |
+| `policy/decisions.edn` | Vector of decision maps (below)                                                                                                                                                                                   |
+| `policy/schema.edn`    | Map: `:policy-version`, `:many` (cardinality-many attributes), `:constants` (name → vector), `:common-witnesses`, `:eligibility-witnesses`, `:lexicon` (input attribute and viewer phrases for `pdb rules`, #416) |
 
 The two queries that are built by string interpolation today become parameterised forms. The per-rule match query takes the rule's `:when` clauses, and the witness query takes a witness clause. The build splices these structurally and checks the result reads back as one form, so no runtime string concatenation of user-visible policy remains.
 
