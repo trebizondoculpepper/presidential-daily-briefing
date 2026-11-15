@@ -25,3 +25,11 @@ export {
   type RulesContext,
   type EffectiveSettings,
 } from "./rules-command.js";
+// Bounded native project-preference evaluation (#515). Not enabled by any command yet (#516);
+// exported here so the packaged worker is part of this single evaluator chunk.
+export {
+  evaluateProjectPreferences,
+  ProjectEvaluationError,
+  type ProjectEvaluation,
+  type ProjectEvaluationOptions,
+} from "./project/evaluate.js";
