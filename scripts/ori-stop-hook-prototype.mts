@@ -42,6 +42,7 @@ function run(cmd: string, args: string[]): string {
 }
 
 function pdb(args: string[]): string {
+  const [subcommand, ...rest] = args;
   return run("npm", [
     "--prefix",
     PDB_SRC,
@@ -50,8 +51,9 @@ function pdb(args: string[]): string {
     "pdb",
     "--",
     "rebrief",
+    subcommand,
     "--json",
-    ...args,
+    ...rest,
   ]);
 }
 
