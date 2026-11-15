@@ -415,6 +415,8 @@ export interface ReadRuntime {
 
 /** Live read request for a briefing or one issue's intake. */
 export interface BriefingRequest {
+  /** Explicit platform for the shared rebrief read (#506); never inferred. */
+  platform?: string;
   repository: string;
   agent?: string;
   issue?: number;
@@ -478,6 +480,7 @@ export async function readBriefing(
       maxChars: request.maxChars,
       context: request.context,
       agent: request.agent,
+      platform: request.platform,
       issue: request.issue,
       ...(request.role ? { role: request.role } : {}),
       ...(request.order ? { order: request.order } : {}),
