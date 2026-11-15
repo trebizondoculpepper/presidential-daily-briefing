@@ -489,6 +489,14 @@ export function roleCandidates(input: CandidateInput): ActionFacts[] {
   for (const section of input.sections) {
     const kind = sectionKinds[section.name];
     if (section.background || !kind) continue;
+    // #413: an incomplete inventory with zero observed claims cannot establish that the viewer
+    // has no claim; new pickup is denied rather than inviting a claim the guard may refuse.
+    const inventoryUnknown =
+      input.role === "implementer" &&
+      section.name === "pickup" &&
+      input.retained?.ownedClaims.urls.length === 0 &&
+      input.retained?.ownedClaims.complete === false;
+    if (inventoryUnknown) continue;
     for (const row of section.rows) {
       const mapped =
         kind === "continue-implementation" && input.role === "implementer"

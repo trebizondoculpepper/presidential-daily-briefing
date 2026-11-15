@@ -219,6 +219,17 @@ describe("both engines rank retained claims alike (#413)", () => {
       expect(datalog.length).toBeGreaterThan(0);
     });
 
+  it("suppresses new pickup in both engines when zero claims and an incomplete inventory meet", async () => {
+    // The inventory cannot establish that the viewer holds no claim, so neither engine offers
+    // an `implement` row for the otherwise-eligible ticket #4 (D-DENY-INVENTORY-UNKNOWN).
+    for (const engine of ["datalog", "typescript"] as const) {
+      const order = (
+        await ranked(only(s, [4]), engine, { ownedClaims: { urls: [], complete: false } })
+      ).map((r) => r.split(" | ")[0]!);
+      expect(order.filter((r) => r.startsWith("implement #4"))).toEqual([]);
+    }
+  });
+
   it("orders resume and review ahead of new work, and waits after it", async () => {
     const order = (await ranked(s, "datalog", cases["waiting, resume-required and unknown"])).map(
       (r) => r.split(" | ")[0]!,
