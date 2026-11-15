@@ -12,7 +12,16 @@ process.env.SENTRY_DISABLED = "1";
  */
 import { defaultCrashDsn } from "../src/telemetry/crashes.js";
 import { execFile, spawn } from "node:child_process";
-import { chmod, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  realpath,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -1056,6 +1065,7 @@ try {
     // The real installed entrypoints read the opt-out before resolving the SDK.
     {
       const marker = join(work, "unexpected-sdk-load");
+      const privateHome = await realpath(work);
       const preload = join(work, "config-opt-out.mjs");
       // Locate the dependency from the installed package, independent of npm hoisting.
       const { createRequire } = await import("node:module");
@@ -1065,17 +1075,17 @@ try {
         preload,
         `import paths from ${JSON.stringify(pathsUrl.href)};
         import {mkdirSync,writeFileSync} from 'node:fs';import {join} from 'node:path';import {registerHooks} from 'node:module';
-        const dir=paths('presidential-daily-briefing').config;mkdirSync(dir,{recursive:true});writeFileSync(join(dir,'crash-reporting.toml'),'[telemetry.crashes]\\nenabled=false');
+        const dir=paths('presidential-daily-briefing').config;mkdirSync(dir,{recursive:true});writeFileSync(join(dir,'crash-reporting.toml'),'[telemetry.crashes]\\nenabled='+String(process.env.PDB_TEST_CRASH_ENABLE==='1'));
         registerHooks({resolve(specifier,context,next){if(specifier==='@sentry/node')writeFileSync(${JSON.stringify(marker)},'loaded');return next(specifier,context);}});`,
       );
       const optOutEnv = {
         ...env,
         SENTRY_DISABLED: "",
         SENTRY_DSN: "https://public@sentry.example.invalid/1",
-        HOME: work,
-        USERPROFILE: work,
-        APPDATA: join(work, "appdata"),
-        XDG_CONFIG_HOME: join(work, "config"),
+        HOME: privateHome,
+        USERPROFILE: privateHome,
+        APPDATA: join(privateHome, "appdata"),
+        XDG_CONFIG_HOME: join(privateHome, "config"),
         NODE_OPTIONS: `--import=${pathToFileURL(preload).href}`,
       };
       for (const name of ["cli", "mcp"])
@@ -1091,6 +1101,17 @@ try {
         )
       )
         throw new Error("Configured opt-out loaded the SDK");
+      await run(process.execPath, [join(packageDir, "dist", "cli.mjs"), "--help"], {
+        env: { ...optOutEnv, PDB_TEST_CRASH_ENABLE: "1" },
+        cwd: work,
+      });
+      if (
+        !(await readFile(marker, "utf8").then(
+          () => true,
+          () => false,
+        ))
+      )
+        throw new Error("SDK-resolution oracle missed the enabled positive control");
       console.log(
         "ok   installed CLI, STDIO MCP and HTTP serve config opt-out never resolve the SDK",
       );
