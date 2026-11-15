@@ -34,8 +34,8 @@ describe("rules build (#348)", () => {
   it("builds the EDN sources and the committed artifact is current", () => {
     const artifact = buildPolicy();
     expect(JSON.parse(readFileSync(artifactPath, "utf8"))).toEqual(JSON.parse(serialize(artifact)));
-    // 29 agent decisions (six for retained claims, #413) plus five human briefing decisions (#457).
-    expect(artifact.definitions).toHaveLength(34);
+    // 29 agent decisions (six for retained claims, #413) plus eight human decisions (#457, #414).
+    expect(artifact.definitions).toHaveLength(37);
   });
 
   it("rejects a second top-level form that DataScript would silently ignore", () => {
