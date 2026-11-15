@@ -6,6 +6,7 @@ import {
   isRateLimit,
   RateLimitError,
   dependencyReport,
+  dependencyReportIncomplete,
   dependencyText,
   planDependencyChange,
 } from "./dependencies.js";
@@ -202,6 +203,51 @@ describe("bounded --tree diagnosis (#196)", () => {
     );
     expect(partial.treeBounds).toMatchObject({ complete: false, stoppedBy: null, notServed: 1 });
     expect(dependencyText(partial)).toContain("1 issue(s) in repositories not served");
+  });
+  it("exits 2 for an incomplete tree and 0 for a complete one", async () => {
+    const { query } = graphQuery({ edges: largeGraph() });
+    const runtime = {
+      collect: async () => {
+        throw new Error("briefing collection must not run");
+      },
+      currentRepository: async () => repo,
+      dependencyReport: (r: string, n: number, o?: Parameters<typeof dependencyReport>[2]) =>
+        dependencyReport(r, n, o, query, clock),
+    };
+    const quiet = async () => {};
+    expect(await main(["deps", "1", "--tree", "--max-nodes", "5"], quiet, runtime)).toBe(2);
+    expect(await main(["deps", "1", "--tree", "--json"], quiet, runtime)).toBe(2);
+    expect(await main(["deps", "1", "--tree", "--max-nodes", "500"], quiet, runtime)).toBe(0);
+    expect(await main(["deps", "1"], quiet, runtime)).toBe(0);
+    // Unserved nodes and a quota stop are incomplete too.
+    let first = true;
+    const unserved = await dependencyReport(
+      repo,
+      1,
+      {
+        tree: true,
+        follow: () => {
+          const ok = first;
+          first = false;
+          return ok;
+        },
+      },
+      query,
+      clock,
+    );
+    expect(dependencyReportIncomplete(unserved)).toBe(true);
+    let sent = 0;
+    const refusing: Query = async (source, variables) => {
+      if (++sent === 2) throw Object.assign(new Error("x"), { rateLimited: true, retry: {} });
+      return query(source, variables);
+    };
+    expect(
+      await main(["deps", "1", "--tree"], quiet, {
+        ...runtime,
+        dependencyReport: (r: string, n: number, o?: Parameters<typeof dependencyReport>[2]) =>
+          dependencyReport(r, n, o, refusing, clock),
+      }),
+    ).toBe(2);
   });
   it("rejects a node limit outside its bounds", async () => {
     const { query } = graphQuery({ edges: [[1, 2]] });

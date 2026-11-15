@@ -21,6 +21,7 @@ import {
   applyDependencyChange,
   dependencyChangeText,
   dependencyReport,
+  dependencyReportIncomplete,
   dependencyText,
   treeNodeLimit,
   treeNodeMaximum,
@@ -347,8 +348,10 @@ Changes no labels.
   --help                Show usage
 deps migrate --plan reads only: it writes a report of how \`Depends on\` text and blocked:work
 labels map to native dependencies. Record edges with deps add; automatic apply is deferred (#48).
-Exit: 0 all done; 2 partly done (refused/skipped/failed items listed); 1 nothing done or
-invalid arguments/API failure.
+Exit (deps N): 0 complete; 2 incomplete evidence (a tree stopped by its node limit, a quota
+refusal or unserved repositories, or native evidence unknown); 1 invalid arguments/API failure.
+Exit (add/remove): 0 all done; 2 partly done (refused/skipped/failed items listed); 1 nothing
+done or invalid arguments/API failure.
 `;
 export function depsArgumentsFor(args: string[]): DepsArguments {
   const { values, positionals } = parseArgs({
@@ -1519,7 +1522,7 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
       ...(values.maxNodes ? { maxNodes: values.maxNodes } : {}),
     });
     await output(values.json ? JSON.stringify(report, null, 2) + "\n" : dependencyText(report));
-    return 0;
+    return dependencyReportIncomplete(report) ? 2 : 0;
   }
   const options = argumentsFor(args);
   if (options.help) {

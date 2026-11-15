@@ -333,6 +333,16 @@ export async function dependencyReport(
     ...(treeBounds ? { treeBounds } : {}),
   };
 }
+/**
+ * Whether a dependency report rests on incomplete evidence (exit 2 for every read command): a
+ * tree that is not proven complete, a quota refusal, unread nodes or unknown native evidence.
+ */
+export function dependencyReportIncomplete(report: DependencyReport): boolean {
+  if (report.tree && report.treeBounds?.complete !== true) return true;
+  if (report.collection?.quota || report.collection?.notAttempted.length) return true;
+  if (report.unfollowed?.length) return true;
+  return report.nodes.some((node) => !node.known);
+}
 /** One line of read cost, from the report's own telemetry; unknown cost is never zero. */
 export function readCostText(report: Pick<DependencyReport, "collection">): string {
   const t = report.collection?.telemetry;
