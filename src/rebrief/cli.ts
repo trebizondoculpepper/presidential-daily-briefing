@@ -6,6 +6,7 @@ import { dependencyReport } from "../github/dependencies.js";
 import { resolveIdentityTarget } from "../config/identity.js";
 import { validateHarness } from "../config/harness.js";
 import { validateEntryKey } from "../config/identity.js";
+import type { ReadIdentity } from "../config/readidentity.js";
 import { resolveReadIdentity } from "../config/readidentity.js";
 import type { ConfigFileSystem, GitRunner } from "../config/config.js";
 import { noLocalProject } from "../serve/api.js";
@@ -58,7 +59,13 @@ export async function runRebrief(
     reason: "unknown",
     enabled: false,
   };
-  const emit = async (result: Result) => output(`${JSON.stringify(result)}\n`);
+  let identityMetadata:
+    | Pick<ReadIdentity, "source" | "store" | "diagnostic" | "storeDiagnostic">
+    | undefined;
+  const emit = async (result: Result) =>
+    output(
+      `${JSON.stringify({ ...result, ...(identityMetadata ? { identity: identityMetadata } : {}) })}\n`,
+    );
   const controller = new AbortController();
   const abort = () => controller.abort();
   runtime.signal?.addEventListener("abort", abort, { once: true });
@@ -178,6 +185,14 @@ export async function runRebrief(
         fs: runtime.fs,
         git: runtime.git,
       });
+      const bounded = (value: string | null) =>
+        value === null || value.length <= 512 ? value : `${value.slice(0, 498)}… [truncated]`;
+      identityMetadata = {
+        source: identity.source,
+        store: identity.store,
+        diagnostic: bounded(identity.diagnostic),
+        storeDiagnostic: bounded(identity.storeDiagnostic),
+      };
       input.agent = identity.agent ?? "";
     };
     await Promise.race([

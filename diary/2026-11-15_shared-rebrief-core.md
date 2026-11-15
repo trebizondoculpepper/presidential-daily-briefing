@@ -9,3 +9,5 @@ Caught and corrected an initial workspace routing mistake before commit: moved o
 Validation: full suite 1,945 passed with one existing skip; focused rebrief cases, check, build, built smoke and installed-archive package test passed. Check reports 45 pre-existing warnings and zero errors. The private state and Codex platform path were exercised without credentials, model calls, hooks or live mutations.
 
 Codex review found that validation stripped native unlock fields before fingerprinting. Preserved unlock counts/unknown evidence, assessment fields and band in the validated semantic action; added an acknowledged-session regression for changed native unlock evidence while action identity/order and subject metadata stay fixed.
+
+Final compatibility check preserved the canonical/legacy identity resolver notice in CLI JSON, including bounded legacy-not-imported recovery, without importing or writing configuration. Added a legacy-read regression.
