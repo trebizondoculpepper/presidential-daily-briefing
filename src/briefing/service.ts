@@ -14,7 +14,7 @@ import type { DeclaredReviewPolicy } from "../workflow/reviewpolicy.js";
  * parses terminal text. Only read operations live here: mutation planning and application stay
  * in their own modules and are never reachable through this service.
  */
-import { collect, IssueUnavailable, permissionLookup } from "../github/github.js";
+import { collect, ghQuery, IssueUnavailable, permissionLookup } from "../github/github.js";
 import type { IssueDiagnosis, Query, Rest } from "../github/github.js";
 import { diagnoseDelivery } from "../workflow/deliverydoctor.js";
 import { deliveryRead } from "../workflow/deliveryread.js";
@@ -26,7 +26,13 @@ import { ReadMeter } from "../github/readplan.js";
 import { impactMetric } from "../estimation/metrics.js";
 import { dependencyReport, dependencyText } from "../github/dependencies.js";
 import type { DependencyReport } from "../github/dependencies.js";
-import { compactBriefing, compactText } from "./compact.js";
+import {
+  BriefingArgumentError,
+  compactBriefing,
+  compactText,
+  LabelFilterUnresolved,
+} from "./compact.js";
+import { normalizeLabelRequest, resolveLabels } from "../github/labels.js";
 import { briefing, textReport } from "./briefing.js";
 import type { BriefingOptions } from "./briefing.js";
 import { readSnapshotAssessments, unknownTrust } from "./assessments.js";
@@ -61,6 +67,8 @@ export interface PresentOptions extends Omit<BriefingOptions, "estimation" | "as
   role?: string;
   /** One registered section of the role view with its row cap lifted (#311). */
   section?: string;
+  /** Canonical, already-resolved labels every candidate must carry (#312, AND). */
+  labels?: string[];
   /** Workflow guide (#71) for the compact briefing; omitted means no `process` object. */
   process?: BriefingProcess;
   /**
@@ -427,6 +435,8 @@ export interface BriefingRequest {
   role?: string;
   /** One registered section, every row (#311): the same as CLI --section. */
   section?: string;
+  /** Requested label filter (#312, AND), resolved against the repository before projection. */
+  labels?: string[];
   /** Pickup order (#260), as CLI --order. */
   order?: PickupOrder;
   /** Expanded compact text (#355), as CLI --context; never changes the report. */
@@ -446,6 +456,30 @@ export function unavailableText(d: IssueDiagnosis): string {
 }
 
 /** Collect live evidence and present the compact briefing, focused on `issue` if given. */
+/**
+ * Resolve a requested label filter to canonical repository labels (#312), shared by the CLI,
+ * MCP and HTTP front ends: an unknown label is an argument error naming it, and a failed
+ * lookup is an unresolved filter; neither yields a silently empty queue.
+ */
+export async function resolveLabelFilter(
+  repository: string,
+  labels: readonly string[],
+  query: Query,
+): Promise<string[]> {
+  const normalized = normalizeLabelRequest(labels);
+  if (!normalized.ok) throw new BriefingArgumentError(normalized.why);
+  const resolution = await resolveLabels(repository, normalized.labels, query);
+  if (resolution.status === "unknown")
+    throw new BriefingArgumentError(
+      `Unknown label(s) in ${repository}: ${resolution.missing.join(", ")}. No label is created; check the name with gh label list --repo ${repository}.`,
+    );
+  if (resolution.status === "unresolved")
+    throw new LabelFilterUnresolved(
+      `The label filter could not be resolved: ${resolution.why}. This is not proof the label is absent; retry when GitHub is reachable.`,
+    );
+  return resolution.labels;
+}
+
 export async function readBriefing(
   runtime: ReadRuntime,
   request: BriefingRequest,
@@ -465,6 +499,14 @@ export async function readBriefing(
       text: unavailableText(error.diagnosis),
     };
   }
+  // #312: resolve the label filter once, through the same read boundary, before projecting.
+  const labels = request.labels?.length
+    ? await resolveLabelFilter(
+        request.repository,
+        request.labels,
+        runtime.queryWith?.(request.signal) ?? runtime.query ?? ghQuery,
+      )
+    : undefined;
   const engineSetting = request.issue
     ? undefined
     : await resolveEngineSetting(request.repository, runtime.guide);
@@ -485,6 +527,7 @@ export async function readBriefing(
       issue: request.issue,
       ...(request.role ? { role: request.role } : {}),
       ...(request.section !== undefined ? { section: request.section } : {}),
+      ...(labels ? { labels } : {}),
       ...(request.order ? { order: request.order } : {}),
       process,
       engineSetting,

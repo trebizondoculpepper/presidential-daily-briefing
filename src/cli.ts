@@ -31,6 +31,7 @@ import {
   planDependencyChange,
 } from "./github/dependencies.js";
 import { briefingRoleNames, roleSectionIds } from "./briefing/roles.js";
+import { normalizeLabelRequest } from "./github/labels.js";
 import { doctorStaleHours, ticketDoctor, ticketDoctorText } from "./workflow/ticketdoctor.js";
 import { diagnoseClosedDrift, diagnoseDelivery } from "./workflow/deliverydoctor.js";
 import { deliveryRead, withDeliveryCompleteness } from "./workflow/deliveryread.js";
@@ -57,7 +58,7 @@ import { cachedCheckForUpdate } from "./updates/updatecache.js";
 import { installedVersion, optOutEnv, legacyOptOutEnv, updateAdvisory } from "./updates/updates.js";
 import { defaultStaleHours } from "./workflow/team.js";
 import { migrationPlanText, planMigration } from "./github/migration.js";
-import { presentBriefing, unavailableText } from "./briefing/service.js";
+import { presentBriefing, resolveLabelFilter, unavailableText } from "./briefing/service.js";
 import { runBriefing } from "./briefing/catchupcli.js";
 import type { BriefingFiles } from "./briefing/catchupcli.js";
 import {
@@ -340,6 +341,8 @@ Rollback: pdb config set briefing.engine typescript.
   --section ID          One section of the role view with its row cap lifted (text budget still
                         applies). implementer: ${roleSectionIds("implementer").join(", ")}.
                         designer: ${roleSectionIds("designer").join(", ")}
+  --label NAME          Only candidates carrying every given label (repeatable, AND, up to 8);
+                        a filtered view, never a whole-board all-clear. Facts stay complete
   --limit N             Next steps (default 10)
   --no-update-check     Skip the npm version check (also ${optOutEnv}=1)
   version               Show the installed version and the update check result
@@ -811,6 +814,7 @@ export function argumentsFor(args: string[]) {
       estimate: { type: "boolean" },
       role: { type: "string" },
       section: { type: "string" },
+      label: { type: "string", multiple: true },
       guide: { type: "boolean" },
       "no-guide": { type: "boolean" },
       context: { type: "boolean" },
@@ -823,6 +827,18 @@ export function argumentsFor(args: string[]) {
     throw new Error(`--role must be one of ${briefingRoleNames().join(", ")}.`);
   if (values.role !== undefined && values.full)
     throw new Error("--role shapes the compact briefing; it cannot be combined with --full.");
+  // #312: an AND label filter over the compact role/briefing candidates. It is resolved live
+  // against the repository, so offline, full intake and issue detail are separate requests.
+  if (values.label !== undefined) {
+    const normalized = normalizeLabelRequest(values.label);
+    if (!normalized.ok) throw new Error(normalized.why);
+    if (values.full || values.issue || values.offline)
+      throw new Error(
+        "--label filters a live compact briefing; run --full, --issue N or --offline as a separate request.",
+      );
+    if (values.role === "human")
+      throw new Error("--role human is a view of human input; it takes no --label filter.");
+  }
   // #311: one named section of the role view; contradictory requests are refused, not guessed.
   if (values.section !== undefined) {
     if (values.full || values.issue)
@@ -1824,10 +1840,15 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
   const guideProcess = options.full
     ? undefined
     : briefingProcess(await resolveGuideSetting(snapshot.repository, options.guide, runtime.guide));
+  // #312: resolve the label filter live against the repository before projecting.
+  const labels = options.label?.length
+    ? await resolveLabelFilter(snapshot.repository, options.label, runtime.query ?? ghQuery)
+    : undefined;
   const { report, text } = await presentBriefing(
     snapshot,
     {
       ...options,
+      ...(labels ? { labels } : {}),
       process: guideProcess,
       engineSetting:
         options.full || options.issue
