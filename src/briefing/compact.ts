@@ -1,4 +1,5 @@
 /** Compact presentation of the registered findings; contract #698. */
+import { leanRow } from "./leanrows.js";
 import { isParked, owners, excerpt } from "./briefing.js";
 import type { BriefingProcess } from "./process.js";
 import type { Briefing, BriefingOptions, Bounded, CheckOutcome } from "./briefing.js";
@@ -665,9 +666,15 @@ export function compactText(
       rows.push(
         `\nNEXT STEPS (${ranked.total}${ranked.omitted ? `; ${ranked.omitted} omitted` : ""})`,
       );
-    for (const item of ranked.items) {
+    for (const [i, item] of ranked.items.entries()) {
       const s = defined(subjects.get(item.target));
       const why = item.why?.text ?? roleReasons.get(item.target);
+      // Lean default rows (#487): no metric line, codes or zero-only unlocks; --context keeps
+      // the detailed row with paired assessments and reason codes.
+      if (brief) {
+        rows.push(leanRow(i + 1, item, s, why, s.detailCommand));
+        continue;
+      }
       rows.push(
         `- #${s.number} ${s.title} — ${item.kind} (${item.reasonCodes.join(", ")})${s.assessments ? `\n  ${assessmentsText(s.assessments)}` : ""}${why ? `\n  Why: ${why}` : ""}${item.nextCommand ? `\n  Next: ${item.nextCommand}${item.thenCommand ? `\n  Then: ${item.thenCommand}` : ""}` : `\n  Inspect: ${item.inspection ?? s.detailCommand}`}\n  ${item.target}`,
       );
