@@ -174,6 +174,32 @@ describe("dependency readiness (#346)", () => {
     expect(none.detail).toMatch(/comparable source or integrity for zod/);
   });
 
+  it("checks the Datalog chunk dist/cli.mjs imports when running dist", async () => {
+    const base = {
+      "package.json": manifest,
+      "package-lock.json": lock(expected),
+      "node_modules/.package-lock.json": lock(expected),
+      ...installedModules,
+    };
+    const dist = (entries: Record<string, string>) =>
+      dependencyReadiness({
+        root,
+        installed: false,
+        executingDist: true,
+        readText: files({ ...base, ...entries }),
+      });
+    const bundle = 'const e = () => import("./datalog-AbC123.mjs");';
+    expect((await dist({ "dist/cli.mjs": bundle, "dist/datalog-AbC123.mjs": "" })).status).toBe(
+      "ok",
+    );
+    const stale = await dist({ "dist/cli.mjs": bundle, "dist/datalog-Old999.mjs": "" });
+    expect(stale.status).toBe("missing");
+    expect(stale.next).toEqual(["npm run build   (at the PDB source checkout root)"]);
+    expect((await dist({ "dist/cli.mjs": "no chunk import here" })).status).toBe("unknown");
+    // Not running dist: the chunk is irrelevant.
+    expect((await run(base)).status).toBe("ok");
+  });
+
   it("does not trust the hidden lock when a runtime module is gone from disk", async () => {
     const check = await run({
       "package.json": manifest,

@@ -324,6 +324,18 @@ async function check({
   }
   missing.push(...unresolved);
 
+  // Running dist: the lazily loaded Datalog chunk that dist/cli.mjs imports must exist too.
+  const chunk = executingDist ? await engineChunk(root, readText) : "ok";
+  if (chunk === "missing" && missing.length + mismatched.length + extraneous.length === 0)
+    return {
+      id: dependencyCheckId,
+      status: "missing",
+      source: "dist/cli.mjs Datalog chunk import",
+      detail:
+        "The built Datalog engine chunk that dist/cli.mjs imports is missing; the build is incomplete or stale.",
+      next: ["npm run build   (at the PDB source checkout root)"],
+    };
+
   if (missing.length + mismatched.length + extraneous.length > 0) {
     const parts = [
       missing.length ? `missing: ${names(missing)}` : null,
@@ -332,6 +344,7 @@ async function check({
         : null,
       extraneous.length ? `not in package-lock.json: ${names(extraneous)}` : null,
       omittedDev.length ? `missing dev: ${names(omittedDev)}` : null,
+      chunk === "missing" ? "built Datalog engine chunk missing" : null,
     ].filter(Boolean);
     return {
       id: dependencyCheckId,
@@ -341,6 +354,11 @@ async function check({
       ...fix,
     };
   }
+  if (chunk === "unknown")
+    return unknown(
+      "dist/cli.mjs Datalog chunk import",
+      "The built Datalog engine chunk could not be identified or read from dist/cli.mjs.",
+    );
   if (unresolvable.length)
     return unknown(
       "runtime dependency entry points",
@@ -363,4 +381,28 @@ async function check({
     detail: `Installed dependencies match package-lock.json (${expected.size} packages; ${declared.length} runtime dependency entry points exist). This is not a full integrity check.`,
     next: [],
   };
+}
+
+/** The chunk specifier dist/cli.mjs lazily imports for the Datalog engine. */
+const chunkImport = /import\(\s*["']\.\/(datalog-[\w-]+\.mjs)["']\s*\)/g;
+
+/**
+ * Whether the Datalog chunk that the built CLI imports exists: read the bundle, take its one
+ * `import("./datalog-*.mjs")` specifier and check that file. Unknown when the bundle cannot be
+ * read or names no single chunk.
+ */
+export async function engineChunk(
+  root: string,
+  readText: ReadText,
+): Promise<"ok" | "missing" | "unknown"> {
+  try {
+    const bundle = await readText(join(root, "dist", "cli.mjs"));
+    if (bundle === null) return "missing";
+    const chunks = new Set([...bundle.matchAll(chunkImport)].map((m) => m[1]!));
+    if (chunks.size !== 1) return "unknown";
+    const [file] = [...chunks];
+    return (await readText(join(root, "dist", file!))) === null ? "missing" : "ok";
+  } catch {
+    return "unknown";
+  }
 }
