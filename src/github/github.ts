@@ -19,6 +19,7 @@ import type {
 } from "./changes.js";
 import type { Comment, Issue, Page, PullRequest, Reference, Snapshot } from "./types.js";
 import { hydrate, quotaRefusal, ReadMeter, readProfiles } from "./readplan.js";
+import type { Hydrated } from "./readplan.js";
 import {
   classifyGhFailure,
   operationIds,
@@ -896,6 +897,16 @@ export interface FocusOptions {
   meter: ReadMeter;
   locate?: (repository: string, number: number) => Promise<IssueDiagnosis>;
   signal?: AbortSignal;
+  /**
+   * Also read the issue's direct native edges (`pdb ticket N`, #197): selected with the issue,
+   * continuations completed under the same meter. Otherwise they are `not-requested`.
+   */
+  nativeEdges?: boolean;
+  /**
+   * At most this many PRs are hydrated (`pdb ticket N --limit-prs`, #197); the rest are never
+   * read, recorded `not-requested` and warned about, so ownership evidence is incomplete.
+   */
+  hydrationLimit?: number;
 }
 /**
  * One issue and the open pull requests in the same repository that would close it
@@ -952,7 +963,7 @@ export async function collectIssueFocus(
       prop(
         await read(
           issueQuery,
-          `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){${common} stateReason ${closedBy}}}}`,
+          `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){${common} stateReason ${closedBy}${options.nativeEdges ? ` ${nativeFields}` : ""}}}}`,
           { number },
         ),
         "issue",
@@ -975,8 +986,25 @@ export async function collectIssueFocus(
     warnings.push(`${issue.url}: labels exceed 100; label analysis incomplete.`);
     meter.cover("labels", subject, "partial", { omission: "labels beyond the first 100" });
   } else meter.cover("labels", subject, "complete");
-  for (const source of ["native-blocked-by", "native-blocking"])
-    meter.cover(source, subject, "not-requested", { omission: "not needed for ownership" });
+  if (options.nativeEdges) {
+    const sources = ["native-blocked-by", "native-blocking"];
+    try {
+      // Throws unless both edge lists match their totals, so success is complete.
+      await completeNative(issue, repository, meter.query(base, "native-blocked-by", subject));
+      for (const source of sources) meter.cover(source, subject, "complete");
+    } catch (error) {
+      signal?.throwIfAborted();
+      // Unknown edges are never "no blockers": the facts drop them, and coverage says why.
+      delete issue.issueDependenciesSummary;
+      delete issue.blockedBy;
+      delete issue.blocking;
+      const failure = quotaRefusal(error) ? "rate-limited" : "read-failed";
+      warnings.push(`${issue.url}: native dependencies could not be read (${failure}); unknown.`);
+      for (const source of sources) meter.cover(source, subject, "failed", { failure });
+    }
+  } else
+    for (const source of ["native-blocked-by", "native-blocking"])
+      meter.cover(source, subject, "not-requested", { omission: "not needed for ownership" });
 
   // Linked open PRs, from the issue side of the closing link; bounded pages.
   // An absent connection is not "no PR": it stays an unread continuation (partial).
@@ -988,19 +1016,31 @@ export async function collectIssueFocus(
   let pageInfo = linked.pageInfo;
   let linkedPages = 1;
   const linkQuery = meter.query(base, "linked-pull-requests", subject);
+  let quotaStopped = false;
   while (pageInfo.hasNextPage && linkedPages < bounds.linkedPullRequestPages) {
     const cursor = pageInfo.endCursor;
     if (!cursor) break;
+    // The shared quota stop: after any refusal in this read (native edges, comments), no
+    // further page is requested; the list stays a partial continuation, never "no PR".
+    if (meter.refused) {
+      quotaStopped = true;
+      break;
+    }
+    let data: unknown;
+    try {
+      data = await read(
+        linkQuery,
+        `query($owner:String!,$name:String!,$number:Int!,$cursor:String){repository(owner:$owner,name:$name){issue(number:$number){closedByPullRequestsReferences(first:${bounds.linkedPullRequestsPerPage},includeClosedPrs:false,after:$cursor){nodes{number url state} ${info}}}}}`,
+        { number, cursor },
+      );
+    } catch (error) {
+      signal?.throwIfAborted();
+      if (!quotaRefusal(error)) throw error;
+      quotaStopped = true;
+      break;
+    }
     const page = selected<Page<{ number: number; url: string; state: string }>>(
-      prop(
-        await read(
-          linkQuery,
-          `query($owner:String!,$name:String!,$number:Int!,$cursor:String){repository(owner:$owner,name:$name){issue(number:$number){closedByPullRequestsReferences(first:${bounds.linkedPullRequestsPerPage},includeClosedPrs:false,after:$cursor){nodes{number url state} ${info}}}}}`,
-          { number, cursor },
-        ),
-        "issue",
-        "closedByPullRequestsReferences",
-      ),
+      prop(data, "issue", "closedByPullRequestsReferences"),
     );
     if (!page || page.pageInfo.endCursor === cursor) break;
     references.push(...page.nodes);
@@ -1008,7 +1048,8 @@ export async function collectIssueFocus(
     linkedPages++;
   }
   if (pageInfo.hasNextPage) {
-    const omission = `linked pull requests beyond ${references.length} (${linkedPages} pages of ${bounds.linkedPullRequestsPerPage}) not read`;
+    const omission = `linked pull requests beyond ${references.length} (${linkedPages} pages of ${bounds.linkedPullRequestsPerPage}) not read${quotaStopped ? " after a quota refusal" : ""}`;
+    if (quotaStopped) meter.notAttempted.push(`linked-pull-requests ${subject} (continuation)`);
     warnings.push(`${issue.url}: ${omission}; ownership evidence incomplete.`);
     meter.cover("linked-pull-requests", subject, "partial", { omission });
   } else meter.cover("linked-pull-requests", subject, "complete");
@@ -1021,9 +1062,18 @@ export async function collectIssueFocus(
         .map((ref) => [ref.number, ref]),
     ).values(),
   ];
+  const limit = options.hydrationLimit ?? targets.length;
+  for (const ref of targets.slice(limit)) {
+    meter.cover("pull-request", `${repository}#${ref.number}`, "not-requested", {
+      omission: `beyond the hydration limit of ${limit}`,
+    });
+    warnings.push(
+      `${ref.url}: linked pull request not read (beyond the limit of ${limit}); its evidence is unknown.`,
+    );
+  }
   const pullRequests = await hydratePullRequests(
     repository,
-    targets,
+    targets.slice(0, limit),
     { meter, signal, warnings, role: "linked" },
     base,
   );
@@ -1094,27 +1144,32 @@ export async function hydratePullRequests(
     });
     item.comments.pageInfo = { hasNextPage: false, endCursor: null };
   };
-  const hydrated = await hydrate(
-    targets,
-    async (ref) => {
-      const prSubject = `${repository}#${ref.number}`;
-      const q = meter.query(base, "pull-request", prSubject);
-      const pr = selected<PullRequest>(
-        prop(
-          await read(
-            q,
-            `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){${prFields}}}}`,
-            { number: ref.number },
-          ),
-          "pullRequest",
-        ),
+  // The shared quota stop: after an earlier refusal in this read nothing is scheduled; every
+  // target is reported not attempted below. Within hydration, each comment page goes through
+  // the metered query, whose guard refuses to send after a refusal.
+  const hydrated: Hydrated<PullRequest>[] = meter.refused
+    ? targets.map(() => ({ state: "not-attempted" }))
+    : await hydrate(
+        targets,
+        async (ref) => {
+          const prSubject = `${repository}#${ref.number}`;
+          const q = meter.query(base, "pull-request", prSubject);
+          const pr = selected<PullRequest>(
+            prop(
+              await read(
+                q,
+                `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){${prFields}}}}`,
+                { number: ref.number },
+              ),
+              "pullRequest",
+            ),
+          );
+          if (!pr) throw new Error("not readable");
+          await completeComments(pr, q);
+          return pr;
+        },
+        { concurrency: bounds.hydrationConcurrency, signal },
       );
-      if (!pr) throw new Error("not readable");
-      await completeComments(pr, q);
-      return pr;
-    },
-    { concurrency: bounds.hydrationConcurrency, signal },
-  );
   const pullRequests: PullRequest[] = [];
   hydrated.forEach((outcome, index) => {
     const ref = targets[index];

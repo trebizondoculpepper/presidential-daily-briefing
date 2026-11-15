@@ -182,14 +182,48 @@ export async function readWhoLive(
   clock: () => Date = () => new Date(),
   focus: typeof collectIssueFocus = collectIssueFocus,
 ) {
+  const meter = new ReadMeter("issue-detail-v1", "who", clock, undefined, options.signal);
+  const read = await readWhoWith(meter, repository, number, options, boundaries, query, focus);
+  const report = { ...read.report, collection: meter.collection() };
+  return { report, text: read.text, complete: read.complete };
+}
+
+/**
+ * The focused `who N` plan over a caller's meter: the ticket, its linked open PRs, its delivery
+ * records and the open required members. `pdb ticket N` (#197) builds on the same read; the
+ * caller reports `meter.collection()`. Returns the snapshot, the metered boundaries and the
+ * delivery diagnosis so a caller reads nothing twice.
+ */
+export async function readWhoWith(
+  meter: ReadMeter,
+  repository: string,
+  number: number,
+  options: {
+    staleHours: number;
+    now: Date;
+    signal?: AbortSignal;
+    locate?: FocusOptions["locate"];
+    nativeEdges?: boolean;
+    /** Total PRs this read may hydrate, linked first, then members (`ticket --limit-prs`). */
+    hydrationLimit?: number;
+  },
+  boundaries: DeliveryBoundaries,
+  query: Query,
+  focus: typeof collectIssueFocus,
+) {
   const { locate, signal } = options;
-  const meter = new ReadMeter("issue-detail-v1", "who", clock, undefined, signal);
   const snapshot = await focus(
     repository,
     number,
-    { meter, signal, ...(locate ? { locate } : {}) },
+    {
+      meter,
+      signal,
+      ...(locate ? { locate } : {}),
+      ...(options.nativeEdges ? { nativeEdges: true } : {}),
+      ...(options.hydrationLimit !== undefined ? { hydrationLimit: options.hydrationLimit } : {}),
+    },
     query,
-    clock,
+    meter.now,
   );
   const subject = `${repository}#${number}`;
   // A definitive quota refusal while hydrating linked PRs stops the read: no delivery, permission
@@ -205,6 +239,10 @@ export async function readWhoLive(
     // concurrency and quota stop). A member not read stays unknown in its follow-up.
     const scoped = { ...snapshot, issues: snapshot.issues.filter((i) => i.number === number) };
     diagnosis = await diagnoseDelivery(scoped, metered);
+    // Linked PRs already read count against the hydration limit; members get the rest.
+    const attempted = meter.coverage.filter(
+      (c) => c.source === "pull-request" && c.state !== "not-requested",
+    ).length;
     snapshot.pullRequests.push(
       ...(await hydrateMembers(
         repository,
@@ -214,6 +252,9 @@ export async function readWhoLive(
         meter,
         options.signal,
         query,
+        options.hydrationLimit === undefined
+          ? undefined
+          : Math.max(0, options.hydrationLimit - attempted),
       )),
     );
   }
@@ -242,13 +283,25 @@ export async function readWhoLive(
         complete: false,
         warnings: [...read.report.completeness.warnings, warning],
       },
-      collection: meter.collection(),
     };
-    return { report, text: appendLines(read.text, [`INCOMPLETE: ${warning}`]), complete: false };
+    return {
+      report,
+      text: appendLines(read.text, [`INCOMPLETE: ${warning}`]),
+      complete: false,
+      snapshot,
+      metered,
+      delivery: read.delivery,
+    };
   }
   coverDelivery(meter, subject, metered, metered.trust && metered.live ? read.delivery : null);
-  const report = { ...read.report, collection: meter.collection() };
-  return { report, text: read.text, complete: read.complete };
+  return {
+    report: read.report,
+    text: read.text,
+    complete: read.complete,
+    snapshot,
+    metered,
+    delivery: read.delivery,
+  };
 }
 
 /** States whose follow-up memberView derives from the PR's own checks and review. */
@@ -268,6 +321,8 @@ async function hydrateMembers(
   meter: ReadMeter,
   signal: AbortSignal | undefined,
   query: Query,
+  /** At most this many members are read; the rest are not-requested and warned about. */
+  limit?: number,
 ) {
   const d = diagnosis.issues.get(number);
   const evaluated = d?.evaluation?.perDeliverable ?? [];
@@ -287,6 +342,16 @@ async function hydrateMembers(
     if (!held.has(n))
       targets.set(n, { number: n, url: `https://github.com/${match[1]}/pull/${n}` });
   });
+  if (limit !== undefined)
+    for (const t of [...targets.values()].slice(limit)) {
+      targets.delete(t.number);
+      meter.cover("pull-request", `${repository}#${t.number}`, "not-requested", {
+        omission: `beyond the hydration limit`,
+      });
+      snapshot.warnings.push(
+        `${t.url}: delivery member pull request not read (beyond the limit); its evidence is unknown.`,
+      );
+    }
   if (!targets.size) return [];
   // A refusal during the delivery diagnosis stops here: no member is read after it.
   if (meter.refused) {

@@ -98,6 +98,7 @@ import {
   readWho,
   readWhoLive,
 } from "./workflow/readservices.js";
+import { readTicketStatus, ticketLimits, ticketStatusText } from "./workflow/ticketstatus.js";
 import { runServe } from "./serve.js";
 import type { ServeRuntime } from "./serve.js";
 
@@ -196,6 +197,9 @@ Rollback: pdb config set briefing.engine typescript.
   team [--stale-hours N]  Read-only: each agent's claims, linked PRs, activity and warnings
   who N [--stale-hours N]  Read-only: who is working on ticket N? Claims, PRs, activity,
                         handoff evidence and contradictions in one operation
+  ticket N [--limit-prs N] [--max-chars N]  Read-only: one ticket and its associated PRs in
+                        one bounded read: state, delivery, PR checks/reviews, ownership, direct
+                        blockers, discussion excerpts and next step (ticket --help)
   ticket-doctor [--stale-hours N] [--limit N] [--since ISO]  Read-only consistency scan of all open tickets
                         (including conflicting complexity labels), with suggested correction
                         commands per finding (never run; claim commands only for the claimant)
@@ -270,6 +274,27 @@ Exit: 0 complete; 2 incomplete evidence; 1 invalid arguments/API/cache failure.
 The briefing never changes GitHub; only ${mutatingCommands().join(", ")} do;
 config set/convert change only the local .github/triage.toml/.json or agent-inbox.toml. Hints require inspection.
 `;
+export const ticketHelp = `Usage: pdb ticket N [--repo owner/name] [--agent NAME] [--platform NAME]
+                    [--json] [--limit-prs N] [--max-chars N]
+Read-only consolidated view of one ticket and its associated pull requests (#197).
+Reads the issue, its direct native dependencies, comments, trusted delivery records and every
+PR GitHub links as closing it (closed and merged included), then the shared pr-status read for
+at most --limit-prs PRs, required delivery members first. No repository catch-up.
+
+  --limit-prs N         Detailed PR reads, 1-${ticketLimits.maxPullRequests} (default ${ticketLimits.defaultPullRequests}); PRs beyond it are listed as
+                        omitted, unknown evidence, never absent
+  --max-chars N         Text budget (default 10000), never exceeded: whole rows, actionable first,
+                        then "Truncated due to maximum size." (shorter marker for tiny limits)
+  --json                Versioned ticket-status document (never sliced by --max-chars)
+  --agent NAME          Focus identity, reported only; never authorization
+  --platform NAME       Focus platform, reported only
+  --repo owner/name     Repository (default: the current checkout's)
+  --help                Show usage
+
+Exit 0: complete evidence. 2: useful but incomplete evidence. 1: invalid arguments or no usable
+read (including an unavailable issue). The full intake stays: pdb --issue N --json.
+`;
+
 export const depsHelp = `Usage: pdb deps N [--tree] [--json] [--repo owner/name]
        pdb deps add N --on M [--on K] --note WHY [--dry-run] [--json]
        pdb deps remove N --on M [--on K] --note WHY [--dry-run] [--json]
@@ -1066,6 +1091,81 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
     );
     await output(values.json ? JSON.stringify(report, null, 2) + "\n" : text);
     return report.completeness.complete ? 0 : 2;
+  }
+  if (args[0] === "ticket") {
+    const { values, positionals } = parseArgs({
+      args: args.slice(1),
+      allowPositionals: true,
+      options: {
+        repo: { type: "string" },
+        json: { type: "boolean" },
+        agent: { type: "string" },
+        platform: { type: "string" },
+        "limit-prs": { type: "string" },
+        "max-chars": { type: "string" },
+        help: { type: "boolean" },
+      },
+    });
+    if (values.help) {
+      await output(ticketHelp);
+      return 0;
+    }
+    if (positionals.length !== 1 || !/^[1-9]\d*$/.test(positionals[0]))
+      throw new Error(
+        "Usage: pdb ticket N [--repo owner/name] [--agent NAME] [--platform NAME] [--json] [--limit-prs N] [--max-chars N]",
+      );
+    if (values.repo && !/^[\w.-]+\/[\w.-]+$/.test(values.repo))
+      throw new Error("--repo must be owner/name.");
+    if (values.agent !== undefined && !/^[A-Za-z0-9][\w.-]*$/.test(values.agent))
+      throw new Error("--agent must be an agent name such as kavya_sabbagh.");
+    if (values.platform !== undefined && !/^[\w.-]+$/.test(values.platform))
+      throw new Error("--platform must be a platform name such as claude-code.");
+    const bounded = (text: string | undefined, fallback: number, max: number, option: string) => {
+      const value = text ?? String(fallback);
+      if (!/^[1-9]\d*$/.test(value) || Number(value) > max)
+        throw new Error(`${option} must be an integer from 1 to ${max}.`);
+      return Number(value);
+    };
+    const limitPrs = bounded(
+      values["limit-prs"],
+      ticketLimits.defaultPullRequests,
+      ticketLimits.maxPullRequests,
+      "--limit-prs",
+    );
+    const maxChars = bounded(values["max-chars"], 10_000, Number.MAX_SAFE_INTEGER, "--max-chars");
+    const number = Number(positionals[0]);
+    const repository = values.repo ?? (await runtime.currentRepository());
+    let read;
+    try {
+      read = await readTicketStatus(
+        repository,
+        number,
+        {
+          staleHours: defaultStaleHours,
+          now: runtime.now?.() ?? new Date(),
+          limitPrs,
+          ...(values.agent ? { agent: values.agent } : {}),
+          ...(values.platform ? { platform: values.platform } : {}),
+        },
+        deliveryBoundaries(runtime, repository, false),
+        runtime.query ?? ghQuery,
+        runtime.now,
+        runtime.collectIssueFocus,
+      );
+    } catch (error) {
+      if (!(error instanceof IssueUnavailable)) throw error;
+      // The existing missing/forbidden/moved diagnosis; a transfer is never followed here.
+      const d = error.diagnosis;
+      const report = { schemaVersion: 1, kind: "issue-unavailable", ...d };
+      await output(values.json ? JSON.stringify(report, null, 2) + "\n" : unavailableText(d));
+      return 1;
+    }
+    await output(
+      values.json
+        ? JSON.stringify(read.report, null, 2) + "\n"
+        : ticketStatusText(read.report, maxChars),
+    );
+    return read.complete ? 0 : 2;
   }
   if (args[0] === "who") {
     const { values, positionals } = parseArgs({
