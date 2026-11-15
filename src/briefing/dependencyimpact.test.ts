@@ -55,7 +55,7 @@ describe("direct dependency impact (#196)", () => {
     // A platform restriction without a viewer platform is unknown, never zero.
     expect(impact.unknown.join()).toContain("#7");
     expect(impact.nextAction).toBe(
-      "Start #1: claim it (pdb claim 1) and implement it; completing it makes at least 2 dependant(s) pickable immediately: #8, #2.",
+      "Start #1: claim it (pdb claim 1 --repo example/project) and implement it; completing it makes at least 2 dependant(s) pickable immediately: #8, #2.",
     );
     expect(impact.transitive.computed).toBe(false);
     const text = directImpactText(impact).join("\n");
@@ -73,7 +73,9 @@ describe("direct dependency impact (#196)", () => {
       ],
     });
     expect(blocked.impact.subject.startNow.status).toBe("ineligible");
-    expect(blocked.impact.nextAction).toMatch(/^#1 is blocked by #9; start there \(pdb deps 9\)/);
+    expect(blocked.impact.nextAction).toMatch(
+      /^#1 is blocked by #9; start there \(pdb deps 9 --repo example\/project\)/,
+    );
     const claimed = await read({
       states: { 1: { labels: ["status:in-progress", "agent:ana"] } },
       edges: [[2, 1]],
@@ -93,6 +95,73 @@ describe("direct dependency impact (#196)", () => {
     expect(dropped.impact.newlyPickable).toEqual([]);
     expect(dropped.impact.nextAction).toContain("closed (not planned)");
     expect(dropped.impact.nextAction).toContain("a person should check");
+  });
+
+  it("never decides pickup from truncated labels, for the subject or a dependant", async () => {
+    const many = Array.from({ length: 101 }, (_, i) => `l${i}`);
+    const { query: base } = graphQuery({
+      states: { 1: { labels: ["status:ready"] }, 2: { labels: ["status:ready"] } },
+      edges: [[2, 1]],
+    });
+    // GitHub answers 100 labels and says there are more.
+    const truncate = (value: unknown): unknown => {
+      if (Array.isArray(value)) return value.map(truncate);
+      if (value && typeof value === "object") {
+        const out: Record<string, unknown> = {};
+        for (const [k, v] of Object.entries(value))
+          out[k] =
+            k === "labels"
+              ? {
+                  nodes: [{ name: "status:ready" }, ...many.slice(0, 99).map((name) => ({ name }))],
+                  pageInfo: { hasNextPage: true, endCursor: "c" },
+                }
+              : truncate(v);
+        return out;
+      }
+      return value;
+    };
+    const query: Query = async (source, variables) =>
+      truncate(await base(source, variables)) as Awaited<ReturnType<Query>>;
+    const report = await dependencyReport(repo, 1, { impact: true }, query, clock);
+    const impact = directImpact(report)!;
+    expect(impact.subject.startNow.status).toBe("unknown");
+    expect(impact.subject.startNow.reasons.join()).toContain("labels beyond the first 100");
+    expect(impact.nextAction).toMatch(
+      /^Inspect #1 before acting \(pdb ticket 1 --repo example\/project\)/,
+    );
+    expect(impact.newlyPickable).toEqual([]);
+    expect(impact.lastBlockerNotPickable).toEqual([]);
+    expect(impact.unknown.join()).toContain("pickup unknown (labels beyond the first 100");
+  });
+
+  it("never recommends pickup when a blocker was closed as not planned", async () => {
+    const { impact } = await read({
+      states: {
+        1: { labels: ["status:ready"] },
+        9: { state: "CLOSED", stateReason: "NOT_PLANNED" },
+        3: { labels: ["status:ready"] },
+        8: { state: "CLOSED", stateReason: "NOT_PLANNED" },
+      },
+      edges: [
+        [1, 9],
+        [3, 1],
+        [3, 8],
+      ],
+    });
+    expect(impact.subject.startNow.status).toBe("unknown");
+    expect(impact.nextAction).toMatch(/^A blocker of #1 was closed as not planned/);
+    expect(impact.nextAction).toContain("pdb ticket 1 --repo example/project");
+    expect(impact.nextAction).not.toContain("pdb claim");
+    // A dependant whose other blocker was dropped is unknown, not newly pickable.
+    expect(impact.newlyPickable).toEqual([]);
+    expect(impact.unknown.join()).toContain("closed as not planned");
+  });
+
+  it("keeps the repository in every suggested command", async () => {
+    const { query } = graphQuery({ states: { 1: { labels: ["status:ready"] } }, edges: [[2, 1]] });
+    const other = await dependencyReport("Other/Repo", 1, { impact: true }, query, clock);
+    // The fake answers for example/project; the command names the issue's own repository.
+    expect(directImpact(other)!.nextAction).toContain("pdb claim 1 --repo example/project");
   });
 
   it("bounds dependant hydration and reports the rest as unknown, never zero", async () => {

@@ -44,7 +44,7 @@ export type DependantFacts = Pick<
 > &
   Required<Pick<Issue, "issueDependenciesSummary" | "closedByPullRequestsReferences">> & {
     repository: { nameWithOwner: string };
-    blockedBy: Page<Pick<NativeNode, "number" | "url" | "state">>;
+    blockedBy: Page<Pick<NativeNode, "number" | "url" | "state" | "stateReason">>;
   };
 /** Direct-impact evidence attached to a routine `deps N` read (#196). */
 export interface DirectEvidence {
@@ -406,7 +406,7 @@ export function dependencyReportIncomplete(report: DependencyReport): boolean {
   return report.nodes.some((node) => !node.known);
 }
 const dependantFields = (blockers: number) =>
-  `number title url state stateReason createdAt repository{nameWithOwner} labels(first:100){nodes{name} ${pageInfo}} closedByPullRequestsReferences(first:10,includeClosedPrs:false){nodes{number url state} ${pageInfo}} ${summaryFields} blockedBy(first:${blockers}){nodes{number url state} ${pageInfo}}`;
+  `number title url state stateReason createdAt repository{nameWithOwner} labels(first:100){nodes{name} ${pageInfo}} closedByPullRequestsReferences(first:10,includeClosedPrs:false){nodes{number url state} ${pageInfo}} ${summaryFields} blockedBy(first:${blockers}){nodes{number url state stateReason} ${pageInfo}}`;
 /**
  * Hydrate the eligibility facts of the open direct dependants for which `item` is the last open
  * blocker, in `blocking` order, batched and bounded (dependency-direct-v1). Dependants with other

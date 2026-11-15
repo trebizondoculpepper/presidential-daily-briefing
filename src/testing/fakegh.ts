@@ -81,9 +81,12 @@ export const graphQuery = (graph: Graph) => {
                 ...node(n),
                 ...eligibility(n),
                 blockedBy: page(
-                  blockers
-                    .slice(0, limit)
-                    .map((b) => ({ number: b, url: url(b), state: state(b) })),
+                  blockers.slice(0, limit).map((b) => ({
+                    number: b,
+                    url: url(b),
+                    state: state(b),
+                    stateReason: graph.states?.[b]?.stateReason ?? null,
+                  })),
                   blockers.length > limit,
                 ),
               }
