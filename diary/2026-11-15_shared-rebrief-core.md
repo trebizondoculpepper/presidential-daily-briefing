@@ -17,3 +17,7 @@ Added a final pre-emission cancellation check and injected regression for a user
 The same total-deadline cancellation race now wraps state-store waits as well as setup/read; a nonresponsive injected store returns a normal stop instead of delaying the CLI outcome indefinitely. Lock recovery remains explicit, never age-based.
 
 Addressed Codex review of project-resolution cleanup by adding an optional AbortSignal to the shared Git boundary and binding all rebrief project/identity/config Git lookups to the total-deadline controller. A portable child-process regression verifies termination and no follow-up Git lookup. Additional highly parallel full runs exposed existing soft-budget parity diagnostics under host load; verification is repeated with a controlled worker count without changing unrelated tests.
+
+Addressed TypeScript fallback fingerprint review by retaining the effective role reason used by the renderer and semantic PR checks/review counts/linked issues. A real shared-service TypeScript regression acknowledges failed CI, changes it to passing on the same head, and verifies a new offer with the same action IDs but updated briefing.
+
+The shared-service transport also binds configuration Git readers directly to each read signal, so memory-owned native adapters receive the same cancellation cleanup as the CLI wrapper. A direct-adapter regression covers this path.

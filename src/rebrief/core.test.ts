@@ -28,7 +28,12 @@ export const read = (): Read => ({
     },
     completeness: { complete: true, warnings: [] },
     ranking: { platform: "codex" },
-    role: { name: "implementer" },
+    role: {
+      name: "implementer",
+      sections: [
+        { items: [{ url: "https://github.com/o/r/issues/1", reason: "Original policy reason" }] },
+      ],
+    },
     decisionEngine: { used: "datalog", policyVersion: "1", rulesHash: "rules1" },
     rankedActions: {
       policyVersion: 1,
@@ -58,7 +63,7 @@ export const read = (): Read => ({
         url: "https://github.com/o/r/issues/1",
         labels: ["status:ready"],
         owners: [],
-        pullRequest: { head: "head1" },
+        pullRequest: { head: "head1", checks: [], unresolvedThreads: 0, linkedIssues: [] },
       },
     ],
   },
@@ -70,7 +75,7 @@ interface FixtureReport {
   freshness: { offline: boolean; startedAt: string; fetchedAt: string };
   completeness: { complete: boolean; warnings: string[] };
   ranking: { platform: string };
-  role: { name: string };
+  role: { name: string; sections: { items: { url: string; reason: string }[] }[] };
   decisionEngine: { used: string; policyVersion: string; rulesHash: string | null };
   rankedActions: {
     policyVersion: number;

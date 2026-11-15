@@ -7,11 +7,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { main } from "../cli.js";
 import { runRebrief } from "./cli.js";
-import { initialize } from "./core.js";
+import { initialize, RebriefSession } from "./core.js";
 import type { Context, Transport } from "./core.js";
 import { withPrivateState } from "./state.js";
 import { serviceTransport } from "./transports.js";
-import { snapshot, issue, repo, clock } from "../testing/snapshots.js";
+import { snapshot, issue, pr, repo, clock } from "../testing/snapshots.js";
 import { dependencyReport } from "../github/dependencies.js";
 import { noLocalProject } from "../serve/api.js";
 
@@ -550,6 +550,89 @@ describe("rebrief CLI/private state", () => {
         await closed;
       }
     }
+  });
+  it("rebriefs an acknowledged TypeScript PR follow-up when CI changes on the same head", async () => {
+    const scoped = {
+      ...context,
+      repository: repo,
+      enabled: true,
+      eventId: "failed-ci",
+      reason: "natural",
+    };
+    const session = new RebriefSession(initialize(scoped));
+    const makeTransport = (outcome: string) => {
+      const local = noLocalProject(repo);
+      return serviceTransport({
+        ...local,
+        now: clock,
+        guide: {
+          ...local.guide,
+          fs: {
+            ...local.guide!.fs!,
+            readText: async (path) =>
+              path.endsWith("triage.toml")
+                ? 'schemaVersion=1\n[briefing]\nengine="typescript"\n'
+                : null,
+          },
+        },
+        collect: async () => {
+          const pull = pr();
+          pull.commits!.nodes[0].commit.statusCheckRollup!.contexts.nodes[0].conclusion = outcome;
+          return snapshot([], [pull]);
+        },
+        dependencyReport,
+      });
+    };
+    const runtime = { transport: makeTransport("FAILURE"), now: () => clock().getTime() };
+    const failed = await session.evaluate(scoped, runtime);
+    expect(failed).toMatchObject({
+      decision: "continue",
+      policyRevision: expect.stringContaining("typescript:"),
+    });
+    expect(session.acknowledge(scoped, scoped.eventId, failed.fingerprint!)).toBe(true);
+    const clean = await session.evaluate(
+      { ...scoped, eventId: "clean-ci" },
+      { ...runtime, transport: makeTransport("SUCCESS") },
+    );
+    expect(clean.decision).toBe("continue");
+    expect(clean.fingerprint).not.toBe(failed.fingerprint);
+    expect(clean.actionIds).toEqual(failed.actionIds);
+    expect(clean.briefing).not.toBe(failed.briefing);
+  });
+  it("passes cancellation to configuration Git reads for direct service adapters too", async () => {
+    let started!: () => void,
+      aborted = false,
+      calls = 0;
+    const ready = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const git: GitRunner = async (_args, _cwd, signal) => {
+      calls++;
+      return new Promise((_resolve, reject) => {
+        started();
+        const cancel = () => {
+          aborted = true;
+          reject(new Error("cancelled"));
+        };
+        if (signal?.aborted) cancel();
+        else signal?.addEventListener("abort", cancel, { once: true });
+      });
+    };
+    const local = noLocalProject(repo);
+    const transport = serviceTransport({
+      ...local,
+      guide: { ...local.guide, git },
+      now: clock,
+      collect: async () => snapshot([], []),
+      dependencyReport,
+    });
+    const controller = new AbortController();
+    const pending = transport.read({ ...context, repository: repo }, controller.signal);
+    await ready;
+    controller.abort();
+    await pending.catch(() => null);
+    expect(aborted).toBe(true);
+    expect(calls).toBe(1);
   });
   it("help/error are structured and never echo private state errors", async () => {
     let text = "";
