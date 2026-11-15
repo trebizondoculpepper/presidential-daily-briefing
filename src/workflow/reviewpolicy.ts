@@ -99,6 +99,8 @@ export interface ReviewEvidence {
     url: string;
   }[];
   comments: { author: Author; body: string | null; url: string }[];
+  /** Unresolved review threads, by the author of their opening comment; absent when unread. */
+  unresolvedThreads?: { author: Author; url: string }[];
   /** Head check runs with their publishing app; absent when the read did not collect apps. */
   checks?: {
     app: string | null;
@@ -178,9 +180,17 @@ export function observeProvider(
   // Any head receipt with findings vetoes, even beside a clean one: conflicts are not resolved by
   // choosing whichever says clean. A formal review counts by its latest state on the head.
   const latestReview = headReviews.at(-1);
+  // GitHub's review state: a COMMENTED review neither clears nor replaces a change request; only
+  // a later APPROVED or DISMISSED review does. The latest decisive review is the provider's state.
+  const decisive = headReviews.findLast((r) =>
+    ["CHANGES_REQUESTED", "APPROVED", "DISMISSED"].includes(r.state),
+  );
+  // An unresolved thread opened by the authenticated provider is an outstanding finding.
+  const thread = (e.unresolvedThreads ?? []).find((t) => attribution(t.author, p) === "provider");
   const finding =
     headMarkers.find(({ m }) => m.has_unresolved_findings === true)?.url ??
-    (latestReview?.state === "CHANGES_REQUESTED" ? latestReview.url : undefined);
+    (decisive?.state === "CHANGES_REQUESTED" ? decisive.url : undefined) ??
+    thread?.url;
   if (finding)
     return obs("findings", e.head, finding, "reports unresolved findings on the current head");
   const latest = headMarkers.at(-1);
@@ -191,8 +201,8 @@ export function observeProvider(
   );
   if (clean)
     return obs("accepted", e.head, clean.url, "completed clean review of the current head");
-  if (latestReview?.state === "APPROVED")
-    return obs("accepted", e.head, latestReview.url, "approved the current head");
+  if (decisive?.state === "APPROVED")
+    return obs("accepted", e.head, decisive.url, "approved the current head");
   if (latest)
     return obs("unknown", e.head, latest.url, "unrecognised review-state receipt on the head");
   const running = checks.find((c) => unfinished.includes(c.status ?? c.conclusion ?? ""));
@@ -293,10 +303,15 @@ export function evaluateReviewPolicy(
   let headFindings: boolean;
   if (effective === "legacy") ({ headReviewed, headFindings } = legacy);
   else {
-    // Unknown policy: findings still block; nothing is accepted.
-    headFindings = legacy.headFindings || findings.length > 0;
+    // Only authenticated, head-bound findings veto a declared policy; an unattributed marker is
+    // reported in unknowns as ignored. Unknown policy: findings still block; nothing is accepted.
+    // Incomplete evidence never yields accepted coverage (headReviewed agrees with coverage).
+    headFindings = findings.length > 0;
     headReviewed =
-      effective !== "unknown" && !headFindings && counted.some((o) => o.state === "accepted");
+      effective !== "unknown" &&
+      e.complete &&
+      !headFindings &&
+      counted.some((o) => o.state === "accepted");
   }
   const satisfiedBy =
     effective === "unknown" || effective === "legacy" || !headReviewed
@@ -341,6 +356,12 @@ export function snapshotReviewEvidence(pr: PullRequest, complete: boolean): Revi
       body: c.body,
       url: c.url,
     })),
+    unresolvedThreads: (pr.reviewThreads?.nodes ?? [])
+      .filter((t) => !t.isResolved)
+      .map((t) => ({
+        author: t.comments.nodes[0]?.author,
+        url: t.comments.nodes[0]?.url ?? pr.url,
+      })),
     complete,
   };
 }
