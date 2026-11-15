@@ -82,6 +82,20 @@ npm run pdb -- deps 675 [--tree [--max-nodes K]] [--json]
     Pickup is never inferred from a truncated label page (more than 100 labels) or for a ticket with a native blocker closed as not planned: the ticket's start-now status, or the dependant's impact, is unknown with the reason, and a not-planned blocker yields an inspect-or-decide next action, as the briefing's dependency-not-planned check does. Every suggested command names `--repo owner/name`. The impact does not reorder work: finish-started-work (#182) and the briefing's ranking still decide what comes first. Discussion and claim records are not read; `pdb claim` re-checks ownership live before claiming.
 - `--tree` is an explicit, expensive diagnosis for occasional project-wide questions, never the routine path (#196). It follows the chain transitively, breadth first, with one request per issue, prints each ticket once and reports any cycle among the issues it read. It stops after `--max-nodes` issues (default 50, at most 500, profile `dependency-tree-v1`) or at a GitHub quota refusal. A stopped walk is reported as **incomplete**: `treeBounds` in the JSON gives the node limit, issues read, why it stopped and the identities known from an edge but not read ("more not read" beyond them), and the text prints `TREE INCOMPLETE`. A truncated tree is never reported as complete, and its cycle list covers only the issues read. `deps N` exits 2 whenever its evidence is incomplete (a tree stopped by its node limit, a quota refusal or unserved repositories, or unknown native evidence, or direct-impact dependants not read), like every other read command. Every read prints its cost (requests, bytes, GraphQL cost, duration) from the shared read meter; an unknown cost is shown as unknown, never zero.
 
+### `deps --top`: what can start now, and what completion unlocks most (read-only)
+
+```sh
+npm run pdb -- deps --top [--limit K] [--json]
+```
+
+The repository-wide routine answer (#196), from direct edges only (profile `dependency-discovery-v1`). It reads open issues oldest first, 50 to a page and at most 10 pages, with labels, creation time, open closing-PR identities, native summaries and at most 10 blockers and 50 dependants each. No bodies, comments, reviews, checks or transitive edges. It reuses the shared pickup ranking (`rankPickup`, impact order) and the one impact definition (`immediateUnlocks`):
+
+- _can start now_: pickable tickets in the shared impact order (urgency, proven unlocks, incomplete, oldest), each with the dependants its completion makes pickable;
+- _completion that unlocks the most, not pickable now_: blocked, claimed or otherwise unpickable open work ordered by proven unlocks, with why it is not pickable;
+- _next action_: one concrete step.
+
+Open issues the gates cannot decide from this read (more than 100 labels, a blocker closed as not planned, a truncated blocker list, or an unknown shared pickup gate such as a `platform:` restriction without `--platform`) are never offered for pickup or ranked as a proven completion: they are listed as _undecided_ with the reason, and as dependants they count as unknown impact. `--platform P` (deps N and deps --top) states the viewer's platform as the briefing's `--platform` does. For `deps N`, truncated labels on the ticket or a read dependant make the coverage partial and the exit code 2. Suggested commands name `--repo`. Each list shows at most `--limit` entries (default 10, at most 50) and the total. Unknown impact (a truncated dependant list, a dependant not read, a platform restriction without a viewer platform) is shown as a lower bound, never zero. If the page cap or a quota refusal stops the inventory, the answer is labelled **provisional**, says how many open issues were read out of GitHub's count, and exits 2. It never reorders started work: finish-first (#182) and the briefing still decide what comes first, and claiming re-checks ownership live.
+
 ### `deps add` and `deps remove`: change dependencies
 
 ```sh
