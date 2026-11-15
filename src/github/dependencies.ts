@@ -174,8 +174,10 @@ export interface TreeBounds {
   /** Effective node limit for this walk. */
   nodeLimit: number;
   nodesRead: number;
-  /** Why the walk stopped early; null when it read everything reachable. */
+  /** Why the walk stopped early; null when it did not stop (it may still be incomplete). */
   stoppedBy: "node-limit" | "quota" | null;
+  /** Issues in repositories the caller may not read (`unfollowed`); each makes it incomplete. */
+  notServed: number;
   /**
    * Distinct issues known from an edge but not read. A lower bound: their own edges were never
    * read, so more issues beyond them may exist ("more not read").
@@ -300,13 +302,15 @@ export async function dependencyReport(
         omission: stoppedBy === "quota" ? "not read: quota refusal" : "not read: tree node limit",
       });
     }
-    const complete = stoppedBy === null && !notRead.size;
+    // Unserved repositories (pdb serve, #373) leave the graph just as unread as a node cap does.
+    const complete = stoppedBy === null && !notRead.size && !unfollowed.size;
     treeBounds = {
       complete,
       nodeLimit: maxNodes,
       nodesRead: nodes.size,
-      stoppedBy: complete ? null : (stoppedBy ?? "node-limit"),
+      stoppedBy,
       notRead: notRead.size,
+      notServed: unfollowed.size,
       notReadSample: [...notRead.values()].slice(
         0,
         readProfiles["dependency-tree-v1"].bounds.notReadListed,
@@ -335,19 +339,27 @@ export function readCostText(report: Pick<DependencyReport, "collection">): stri
   if (!t) return "Read cost: unknown (no telemetry).";
   return `Read cost: ${t.requests} request(s), ${t.bytes} bytes returned, GraphQL cost ${t.cost ?? `unknown (at least ${t.knownCost})`}, ${t.durationMs} ms.`;
 }
+/** Why a tree is incomplete, shared by the CLI, MCP and HTTP answers. */
+export function treeIncompleteText(b: TreeBounds): string {
+  const why = [
+    ...(b.stoppedBy === "quota" ? ["stopped after a GitHub quota refusal"] : []),
+    ...(b.stoppedBy === "node-limit" ? [`node limit ${b.nodeLimit}`] : []),
+    ...(b.notServed ? [`${b.notServed} issue(s) in repositories not served`] : []),
+  ].join("; ");
+  return `TREE INCOMPLETE (${why || "unknown bound"}): read ${b.nodesRead} issue(s); ${b.notRead + (b.notServed ?? 0)} known issue(s) not read, and more not read beyond them. This is not a complete graph; cycles are only those among the issues read.`;
+}
+/** The listed identities a stopped tree did not read. */
+export function notReadText(b: TreeBounds): string {
+  const listed = b.notReadSample.map((r) => `${r.repository}#${r.number}`);
+  return `  Not read: ${listed.join(", ")}${b.notRead > listed.length ? `, … ${b.notRead - listed.length} more` : ""}`;
+}
 /** The truncation notice of a stopped tree; empty for a complete tree or a direct read. */
 export function treeNotice(report: Pick<DependencyReport, "treeBounds">): string[] {
   const b = report.treeBounds;
   if (!b) return [];
   if (b.complete)
     return [`Tree complete: ${b.nodesRead} issue(s) read (node limit ${b.nodeLimit}).`];
-  const why =
-    b.stoppedBy === "quota" ? "stopped after a GitHub quota refusal" : `node limit ${b.nodeLimit}`;
-  const listed = b.notReadSample.map((r) => `${r.repository}#${r.number}`);
-  return [
-    `TREE INCOMPLETE (${why}): read ${b.nodesRead} issue(s); ${b.notRead} known issue(s) not read, and more not read beyond them. This is not a complete graph; cycles are only those among the issues read.`,
-    `  Not read: ${listed.join(", ")}${b.notRead > listed.length ? `, … ${b.notRead - listed.length} more` : ""}`,
-  ];
+  return [treeIncompleteText(b), ...(b.notRead ? [notReadText(b)] : [])];
 }
 export function dependencyText(report: DependencyReport): string {
   return (
