@@ -1070,8 +1070,19 @@ export async function planNeedsHuman(
   // Page back until a marker WITH authority is found (#214): stopping at any matching marker
   // would let a newer forged copy hide an older genuine one, so a retry would post twice.
   // Permission lookups are cached per run, so re-checking candidates per page costs no requests.
+  // Only a record the human view can read counts as already posted: a valid v1 marker, or a
+  // v2 marker bound to this repository and issue. A damaged or copied one never suppresses.
   const candidates = (c: Comment[]) =>
-    c.filter((x) => parseQuestionMarker(x.body)?.opId === opId && x.body.includes(opToken));
+    c.filter((x) => {
+      const m = parseQuestionMarker(x.body);
+      if (m?.opId !== opId || !x.body.includes(opToken)) return false;
+      return (
+        m.version === 1 ||
+        (m.version === 2 &&
+          m.repository.toLowerCase() === repository.toLowerCase() &&
+          m.issue === number)
+      );
+    });
   const seen = await commentHistory(
     repository,
     number,

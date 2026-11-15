@@ -570,6 +570,25 @@ describe("claim and needs-human review fixes", () => {
       );
       expect(commented(plan)).toBe(false);
     });
+    it("a damaged or copied marker of this request never suppresses the question (#412)", async () => {
+      const body = await questionBody();
+      for (const damaged of [
+        body.replace(/ v2 \{.*\} -->/, ' v2 {"v":2} -->'),
+        body.replace(/"issue":\d+/, '"issue":999'),
+      ]) {
+        const data = base(["status:ready"]);
+        (data.repository.issueOrPullRequest.comments as unknown) = page([
+          { ...by("kavya"), body: damaged, createdAt: "2026-11-12T10:00:00Z" },
+        ]);
+        const plan = await planNeedsHuman(
+          repo,
+          ask,
+          async () => data,
+          permissions({ kavya: "write" }),
+        );
+        expect(commented(plan)).toBe(true);
+      }
+    });
     it("a failed permission lookup does not suppress the question", async () => {
       const plan = await planNeedsHuman(
         repo,
