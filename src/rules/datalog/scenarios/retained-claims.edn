@@ -108,4 +108,12 @@
           {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "t1" "created" 1 "label" "status:ready" "labels-complete" true "native-complete" true "reverse-complete" true "blocking-complete" true "open-blockers" 0 "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "owner" "other" "claim-activity" "waiting" "wait-reason" "theirs"}]
   :expect {:actions []
            :denials #{[100 "D-DENY-CLAIM"]}}}
+
+ {:id "zero-observed-claims-in-an-incomplete-inventory-deny-new-pickup"
+  :doc "Zero observed claims with an incomplete inventory cannot establish that the viewer has no claim: new pickup is denied, not offered. Codex finding on #606."
+  :viewer {:role "implementer" :agent "me"}
+  :facts [{:e 1 "forward-complete" true "owned-claims" 0 "owned-claims-complete" false}
+          {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "t1" "created" 1 "label" "status:ready" "labels-complete" true "native-complete" true "reverse-complete" true "blocking-complete" true "open-blockers" 0 "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M"}]
+  :expect {:actions []
+           :denials #{[100 "D-DENY-INVENTORY-UNKNOWN"]}}}
  ]}
