@@ -465,6 +465,15 @@ describe("source checkout freshness (#309)", () => {
     });
   });
 
+  it("bounds a stalled realpath by the overall deadline and reports unknown", async () => {
+    const { work } = await cloned();
+    const started = Date.now();
+    const s = await probe(work, { samePath: () => new Promise(() => {}), deadlineMs: 1500 });
+    expect(Date.now() - started).toBeLessThan(2500);
+    expect(s).toMatchObject({ status: "unknown", comparison: null, branch: null });
+    expect(s.reason).toMatch(/timed out/);
+  });
+
   it("never probes an npm installation, and honours the opt-out", async () => {
     let calls = 0;
     const counting: GitRunner = async () => {
