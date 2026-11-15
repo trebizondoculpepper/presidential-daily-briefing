@@ -494,7 +494,8 @@ export function compactBriefing(
   // the same selector and ordering (doc/design/briefing-focus-controls.md). A presentation
   // selection: nothing is reclassified, and the text byte budget still applies.
   const focus = (() => {
-    if (!options.section) return null;
+    // Absent means no selection; an explicitly empty ID is an argument error, never ignored.
+    if (options.section === undefined) return null;
     if (!options.role || !roleContext)
       throw new BriefingArgumentError(
         "--section needs a role view: add --role implementer or --role designer.",

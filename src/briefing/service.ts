@@ -484,7 +484,7 @@ export async function readBriefing(
       agent: request.agent,
       issue: request.issue,
       ...(request.role ? { role: request.role } : {}),
-      ...(request.section ? { section: request.section } : {}),
+      ...(request.section !== undefined ? { section: request.section } : {}),
       ...(request.order ? { order: request.order } : {}),
       process,
       engineSetting,

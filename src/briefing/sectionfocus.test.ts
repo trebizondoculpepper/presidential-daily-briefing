@@ -97,6 +97,13 @@ describe("--section (#311)", () => {
       ),
     );
     expect(() => compact(eight(), { limit: 10, section: "pickup" })).toThrow(/needs a role view/);
+    // An explicitly empty ID is rejected with the choices, never read as "no section".
+    expect(() => compact(eight(), { limit: 10, role: "designer", section: "" })).toThrow(
+      /--section for role designer must be one of: addressed, decision-needed/,
+    );
+    expect(() => argumentsFor(["--role", "implementer", "--section", ""])).toThrow(
+      /must be one of/,
+    );
     expect(() => argumentsFor(["--role", "designer", "--section", "pickup"])).toThrow(
       /design-pickup/,
     );
