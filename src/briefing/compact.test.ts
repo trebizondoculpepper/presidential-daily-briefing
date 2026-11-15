@@ -40,7 +40,7 @@ describe("compact briefing contract", () => {
     expect(sourceContext(parked).chronology).toContain("Unknown");
     const noDetail = { ...compact, detail: null };
     expect(compactText(noDetail, 1500).length).toBeLessThanOrEqual(1500);
-    expect(compactText(noDetail, 600)).toContain("omitted");
+    expect(compactText(noDetail, 600)).toContain("Truncated due to maximum size");
   });
   it("keeps real estimation warnings visible even with no estimate candidates", async () => {
     const { compactBriefing, compactText } = await import("./compact.js");

@@ -270,3 +270,118 @@ it("uses ten MCP next actions when limit is omitted, matching the CLI default", 
   expect(ranked.items.length).toBe(10);
   expectParity(mcp, cli);
 });
+
+describe("--section and the MCP section input report the same section (#311)", () => {
+  let count = 8;
+  const pickupIssues = () =>
+    Array.from({ length: count }, (_, i) =>
+      issue(
+        20 + i,
+        ["status:ready"],
+        new Date(Date.parse("2026-10-01T00:00:00Z") + i * 3_600_000).toISOString(),
+      ),
+    );
+  const runtime = (): McpRuntime => ({
+    ...runtimeFor(null),
+    collect: (repository, options) =>
+      collect(
+        repository,
+        options,
+        async (source) => ({
+          repository: {
+            issues: page(source.includes("issues(first") ? pickupIssues() : []),
+            pullRequests: page([]),
+          },
+        }),
+        clock,
+      ),
+  });
+  it("lifts the pickup row cap identically in both front ends", async () => {
+    let out = "";
+    const code = await main(
+      [
+        "--repo",
+        repo,
+        "--agent",
+        "me",
+        "--role",
+        "implementer",
+        "--section",
+        "pickup",
+        "--json",
+        "--no-update-check",
+      ],
+      async (text) => void (out += text),
+      { ...runtime(), updateCheck: async () => ({ status: "disabled" }) as never },
+    );
+    expect(code).toBe(0);
+    const cli = JSON.parse(out) as {
+      focus: { section: string; total: number; items: { url: string }[] };
+    };
+    expect(cli.focus).toMatchObject({ section: "pickup", total: 8, shown: 8, omitted: 0 });
+
+    const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+    await createServer({ repo }, runtime()).connect(serverSide);
+    const client = new Client({ name: "parity", version: "1.0.0" });
+    await client.connect(clientSide);
+    try {
+      const raw = await client.callTool({
+        name: "triage_briefing",
+        arguments: { agent: "me", role: "implementer", section: "pickup" },
+      });
+      const parsed = boundedEnvelope.parse(raw.structuredContent);
+      expect((parsed.data as { focus: unknown }).focus).toEqual(cli.focus);
+      // Section-only text, like CLI --section: no next actions or other context.
+      const first: unknown = Array.isArray(raw.content) ? raw.content[0] : undefined;
+      const text =
+        typeof first === "object" && first !== null && "text" in first ? String(first.text) : "";
+      expect(text).toContain("Section pickup of role implementer (8 shown of 8):");
+      expect(text).not.toContain("Next actions");
+      const bad = await client.callTool({
+        name: "triage_briefing",
+        arguments: { role: "implementer", section: "nope" },
+      });
+      expect(bad.isError).toBe(true);
+      expect(JSON.stringify(bad.content)).toMatch(/must be one of: addressed, pr-follow-up/);
+      // Role omitted: validated after the default role resolves, with the same choices.
+      const deferred = await client.callTool({
+        name: "triage_briefing",
+        arguments: { section: "nope" },
+      });
+      const envelope = boundedEnvelope.parse(deferred.structuredContent);
+      expect(envelope.error).toMatchObject({
+        code: "invalid-argument",
+        message: expect.stringMatching(/--section for role implementer must be one of: addressed/),
+      });
+    } finally {
+      await client.close();
+    }
+  });
+
+  it("reports the rows actually returned when the transport budget prunes the section", async () => {
+    count = 120;
+    const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+    await createServer({ repo }, runtime()).connect(serverSide);
+    const client = new Client({ name: "parity", version: "1.0.0" });
+    await client.connect(clientSide);
+    try {
+      const raw = await client.callTool({
+        name: "triage_briefing",
+        arguments: { agent: "me", role: "implementer", section: "pickup", maxChars: 1000 },
+      });
+      const parsed = boundedEnvelope.parse(raw.structuredContent);
+      const focus = (
+        parsed.data as {
+          focus: { total: number; shown: number; omitted: number; items: unknown[] };
+        }
+      ).focus;
+      expect(focus.total).toBe(120);
+      expect(focus.items.length).toBeLessThan(120);
+      expect(focus.shown).toBe(focus.items.length);
+      expect(focus.omitted).toBe(120 - focus.items.length);
+    } finally {
+      count = 8;
+      await client.close();
+    }
+  });
+});

@@ -41,6 +41,16 @@ due to maximum size and offer a focused detail/budget request when it fits. Do n
 claim `--max-chars` raises fixed row caps or that `--json` is exhaustive when source
 coverage is incomplete. This hint changes only when the actual option ships.
 
+Implementation note (#311): shipped as CLI `--section ID`, the MCP `triage_briefing`
+`section` input and the HTTP `/api/v1/briefing?section=ID` parameter, validated identically
+against `roleSectionIds(role)` (the registry's selector IDs plus `other-context`). Without
+`--role` the ID is checked against the resolved role. The report gains an additive `focus`
+object (`role`, `section`, `title`, `background`, `total`, `shown`, `omitted`, `items`);
+registry sections are computed by their selectors under either engine, and under Datalog
+`other-context` is that engine's own OTHER CONTEXT list. A capped section in the expanded
+view prints `N more: pdb --role ROLE --section ID`; byte truncation says "Truncated due to
+maximum size" instead of suggesting that `--max-chars` lifts row caps.
+
 ## #312: filter candidates by label
 
 Add repeatable `--label NAME`, with **AND** semantics: a candidate must have every

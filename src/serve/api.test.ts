@@ -386,6 +386,10 @@ describe("pdb serve read API (#373)", () => {
         "/api/v1/issues/1/deps?tree=1",
         "/api/v1/issues/1/deps?role=implementer",
         "/api/v1/briefing?entry=a&harness=claude",
+        // #311: an unknown or explicitly empty section, with or without a role.
+        "/api/v1/briefing?role=implementer&section=nope",
+        "/api/v1/briefing?section=nope",
+        "/api/v1/briefing?section=",
       ]) {
         const reply = await call(one.running.port, path);
         expect(reply.status, path).toBe(400);
