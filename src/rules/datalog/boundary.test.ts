@@ -190,9 +190,17 @@ describe("host facts reaching the engine (#339)", () => {
     expect(handed[0].find(([e, a]) => e === firstSubjectId && a === "pr-complete")?.[2]).toBe(true);
   });
 
-  it.fails("never treats a bare agent: label as the viewer's claim when no agent is given", () => {
-    const r = run(snap([issue(1, ["status:ready", "agent:"])]));
+  it("never treats a bare agent: label as the viewer's claim when no agent is given (#449)", () => {
+    const r = run(
+      snap([issue(1, ["status:ready", "agent:"]), issue(2, ["status:ready", "attention:"])]),
+    );
     expect(r.items.map((x) => x.kind)).not.toContain("continue-implementation");
+    expect(r.items.map((x) => x.kind)).not.toContain("addressed-response");
+    // The empty claim still belongs to someone: the ticket is denied, not offered as ordinary work.
+    expect(r.decisionEngine.denials).toContainEqual({
+      target: issue(1).url,
+      ruleId: "D-DENY-CLAIM",
+    });
   });
 
   it.fails("one unparseable createdAt does not reorder the valid tickets", () => {
