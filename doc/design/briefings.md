@@ -46,6 +46,8 @@ Include a minimal implementation-PR summary near the bottom. Evidence of repeate
 
 Lead with actionable human decisions, answers, access and interventions, stating what each blocks. Say explicitly when no human action is needed. Then material changes/completions/releases since the comparison window; risks/stalls/repeated review cycles; finally lower-priority current-work and next-outcome summaries. Separate reported claims/activity from confirmed presence. Exclude routine bot/commit chatter unless material. Name the time window/baseline; never invent “since last visit” history. Reuse since/checkpoint observations across open/closed/merged states. This is a presentation use case, not a new privileged identity.
 
+The forward-looking `--role human` view of explicit questions, approvals and unblock actions is defined in [human-briefing.md](human-briefing.md) (#457); catch-up remains a history view.
+
 The concrete repository-wide catch-up interface and bounded source coverage are defined in [briefing-mode.md](briefing-mode.md) (#163). That mode is distinct from the next-action view; its first slice reports issue/PR evidence and explicitly does not audit releases/deployments.
 
 ## Pickup ordering and manual urgency
