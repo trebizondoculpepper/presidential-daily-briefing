@@ -73,7 +73,7 @@
 [(head-reviewed ?t) (legacy-coverage ?t) [?t "head" ?h] [?t "review" ?r] [?r "review-state" "APPROVED"] [?r "review-commit" ?h]]
 [(head-reviewed ?t) (legacy-coverage ?t) [?t "head" ?h] [?t "receipt" ?c] [?c "receipt-commit" ?h] [?c "receipt-status" "completed"] [?c "receipt-findings" false]]
 [(head-reviewed ?t) [1 "review-coverage" "any"] [?t "head" ?h] [?t "provider-review" ?p] [?p "provider-state" "accepted"] [?p "provider-commit" ?h]]
-[(head-findings ?t) [?t "head" ?h] [?t "receipt" ?c] [?c "receipt-commit" ?h] [?c "receipt-findings" true]]
+[(head-findings ?t) (legacy-coverage ?t) [?t "head" ?h] [?t "receipt" ?c] [?c "receipt-commit" ?h] [?c "receipt-findings" true]]
 [(head-findings ?t) [?t "head" ?h] [?t "provider-review" ?p] [?p "provider-state" "findings"] [?p "provider-commit" ?h]]
 [(accepted-pr ?t) (head-reviewed ?t) (not (head-findings ?t)) [?t "pr-complete" true] [?t "draft" false] (verified ?t) (not (pr-failure ?t)) (not (pr-pending ?t)) (not (pr-unknown ?t)) (not (pr-review ?t)) (not [?t "mergeable" "CONFLICTING"])]
 [(refresh-needed ?t) [?t "mergeable" ?m] [1 "unknown-mergeable" ?m]]

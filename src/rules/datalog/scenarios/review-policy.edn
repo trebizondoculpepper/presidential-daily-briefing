@@ -33,6 +33,20 @@
               :overridden [] :unlocks 0 :unknown [] :other-claims []}]
            :denials #{}}}
 
+ {:id "either-provider-ignores-legacy-receipt-findings"
+  :doc "Declared either-provider coverage: raw login-only receipt findings do not veto; only host-authenticated provider findings do (#301, #556 review)."
+  :viewer {:role "implementer"}
+  :facts [{:e 1 "forward-complete" true "review-coverage" "any"}
+          {:e 100 "kind" "pr" "state" "OPEN" "number" 2 "target" "https://github.com/o/r/pull/2" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "head2" "draft" false "pr-complete" true "review-decision" "" "mergeable" "MERGEABLE" "merge-state" "BEHIND" "check" 101 "provider-review" 102 "receipt" 103}
+          {:e 101 "name" "verify" "outcome" "SUCCESS"}
+          {:e 102 "provider" "coderabbit" "provider-state" "accepted" "provider-commit" "head2"}
+          {:e 103 "receipt-commit" "head2" "receipt-status" "completed" "receipt-findings" true}]
+  :expect {:actions [{:subject 100 :rule "D-PR-INTEGRATE" :kind "pr-follow-up" :band 2
+              :why "Accepted at head head2 (verify passed, head reviewed, no fetched findings) but merge state is BEHIND, mergeable MERGEABLE; refresh mergeability or update the branch, then recheck before considering merge."
+              :facts {"impact" "unknown" "complexity" "unknown" "impactState" "unknown" "complexityState" "unknown" "head" "head2" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "mergeable" "MERGEABLE" "mergeState" "BEHIND" "verify" "SUCCESS"}
+              :overridden [] :unlocks 0 :unknown [] :other-claims []}]
+           :denials #{}}}
+
  {:id "either-provider-both-accepted"
   :doc "Declared either-provider coverage: both providers accepted (#301)."
   :viewer {:role "implementer"}

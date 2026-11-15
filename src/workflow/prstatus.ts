@@ -427,7 +427,13 @@ export function prStatus(
     if (pr.reviewDecision === "REVIEW_REQUIRED")
       blockers.push("a required approving review is missing");
     if (unresolved.length) blockers.push(`${unresolved.length} unresolved review thread(s)`);
-    if (codex?.has_unresolved_findings && codex.commit_sha === head)
+    // A declared policy reports only authenticated provider findings (below); legacy keeps this.
+    if (
+      !declaredCoverage &&
+      policy.detail.effective !== "unknown" &&
+      codex?.has_unresolved_findings &&
+      codex.commit_sha === head
+    )
       blockers.push("Codex reports unresolved findings on the current head");
     else if (
       !optionalDetail &&
