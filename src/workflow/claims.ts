@@ -1238,6 +1238,29 @@ export async function planQuestionResolution(
   const { item } = await readTicket(repository, number, agent, query);
   if (!item)
     return refuse("TICKET_NOT_FOUND", { number }, `#${number} must exist.`, [`${triage} --json`]);
+  // The record's author is the authenticated account: it must pass the same authority rule the
+  // readers apply, or the posted record would be ignored and the question stay open.
+  let viewer: Actor | null = null;
+  try {
+    viewer =
+      ((await query("query{viewer{__typename login}}", {})) as { viewer?: Actor | null }).viewer ??
+      null;
+  } catch {
+    viewer = null;
+  }
+  const writer = viewer?.login
+    ? await commentAuthority(
+        { body: "", author: viewer, lastEditedAt: null, includesCreatedEdit: false, editor: null },
+        permission,
+      )
+    : { status: "unknown" as const, why: "the authenticated account could not be read" };
+  if (writer.status !== "trusted")
+    return refuse(
+      "MARKER_UNVERIFIED",
+      { number, url: item.url },
+      `The authenticated account ${viewer?.login ?? "(unknown)"} must be a user with current write, maintain or admin permission on ${repository} to record a question outcome (${writer.why}); nothing is posted.`,
+      [`gh auth status`, retry],
+    );
   if (item.__typename !== "Issue")
     return refuse("NOT_AN_ISSUE", { number, url: item.url }, "Questions are recorded on issues.", [
       `gh pr view ${number} --repo ${repository}`,
@@ -1369,10 +1392,20 @@ export async function planQuestionResolution(
   const body = [
     `Question ${op === "resolve" ? "resolved" : "withdrawn"} by \`${agent}\` with \`pdb question ${op}\`: ${question}`,
     "",
-    `**Why:** ${why}`,
+    // Displayed text never carries a marker delimiter: the record is in the marker alone.
+    `**Why:** ${why.replaceAll("<", "&lt;").replaceAll(">", "&gt;")}`,
     "",
     resolutionMarker(record),
   ].join("\n");
+  // The whole comment must read back as exactly this record, or nothing is posted.
+  const readBack = parseResolutionComment(body);
+  if (readBack.kind !== "record" || JSON.stringify(readBack.record) !== JSON.stringify(record))
+    return refuse(
+      "INVALID_ARGUMENT",
+      facts,
+      "The resolution comment would not read back as a single valid record; nothing is posted.",
+      [retry],
+    );
   return {
     ok: true,
     facts,

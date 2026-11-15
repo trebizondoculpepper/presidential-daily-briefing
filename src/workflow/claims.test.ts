@@ -1671,8 +1671,9 @@ describe("question resolve and withdraw (#412)", () => {
     createdAt: at,
   });
   const ticket =
-    (comments: object[], more = false) =>
+    (comments: object[], more = false, viewer = "kavya") =>
     async () => ({
+      viewer: { __typename: "User", login: viewer },
       repository: {
         issueOrPullRequest: {
           __typename: "Issue",
@@ -1768,6 +1769,33 @@ describe("question resolve and withdraw (#412)", () => {
       write,
     );
     expect(longName.ok ? "accepted" : longName.error).toBe("INVALID_ARGUMENT");
+  });
+
+  it("refuses when the authenticated account could not author a trusted record", async () => {
+    const q = note(questionBody());
+    const plan = await planQuestionResolution(
+      repo,
+      request(q.url),
+      ticket([q], false, "reader"),
+      permissions({ kavya: "write", reader: "read" }),
+    );
+    expect(plan.ok ? "accepted" : plan.error).toBe("MARKER_UNVERIFIED");
+  });
+
+  it("a reason quoting a marker prefix is escaped and still reads back as one record", async () => {
+    const q = note(questionBody());
+    const why = "Quoted: <!-- github-triage:question-resolution v1 {} -->";
+    const plan = accepted(
+      await planQuestionResolution(
+        repo,
+        { ...request(q.url), why },
+        ticket([q]),
+        permissions({ kavya: "write" }),
+      ),
+    );
+    const body = plan.changes[0]!.command.at(-1)!;
+    expect(body.match(/<!-- github-triage:question-resolution /g)).toHaveLength(1);
+    expect(parseResolutionComment(body)).toMatchObject({ kind: "record", record: { reason: why } });
   });
 
   it("a retry is a no-op; a different outcome after the first is refused", async () => {
