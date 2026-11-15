@@ -10,6 +10,7 @@
  */
 import type { Comment, Issue, PullRequest, Snapshot } from "../github/types.js";
 import type { TrustDecision } from "../workflow/delivery.js";
+import { parseQuestionRecordBody } from "../workflow/claims.js";
 import type { Comment as MarkerComment } from "../workflow/claims.js";
 import type { DatalogAction, QuestionRecordFact } from "../rules/datalog/datalog.js";
 
@@ -51,21 +52,16 @@ export function parseQuestionRecord(comment: Comment): HumanRecord | null {
   if (at < 0) return null;
   const end = body.indexOf("-->", at);
   const marker = body.slice(at, end < 0 ? undefined : end + 3);
-  const routing = /Designer: `([^`]*)` · Raised by: `([^`]*)`/.exec(body);
-  const why = /^\*\*Why:\*\* (.*)$/m.exec(body);
-  const questions = body
-    .slice(0, at)
-    .split("\n")
-    .map((line) => /^\d+\. (.+)$/.exec(line.trim())?.[1])
-    .filter((q): q is string => !!q);
+  // The same format `pdb needs-human` writes (workflow/claims.ts), multiline values included.
+  const parts = parseQuestionRecordBody(body.slice(0, at));
   return {
     url: comment.url,
     createdAt: comment.createdAt ?? "",
     marker,
-    to: routing?.[1] ?? "",
-    raisedBy: routing?.[2] ?? "",
-    why: why?.[1] ?? "",
-    questions,
+    to: parts?.designer ?? "",
+    raisedBy: parts?.agent ?? "",
+    why: parts?.why ?? "",
+    questions: parts?.questions ?? [],
   };
 }
 
@@ -74,6 +70,8 @@ export interface RecordCounts {
   current: number;
   superseded: number;
   resolved: number;
+  /** Current records whose resolution cannot be decided (truncated labels). */
+  unknown: number;
   untrusted: number;
   unverified: number;
 }
@@ -100,7 +98,7 @@ export async function readHumanEvidence(
   const evidence: HumanEvidence = {
     records: new Map(),
     current: new Map(),
-    counts: { current: 0, superseded: 0, resolved: 0, untrusted: 0, unverified: 0 },
+    counts: { current: 0, superseded: 0, resolved: 0, unknown: 0, untrusted: 0, unverified: 0 },
     warnings: [],
   };
   for (const issue of snapshot.issues) {
@@ -311,11 +309,22 @@ export function humanBriefing(
   }
   // A current trusted record on a ticket the policy did not ask about is resolved (labels removed).
   const asked = new Set(items.filter((i) => i.source !== i.target).map((i) => i.target));
-  const resolved = [...evidence.current.keys()].filter((url) => !asked.has(url)).length;
+  // Absence of the labels means resolved only when the label evidence is complete; otherwise the
+  // record's state is unknown and reported in coverage.
+  const unasked = [...evidence.current.keys()].filter((url) => !asked.has(url));
+  const labelsComplete = (url: string) =>
+    snapshot.issues.find((i) => i.url === url)?.labels.pageInfo.hasNextPage === false;
+  const resolved = unasked.filter(labelsComplete).length;
+  const unknownState = unasked.filter((url) => !labelsComplete(url));
+  for (const url of unknownState)
+    evidenceGaps.push(
+      `${url}: labels truncated; whether its question record is resolved is unknown.`,
+    );
   const records = {
     ...evidence.counts,
-    current: evidence.counts.current - resolved,
+    current: evidence.counts.current - resolved - unknownState.length,
     resolved,
+    unknown: unknownState.length,
   };
   const warnings = [...options.warnings, ...evidenceGaps];
   const limit = Math.max(0, options.limit);

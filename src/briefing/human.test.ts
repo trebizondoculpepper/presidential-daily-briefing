@@ -6,6 +6,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { presentBriefing } from "./service.js";
 import type { HumanBriefing } from "./human.js";
 import { parseQuestionRecord } from "./human.js";
+import { parseQuestionRecordBody, questionRecordBody } from "../workflow/claims.js";
 import { markerTrust } from "../workflow/delivery.js";
 import type { TrustDecision } from "../workflow/delivery.js";
 import type { Comment, Issue, PullRequest } from "../github/types.js";
@@ -91,6 +92,36 @@ describe("human briefing role (#457)", () => {
     expect(parseQuestionRecord({ ...by(), url: "u", body: "no marker" })).toBeNull();
   });
 
+  it("round-trips multiline questions and reasons in the format needs-human writes", () => {
+    const parts = {
+      designer: "owner",
+      agent: "kavya",
+      why: "Two lines\nof reason.",
+      questions: ["First line\n2 continued, not a new item", "Second?\n\n- with a list"],
+    };
+    const body = questionRecordBody(parts, "<!-- github-triage:needs-human:0123456789abcdef -->");
+    expect(parseQuestionRecordBody(body.slice(0, body.indexOf("<!--")))).toEqual(parts);
+    expect(parseQuestionRecord({ ...by(), url: "u", body })).toMatchObject({
+      to: "owner",
+      why: parts.why,
+      questions: parts.questions,
+    });
+  });
+
+  it("treats a record on a ticket with truncated labels as unknown, never resolved", async () => {
+    const truncated = withComments(
+      { ...issue(1, ["status:ready"]), labels: page([{ name: "status:ready" }], true) },
+      [record("owner", ["Q?"])],
+    );
+    const { view, complete } = await human([truncated]);
+    expect(view.total).toBe(0);
+    expect(view.coverage.records).toMatchObject({ resolved: 0, unknown: 1, current: 0 });
+    expect(complete).toBe(false);
+    expect(view.coverage.warnings.join(" ")).toMatch(
+      /whether its question record is resolved is unknown/,
+    );
+  });
+
   it("ranks addressed explicit requests first, then explicit, then inferred items", async () => {
     const dependent = { ...issue(9), state: "OPEN" };
     const asked = {
@@ -167,6 +198,7 @@ describe("human briefing role (#457)", () => {
       current: 1,
       superseded: 1,
       resolved: 1,
+      unknown: 0,
       untrusted: 0,
       unverified: 0,
     });

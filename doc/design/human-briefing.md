@@ -90,7 +90,7 @@ The compact report for `--role human` carries a `human` object instead of the ag
 
 ## Resolved and superseded records
 
-A question is current only while its ticket is open and still carries `question` or `design:decision-needed`. Removing those labels is how a participant marks it resolved (workflow.md, "Human questions"); a trusted record on a ticket without them is counted as `resolved` and produces no item. A record is never treated as resolved because of a later comment, a PR merge or closure of the ticket.
+A question is current only while its ticket is open and still carries `question` or `design:decision-needed`. Removing those labels is how a participant marks it resolved (workflow.md, "Human questions"); a trusted record on a ticket without them is counted as `resolved` and produces no item, but only when the ticket's labels were read completely; with truncated labels the record is counted as `unknown` and coverage is incomplete. Records are parsed with the same format `pdb needs-human` writes (`questionRecordBody`/`parseQuestionRecordBody` in `src/workflow/claims.ts`), so multiline questions and reasons are kept. A record is never treated as resolved because of a later comment, a PR merge or closure of the ticket.
 
 The newest trusted record on a ticket supersedes older trusted records there: a new needs-human call states the questions still outstanding, which is also how a partial answer is recorded. Older records are counted as `superseded` and stay reachable through the ticket. Exact repeats of a record (the same marker) are one record. #412 plans durable question IDs and waiting records; when they ship, resolution can bind to IDs instead of labels, and this projection reads them through the same fact boundary.
 
