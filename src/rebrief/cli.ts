@@ -242,8 +242,8 @@ export async function runRebrief(
                 ...runtime.read,
                 ...(input.project
                   ? {
-                      guide: { cwd: input.project, fs: runtime.fs, git: runtime.git },
-                      estimation: { cwd: input.project, fs: runtime.fs, git: runtime.git },
+                      guide: { cwd: input.project, fs: runtime.fs, git },
+                      estimation: { cwd: input.project, fs: runtime.fs, git },
                     }
                   : noLocalProject(input.repository)),
               }));
