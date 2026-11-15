@@ -13,6 +13,8 @@ const tsx = (args: string[]) =>
   }).status ?? 1;
 const steps = [
   ["rules", "--", "npm", "run", "rules:test", "--", "--junit", "reports/junit-rules.xml"],
+  // #394: the rule outcome category demonstration, as in CI.
+  ["rule-categories", "--", "npx", "tsx", "scripts/rules-categories.ts"],
   [
     "tests",
     "--",
