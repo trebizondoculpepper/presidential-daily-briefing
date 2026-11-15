@@ -146,6 +146,9 @@ const runtime = (): McpRuntime => ({
       : { ...report, tree: false, nodes: report.nodes.filter((x) => x.number === n) };
   }) as McpRuntime["dependencyReport"],
   now: clock,
+  // The Datalog soft time-budget diagnostic measures elapsed time by design; a fixed timer
+  // keeps it out of results that must be byte-identical (slow Windows runners exceeded it).
+  engineClock: () => 0,
 });
 
 const connect = async (rt: McpRuntime = runtime()) => {
