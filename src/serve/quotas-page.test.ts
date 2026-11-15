@@ -17,6 +17,7 @@ import { dashboardRenderers, dashboardSecurityPolicy } from "./dashboard.js";
 import { serveArguments } from "./options.js";
 import { quotaRenderers, quotasScript } from "./quotas-page.js";
 import { readServices } from "./services.js";
+import { ServeCache } from "./cache.js";
 
 const T0 = Date.parse("2026-11-15T09:00:00.000Z");
 const epoch = (ms: number) => Math.floor(ms / 1000);
@@ -401,5 +402,58 @@ describe("quota browser script (#548)", () => {
     await settle();
     expect(b.elements.get("state")!.innerHTML).toContain("Refresh failed: INTERNAL");
     expect(b.elements.get("meters")!.innerHTML).toBe("");
+  });
+});
+
+describe("quota telemetry from the serve error ring (#548)", () => {
+  it("is only the requested login's, carries header observations, and is empty when unverified", () => {
+    const cache = new ServeCache({
+      ttlMs: 300_000,
+      clock: { now: () => new Date(T0), setTimeout: () => ({}), clearTimeout: () => undefined },
+      authContext: async () => ({ host: "github.com", login: "octo" }),
+      initialAuth: { host: "github.com", login: "octo" },
+    });
+    const ring = (cache as unknown as { errors: unknown[] }).errors;
+    const event = (auth: string, category: string | null, remaining: number) => ({
+      id: "e",
+      repository: "o/r",
+      auth,
+      at: new Date(T0 - 60_000).toISOString(),
+      operation: "collect",
+      code: "GITHUB_RATE_LIMITED",
+      category,
+      subject: null,
+      hint: "",
+      quota: {
+        resource: "graphql",
+        limit: 5000,
+        remaining,
+        resetAt: new Date(T0 + 60_000).toISOString(),
+      },
+    });
+    ring.push(
+      event("github.com/octo", "rate-limited", 0),
+      event("github.com/other", "rate-limited", 0),
+    );
+    ring.push(event("github.com/octo", null, 42));
+    const mine = cache.quotaTelemetry({ host: "github.com", login: "octo" })!;
+    expect(mine.events).toHaveLength(1);
+    expect(mine.observations).toEqual([
+      expect.objectContaining({ resource: "graphql", remaining: 0, operation: "collect" }),
+      expect.objectContaining({ resource: "graphql", remaining: 42 }),
+    ]);
+    expect(cache.quotaTelemetry({ host: "github.com", login: null })).toBeNull();
+    // The aggregate comparison now sees the retained headers.
+    const quota = buildQuotaView({
+      context: { host: "github.com", login: "octo" },
+      now: T0,
+      reading: normalizeRateLimit(body(), new Date(T0).toISOString()),
+      freshness: "live",
+      failure: null,
+      embargo: null,
+      telemetry: mine,
+      requests: { quota: 1, context: 1 },
+    });
+    expect(quota.notices.some((n) => n.code === "header-disagrees")).toBe(true);
   });
 });

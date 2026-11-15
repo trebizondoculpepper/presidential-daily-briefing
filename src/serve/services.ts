@@ -58,7 +58,7 @@ export function readServices(
             throw new Error("no REST boundary");
           }),
         now: () => serve.clock.now(),
-        telemetry: () => cache.quotaTelemetry(),
+        telemetry: (context) => cache.quotaTelemetry(context),
       }),
       async (mode) => {
         // Offline makes no request, not even an identity read: the held login only.
