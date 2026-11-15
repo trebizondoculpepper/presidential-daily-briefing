@@ -38,11 +38,11 @@ const gitAt =
     if (command === "remote -v") return `origin\thttps://github.com/${repository}.git (fetch)\n`;
     throw new Error(`unexpected git ${command}`);
   };
-const configFs = (enabled: boolean): ConfigFileSystem => ({
+const configFs = (enabled: boolean, engine = "datalog"): ConfigFileSystem => ({
   ...emptyFileSystem,
   readText: async (path) =>
     path.endsWith("triage.toml")
-      ? `schemaVersion = 1\n[rules.project]\nenabled = ${enabled}\n`
+      ? `schemaVersion = 1\n[briefing]\nengine = "${engine}"\n[rules.project]\nenabled = ${enabled}\n`
       : null,
 });
 
@@ -184,6 +184,17 @@ describe("pdb rules init and surface parity (#516)", () => {
         },
       );
       expect(briefing.manifest.effectiveRulesHash).toBe(cli.effectivePolicy.effectiveRulesHash);
+
+      // The TypeScript rollback cannot apply project preferences: an error, as in the briefing.
+      const rollback: string[] = [];
+      await main(["rules", "--json"], async (t) => void rollback.push(t), {
+        guide: { cwd: dir, git: gitAt(dir), fs: configFs(true, "typescript") },
+      } as never);
+      expect(JSON.parse(rollback.join("")).effectivePolicy).toMatchObject({
+        state: "error",
+        effectiveRulesHash: null,
+        reason: expect.stringContaining("briefing.engine datalog"),
+      });
 
       // A repo-only served project is unknown, never shown as default-only effective policy.
       const remote = await rulesPage(
