@@ -1,0 +1,531 @@
+/**
+ * Routine briefing collection (#368, profile briefing-shortlist-v1): discover every open issue
+ * and pull request cheaply, rank them through the briefing's own engine, then hydrate only the
+ * subjects the briefing would show and the items their rules need. Contract:
+ * doc/design/collection-profiles.md, "Command read plans" and "Ranking before limiting".
+ *
+ * Discovery facts (labels, creation time, native summaries and direct edges, closing links, PR
+ * head/base/draft) are real evidence. Bodies, comments, reviews, threads and checks are not read
+ * for an item that was not hydrated: such an item is kept only as a ranking candidate, recorded
+ * `not-requested`, listed in `shortlist.notHydrated` and never shown as a subject. Its unread
+ * evidence is unknown, never empty.
+ */
+import { completeNative, nativeFields } from "./dependencies.js";
+import {
+  closedBy,
+  comment,
+  common,
+  ghQueryWith,
+  ghRestWith,
+  hydratePullRequests,
+  info,
+  pages,
+  prop,
+  selected,
+} from "./github.js";
+import type { Query, QueryVariables, Rest } from "./github.js";
+import { hydrate, quotaRefusal, ReadMeter, readProfiles } from "./readplan.js";
+import { hydrateRequiredChecks } from "./requiredchecks.js";
+import type { Comment, Issue, Page, PullRequest, Snapshot } from "./types.js";
+
+export type ShortlistBounds = { -readonly [K in keyof Profile["bounds"]]: number };
+type Profile = (typeof readProfiles)["briefing-shortlist-v1"];
+
+/** Why a discovered item was not hydrated. */
+export type NotHydratedReason = "not-shortlisted" | "hydration-cap" | "failed" | "not-attempted";
+/** The shortlist record a routine snapshot carries (additive; snapshot schema unchanged). */
+export interface ShortlistRecord {
+  schemaVersion: 1;
+  profile: "briefing-shortlist-v1";
+  discovered: { issues: number; pullRequests: number; complete: boolean };
+  /** URLs whose full snapshot fields were read, in hydration order. */
+  hydrated: string[];
+  /** Discovered open items whose comments, reviews, checks and records were not read. */
+  notHydrated: {
+    number: number;
+    url: string;
+    kind: "issue" | "pull-request";
+    reason: NotHydratedReason;
+  }[];
+  /** Ranking rounds run (each re-ranks after hydration). */
+  rounds: number;
+  /** True when any open item was not hydrated: the ordering cannot be proven final. */
+  provisional: boolean;
+  /** The omission notice (count and how to inspect), or null when every item was hydrated. */
+  notice: string | null;
+}
+
+export interface ShortlistOptions {
+  /**
+   * Rank a snapshot through the briefing engine and return the URLs it would show (its
+   * subjects), most important first. Called once per round; it must not read GitHub.
+   */
+  select: (snapshot: Snapshot) => Promise<string[]>;
+  signal?: AbortSignal;
+  /** REST boundary for required-check evidence (#343); absent leaves requiredness unknown. */
+  rest?: Rest;
+  /** Smaller bounds for tests; effective values are reported in the collection record. */
+  bounds?: Partial<ShortlistBounds>;
+  monotonic?: () => number;
+  /**
+   * The read's shared meter, when the caller also reads through it (permission lookups,
+   * delivery evidence): one quota stop and one telemetry record for the whole command.
+   */
+  meter?: ReadMeter;
+}
+
+const emptyPage = <T>(): Page<T> => ({
+  nodes: [],
+  pageInfo: { hasNextPage: false, endCursor: null },
+});
+const labelsField = `labels(first:100){nodes{name} ${info}}`;
+/** Discovery fields: no body, comments, reviews, threads or checks. */
+export const discoveryIssueFields = `number title url state stateReason createdAt updatedAt ${labelsField} ${closedBy} ${nativeFields}`;
+/**
+ * Issues whose comments mention a PR leave a cross-reference on it; delivery and responsibility
+ * records about a PR live on such an issue even without a closing link (#368).
+ */
+const crossReferences = `timelineItems(first:25,itemTypes:[CROSS_REFERENCED_EVENT]){nodes{... on CrossReferencedEvent{source{__typename ... on Issue{number url state}}}} ${info}}`;
+export const discoveryPullRequestFields = `number title url state createdAt updatedAt ${labelsField} headRefOid headRefName baseRefName isDraft closingIssuesReferences(first:100){nodes{number url} ${info}} ${crossReferences}`;
+const hydratedIssueFields = `${common} stateReason ${closedBy} ${nativeFields}`;
+
+/**
+ * A ranking candidate built from discovery facts only. Its unread sources are empty here so the
+ * engine can run; they are never shown, because a stub is never a subject of the result.
+ */
+const issueStub = (node: Issue): Issue => ({ ...node, body: "", comments: emptyPage<Comment>() });
+const pullRequestStub = (node: PullRequest): PullRequest => ({
+  ...issueStub(node),
+  headRefOid: node.headRefOid,
+  headRefName: node.headRefName,
+  baseRefName: node.baseRefName,
+  isDraft: node.isDraft,
+  closingIssuesReferences: node.closingIssuesReferences,
+  mergeable: "UNKNOWN",
+  mergeStateStatus: "UNKNOWN",
+  reviewDecision: null,
+  reviewThreads: emptyPage(),
+  reviews: emptyPage(),
+  commits: { nodes: [] },
+});
+
+export async function collectShortlist(
+  repository: string,
+  options: ShortlistOptions,
+  injected?: Query,
+  now: () => Date = () => new Date(),
+): Promise<Snapshot> {
+  const { signal } = options;
+  const bounds: ShortlistBounds = {
+    ...readProfiles["briefing-shortlist-v1"].bounds,
+    ...options.bounds,
+  };
+  const meter =
+    options.meter ??
+    new ReadMeter("briefing-shortlist-v1", "briefing", now, options.monotonic, signal);
+  const base = injected ?? ghQueryWith(signal, { operation: "snapshot" });
+  const startedAt = now().toISOString();
+  const [owner, name] = repository.split("/");
+  const warnings: string[] = [];
+  const read = async (q: Query, source: string, variables: QueryVariables = {}) => {
+    signal?.throwIfAborted();
+    const data = await q(source, { owner, name, ...variables });
+    if (!data.repository) throw new Error(`Repository unavailable: ${repository}`);
+    return data.repository;
+  };
+
+  // 1. Discovery: each connection paginated independently, at most `pages` pages.
+  const discover = async <T>(field: "issues" | "pullRequests", fields: string) => {
+    const label = field === "issues" ? "open-issues" : "open-pull-requests";
+    const q = meter.query(base, label, repository);
+    const source = `query($owner:String!,$name:String!,$cursor:String){repository(owner:$owner,name:$name){${field}(first:${bounds.pageSize},after:$cursor,orderBy:{field:UPDATED_AT,direction:DESC},states:OPEN){nodes{${fields}} ${info}}}}`;
+    let count = 0;
+    let more = false;
+    const nodes = await pages<T>(
+      async (cursor) => {
+        const page = prop(await read(q, source, cursor ? { cursor } : {}), field);
+        count++;
+        more = prop(page, "pageInfo", "hasNextPage") === true;
+        return page;
+      },
+      () => count >= bounds.pages,
+    );
+    const complete = !more;
+    if (complete) meter.cover(label, repository, "complete");
+    else {
+      const omission = `open ${field === "issues" ? "issues" : "pull requests"} beyond ${nodes.length} (${bounds.pages} pages of ${bounds.pageSize}) not discovered`;
+      meter.cover(label, repository, "partial", { omission });
+      warnings.push(`Discovery incomplete: ${omission}; they are unknown, not absent.`);
+    }
+    return { nodes, complete };
+  };
+  const [issueInventory, prInventory] = await Promise.all([
+    discover<Issue>("issues", discoveryIssueFields),
+    discover<PullRequest>("pullRequests", discoveryPullRequestFields),
+  ]);
+  const stubs = new Map<string, Issue | PullRequest>();
+  const kinds = new Map<string, "issue" | "pull-request">();
+  for (const node of issueInventory.nodes) {
+    stubs.set(node.url, issueStub(node));
+    kinds.set(node.url, "issue");
+  }
+  /** Open issues that mention each PR (record candidates), and whether that list is whole. */
+  const referencedBy = new Map<string, string[]>();
+  for (const node of prInventory.nodes) {
+    const timeline = prop(node, "timelineItems");
+    delete (node as { timelineItems?: unknown }).timelineItems;
+    stubs.set(node.url, pullRequestStub(node));
+    kinds.set(node.url, "pull-request");
+    const sources = (prop(timeline, "nodes") as unknown[] | undefined) ?? [];
+    referencedBy.set(
+      node.url,
+      sources
+        .map((event) => prop(event, "source"))
+        .filter(
+          (source) => prop(source, "__typename") === "Issue" && prop(source, "state") === "OPEN",
+        )
+        .map((source) => String(prop(source, "url"))),
+    );
+    if (!timeline || prop(timeline, "pageInfo", "hasNextPage") !== false)
+      warnings.push(
+        `${node.url}: more issues mention it than were listed; delivery and responsibility records on the rest are unknown.`,
+      );
+  }
+  const order = [...stubs.keys()];
+
+  const hydratedIssues = new Map<string, Issue>();
+  const hydratedPrs = new Map<string, PullRequest>();
+  /** Items read but now closed (no longer in the open population) or unreadable. */
+  const gone = new Set<string>();
+  const unhydratable = new Map<string, NotHydratedReason>();
+  const hydratedOrder: string[] = [];
+  const isHydrated = (url: string) => hydratedIssues.has(url) || hydratedPrs.has(url);
+
+  const build = (): Snapshot => {
+    const issues: Issue[] = [];
+    const pullRequests: PullRequest[] = [];
+    for (const url of order) {
+      if (gone.has(url)) continue;
+      const kind = kinds.get(url);
+      const item = hydratedIssues.get(url) ?? hydratedPrs.get(url);
+      // A stub that could not be hydrated but would be shown is withdrawn rather than shown.
+      if (!item && unhydratable.has(url)) continue;
+      const value = item ?? stubs.get(url)!;
+      if (kind === "issue") issues.push(value as Issue);
+      else pullRequests.push(value as PullRequest);
+    }
+    return {
+      schemaVersion: 1,
+      repository,
+      startedAt,
+      fetchedAt: now().toISOString(),
+      issues,
+      pullRequests,
+      dependencies: [
+        ...new Map(
+          issues
+            .flatMap((item) => item.blockedBy?.nodes ?? [])
+            .map((item) => [
+              item.url,
+              { ...item, available: true, repository: item.repository.nameWithOwner },
+            ]),
+        ).values(),
+      ],
+      changed: [],
+      since: null,
+      warnings: [...warnings],
+      rateLimit: null,
+    };
+  };
+
+  /**
+   * Closing links both ways, and the open issues that mention a shown PR (where its delivery and
+   * responsibility records live): a subject's rules read the items it is linked to.
+   */
+  const needed = (subjects: string[]): string[] => [...new Set(units(subjects).flat())];
+  /**
+   * Each subject with the items linked to it, as one hydration unit: a PR's own-work and
+   * delivery facts come through its linked issues, so the bound never splits a unit.
+   */
+  const units = (subjects: string[]): string[][] => {
+    const prefix = `https://github.com/${repository}/`.toLowerCase();
+    const result: string[][] = [];
+    for (const url of subjects) {
+      if (!stubs.has(url)) continue;
+      const unit = [url];
+      result.push(unit);
+      const item = hydratedIssues.get(url) ?? hydratedPrs.get(url) ?? stubs.get(url);
+      if (!item) continue;
+      const links: string[] =
+        kinds.get(url) === "pull-request"
+          ? [
+              ...(item as PullRequest).closingIssuesReferences.nodes.map((ref) => ref.url),
+              ...(referencedBy.get(url) ?? []),
+            ]
+          : (item.closedByPullRequestsReferences?.nodes ?? [])
+              .filter((ref) => ref.state === "OPEN")
+              .map((ref) => ref.url);
+      unit.push(
+        ...links.filter((link) => link.toLowerCase().startsWith(prefix) && stubs.has(link)),
+      );
+    }
+    return result;
+  };
+
+  const commentsSource = `query($owner:String!,$name:String!,$number:Int!,$cursor:String){repository(owner:$owner,name:$name){issue(number:$number){comments(first:100,after:$cursor){nodes{${comment}} ${info}}}}}`;
+  const hydrateIssues = async (urls: string[]) => {
+    const batches: string[][] = [];
+    for (let i = 0; i < urls.length; i += bounds.issuesPerRequest)
+      batches.push(urls.slice(i, i + bounds.issuesPerRequest));
+    const outcomes = await hydrate(
+      batches,
+      async (batch) => {
+        const numbers = batch.map((url) => stubs.get(url)!.number);
+        const q = meter.query(base, "issue", `${repository}#${numbers.join(",")}`);
+        const declared = numbers.map((_, i) => `$n${i}:Int!`).join(",");
+        const fields = numbers
+          .map((_, i) => `i${i}:issue(number:$n${i}){${hydratedIssueFields}}`)
+          .join(" ");
+        const repo = await read(
+          q,
+          `query($owner:String!,$name:String!,${declared}){repository(owner:$owner,name:$name){${fields}}}`,
+          Object.fromEntries(numbers.map((n, i) => [`n${i}`, n])),
+        );
+        return numbers.map((_, i) => selected<Issue>(prop(repo, `i${i}`)));
+      },
+      { concurrency: bounds.hydrationConcurrency, signal },
+    );
+    for (const [b, outcome] of outcomes.entries()) {
+      for (const [i, url] of batches[b].entries()) {
+        const subject = `${repository}#${stubs.get(url)!.number}`;
+        if (outcome.state !== "done") {
+          const reason = outcome.state === "failed" ? "failed" : "not-attempted";
+          unhydratable.set(url, reason);
+          const failure =
+            outcome.state === "failed"
+              ? quotaRefusal(outcome.error)
+                ? "rate-limited"
+                : "read-failed"
+              : null;
+          if (failure) meter.cover("issue", subject, "failed", { failure });
+          else {
+            meter.notAttempted.push(url);
+            meter.cover("issue", subject, "not-requested", {
+              omission: "not attempted after a quota refusal",
+            });
+          }
+          continue;
+        }
+        const issue = outcome.value[i];
+        if (!issue || issue.state !== "OPEN") {
+          // Closed since discovery: no longer open work.
+          gone.add(url);
+          meter.cover("issue", subject, "complete");
+          continue;
+        }
+        try {
+          if (issue.comments.pageInfo.hasNextPage) {
+            const q = meter.query(base, "comments", subject);
+            const initial = issue.comments;
+            issue.comments.nodes = await pages<Comment>(async (cursor) => {
+              if (!cursor) return initial;
+              return prop(
+                await read(q, commentsSource, { number: issue.number, cursor }),
+                "issue",
+                "comments",
+              );
+            });
+            issue.comments.pageInfo = { hasNextPage: false, endCursor: null };
+          }
+        } catch (error) {
+          signal?.throwIfAborted();
+          unhydratable.set(url, quotaRefusal(error) ? "not-attempted" : "failed");
+          meter.cover("comments", subject, "failed", {
+            failure: quotaRefusal(error) ? "rate-limited" : "read-failed",
+          });
+          continue;
+        }
+        try {
+          await completeNative(issue, repository, meter.query(base, "native-blocked-by", subject));
+        } catch (error) {
+          signal?.throwIfAborted();
+          // Unknown edges are never "no blockers".
+          delete issue.issueDependenciesSummary;
+          delete issue.blockedBy;
+          delete issue.blocking;
+          warnings.push(`${issue.url}: native dependencies could not be read; unknown.`);
+          meter.cover("native-blocked-by", subject, "failed", {
+            failure: quotaRefusal(error) ? "rate-limited" : "read-failed",
+          });
+        }
+        if (issue.labels.pageInfo.hasNextPage)
+          warnings.push(`${issue.url}: labels exceed 100; label analysis incomplete.`);
+        hydratedIssues.set(url, issue);
+        hydratedOrder.push(url);
+        meter.cover("issue", subject, "complete");
+      }
+    }
+  };
+  const restBoundary = options.rest ?? (injected ? undefined : ghRestWith(signal));
+  const metredRest = restBoundary
+    ? meter.rest(restBoundary, "required-checks", repository)
+    : undefined;
+  const hydratePrs = async (urls: string[]) => {
+    const targets = urls.map((url) => ({ number: stubs.get(url)!.number, url }));
+    const read = await hydratePullRequests(
+      repository,
+      targets,
+      { meter, signal, warnings, role: "shortlisted" },
+      base,
+    );
+    const byUrl = new Map(read.map((pr) => [pr.url, pr]));
+    for (const { url, number } of targets) {
+      const pr = byUrl.get(url);
+      if (pr) {
+        hydratedPrs.set(url, pr);
+        hydratedOrder.push(url);
+        continue;
+      }
+      const last = meter.coverage.findLast(
+        (c) => c.source === "pull-request" && c.subject === `${repository}#${number}`,
+      );
+      if (last?.state === "complete") gone.add(url);
+      else unhydratable.set(url, last?.state === "failed" ? "failed" : "not-attempted");
+    }
+    if (metredRest && read.length)
+      warnings.push(
+        ...(await hydrateRequiredChecks(repository, read, {
+          query: meter.query(base, "required-checks", repository),
+          rest: (path) => metredRest(path, { signal }),
+        })),
+      );
+  };
+
+  // 2. Rank, hydrate the frontier, re-rank: until the shown subjects are all hydrated.
+  let rounds = 0;
+  let capped = false;
+  const unread = (subjects: string[]) =>
+    subjects.filter((url) => stubs.has(url) && !isHydrated(url) && !gone.has(url));
+  /** The last ranking already showed only hydrated subjects: no verification pass needed. */
+  let converged = false;
+  for (; rounds < bounds.rounds;) {
+    rounds++;
+    const subjects = await options.select(build());
+    // PR obligations (contract: "owned work, PR obligations, ..."): a PR's findings come from
+    // checks and reviews that discovery never reads, so every open PR is a frontier candidate
+    // after the shown subjects, within the hydration bound; never only those already visible.
+    const prObligations = order.filter((url) => kinds.get(url) === "pull-request");
+    const pending = needed([...subjects, ...prObligations]).filter(
+      (url) => !isHydrated(url) && !gone.has(url) && !unhydratable.has(url),
+    );
+    if (!pending.length) {
+      converged = !unread(subjects).length;
+      break;
+    }
+    const room = bounds.maxHydrated - hydratedOrder.length;
+    if (room <= 0 || meter.refused) {
+      capped = true;
+      for (const url of pending)
+        unhydratable.set(url, meter.refused ? "not-attempted" : "hydration-cap");
+      continue;
+    }
+    // Whole units only: a unit that does not fit is left unread together, never split.
+    const open = (url: string) => !isHydrated(url) && !gone.has(url) && !unhydratable.has(url);
+    const take: string[] = [];
+    const left: string[] = [];
+    for (const unit of units([...subjects, ...prObligations])) {
+      const members = [...new Set(unit.filter(open))].filter((url) => !take.includes(url));
+      if (!members.length) continue;
+      if (take.length + members.length <= room) take.push(...members);
+      else left.push(...members);
+    }
+    for (const url of left) if (!take.includes(url)) unhydratable.set(url, "hydration-cap");
+    if (left.some((url) => !take.includes(url))) capped = true;
+    await hydrateIssues(take.filter((url) => kinds.get(url) === "issue"));
+    await hydratePrs(take.filter((url) => kinds.get(url) === "pull-request"));
+  }
+  // 3. Never show a stub: withdraw any shown subject that is still unhydrated, then re-rank.
+  for (let guard = 0; !converged; guard++) {
+    const stale = unread(await options.select(build()));
+    if (!stale.length) break;
+    for (const url of stale) if (!unhydratable.has(url)) unhydratable.set(url, "hydration-cap");
+    capped = true;
+    // Bounded: every pass withdraws at least one stub; after `order.length` passes, none remain.
+    if (guard > order.length) break;
+  }
+
+  const snapshot = build();
+  const notHydrated: ShortlistRecord["notHydrated"] = order
+    .filter((url) => !isHydrated(url) && !gone.has(url))
+    .map((url) => ({
+      number: stubs.get(url)!.number,
+      url,
+      kind: kinds.get(url)!,
+      reason: unhydratable.get(url) ?? "not-shortlisted",
+    }));
+  for (const item of notHydrated)
+    if (item.reason === "not-shortlisted" || item.reason === "hydration-cap")
+      meter.cover(
+        item.kind === "issue" ? "issue" : "pull-request",
+        `${repository}#${item.number}`,
+        "not-requested",
+        {
+          omission:
+            item.reason === "hydration-cap"
+              ? `beyond the hydration bound of ${bounds.maxHydrated}`
+              : "not on the briefing shortlist",
+        },
+      );
+  const discoveredComplete = issueInventory.complete && prInventory.complete;
+  let notice: string | null = null;
+  if (notHydrated.length) {
+    const sample = notHydrated
+      .slice(0, 5)
+      .map((item) => `#${item.number}`)
+      .join(", ");
+    notice = `Shortlist: ${notHydrated.length} of ${order.length - gone.size} open item(s) were discovered but not hydrated (${sample}${notHydrated.length > 5 ? ", ..." : ""}); their comments, reviews, checks and records are unknown, not empty, so this ordering is provisional${capped ? " (hydration bound reached)" : ""}. Inspect one with pdb --issue N, or read everything with --full.`;
+  }
+  // Interim default (#368 owner question): unread shortlist items alone leave the briefing
+  // complete for what it shows, but provisional. A failed or quota-stopped read of an item the
+  // briefing wanted is real incompleteness.
+  const failed = notHydrated.filter((i) => i.reason === "failed" || i.reason === "not-attempted");
+  if (failed.length)
+    snapshot.warnings.push(
+      `Shortlist reads failed or were stopped for ${failed.length} item(s) (${failed
+        .slice(0, 5)
+        .map((i) => `#${i.number}`)
+        .join(
+          ", ",
+        )}${failed.length > 5 ? ", ..." : ""}): their evidence is unknown. Inspect one with pdb --issue N.`,
+    );
+  const collection = meter.collection();
+  collection.bounds = { ...bounds };
+  const telemetry = collection.telemetry;
+  return {
+    ...snapshot,
+    fetchedAt: now().toISOString(),
+    rateLimit:
+      telemetry.rateLimit?.remaining != null && telemetry.rateLimit.resetAt
+        ? { remaining: telemetry.rateLimit.remaining, resetAt: telemetry.rateLimit.resetAt }
+        : null,
+    metrics: {
+      requestCount: telemetry.requests,
+      durationMs: Date.parse(now().toISOString()) - Date.parse(startedAt),
+    },
+    collection,
+    shortlist: {
+      schemaVersion: 1,
+      profile: "briefing-shortlist-v1",
+      discovered: {
+        issues: issueInventory.nodes.length,
+        pullRequests: prInventory.nodes.length,
+        complete: discoveredComplete,
+      },
+      hydrated: [...hydratedOrder],
+      notHydrated,
+      rounds,
+      provisional: notHydrated.length > 0 || !discoveredComplete,
+      notice,
+    },
+  };
+}

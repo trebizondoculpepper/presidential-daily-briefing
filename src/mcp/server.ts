@@ -17,6 +17,7 @@ import { parseArgs } from "node:util";
 import { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod";
 import { collect, currentRepository, ghQueryWith, ghRest } from "../github/github.js";
+import { collectShortlist } from "../github/shortlist.js";
 import { dependencyReport } from "../github/dependencies.js";
 import { impactGuidanceSummary } from "../estimation/impact.js";
 import { readBriefing, readDependencies } from "../briefing/service.js";
@@ -879,6 +880,8 @@ function errorResult(
 /** Production boundaries: authenticated gh through the existing argument-array runners. */
 export const defaultRuntime = (options: McpOptions): McpRuntime => ({
   collect,
+  // #368: the routine briefing hydrates only its shortlist.
+  collectShortlist,
   dependencyReport,
   currentRepository,
   // Provenance authors' permissions for the paired assessments (#247), cached per read.

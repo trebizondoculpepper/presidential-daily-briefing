@@ -64,6 +64,8 @@ describe("read-only MCP adapter (#25)", async () => {
       const runtime: Runtime = {
         ...defaultRuntime({ project }),
         collect: async (repository: string) => ({ ...snapshot(), repository }),
+        // The injected snapshot is the read: no live shortlist collection (#368).
+        collectShortlist: undefined,
         now: clock,
       };
       const client = await connect(runtime, { project, repo });

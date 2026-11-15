@@ -67,7 +67,17 @@ import {
 import { installedVersion, optOutEnv, legacyOptOutEnv, updateAdvisory } from "./updates/updates.js";
 import { defaultStaleHours } from "./workflow/team.js";
 import { migrationPlanText, planMigration } from "./github/migration.js";
-import { presentBriefing, resolveLabelFilter, unavailableText } from "./briefing/service.js";
+import {
+  humanRole,
+  presentBriefing,
+  resolveLabelFilter,
+  shortlistLine,
+  shownSubjects,
+  unavailableText,
+  withShortlist,
+} from "./briefing/service.js";
+import { collectShortlist } from "./github/shortlist.js";
+import { ReadMeter } from "./github/readplan.js";
 import { runBriefing } from "./briefing/catchupcli.js";
 import type { BriefingFiles } from "./briefing/catchupcli.js";
 import {
@@ -202,6 +212,8 @@ export type DepsArguments =
 /** Injected services for `main`; tests replace the GitHub-facing ones. */
 export interface Runtime {
   collect: typeof collect;
+  /** Routine shortlist collection (#368); absent: the routine briefing reads the full snapshot. */
+  collectShortlist?: typeof collectShortlist;
   /** Focused issue read for `who N` (issue-detail-v1, #367); default: the gh collector. */
   collectIssueFocus?: typeof collectIssueFocus;
   currentRepository: typeof currentRepository;
@@ -1146,7 +1158,14 @@ export async function main(
     new Promise<void>((resolve, reject) =>
       process.stdout.write(text, (error) => (error ? reject(error) : resolve())),
     ),
-  runtime: Runtime = { collect, currentRepository, dependencyReport, rest: ghRest, query: ghQuery },
+  runtime: Runtime = {
+    collect,
+    collectShortlist,
+    currentRepository,
+    dependencyReport,
+    rest: ghRest,
+    query: ghQuery,
+  },
 ): Promise<number> {
   // Version check (#51, cached daily per user by #65): runs alongside the command, bounded by a short timeout, and reports
   // only on stderr so JSON on stdout stays valid. --offline and opt-outs mean no network.
@@ -2033,9 +2052,115 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
     await output(help);
     return 0;
   }
+  /**
+   * The briefing presentation for `repository`, resolved once: configuration, label filter and
+   * one per-run permission cache shared by the shortlist's ranking passes and the final report.
+   */
+  let presentation: { repository: string; present: PresentFn; meter?: ReadMeter } | undefined;
+  type PresentFn = (
+    collected: Snapshot,
+    live: boolean,
+    reserve?: number,
+  ) => ReturnType<typeof presentBriefing>;
+  const presentationFor = async (repository: string, meter?: ReadMeter) => {
+    if (presentation?.repository === repository) return presentation;
+    // #368: the shortlist read's meter also carries permission lookups and delivery reads.
+    const rest =
+      meter && runtime.rest ? meter.rest(runtime.rest, "permissions", repository) : runtime.rest;
+    const query =
+      meter && runtime.query
+        ? meter.query(runtime.query, "delivery-records", repository)
+        : runtime.query;
+    const guideProcess = options.full
+      ? undefined
+      : briefingProcess(await resolveGuideSetting(repository, options.guide, runtime.guide));
+    // #312: resolve the label filter live against the repository before projecting.
+    const labels = options.label?.length
+      ? await resolveLabelFilter(repository, options.label, runtime.query ?? ghQuery)
+      : undefined;
+    const presentOptions = {
+      ...options,
+      ...(labels ? { labels } : {}),
+      process: guideProcess,
+      engineSetting:
+        options.full || options.issue
+          ? undefined
+          : await resolveEngineSetting(repository, runtime.guide ?? {}),
+      // #301: declared review policy from local configuration (legacy when undeclared).
+      reviewPolicy: await resolveReviewPolicy(repository, runtime.guide ?? {}),
+    };
+    // Provenance authority (#247) uses the per-run permission cache; offline reads make no
+    // request, so trusted provenance is then unknown. Without an injected boundary, likewise.
+    const trust =
+      !options.offline && rest ? markerTrust(permissionLookup(repository, rest)) : undefined;
+    const present: PresentFn = (collected, live, reserve = 0) =>
+      presentBriefing(
+        collected,
+        { ...presentOptions, maxChars: Math.max(0, presentOptions.maxChars - reserve) },
+        runtime.estimation,
+        runtime.now?.(),
+        undefined,
+        trust,
+        undefined,
+        undefined,
+        // #192: delivery evidence is read live only on a live read with both boundaries.
+        live && !options.offline && rest && query
+          ? {
+              query,
+              rest,
+              trustWith: (other: Rest) => markerTrust(permissionLookup(repository, other)),
+            }
+          : undefined,
+      );
+    presentation = { repository, present, meter };
+    return presentation;
+  };
   let snapshot: Snapshot;
   let stale: StaleFallback | undefined;
-  if (options.offline) snapshot = await cachedSnapshot(options.cache ?? "", options.repo);
+  // #368: a plain live briefing discovers, ranks, then hydrates only its shortlist. Explicit
+  // full reads (--full, --issue, --cache, --since/--checkpoint, offline) and the human briefing
+  // keep the full snapshot.
+  const shortlisted =
+    !!runtime.collectShortlist &&
+    !options.offline &&
+    !options.full &&
+    !options.issue &&
+    !options.cache &&
+    !options.since &&
+    !options.checkpoint &&
+    options.role !== humanRole;
+  if (shortlisted) {
+    const repository = options.repo ?? (await runtime.currentRepository());
+    const meter = new ReadMeter("briefing-shortlist-v1", "briefing", runtime.now);
+    const shared = await presentationFor(repository, meter);
+    try {
+      snapshot = await runtime.collectShortlist!(
+        repository,
+        {
+          select: async (candidates) =>
+            shownSubjects((await shared.present(candidates, false)).report),
+          ...(runtime.rest ? { rest: runtime.rest } : {}),
+          meter,
+        },
+        runtime.query,
+        runtime.now,
+      );
+    } catch (error) {
+      if (!quotaRefusal(error)) throw error;
+      // #371: a quota-refused discovery falls back to the explicit snapshot exactly as a full
+      // read does (stale, offline facts; no shortlist presentation).
+      ({ snapshot, stale } = await quotaFallback(
+        error,
+        options.cache,
+        repository,
+        runtime.now?.() ?? new Date(),
+        options.since,
+      ));
+      options.offline = true;
+      return briefingFrom(snapshot, stale);
+    }
+    return briefingFrom(snapshot, undefined);
+  } else if (options.offline) snapshot = await cachedSnapshot(options.cache ?? "", options.repo);
   else {
     const repository = options.repo ?? (await runtime.currentRepository());
     const previous = options.checkpoint
@@ -2137,39 +2262,51 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
         options.label,
         runtime.query ?? ghQuery,
       );
-    const { report, text } = await presentBriefing(
-      snapshot,
-      {
-        ...options,
-        ...(labels ? { labels } : {}),
-        ...(stale ? { stale } : {}),
-        process: guideProcess,
-        engineSetting:
-          options.full || options.issue
-            ? undefined
-            : await resolveEngineSetting(snapshot.repository, runtime.guide ?? {}),
-        // #301: declared review policy from local configuration (legacy when undeclared).
-        reviewPolicy: await resolveReviewPolicy(snapshot.repository, runtime.guide ?? {}),
-      },
-      runtime.estimation,
-      runtime.now?.(),
-      undefined,
-      // Provenance authority (#247) uses the per-run permission cache; offline reads make no
-      // request, so trusted provenance is then unknown. Without an injected boundary, likewise.
-      !options.offline && runtime.rest
-        ? markerTrust(permissionLookup(snapshot.repository, runtime.rest))
-        : undefined,
-      undefined,
-      undefined,
-      // #192: delivery evidence is read live only on a live read with both boundaries.
-      !options.offline && runtime.rest && runtime.query
-        ? {
-            query: runtime.query,
-            rest: runtime.rest,
-            trustWith: (rest: Rest) => markerTrust(permissionLookup(snapshot.repository, rest)),
-          }
-        : undefined,
-    );
+    // #368: a shortlist read is presented through the shared presentation that ranked it (same
+    // configuration, permission cache and read meter), with its PROVISIONAL notice in budget.
+    const shortlistLineText = snapshot.shortlist ? shortlistLine(snapshot, options.maxChars) : "";
+    const { report, text } =
+      snapshot.shortlist && presentation
+        ? withShortlist(
+            await presentation.present(snapshot, true, shortlistLineText.length),
+            snapshot,
+            presentation.meter,
+            shortlistLineText,
+          )
+        : await presentBriefing(
+            snapshot,
+            {
+              ...options,
+              ...(labels ? { labels } : {}),
+              ...(stale ? { stale } : {}),
+              process: guideProcess,
+              engineSetting:
+                options.full || options.issue
+                  ? undefined
+                  : await resolveEngineSetting(snapshot.repository, runtime.guide ?? {}),
+              // #301: declared review policy from local configuration (legacy when undeclared).
+              reviewPolicy: await resolveReviewPolicy(snapshot.repository, runtime.guide ?? {}),
+            },
+            runtime.estimation,
+            runtime.now?.(),
+            undefined,
+            // Provenance authority (#247) uses the per-run permission cache; offline reads make no
+            // request, so trusted provenance is then unknown. Without an injected boundary, likewise.
+            !options.offline && runtime.rest
+              ? markerTrust(permissionLookup(snapshot.repository, runtime.rest))
+              : undefined,
+            undefined,
+            undefined,
+            // #192: delivery evidence is read live only on a live read with both boundaries.
+            !options.offline && runtime.rest && runtime.query
+              ? {
+                  query: runtime.query,
+                  rest: runtime.rest,
+                  trustWith: (rest: Rest) =>
+                    markerTrust(permissionLookup(snapshot.repository, rest)),
+                }
+              : undefined,
+          );
     const checkpoint = options.checkpoint
       ? {
           previousWindow: snapshot.since,
