@@ -32,6 +32,48 @@ export type GitRunner = (args: string[], cwd: string, timeoutMs: number) => Prom
 export const runGit: GitRunner = (args, cwd, timeoutMs) => gitWith("git", args, cwd, timeoutMs);
 
 /** The real runner for a given executable; tests use it to simulate a missing Git. */
+/** Variables that would make Git inspect some other repository than the one at `cwd`. */
+const repositorySelection = [
+  "GIT_DIR",
+  "GIT_WORK_TREE",
+  "GIT_INDEX_FILE",
+  "GIT_COMMON_DIR",
+  "GIT_OBJECT_DIRECTORY",
+  "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+  "GIT_NAMESPACE",
+  "GIT_CEILING_DIRECTORIES",
+  "GIT_DISCOVERY_ACROSS_FILESYSTEM",
+  "GIT_PREFIX",
+  "GIT_CONFIG_PARAMETERS",
+  "GIT_CONFIG_COUNT",
+];
+
+/**
+ * The exact argument array and environment for one read-only Git call. Repository selection
+ * comes only from `cwd`; lazy fetching of missing objects in partial/promisor clones is off
+ * (`GIT_NO_LAZY_FETCH`, Git 2.44+), and every transport is refused (`protocol.allow=never`) so
+ * older Git fails on a missing object instead of reaching the network.
+ */
+export function gitInvocation(
+  args: string[],
+  env: NodeJS.ProcessEnv = process.env,
+): { args: string[]; env: NodeJS.ProcessEnv } {
+  const clean: NodeJS.ProcessEnv = { ...env };
+  for (const key of Object.keys(clean))
+    if (repositorySelection.includes(key) || /^GIT_CONFIG_(KEY|VALUE)_\d+$/.test(key))
+      delete clean[key];
+  return {
+    args: ["-c", "protocol.allow=never", "-c", "core.fsmonitor=false", ...args],
+    env: {
+      ...clean,
+      GIT_NO_LAZY_FETCH: "1",
+      GIT_OPTIONAL_LOCKS: "0",
+      GIT_TERMINAL_PROMPT: "0",
+      LC_ALL: "C",
+    },
+  };
+}
+
 export function gitWith(
   binary: string,
   args: string[],
@@ -40,16 +82,16 @@ export function gitWith(
 ): Promise<GitResult> {
   return new Promise((resolve) => {
     try {
+      const invocation = gitInvocation(args);
       execFile(
         binary,
-        args,
+        invocation.args,
         {
           cwd,
           timeout: timeoutMs,
           windowsHide: true,
           maxBuffer: 64 * 1024,
-          // Read-only: no optional index locks, no credential or terminal prompts.
-          env: { ...process.env, GIT_OPTIONAL_LOCKS: "0", GIT_TERMINAL_PROMPT: "0", LC_ALL: "C" },
+          env: invocation.env,
         },
         (error, stdout) => {
           if (!error) return resolve({ ok: true, stdout: String(stdout).trim() });
@@ -206,15 +248,20 @@ async function probe({
 
   // FETCH_HEAD lives in the common directory; a worktree's own git dir is checked too.
   const abs = (p: string) => (isAbsolute(p) ? p : join(root, p));
-  const fetched = Math.max(
-    ...(
-      await Promise.all(
-        [...new Set([commonDir, gitDir].filter(Boolean))].map((d) =>
-          mtime(join(abs(d), "FETCH_HEAD")),
-        ),
-      )
-    ).map((t) => t ?? -Infinity),
-  );
+  // A stalled filesystem must not outlast the overall deadline either.
+  const left = Math.max(0, deadlineMs - (now() - started));
+  let fsTimer: ReturnType<typeof setTimeout> | undefined;
+  const times = await Promise.race([
+    Promise.all(
+      [...new Set([commonDir, gitDir].filter(Boolean))].map((d) =>
+        mtime(join(abs(d), "FETCH_HEAD")).catch(() => null),
+      ),
+    ),
+    new Promise<null[]>((resolve) => {
+      fsTimer = setTimeout(() => resolve([]), left);
+    }),
+  ]).finally(() => clearTimeout(fsTimer));
+  const fetched = Math.max(...times.map((t) => t ?? -Infinity));
   if (Number.isFinite(fetched)) {
     result.lastFetch = new Date(fetched).toISOString();
     result.stale = now() - fetched > staleAfterMs;
@@ -241,31 +288,52 @@ async function probe({
     return { ref, source, state, behind, ahead };
   };
 
+  // One call resolves origin/HEAD's target, whether origin/main exists and the branch's upstream.
+  const patterns = ["refs/remotes/origin/HEAD", "refs/remotes/origin/main"];
+  if (result.branch) patterns.push(`refs/heads/${result.branch}`);
+  const refs = await call([
+    "for-each-ref",
+    "--format=%(refname)%09%(symref:lstrip=2)%09%(upstream:short)",
+    ...patterns,
+  ]);
+  const rows = new Map(
+    (refs ?? "")
+      .split(/\r?\n/)
+      .filter(Boolean)
+      .map((line) => {
+        const [name, symref = "", upstream = ""] = line.split("\t");
+        return [name, { symref, upstream }] as const;
+      }),
+  );
   // Prefer the remote's symbolic default; a present origin/main is an explicitly labelled fallback.
-  const symbolic = await call(["symbolic-ref", "-q", "--short", "refs/remotes/origin/HEAD"]);
+  const symbolic = rows.get("refs/remotes/origin/HEAD")?.symref;
   let defaultRef: { ref: string; source: Comparison["source"] } | null = null;
   if (symbolic) defaultRef = { ref: symbolic, source: "remote-default" };
-  else if ((await call(["rev-parse", "--verify", "-q", "refs/remotes/origin/main"])) !== null)
+  else if (rows.has("refs/remotes/origin/main"))
     defaultRef = { ref: "origin/main", source: "fallback" };
   result.comparison = defaultRef
     ? await compare(defaultRef.ref, defaultRef.source)
-    : unknown("origin/main", "fallback", timedOut ? "Git timed out" : "no remote-tracking ref");
+    : unknown(
+        "origin/main",
+        "fallback",
+        refs === null ? (timedOut ? "Git timed out" : "refs unreadable") : "no remote-tracking ref",
+      );
 
   // The branch's own upstream, reported separately: it may be another feature branch.
-  if (result.branch && gitCallLimit - calls >= 3) {
-    const up = await call(["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"]);
-    if (up && up !== defaultRef?.ref) result.upstream = await compare(up, "upstream");
-  }
+  const up = result.branch ? rows.get(`refs/heads/${result.branch}`)?.upstream : undefined;
+  if (up && up !== defaultRef?.ref) result.upstream = await compare(up, "upstream");
 
-  // HEAD or the compared ref moving during collection makes the comparison unreliable.
-  if (result.commit && defaultRef && result.comparison.state !== "unknown") {
+  // HEAD moving during collection makes every comparison unreliable.
+  const measured = [result.comparison, result.upstream].some((c) => c && c.state !== "unknown");
+  if (result.commit && measured) {
     const again = await call(["rev-parse", "--verify", "-q", "HEAD^{commit}"]);
-    if (again !== result.commit)
-      result.comparison = unknown(
-        defaultRef.ref,
-        defaultRef.source,
-        again === null ? "Git timed out" : "checkout changed during inspection; retry",
-      );
+    if (again !== result.commit) {
+      const why = again === null ? "Git timed out" : "checkout changed during inspection; retry";
+      if (result.comparison)
+        result.comparison = unknown(result.comparison.ref, result.comparison.source, why);
+      if (result.upstream)
+        result.upstream = unknown(result.upstream.ref, result.upstream.source, why);
+    }
   }
   if (result.commit === null)
     result.reason = timedOut ? "Git timed out" : "no commit checked out (unborn HEAD)";

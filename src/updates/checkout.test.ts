@@ -8,6 +8,7 @@ import {
   checkoutAdvisory,
   checkoutFreshness,
   describeCheckout,
+  gitInvocation,
   gitWith,
   type GitRunner,
 } from "./checkout.js";
@@ -199,6 +200,111 @@ describe("source checkout freshness (#309)", () => {
       ahead: 0,
     });
     expect(s.lastFetch).not.toBeNull();
+  });
+
+  it("bounds the FETCH_HEAD read by the overall deadline", async () => {
+    const { work } = await cloned();
+    const started = Date.now();
+    const s = await probe(work, { mtime: () => new Promise(() => {}), deadlineMs: 1500 });
+    expect(Date.now() - started).toBeLessThan(2500);
+    expect(s).toMatchObject({ lastFetch: null, stale: null });
+  });
+
+  it("invalidates the upstream comparison too when HEAD moves", async () => {
+    let heads = 0;
+    const moving: GitRunner = async (args) => {
+      const a = args.join(" ");
+      if (a.startsWith("rev-parse --show-toplevel"))
+        return { ok: true, stdout: "/r\n.git\n.git\nfalse" };
+      if (a.startsWith("rev-parse --verify -q HEAD"))
+        return { ok: true, stdout: heads++ ? "b".repeat(40) : "a".repeat(40) };
+      if (a.startsWith("symbolic-ref")) return { ok: true, stdout: "feat" };
+      if (a.startsWith("for-each-ref"))
+        return {
+          ok: true,
+          stdout:
+            "refs/remotes/origin/HEAD\torigin/main\t\nrefs/remotes/origin/main\t\t\nrefs/heads/feat\t\torigin/feat",
+        };
+      if (a.startsWith("rev-list")) return { ok: true, stdout: "1\t0" };
+      return { ok: false, reason: "failed" };
+    };
+    const s = await probe("x", { git: moving, mtime: async () => null });
+    expect(s.comparison).toMatchObject({
+      state: "unknown",
+      reason: expect.stringMatching(/changed/),
+    });
+    expect(s.upstream).toMatchObject({
+      ref: "origin/feat",
+      state: "unknown",
+      reason: expect.stringMatching(/changed/),
+    });
+  });
+
+  it("still compares the upstream on the origin/main fallback path within the call budget", async () => {
+    const { origin, work } = await cloned();
+    git(work, "checkout", "-q", "-b", "feat");
+    await commit(work);
+    git(work, "push", "-q", "-u", "origin", "feat");
+    await commit(origin);
+    git(origin, "checkout", "-q", "feat");
+    await commit(origin);
+    git(work, "fetch", "-q");
+    git(work, "remote", "set-head", "origin", "-d");
+    let calls = 0;
+    const counting: GitRunner = (a, c, t) => (calls++, gitWith("git", a, c, t));
+    const s = await probe(work, { git: counting });
+    expect(s.comparison).toMatchObject({
+      ref: "origin/main",
+      source: "fallback",
+      state: "diverged",
+      behind: 1,
+      ahead: 1,
+    });
+    expect(s.upstream).toMatchObject({ ref: "origin/feat", state: "behind", behind: 1, ahead: 0 });
+    expect(calls).toBeLessThanOrEqual(8);
+  });
+
+  it("refuses every transport and lazy fetch, so a probe never reaches the network", async () => {
+    const inv = gitInvocation(["status"], { PATH: "p" });
+    expect(inv.args.slice(0, 2)).toEqual(["-c", "protocol.allow=never"]);
+    expect(inv.env).toMatchObject({ GIT_NO_LAZY_FETCH: "1", PATH: "p" });
+    // Even an explicit fetch through the probe's runner fails, here from a local file remote.
+    const { work } = await cloned();
+    expect(await gitWith("git", ["fetch", "origin"], work, 5000)).toMatchObject({ ok: false });
+  });
+
+  it("ignores inherited repository-selection variables", async () => {
+    const inv = gitInvocation([], {
+      GIT_DIR: "/elsewhere/.git",
+      GIT_WORK_TREE: "/elsewhere",
+      GIT_INDEX_FILE: "i",
+      GIT_COMMON_DIR: "c",
+      GIT_CONFIG_KEY_0: "k",
+      HOME: "h",
+    });
+    for (const k of [
+      "GIT_DIR",
+      "GIT_WORK_TREE",
+      "GIT_INDEX_FILE",
+      "GIT_COMMON_DIR",
+      "GIT_CONFIG_KEY_0",
+    ])
+      expect(inv.env[k]).toBeUndefined();
+    expect(inv.env.HOME).toBe("h");
+    const { work } = await cloned();
+    const other = await cloned();
+    git(other.work, "checkout", "-q", "-b", "elsewhere");
+    const saved = { dir: process.env.GIT_DIR, tree: process.env.GIT_WORK_TREE };
+    process.env.GIT_DIR = join(other.work, ".git");
+    process.env.GIT_WORK_TREE = other.work;
+    try {
+      expect(await probe(work)).toMatchObject({ status: "checkout", branch: "main" });
+    } finally {
+      if (saved.dir === undefined) delete process.env.GIT_DIR;
+      else process.env.GIT_DIR = saved.dir;
+      if (saved.tree === undefined) delete process.env.GIT_WORK_TREE;
+      else process.env.GIT_WORK_TREE = saved.tree;
+    }
   });
 
   it("never probes an npm installation, and honours the opt-out", async () => {
