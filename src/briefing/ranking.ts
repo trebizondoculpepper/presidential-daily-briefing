@@ -11,6 +11,8 @@ import type { Issue, PullRequest } from "../github/types.js";
 
 export const pickupOrders = ["impact", "oldest", "newest"] as const;
 export type PickupOrder = (typeof pickupOrders)[number];
+/** Pickup order when --order is omitted; `pdb rules` reports it as a declared default. */
+export const defaultPickupOrder: PickupOrder = "impact";
 
 export const pickupPolicy = {
   /** Readiness labels that make unclaimed work available for implementation pickup. */

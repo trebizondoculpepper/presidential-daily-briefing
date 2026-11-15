@@ -36,6 +36,8 @@ export const MAX_GUIDE_CODE_POINTS = 900;
 /** Registered repository setting that opts a project out of the recurring guide. */
 export const GUIDE_CONFIG_KEY = "processGuide";
 export const PROCESS_COMMAND = "pdb process";
+/** The compiled-policy listing (#416), cross-linked from the full guide. */
+export const RULES_COMMAND = "pdb rules";
 
 /** An implemented command. Only these may appear as executable advice. */
 export interface CommandSpec {
@@ -217,6 +219,7 @@ export function fullGuideText(): string {
     "\nLimitations",
     ...guideLimitations.map((line) => `  ${line}`),
     `\nOpt out of the briefing guide: --no-guide, or pdb config set ${GUIDE_CONFIG_KEY} false.`,
+    `Every decision rule, compiled to English from the policy itself: ${RULES_COMMAND} (see ${RULES_COMMAND} --help).`,
     "",
   ].join("\n");
 }

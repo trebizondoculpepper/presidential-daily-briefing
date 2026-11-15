@@ -38,7 +38,7 @@ import { cachedCheckForUpdate } from "./updates/updatecache.js";
 import { installedVersion, optOutEnv, legacyOptOutEnv, updateAdvisory } from "./updates/updates.js";
 import { defaultStaleHours } from "./workflow/team.js";
 import { migrationPlanText, planMigration } from "./github/migration.js";
-import { presentBriefing, unavailableText } from "./briefing/service.js";
+import { defaultEngineRole, presentBriefing, unavailableText } from "./briefing/service.js";
 import { runBriefing } from "./briefing/catchupcli.js";
 import type { BriefingFiles } from "./briefing/catchupcli.js";
 import {
@@ -52,10 +52,11 @@ import {
   resolveGuideSetting,
 } from "./briefing/process.js";
 import type { GuideRuntime } from "./briefing/process.js";
-import { pickupOrders } from "./briefing/ranking.js";
+import { defaultPickupOrder, pickupOrders } from "./briefing/ranking.js";
 import type { PickupOrder } from "./briefing/ranking.js";
 import { complexityGuidanceJson, complexityGuidanceText } from "./estimation/complexity.js";
 import { impactGuidanceJson, impactGuidanceText } from "./estimation/impact.js";
+import { CONFIG_KEYS } from "./config/config.js";
 import { runConfig } from "./config/configcli.js";
 import type { ConfigRuntime } from "./config/configcli.js";
 import { estimateUsage, runEstimate } from "./estimation/estimate.js";
@@ -241,6 +242,9 @@ Rollback: pdb config set briefing.engine typescript.
   --guide | --no-guide  Show or hide the compact workflow guide in this briefing
                         (default off; repository setting: config set ${GUIDE_CONFIG_KEY} false)
   process [--json]      Full workflow guide from the registered policy; local, no GitHub
+  rules [--json] [--rule ID] [--role R]
+                        The decision policy compiled to English from its Datalog clauses;
+                        local, no GitHub (pdb rules --help)
   --help                Show usage
 Workflow (generated from the registered policy):
 ${guideRules()
@@ -493,7 +497,7 @@ export function argumentsFor(args: string[]) {
     );
   if (values.repo && !/^[\w.-]+\/[\w.-]+$/.test(values.repo))
     throw new Error("--repo must be owner/name.");
-  const order = values.order ?? "impact";
+  const order = values.order ?? defaultPickupOrder;
   if (!isPickupOrder(order)) throw new Error(`--order must be one of ${pickupOrders.join(", ")}.`);
   if (values.platform !== undefined && !/^[\w.-]+$/.test(values.platform))
     throw new Error("--platform must be a platform name such as claude-code.");
@@ -625,6 +629,7 @@ export async function main(
     !rest.includes("--help") &&
     !(rest[0] === "config" && rest[1] === "help") &&
     rest[0] !== "process" &&
+    rest[0] !== "rules" &&
     // A foreground server prints its banner first and runs until stopped; no advisory.
     rest[0] !== "serve";
   const pending = eligible
@@ -642,8 +647,80 @@ export async function main(
   }
 }
 
+/**
+ * `pdb rules` (#416): the compiled policy. Local and credential-free: it reads only the bundled
+ * artifact. The document is built and validated before anything is printed, so a failure never
+ * leaves a partial listing on stdout. Exit 2 for arguments, 1 for a missing or stale artifact.
+ */
+async function runRules(args: string[], output: Output, runtime: Runtime): Promise<number> {
+  const stderr = runtime.stderr ?? ((text: string) => process.stderr.write(text));
+  let values: { json?: boolean; rule?: string; role?: string; help?: boolean };
+  try {
+    ({ values } = parseArgs({
+      args,
+      strict: true,
+      allowPositionals: false,
+      options: {
+        json: { type: "boolean" },
+        rule: { type: "string" },
+        role: { type: "string" },
+        help: { type: "boolean" },
+      },
+    }));
+  } catch (error) {
+    stderr(
+      `pdb rules: ${error instanceof Error ? error.message : String(error)}\nRun pdb rules --help.\n`,
+    );
+    return 2;
+  }
+  const rules = await import("./rules/datalog/datalog.js");
+  if (values.help) {
+    await output(rules.rulesHelp);
+    return 0;
+  }
+  let text: string;
+  try {
+    const document = rules.rulesDocument(
+      {
+        defaults: [
+          ...CONFIG_KEYS.map((k) => ({
+            name: k.key,
+            value: k.defaultValue,
+            declaredBy: "repository setting registry",
+          })),
+          {
+            name: "--role",
+            value: defaultEngineRole,
+            declaredBy: "briefing, when --role is omitted",
+          },
+          {
+            name: "--order",
+            value: defaultPickupOrder,
+            declaredBy: "briefing, when --order is omitted",
+          },
+          {
+            name: "--platform",
+            value: "",
+            declaredBy: "briefing, when --platform is omitted; the viewer platform is then unknown",
+          },
+        ],
+        mutatingCommands: mutatingCommands(),
+        processCommand: PROCESS_COMMAND,
+      },
+      { rule: values.rule, role: values.role },
+    );
+    text = values.json ? `${JSON.stringify(document, null, 2)}\n` : rules.rulesText(document);
+  } catch (error) {
+    stderr(`pdb rules: ${error instanceof Error ? error.message : String(error)}\n`);
+    return error instanceof rules.RulesArgumentError ? 2 : 1;
+  }
+  await output(text);
+  return 0;
+}
+
 /** The command itself; `main` adds the version check around it. */
 async function run(args: string[], output: Output, runtime: Runtime): Promise<number> {
+  if (args[0] === "rules") return runRules(args.slice(1), output, runtime);
   if (args[0] === "process") {
     const { values } = parseArgs({ args: args.slice(1), options: { json: { type: "boolean" } } });
     await output(values.json ? JSON.stringify(fullGuideJson(), null, 2) + "\n" : fullGuideText());

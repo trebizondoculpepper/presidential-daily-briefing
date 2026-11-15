@@ -37,6 +37,9 @@ import type { HumanBriefing } from "./human.js";
 import type { BriefingProcess, GuideRuntime } from "./process.js";
 
 /** Presentation options for a collected snapshot, as the CLI's briefing flags express them. */
+/** Decision-engine view when --role is omitted; `pdb rules` reports it as a declared default. */
+export const defaultEngineRole = "implementer";
+
 export interface PresentOptions extends Omit<BriefingOptions, "estimation" | "assessments"> {
   /** Expanded version-1 report instead of the compact briefing. */
   full?: boolean;
@@ -139,7 +142,7 @@ export async function presentBriefing(
   const roleSource = options.role === undefined ? ("default" as const) : ("request" as const);
   // Full issue intake is outside the experimental next-action slice.
   if (selection.requested === "datalog" && !options.full && !options.issue) {
-    options = { ...options, role: options.role ?? "implementer" };
+    options = { ...options, role: options.role ?? defaultEngineRole };
     if (options.role !== "implementer" && options.role !== "designer")
       throw new BriefingEngineError(
         "decision-engine-role",
@@ -189,7 +192,7 @@ export async function presentBriefing(
     ? {
         ...experimental.decisionEngine,
         source: selection.source,
-        role: { used: options.role ?? "implementer", source: roleSource },
+        role: { used: options.role ?? defaultEngineRole, source: roleSource },
       }
     : {
         requested: selection.requested,
