@@ -1,7 +1,8 @@
 # Per-request GitHub evidence and failure classification
 
-Contract for #293. This is documentation before implementation, not new runtime
-instrumentation. It supports collection profiles (#366), independent read coverage
+Contract for #293. Implemented in #489 (same-response evidence and classification),
+#494 (per-attempt events and the `metrics.github` summary) and the REST slice; surfacing
+the summary in serve diagnostics is #459. It supports collection profiles (#366), independent read coverage
 (#369) and safe server diagnostics (#459). Review quotas from Codex/CodeRabbit are
 separate services and are never added to GitHub's API allowance.
 

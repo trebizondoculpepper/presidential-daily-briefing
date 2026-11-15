@@ -360,6 +360,11 @@ export function graphqlAnswer(text: unknown): JsonObject | null {
 export interface RestAnswer {
   status: number | null;
   body: unknown;
+  /**
+   * Additive (#293): for a non-2xx answer, the failure classified from this same response's
+   * status, headers and structured error fields. Absent on success or without headers.
+   */
+  evidence?: FailureClassification;
 }
 /**
  * Read-only REST GET. With `options.signal`, an implementation stops before starting and aborts
@@ -373,18 +378,30 @@ export const ghRestWith =
   async (path, options) => {
     const signal = options?.signal ?? bound;
     signal?.throwIfAborted();
+    // --include: the status and quota headers come from this response itself (#293).
     try {
-      const { stdout } = await execute("gh", ["api", path], { timeout: 30_000, signal });
-      return { status: 200, body: JSON.parse(stdout) as unknown };
+      const { stdout } = await execute("gh", ["api", "--include", path], {
+        timeout: 30_000,
+        signal,
+      });
+      const response = parseGhResponse(stdout);
+      return { status: response.status ?? 200, body: JSON.parse(response.body) as unknown };
     } catch (error) {
       signal?.throwIfAborted();
+      const response = responseOf(prop(error, "stdout"));
+      let body: unknown = null;
       try {
-        const out = prop(error, "stdout");
-        const body: unknown = JSON.parse(typeof out === "string" ? out : "");
-        return { status: Number(prop(body, "status")) || null, body };
+        body = response ? (JSON.parse(response.body) as unknown) : null;
       } catch {
-        return { status: null, body: null };
+        body = null;
       }
+      const status = response?.status ?? (Number(prop(body, "status")) || null);
+      const timedOut = prop(error, "killed") === true && prop(error, "signal") === "SIGTERM";
+      const evidence =
+        response?.status !== null && response !== null
+          ? classifyGhFailure({ response, exitCode: prop(error, "code"), timedOut })
+          : undefined;
+      return { status, body, ...(evidence ? { evidence } : {}) };
     }
   };
 export const ghRest: Rest = ghRestWith();
