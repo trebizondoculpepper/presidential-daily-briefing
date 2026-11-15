@@ -1,3 +1,4 @@
+import type { SafeEngineCause } from "../config/engine-setting.js";
 /**
  * Whole-result byte budget for MCP read results (doc/design/mcp-bounded-results.md, #266).
  *
@@ -82,7 +83,20 @@ export const boundedEnvelope = z.strictObject({
     .nullable(),
   presentation: presentationSchema,
   data: z.record(z.string(), z.unknown()).nullable(),
-  error: z.object({ code: z.string(), message: z.string() }).nullable(),
+  error: z
+    .object({
+      code: z.string(),
+      message: z.string(),
+      /** #346: a safe engine cause (validated module name and recovery commands), when known. */
+      cause: z
+        .object({
+          category: z.literal("missing-module"),
+          module: z.string().max(214).nullable(),
+          recovery: z.array(z.string()),
+        })
+        .optional(),
+    })
+    .nullable(),
 });
 export type BoundedEnvelope = z.infer<typeof boundedEnvelope>;
 
@@ -238,6 +252,8 @@ export interface ErrorInput {
   sourceCompleteness: BoundedEnvelope["sourceCompleteness"];
   code: string;
   message: string;
+  /** #346: a safe, structured cause (validated fields only). */
+  cause?: SafeEngineCause | null;
 }
 
 const echoNotice = `Echoed input longer than ${fieldLimit} characters was shortened (${truncationMarker}).`;
@@ -267,7 +283,11 @@ function errorShape(input: ErrorInput): ToolResult {
         next: null,
       },
       data: null,
-      error: { code: input.code, message: input.message },
+      error: {
+        code: input.code,
+        message: input.message,
+        ...(input.cause ? { cause: input.cause } : {}),
+      },
     },
     isError: true,
   });

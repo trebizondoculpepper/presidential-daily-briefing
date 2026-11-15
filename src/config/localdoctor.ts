@@ -24,6 +24,8 @@ import type { ConfigFileSystem, GitRunner } from "./config.js";
 import { roleNames } from "../briefing/roles.js";
 import { resolveEntry } from "./harness.js";
 import type { Environment } from "./harness.js";
+import { dependencyReadiness } from "../updates/dependencies.js";
+import { installedVersion } from "../updates/updates.js";
 import {
   LEGACY_IDENTITY_FILE,
   parseIdentityDocument,
@@ -87,6 +89,18 @@ export interface LocalDoctorRuntime {
   readonly nodeVersion?: string;
   /** Environment for harness detection; defaults to the process. Values are never reported. */
   readonly env?: Environment;
+  /** Dependency readiness of the running source checkout (#346); defaults to the real probe. */
+  readonly dependencies?: () => Promise<LocalCheck>;
+}
+
+/** The real #346 probe for the running installation. */
+export async function installationDependencies(): Promise<LocalCheck> {
+  const info = await installedVersion();
+  return dependencyReadiness({
+    root: info.root ?? null,
+    installed: info.installed,
+    executingDist: import.meta.url.includes("/dist/"),
+  });
 }
 
 export interface LocalDoctorOptions {
@@ -155,6 +169,17 @@ export async function localDoctor(
           detail: "Node version could not be read.",
           next: ["node --version"],
         },
+  );
+
+  // install.dependencies (#346): independent of every other check.
+  add(
+    await (runtime.dependencies ?? installationDependencies)().catch((): LocalCheck => ({
+      id: "install.dependencies",
+      status: "unknown",
+      source: "installation root",
+      detail: "Dependency readiness could not be checked, so it is not reported as up to date.",
+      next: [],
+    })),
   );
 
   // gh.available and gh.auth: exit codes only; gh output may contain account details.

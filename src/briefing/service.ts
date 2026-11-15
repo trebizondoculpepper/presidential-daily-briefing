@@ -1,5 +1,6 @@
 import {
   BriefingEngineError,
+  engineFailure,
   resolveEngineSetting,
   defaultEngine,
 } from "../config/engine-setting.js";
@@ -223,12 +224,7 @@ export async function presentBriefing(
       });
     } catch (error) {
       if (signal?.aborted) throw error;
-      throw new BriefingEngineError(
-        "decision-engine-failed",
-        error instanceof Error
-          ? error.message
-          : "Experimental evaluator failed; no fallback was run.",
-      );
+      throw engineFailure(error, "Experimental evaluator failed; no fallback was run.");
     }
   }
   const expanded = briefing(
@@ -356,12 +352,7 @@ async function presentHuman(
     });
   } catch (error) {
     if (signal?.aborted) throw error;
-    throw new BriefingEngineError(
-      "decision-engine-failed",
-      error instanceof Error
-        ? error.message
-        : "Human briefing evaluator failed; no fallback was run.",
-    );
+    throw engineFailure(error, "Human briefing evaluator failed; no fallback was run.");
   }
   // Freshness and snapshot completeness come from the shared facts, as in every briefing.
   const facts = briefing(
@@ -406,6 +397,8 @@ async function presentHuman(
 /** GitHub-facing boundaries of a live read; tests inject credential-free fakes. */
 export interface ReadRuntime {
   collect: typeof collect;
+  /** Test seam for the lazily loaded Datalog engine; defaults to importing it (#346). */
+  loadEngine?: () => Promise<Pick<typeof import("../rules/datalog/datalog.js"), "evaluateDatalog">>;
   dependencyReport: typeof dependencyReport;
   estimation?: LabelEstimationRuntime;
   /**
@@ -554,7 +547,7 @@ export async function readBriefing(
       ? markerTrust(permissionLookup(request.repository, runtime.rest, request.signal))
       : undefined,
     request.signal,
-    undefined,
+    runtime.loadEngine,
     // Delivery requests are bound to the request's cancellation signal, like collection.
     runtime.rest && (runtime.queryWith || runtime.query)
       ? {

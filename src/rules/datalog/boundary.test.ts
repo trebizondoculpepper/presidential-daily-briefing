@@ -31,7 +31,7 @@ vi.mock("./engine.js", async (importOriginal) => {
 const { evaluateDatalog } = await import("./datalog.js");
 const { evaluatePolicy, firstSubjectId, DatalogError } = await import("./engine.js");
 const { presentBriefing } = await import("../../briefing/service.js");
-const { BriefingEngineError } = await import("../../config/engine-setting.js");
+const { BriefingEngineError, engineFailureCause } = await import("../../config/engine-setting.js");
 const bundle = (await import("./policy.generated.json", { with: { type: "json" } })).default;
 
 const page = <T>(nodes: T[] = []): Page<T> => ({
@@ -303,5 +303,64 @@ describe("engine failure and explanation consistency (#339)", () => {
     await expect(failing).rejects.toBeInstanceOf(BriefingEngineError);
     await expect(failing).rejects.toMatchObject({ code: "decision-engine-failed" });
     await expect(failing).rejects.toThrow(/engine exploded/);
+  });
+
+  it("names a missing engine module and its recovery, keeping decision-engine-failed (#346)", async () => {
+    const root = "/repo";
+    const fs: ConfigFileSystem = {
+      readText: async () => null,
+      writeText: async () => undefined,
+      rename: async () => undefined,
+      remove: async () => undefined,
+      makeDirectory: async () => undefined,
+    };
+    const git: GitRunner = async (args) =>
+      args[0] === "rev-parse" ? `${root}\n` : "origin\thttps://github.com/o/r.git (fetch)\n";
+    const missing = Object.assign(
+      new Error(
+        "Cannot find package 'datascript' imported from /private/home/x/src/rules/datalog/datalog.ts",
+      ),
+      { code: "ERR_MODULE_NOT_FOUND" },
+    );
+    const failing = presentBriefing(
+      snap([issue(1)]),
+      {
+        limit: 10,
+        maxChars: 20000,
+        agent: "me",
+        engineSetting: { requested: "datalog", source: "config" },
+      },
+      { fs, git, cwd: root },
+      new Date("2026-01-02T00:00:00Z"),
+      undefined,
+      undefined,
+      undefined,
+      async () => {
+        throw missing;
+      },
+    );
+    await expect(failing).rejects.toMatchObject({
+      code: "decision-engine-failed",
+      engineCause: { category: "missing-module", module: "datascript" },
+    });
+    await expect(failing).rejects.toThrow(/missing module datascript.*npm ci.*pdb doctor/);
+    await expect(failing).rejects.not.toThrow(/private/);
+  });
+
+  it("classifies only module-resolution errors as a missing module, never echoing paths", () => {
+    const pathy = Object.assign(new Error("Cannot find module '/secret/dir/x.js'"), {
+      code: "ERR_MODULE_NOT_FOUND",
+    });
+    expect(engineFailureCause(pathy)).toEqual({ category: "missing-module", module: null });
+    expect(engineFailureCause(new Error("Cannot find package 'datascript'"))).toEqual({
+      category: "unknown",
+    });
+    const scoped = Object.assign(new Error("Cannot find package '@scope/pkg/deep'"), {
+      code: "MODULE_NOT_FOUND",
+    });
+    expect(engineFailureCause(scoped)).toEqual({
+      category: "missing-module",
+      module: "@scope/pkg",
+    });
   });
 });
