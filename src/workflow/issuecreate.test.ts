@@ -4,8 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { main } from "../cli.js";
 import type { Rest, RestAnswer } from "../github/github.js";
+import { EventEmitter } from "node:events";
+import { PassThrough, Writable } from "node:stream";
+import { execFileSync } from "node:child_process";
 import {
   createIssue,
+  ghPostWith,
   creationMarker,
   intentDigest,
   ISSUE_CREATE_MARKER,
@@ -364,5 +368,74 @@ describe("pdb issue create CLI", () => {
     } finally {
       await rm(dir, { recursive: true });
     }
+  });
+});
+
+describe("issue create: generated commands and the create boundary", () => {
+  it.skipIf(process.platform === "win32")(
+    "quotes untrusted label text in recovery commands so a shell treats it as data",
+    async () => {
+      const hostile = ["$(touch pwned)", "`id`", 'it\'s "q"', "a b;c|d&e"];
+      const f = fake({
+        post: () => ({ dispatched: true, status: 201, body: issueBody(7, []) }),
+        readBack: { status: 200, body: issueBody(7, []) },
+      });
+      const result = await createIssue(request({ labels: hostile }), f.rt);
+      expect(result.status).toBe("partial");
+      for (const [i, command] of result.recovery.entries()) {
+        // printf echoes the shell's parsed last argument: it must equal the label exactly.
+        const parsed = execFileSync("sh", ["-c", `set -- ${command}; printf %s "$8"`], {
+          encoding: "utf8",
+        });
+        expect(parsed).toBe(hostile[i]);
+      }
+      // Newlines never reach a command: labels with control characters are rejected first.
+      await expect(createIssue(request({ labels: ["a\nb"] }), f.rt)).rejects.toThrow(
+        "Invalid --label",
+      );
+    },
+  );
+  it.skipIf(process.platform === "win32")(
+    "quotes the unknown-outcome recovery query as separate arguments",
+    async () => {
+      const f = fake({ post: () => ({ dispatched: true, status: 503, body: null }) });
+      const result = await createIssue(request(), f.rt);
+      const parsed = execFileSync(
+        "sh",
+        ["-c", `set -- ${result.recovery[0]!}; printf '%s\\n' "$#" "$3"`],
+        { encoding: "utf8" },
+      ).split("\n");
+      expect(parsed[0]).toBe("5");
+      expect(parsed[1]).toContain(`repos/${target}/issues?creator=reporter&since=`);
+    },
+  );
+  it("survives gh closing stdin early (EPIPE) and never reports created", async () => {
+    const fakeSpawn = (() => {
+      const child = new EventEmitter() as EventEmitter & {
+        stdin: Writable;
+        stdout: PassThrough;
+        kill: () => boolean;
+      };
+      child.stdin = new Writable({
+        write: (_c, _e, done) => done(Object.assign(new Error("write EPIPE"), { code: "EPIPE" })),
+        final: (done) => done(Object.assign(new Error("write EPIPE"), { code: "EPIPE" })),
+      });
+      child.stdout = new PassThrough();
+      child.kill = () => true;
+      setImmediate(() => {
+        child.emit("spawn");
+        setImmediate(() => {
+          child.stdout.end();
+          child.emit("close", 1);
+        });
+      });
+      return child;
+    }) as never;
+    const answer = await ghPostWith(fakeSpawn)("repos/owner/repo/issues", { title: "t" });
+    expect(answer).toMatchObject({ dispatched: true, status: null });
+    const f = fake({ post: () => answer });
+    const result = await createIssue(request(), f.rt);
+    expect(result.status).toBe("unknown");
+    expect(result.issue).toBeNull();
   });
 });
