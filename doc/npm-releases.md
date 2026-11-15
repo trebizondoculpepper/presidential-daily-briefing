@@ -13,7 +13,7 @@ npm install -g @trebizondoculpepper/presidential-daily-briefing
 pdb --help
 ```
 
-Use `@next` to opt into prereleases and `@VERSION` to pin a version. Publish the built ESM CLI at `dist/cli.mjs`; allowlist only required runtime artifacts, README and license. Never ship identity files, caches, credentials, agent settings or tests. Consumer installation must not invoke development tooling or install contributor hooks.
+Use `@next` to opt into prereleases and `@VERSION` to pin a version. Publish the built ESM CLI at `dist/cli.mjs`; allowlist only required runtime artifacts, README and license. The bundles' `.mjs.map` files are runtime artifacts: they carry positions and public `../src/` names only, for crash-frame mapping ([sentry-crash-reporting.md](design/sentry-crash-reporting.md#packaged-stack-locations-629)). Never ship identity files, caches, credentials, agent settings or tests. Consumer installation must not invoke development tooling or install contributor hooks.
 
 ## Explicit publication operations
 
