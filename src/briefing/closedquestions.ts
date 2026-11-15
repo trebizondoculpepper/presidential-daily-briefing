@@ -157,6 +157,8 @@ interface Entry {
    * They stay visible (with an unknown outcome) until the reread completes (Codex, #609).
    */
   earlier?: Comment[];
+  /** Set when GitHub stopped returning the issue; its history stays incomplete. */
+  unavailable?: string;
 }
 /** The comments to fold: those reread so far, plus earlier ones not yet reread. */
 const known = (e: Entry): Comment[] => {
@@ -421,40 +423,63 @@ async function scan(
     if (!(error instanceof BudgetExhausted)) failure = `inventory: ${failureText(error)}`;
   }
 
-  // 2. Hydrate truncated comment histories, one page per source in rotation.
+  // 2. Hydrate truncated comment histories, one page per source in rotation. One source's
+  // failure never stops the others; a source GitHub no longer returns (deleted, transferred,
+  // inaccessible) stops being queued and is reported, so it cannot stall the scan (Codex, #609).
   let commentPages = 0;
   const queue = [...s.entries].filter(([, e]) => e.next !== null).map(([url]) => url);
-  try {
-    while (queue.length && commentPages < bounds.commentPages) {
-      signal?.throwIfAborted();
-      const url = queue.shift()!;
-      const entry = s.entries.get(url)!;
-      const page = pageOf(
-        prop(
-          await request(commentsSource(bounds.pageSize), {
-            number: entry.issue.number,
-            ...(entry.next ? { cursor: entry.next } : {}),
-          }),
-          "issueOrPullRequest",
-          "comments",
-        ),
-      );
-      commentPages++;
-      entry.comments.push(...(page.nodes as Comment[]));
-      if (page.more && page.cursor) {
-        entry.next = page.cursor;
-        queue.push(url);
-      } else {
-        entry.next = null;
-        delete entry.earlier;
-      }
-    }
-  } catch (error) {
+  const failed: string[] = [];
+  while (queue.length && commentPages < bounds.commentPages) {
     signal?.throwIfAborted();
-    if (!(error instanceof BudgetExhausted))
-      failure = [failure, `comments: ${failureText(error)}`].filter(Boolean).join("; ");
+    const url = queue.shift()!;
+    const entry = s.entries.get(url)!;
+    let target: unknown;
+    try {
+      target = prop(
+        await request(commentsSource(bounds.pageSize), {
+          number: entry.issue.number,
+          ...(entry.next ? { cursor: entry.next } : {}),
+        }),
+        "issueOrPullRequest",
+      );
+    } catch (error) {
+      signal?.throwIfAborted();
+      if (error instanceof BudgetExhausted) break;
+      failed.push(`${url}: ${failureText(error)}`);
+      continue;
+    }
+    commentPages++;
+    if (target === null || target === undefined || prop(target, "comments") === undefined) {
+      entry.next = null;
+      entry.unavailable =
+        "GitHub no longer returns this issue (deleted, transferred or inaccessible)";
+      delete entry.earlier;
+      continue;
+    }
+    let page: ReturnType<typeof pageOf>;
+    try {
+      page = pageOf(prop(target, "comments"));
+    } catch (error) {
+      failed.push(`${url}: ${failureText(error)}`);
+      continue;
+    }
+    entry.comments.push(...(page.nodes as Comment[]));
+    if (page.more && page.cursor) {
+      entry.next = page.cursor;
+      queue.push(url);
+    } else {
+      entry.next = null;
+      delete entry.earlier;
+    }
   }
+  if (failed.length)
+    failure = [failure, `comments: ${failed.join("; ")}`].filter(Boolean).join("; ");
   const pending = [...s.entries].filter(([, e]) => e.next !== null).map(([url]) => url);
+  const unavailable = [...s.entries].filter(([, e]) => e.unavailable);
+  for (const [url, e] of unavailable)
+    warnings.push(
+      `${url}: ${e.unavailable}; its comment history could not be completed, so questions found on it have an unknown resolution.`,
+    );
   // Hydrated issues without any marker hold nothing to fold: keep only their URL.
   for (const [url, e] of s.entries)
     if (e.next === null && !e.comments.some((c) => (c.body ?? "").includes("<!-- github-triage:")))
@@ -503,7 +528,7 @@ async function scan(
       repository,
       entry.issue,
       comments,
-      entry.next === null,
+      entry.next === null && !entry.unavailable,
       trust,
       counts,
       warnings,
