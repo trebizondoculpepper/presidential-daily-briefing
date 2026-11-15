@@ -8,11 +8,17 @@
  * no claim and reserves nothing. Disabled complexity suppresses it. Sizes come from the
  * `complexity:` labels already in the snapshot (complexitylabels.ts); incomplete label evidence
  * is unknown, never "unestimated" or queued. Missing labels or label definitions are not setup
- * errors. Provenance comes from v2 marker comments already in the snapshot.
+ * errors. Provenance comes from v2 marker comments already in the snapshot; only a marker whose
+ * author and any editor are verified (#269, doc/design/complexity-provenance-trust.md) counts as
+ * recorded. `readComplexityProvenance` makes those trust decisions asynchronously, before the pure
+ * report builder runs.
  */
 import { complexityGuidance } from "./complexity.js";
 import type { ComplexitySize } from "./complexity.js";
-import { parseLabelProvenance } from "./estimate.js";
+import { parseLabelProvenance, scanProvenance } from "./estimate.js";
+import { complexityMetric } from "./metrics.js";
+import { classifyComplexityLabels } from "./complexitylabels.js";
+import type { TrustDecision } from "../workflow/delivery.js";
 import { pickupEligibility } from "../briefing/ranking.js";
 import type { PickupContext } from "../briefing/ranking.js";
 import type { Issue } from "../github/types.js";
@@ -47,11 +53,22 @@ export interface EstimateEntry {
   title: string;
   url: string;
   createdAt: string;
-  /** Size from the complexity label; null when unset or unknown (see state). */
+  /**
+   * Size from the complexity label; null when unset, conflicting or unreadable. Kept when only the
+   * provenance authority is unknown (state `unknown`), so the label size is still shown.
+   */
   size: ComplexitySize | null;
   state: EstimateState;
-  /** Newest provenance marker in the comment history, if any. */
+  /** Newest trusted provenance marker in the comment history, if any (#269). */
   recorded: RecordedEstimate | null;
+  /**
+   * Additive (#269): whether the provenance behind `recorded` was written by a verified author.
+   * `none`: no marker; `untrusted`: only confirmed-untrusted markers; `unknown`: the newest
+   * relevant marker's authority, or the history, could not be verified.
+   */
+  provenanceAuthority: ProvenanceAuthority;
+  /** Additive (#269): why newer provenance markers were not trusted. */
+  ignoredProvenance: string[];
   /** Implementation pickup eligibility, independent of estimation. */
   implementation: "eligible" | "ineligible" | "unknown";
   reasons: string[];
@@ -80,16 +97,24 @@ export interface EstimationReport {
   boundaries: string;
 }
 
-/**
- * Newest valid v2 (label-backed) provenance marker; undefined when comment history is incomplete.
- * Retired field-era v1 markers are not provenance and are ignored, never parsed.
- */
-function newestRecord(issue: Issue): RecordedEstimate | null | undefined {
-  let found: RecordedEstimate | null = null;
-  for (const comment of issue.comments.nodes) {
-    const p = parseLabelProvenance(comment.body);
-    if (p)
-      found = {
+export type ProvenanceAuthority = "trusted" | "untrusted" | "unknown" | "none";
+
+/** One issue's complexity provenance after trust decisions (#269). */
+export interface ProvenanceDecision {
+  authority: ProvenanceAuthority;
+  /** The newest trusted record; non-null only when `authority` is `trusted`. */
+  record: RecordedEstimate | null;
+  /** Confirmed-untrusted markers skipped on the way to the decision. */
+  ignored: string[];
+  /** Why authority is unknown. */
+  why?: string;
+}
+
+/** A v2 (label-backed) marker comment as a recorded estimate; v1 field-era markers are not. */
+function recordOf(comment: { body: string; url: string }): RecordedEstimate | null {
+  const p = parseLabelProvenance(comment.body);
+  return p
+    ? {
         size: p.size,
         rationale: p.rationale,
         assumptions: Array.isArray(p.assumptions) ? p.assumptions : [],
@@ -97,10 +122,62 @@ function newestRecord(issue: Issue): RecordedEstimate | null | undefined {
         recordedAt: typeof p.recordedAt === "string" ? p.recordedAt : null,
         guidanceVersion: typeof p.guidanceVersion === "number" ? p.guidanceVersion : null,
         url: comment.url,
-      };
+      }
+    : null;
+}
+
+/**
+ * Without a prepared decision nothing is trusted: an issue with no marker has no provenance, and
+ * one with a marker has provenance of unknown authority. Untrusted text never becomes a record.
+ */
+function unevaluated(issue: Issue): ProvenanceDecision {
+  return issue.comments.nodes.some((c) => recordOf(c))
+    ? { authority: "unknown", record: null, ignored: [], why: "provenance authority not evaluated" }
+    : { authority: "none", record: null, ignored: [] };
+}
+
+/**
+ * Trust decisions for complexity provenance (#269), made once per snapshot before the pure report
+ * builder runs: the shared newest-first scanner with the run's `TrustDecision` (the per-run
+ * permission cache, so requests stay bounded by distinct marker authors and editors). Only open
+ * tickets with exactly one recognized size label are judged; for the rest provenance is not read.
+ * Missing newer comments make provenance unknown, even when an older trusted record was found.
+ */
+export async function readComplexityProvenance(
+  issues: readonly Issue[],
+  trust: TrustDecision,
+  signal?: AbortSignal,
+): Promise<Map<string, ProvenanceDecision>> {
+  const decisions = new Map<string, ProvenanceDecision>();
+  // Sequential, so the permission cache answers repeated authors without a second request.
+  for (const issue of issues) {
+    signal?.throwIfAborted();
+    if (issue.state !== "OPEN" || classifyComplexityLabels(issue).state !== "estimated") continue;
+    const scan = await scanProvenance(complexityMetric, issue.comments.nodes, trust);
+    const ignored = scan.ignored;
+    if (issue.comments.pageInfo.hasNextPage && scan.status !== "unknown")
+      decisions.set(issue.url, {
+        authority: "unknown",
+        record: null,
+        ignored,
+        why: "newer comment history incomplete",
+      });
+    else if (scan.status === "unknown")
+      decisions.set(issue.url, { authority: "unknown", record: null, ignored, why: scan.why });
+    else if (scan.status === "trusted")
+      decisions.set(issue.url, {
+        authority: "trusted",
+        record: recordOf(scan.node as { body: string; url: string }),
+        ignored,
+      });
+    else
+      decisions.set(issue.url, {
+        authority: ignored.length ? "untrusted" : "none",
+        record: null,
+        ignored,
+      });
   }
-  if (!found && issue.comments.pageInfo.hasNextPage) return undefined;
-  return found;
+  return decisions;
 }
 
 /**
@@ -120,6 +197,8 @@ export interface SizeSource {
   /** Human noun for the authoritative size evidence, e.g. "complexity size label". */
   evidence: string;
   read: (issue: Issue) => SizeReading;
+  /** Prepared provenance trust decisions by issue URL (#269); absent ones are unevaluated. */
+  provenance?: ReadonlyMap<string, ProvenanceDecision>;
 }
 
 /** Shared report builder over any size reader. Pure. */
@@ -152,7 +231,11 @@ export function sizeReport(
     .filter((issue) => issue.state === "OPEN")
     .map((issue): EstimateEntry => {
       const reading = input.read(issue);
-      const recorded = newestRecord(issue);
+      const decision =
+        reading.kind === "known" && reading.size !== null
+          ? (input.provenance?.get(issue.url) ?? unevaluated(issue))
+          : { authority: "none" as const, record: null, ignored: [] };
+      const recorded = decision.record;
       const reasons: string[] = [];
       let state: EstimateState;
       let size: ComplexitySize | null = null;
@@ -162,16 +245,33 @@ export function sizeReport(
       } else if (reading.kind === "conflict") {
         state = "conflicting";
         reasons.push(reading.reason);
-      } else if (recorded === undefined) {
-        state = "unknown";
-        reasons.push("comment history incomplete; provenance unknown");
       } else if (reading.size === null) {
-        state = "unestimated";
-        reasons.push(`no ${input.evidence}`);
+        // As before #269: an unlabelled ticket with incomplete history is unknown, not unestimated.
+        if (issue.comments.pageInfo.hasNextPage) {
+          state = "unknown";
+          reasons.push("comment history incomplete; provenance unknown");
+        } else {
+          state = "unestimated";
+          reasons.push(`no ${input.evidence}`);
+        }
+      } else if (decision.authority === "unknown") {
+        // The label size stands, but freshness cannot be established: inspect, never re-queue.
+        size = reading.size;
+        state = "unknown";
+        reasons.push(
+          ...decision.ignored,
+          `provenance authority unknown (${decision.why ?? "unverified"}); freshness not established`,
+        );
       } else {
         size = reading.size;
         state = "estimated";
-        if (!recorded) reasons.push("no recorded rationale (value set outside pdb)");
+        reasons.push(...decision.ignored);
+        if (!recorded)
+          reasons.push(
+            decision.authority === "untrusted"
+              ? "no trusted recorded rationale"
+              : "no recorded rationale (value set outside pdb)",
+          );
         else {
           if (recorded.size !== size) {
             state = "stale";
@@ -208,6 +308,8 @@ export function sizeReport(
         size,
         state,
         recorded: recorded ?? null,
+        provenanceAuthority: decision.authority,
+        ignoredProvenance: decision.ignored,
         implementation: pickupEligibility(issue, options).status,
         reasons,
       };
@@ -251,7 +353,9 @@ export function estimateLine(e: EstimateEntry): string {
     e.state === "conflicting"
       ? "conflicting sizes"
       : e.state === "unknown"
-        ? `size unknown${r ? ` (last recorded ${r.size}, unverified)` : ""}`
+        ? e.size
+          ? `size ${e.size} (provenance unverified)`
+          : "size unknown"
         : e.size
           ? `size ${e.size}`
           : "unestimated";

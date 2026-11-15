@@ -962,7 +962,7 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
     }
     return runEstimate(rest, output, {
       now: runtime.now,
-      // #245: impact provenance authority, the #212 rule over a per-run permission cache.
+      // #245/#269: provenance authority for both metrics, the #212 rule over a per-run permission cache.
       trust: (repository) => markerTrust(permissionLookup(repository, runtime.rest ?? ghRest)),
       ...runtime.estimate,
     });

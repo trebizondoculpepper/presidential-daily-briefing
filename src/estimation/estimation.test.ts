@@ -15,9 +15,12 @@ import {
   labelEstimationReport,
   suggestedSize,
 } from "./complexitylabels.js";
-import { estimationText } from "./estimation.js";
+import { estimationText, readComplexityProvenance } from "./estimation.js";
 import { ticketDoctor } from "../workflow/ticketdoctor.js";
 import type { Issue } from "../github/types.js";
+import { permissionLookup } from "../github/github.js";
+import type { Rest } from "../github/github.js";
+import { markerTrust } from "../workflow/delivery.js";
 import { issue, page, repo, snapshot, time } from "../testing/snapshots.js";
 
 describe("estimation queue and briefing visibility from size labels (#122, #152)", () => {
@@ -57,7 +60,18 @@ describe("estimation queue and briefing visibility from size labels (#122, #152)
   });
   const withComment = (item: Issue, body: string): Issue => ({
     ...item,
-    comments: page([{ body, url: `${item.url}#c`, author: null, createdAt: time }]),
+    // Written by a verified maintainer (#269): only trusted provenance counts as recorded.
+    comments: page([
+      {
+        body,
+        url: `${item.url}#c`,
+        author: { __typename: "User", login: "maintainer" },
+        createdAt: time,
+        lastEditedAt: null,
+        includesCreatedEdit: false,
+        editor: null,
+      },
+    ]),
   });
   async function brief(configText: string | null, issues: Issue[], args: string[] = []) {
     let out = "";
@@ -66,6 +80,7 @@ describe("estimation queue and briefing visibility from size labels (#122, #152)
       currentRepository: async () => repo,
       now: () => new Date(time),
       estimation: { fs: config(configText), git, cwd: root },
+      rest: maintainerOnly,
       guide: {
         fs: config('{"schemaVersion":1,"briefing":{"engine":"typescript"}}'),
         git,
@@ -74,6 +89,13 @@ describe("estimation queue and briefing visibility from size labels (#122, #152)
     });
     return { code, report: JSON.parse(out) };
   }
+  /** Permissions: `maintainer` writes; anyone else is unknown (404). */
+  const maintainerOnly: Rest = async (path) => {
+    const login = /collaborators\/([^/]+)\/permission/.exec(path)?.[1];
+    return login === "maintainer"
+      ? { status: 200, body: { role_name: "write", user: { login } } }
+      : { status: 404, body: null };
+  };
   const blocked = (): Issue => ({
     ...issue(2),
     issueDependenciesSummary: { blockedBy: 1, totalBlockedBy: 1, blocking: 0, totalBlocking: 0 },
@@ -160,7 +182,7 @@ describe("estimation queue and briefing visibility from size labels (#122, #152)
   });
   it("keeps well-formed complexity provenance output byte-identical (#281 parity)", async () => {
     // Captured from origin/main before the fix: well-formed records must not change.
-    const golden = `{"fieldId":null,"requested":false,"guidanceVersion":1,"findings":[],"boundaries":"Optional work after PR follow-up, own work and eligible pickup. Estimating acquires no claim, reserves nothing and does not unblock or re-rank.","status":"available","detail":"1 ticket(s) to estimate (unestimated or stale, blocked included).","unknown":0,"conflicts":{"total":0,"omitted":0,"items":[]},"offered":true,"queue":{"total":1,"omitted":0,"items":[{"number":3,"title":"Ticket 3","url":"https://github.com/example/project/issues/3","createdAt":"2026-11-12T10:00:00.000Z","size":"M","state":"stale","recorded":{"size":"M","rationale":"contained capability across modules","assumptions":["blocker #9 supplies the API; waiting excluded"],"estimator":"ana","recordedAt":"2026-11-12T10:00:00.000Z","guidanceVersion":1,"url":"https://github.com/example/project/issues/3#c"},"implementation":"ineligible","reasons":["description edited 2026-11-13T00:00:00Z after the estimate"]}]}}`;
+    const golden = `{"fieldId":null,"requested":false,"guidanceVersion":1,"findings":[],"boundaries":"Optional work after PR follow-up, own work and eligible pickup. Estimating acquires no claim, reserves nothing and does not unblock or re-rank.","status":"available","detail":"1 ticket(s) to estimate (unestimated or stale, blocked included).","unknown":0,"conflicts":{"total":0,"omitted":0,"items":[]},"offered":true,"queue":{"total":1,"omitted":0,"items":[{"number":3,"title":"Ticket 3","url":"https://github.com/example/project/issues/3","createdAt":"2026-11-12T10:00:00.000Z","size":"M","state":"stale","recorded":{"size":"M","rationale":"contained capability across modules","assumptions":["blocker #9 supplies the API; waiting excluded"],"estimator":"ana","recordedAt":"2026-11-12T10:00:00.000Z","guidanceVersion":1,"url":"https://github.com/example/project/issues/3#c"},"provenanceAuthority":"trusted","ignoredProvenance":[],"implementation":"ineligible","reasons":["description edited 2026-11-13T00:00:00Z after the estimate"]}]}}`;
     const { report } = await brief(null, [
       { ...withComment(sized(1, ["complexity:M"]), marker("M")), lastEditedAt: time },
       withComment(sized(2, ["complexity:M"]), marker("M")),
@@ -306,7 +328,18 @@ describe("label-backed complexity classification and prepared reader (#151)", ()
     });
   const withComment = (item: Issue, body: string): Issue => ({
     ...item,
-    comments: page([{ body, url: `${item.url}#c`, author: null, createdAt: time }]),
+    // Written by a verified maintainer (#269): only trusted provenance counts as recorded.
+    comments: page([
+      {
+        body,
+        url: `${item.url}#c`,
+        author: { __typename: "User", login: "maintainer" },
+        createdAt: time,
+        lastEditedAt: null,
+        includesCreatedEdit: false,
+        editor: null,
+      },
+    ]),
   });
   const available = { status: "available" as const, unavailable: null, findings: [] };
   const options = { prs: [], limit: 10 };
@@ -373,22 +406,22 @@ describe("label-backed complexity classification and prepared reader (#151)", ()
     ).toBe("conflicting");
   });
 
-  it("queues unestimated and stale tickets including blocked ones; conflicts are inspection cases", () => {
+  it("queues unestimated and stale tickets including blocked ones; conflicts are inspection cases", async () => {
     const blocked: Issue = {
       ...labelled(2, []),
       issueDependenciesSummary: { blockedBy: 1, totalBlockedBy: 1, blocking: 0, totalBlocking: 0 },
     };
-    const report = labelEstimationReport(
-      [
-        withComment(labelled(1, ["complexity:M"]), marker("M")),
-        blocked,
-        withComment(labelled(3, ["complexity:L", "status:ready"]), marker("S")),
-        labelled(4, ["complexity:S", "complexity:M"]),
-        labelled(5, ["status:ready"], true),
-      ],
-      available,
-      options,
-    );
+    const issues = [
+      withComment(labelled(1, ["complexity:M"]), marker("M")),
+      blocked,
+      withComment(labelled(3, ["complexity:L", "status:ready"]), marker("S")),
+      labelled(4, ["complexity:S", "complexity:M"]),
+      labelled(5, ["status:ready"], true),
+    ];
+    const provenance = await readComplexityProvenance(issues, async () => ({
+      status: "trusted",
+    }));
+    const report = labelEstimationReport(issues, { ...available, provenance }, options);
     expect(report.status).toBe("available");
     expect(report.queue?.items.map((e) => [e.number, e.state, e.implementation])).toEqual([
       [2, "unestimated", "ineligible"],
@@ -506,5 +539,160 @@ describe("label-backed complexity classification and prepared reader (#151)", ()
     expect(complexityLabelFindings(labelled(1, [], true))).toMatchObject([
       { kind: "complexity-labels-incomplete", certainty: "unknown" },
     ]);
+  });
+});
+
+describe("verified-author complexity provenance (#269, doc/design/complexity-provenance-trust.md)", () => {
+  const record = (size: "M" | "S", rationale: string, recordedAt = time) =>
+    provenanceComment({
+      schemaVersion: 2,
+      kind: "complexity-estimate",
+      storage: "labels",
+      size,
+      previous: [],
+      rationale,
+      assumptions: [],
+      references: [],
+      estimator: "ana",
+      revision: null,
+      guidanceVersion: complexityGuidance.guidanceVersion,
+      recordedAt,
+    });
+  type Note = { body: string; login: string; editor?: string };
+  const ticket = (
+    number: number,
+    labels: string[],
+    notes: Note[],
+    { newerMissing = false } = {},
+  ): Issue => ({
+    ...issue(number, labels),
+    labels: page(labels.map((name) => ({ name }))),
+    comments: page(
+      notes.map((n, i) => ({
+        body: n.body,
+        url: `${issue(number).url}#c${i}`,
+        createdAt: time,
+        author: { __typename: "User", login: n.login },
+        lastEditedAt: n.editor ? time : null,
+        includesCreatedEdit: false,
+        editor: n.editor ? { __typename: "User", login: n.editor } : null,
+      })),
+      newerMissing,
+      newerMissing ? "c" : null,
+    ),
+  });
+  /** Permissions by login: maintainer writes, reader reads, everyone else unknown (404). */
+  const lookups: string[] = [];
+  const rest: Rest = async (path) => {
+    const login = /collaborators\/([^/]+)\/permission/.exec(path)?.[1] ?? "";
+    lookups.push(login);
+    return login === "maintainer"
+      ? { status: 200, body: { role_name: "write", user: { login } } }
+      : login === "reader"
+        ? { status: 200, body: { role_name: "read", user: { login } } }
+        : { status: 404, body: null };
+  };
+  const trust = () => markerTrust(permissionLookup(repo, rest));
+  const report = async (issues: Issue[], withDecisions = true) =>
+    labelEstimationReport(
+      issues,
+      {
+        status: "available",
+        unavailable: null,
+        findings: [],
+        ...(withDecisions ? { provenance: await readComplexityProvenance(issues, trust()) } : {}),
+      },
+      { prs: [], limit: 10 },
+    );
+  const entry = (r: Awaited<ReturnType<typeof report>>, n: number) =>
+    r.entries.find((e) => e.number === n)!;
+  const trusted = { body: record("M", "trusted reasons"), login: "maintainer" };
+
+  it("accepts a current trusted record and skips a newer confirmed-untrusted one", async () => {
+    const r = await report([
+      ticket(1, ["complexity:M"], [trusted]),
+      ticket(2, ["complexity:M"], [trusted, { body: record("S", "spoof"), login: "reader" }]),
+    ]);
+    expect(entry(r, 1)).toMatchObject({
+      state: "estimated",
+      size: "M",
+      provenanceAuthority: "trusted",
+      ignoredProvenance: [],
+      recorded: { rationale: "trusted reasons" },
+    });
+    expect(entry(r, 2)).toMatchObject({
+      state: "estimated",
+      provenanceAuthority: "trusted",
+      recorded: { rationale: "trusted reasons", size: "M" },
+    });
+    expect(entry(r, 2).ignoredProvenance).toHaveLength(1);
+    expect(entry(r, 2).ignoredProvenance[0]).toMatch(/untrusted provenance ignored/);
+  });
+
+  it("stops at a newer record of unknown authority: never falls back, keeps the label size, never queues", async () => {
+    const r = await report([
+      ticket(1, ["complexity:M"], [trusted, { body: record("M", "who?"), login: "stranger" }]),
+      ticket(2, ["complexity:M"], [{ ...trusted, editor: "stranger" }]),
+    ]);
+    for (const n of [1, 2]) {
+      expect(entry(r, n)).toMatchObject({
+        state: "unknown",
+        size: "M",
+        recorded: null,
+        provenanceAuthority: "unknown",
+      });
+      expect(entry(r, n).reasons.join()).toMatch(/provenance authority unknown/);
+    }
+    expect(r.queue?.items).toEqual([]);
+    expect(estimationText(r).join("\n")).not.toContain("who?");
+  });
+
+  it("untrusted-only history is no trusted record: the size stands, nothing untrusted is copied", async () => {
+    const r = await report([
+      ticket(1, ["complexity:M"], [{ body: record("S", "bot reasons"), login: "reader" }]),
+      ticket(2, [], [{ body: record("S", "bot reasons"), login: "reader" }]),
+    ]);
+    expect(entry(r, 1)).toMatchObject({
+      state: "estimated",
+      size: "M",
+      recorded: null,
+      provenanceAuthority: "untrusted",
+    });
+    expect(entry(r, 1).reasons).toContain("no trusted recorded rationale");
+    expect(JSON.stringify(entry(r, 1))).not.toContain("bot reasons");
+    // Label classification is unchanged: an unlabelled ticket is still unestimated.
+    expect(entry(r, 2)).toMatchObject({ state: "unestimated", size: null });
+  });
+
+  it("missing newer history makes provenance unknown even when a trusted record was found", async () => {
+    const r = await report([ticket(1, ["complexity:M"], [trusted], { newerMissing: true })]);
+    expect(entry(r, 1)).toMatchObject({ state: "unknown", provenanceAuthority: "unknown" });
+    expect(entry(r, 1).reasons.join()).toMatch(/newer comment history incomplete/);
+  });
+
+  it("another metric's provenance never supplies complexity history", async () => {
+    const impact =
+      '<!-- github-triage:impact-estimate v1 {"schemaVersion":1,"kind":"impact-estimate","size":"M"} -->';
+    const r = await report([ticket(1, ["complexity:M"], [{ body: impact, login: "maintainer" }])]);
+    expect(entry(r, 1)).toMatchObject({ provenanceAuthority: "none", recorded: null });
+  });
+
+  it("without prepared decisions nothing is trusted: a marker is unknown, no marker is none", async () => {
+    const r = await report(
+      [ticket(1, ["complexity:M"], [trusted]), ticket(2, ["complexity:M"], [])],
+      false,
+    );
+    expect(entry(r, 1)).toMatchObject({ state: "unknown", provenanceAuthority: "unknown" });
+    expect(entry(r, 2)).toMatchObject({ state: "estimated", provenanceAuthority: "none" });
+  });
+
+  it("asks about each distinct marker author once per run, and only for labelled tickets", async () => {
+    lookups.length = 0;
+    await report([
+      ticket(1, ["complexity:M"], [trusted]),
+      ticket(2, ["complexity:S"], [{ ...trusted, body: record("S", "s") }]),
+      ticket(3, [], [{ body: record("S", "x"), login: "unlabelled" }]),
+    ]);
+    expect(lookups).toEqual(["maintainer"]);
   });
 });

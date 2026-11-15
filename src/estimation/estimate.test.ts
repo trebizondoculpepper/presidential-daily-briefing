@@ -83,6 +83,10 @@ describe("estimate N records a size label with provenance (#152)", () => {
       /** Fail removal of this label name, the first N times. */
       failRemove?: { name: string; times: number };
       failComment?: boolean;
+      /** Comment bodies written by an untrusted author (#269). */
+      untrusted?: string[];
+      /** Comment bodies whose author's permission cannot be verified (#269). */
+      unverified?: string[];
     } = {},
   ) {
     const files = new Map<string, string>();
@@ -125,7 +129,21 @@ describe("estimate N records a size label with provenance (#152)", () => {
       const start = Math.max(0, end - 100);
       return {
         pageInfo: { hasPreviousPage: start > 0, startCursor: String(start) },
-        nodes: remote.comments.slice(start, end).map((body) => ({ body })),
+        // Every comment is by a trusted writer unless the test says otherwise (#269).
+        nodes: remote.comments.slice(start, end).map((body) => ({
+          body,
+          author: {
+            __typename: "User",
+            login: options.untrusted?.includes(body)
+              ? "bot"
+              : options.unverified?.includes(body)
+                ? "ghost"
+                : "writer",
+          },
+          lastEditedAt: null,
+          includesCreatedEdit: false,
+          editor: null,
+        })),
       };
     };
     const answer = (label: string): Answer => ({
@@ -158,6 +176,12 @@ describe("estimate N records a size label with provenance (#152)", () => {
           fs,
           git,
           cwd: root,
+          trust: () => async (c) =>
+            c.author?.login === "writer"
+              ? { status: "trusted" }
+              : c.author?.login === "ghost"
+                ? { status: "unknown", why: "permission could not be verified" }
+                : { status: "untrusted", why: `author ${c.author?.login} lacks write permission` },
           api: {
             query: async (query, vars) => {
               if (query.includes("$before")) {
@@ -399,6 +423,52 @@ describe("estimate N records a size label with provenance (#152)", () => {
       provenance: { recordedAt: "2026-11-01T00:00:00.000Z", revision: "b".repeat(40) },
     });
     expect(t.mutations).toEqual([]);
+  });
+  describe("complexity provenance authority (#269)", () => {
+    const stored = provenanceComment({
+      schemaVersion: 2,
+      kind: "complexity-estimate",
+      storage: "labels",
+      size: "M",
+      previous: [],
+      rationale: "few modules; bounded tests",
+      assumptions: [],
+      references: [],
+      estimator: null,
+      revision: "b".repeat(40),
+      guidanceVersion: 1,
+      recordedAt: "2026-11-01T00:00:00.000Z",
+    });
+    it("a spoofed identical record by an untrusted author is not a retry receipt: the caller's assessment is recorded", async () => {
+      const t = harness({ labels: ["complexity:M"], comments: [stored], untrusted: [stored] });
+      expect(await t.call(...base)).toBe(0);
+      expect(t.json()).toMatchObject({ status: "recorded" });
+      expect(t.json().provenance.recordedAt).not.toBe("2026-11-01T00:00:00.000Z");
+      expect(t.kinds()).toEqual(["addComment"]);
+      expect(t.remote.comments[0]).toBe(stored); // never edited or deleted
+    });
+    it("an identical record of unknown authority is not a receipt either, even with an older trusted one behind it", async () => {
+      const older = stored.replace("2026-11-01", "2026-10-01");
+      const t = harness({
+        labels: ["complexity:M"],
+        comments: [older, stored],
+        unverified: [stored],
+      });
+      expect(await t.call(...base)).toBe(0);
+      expect(t.json().status).toBe("recorded");
+      expect(t.remote.comments).toHaveLength(3);
+    });
+    it("an identical trusted record behind an untrusted newer one is still the retry receipt", async () => {
+      const spoof = stored.replace("few modules", "spoofed");
+      const t = harness({
+        labels: ["complexity:M"],
+        comments: [stored, spoof],
+        untrusted: [spoof],
+      });
+      expect(await t.call(...base)).toBe(0);
+      expect(t.json()).toMatchObject({ status: "unchanged" });
+      expect(t.mutations).toEqual([]);
+    });
   });
   it("records a new same-size assessment as provenance only", async () => {
     const t = harness();

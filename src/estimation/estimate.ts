@@ -59,7 +59,8 @@ issue comment (marker github-triage:complexity-estimate v2).
   --assumption TEXT     Repeatable: stated conditions, e.g. "blocker #B supplies the API;
                         waiting excluded" — sizing a blocked ticket does not unblock it
   --reference REF       Repeatable reference anchor: #N, owner/name#N or an https URL
-  --agent NAME          Estimator identity to record; omitted means null (never inferred)
+  --agent NAME          Estimator identity to record; omitted means null (never inferred).
+                        Attribution only: authority is the GitHub account that writes it
   --replace SIZE        Optional guard: refuse unless the ticket still carries this size
   --replace-invalid     Also remove complexity: labels that are not a recognized size (e.g.
                         complexity:huge); they are listed in the provenance. Without it they
@@ -70,8 +71,9 @@ Creates the requested label only if the repository lacks it (existing labels are
 removes other complexity size labels from the ticket and preserves every other label.
 Also recorded: observed previous size(s), repository revision (git HEAD) and guidance version ${complexityGuidance.guidanceVersion}.
 Never claims, unblocks, changes readiness, splits or re-ranks.
-Same size and provenance again: unchanged, nothing written. Retrying after a partial write
-completes only what is missing.
+Same size and provenance again: unchanged, nothing written, but only when the stored record's
+author and any editor have write, maintain or admin access; an unverified one is recorded
+again, never edited. Retrying after a partial write completes only what is missing.
 Exit: 0 recorded or unchanged; 2 disabled, partial write, conflicting or unreadable result, or
 labels/history unreadable (retry); 1 invalid arguments, refused (stale guard, concurrent change,
 unrecognized complexity label without --replace-invalid) or API denial.`;
@@ -84,10 +86,10 @@ export interface EstimateRuntime {
   readonly api?: GraphqlApi;
   readonly now?: () => Date;
   /**
-   * Impact provenance authority (#215 rule) for the resolved repository: only a comment whose
-   * author and any editor are trusted counts as a recorded impact estimate. The CLI supplies the
-   * #212 rule over a per-run permission cache; without it every impact marker is unverified (never
-   * trusted). Complexity provenance is read without a trust check, as before (#269).
+   * Provenance authority (#215 rule) for the resolved repository: only a comment whose author and
+   * any editor are trusted counts as a recorded estimate of either metric (#269). The CLI supplies
+   * the #212 rule over a per-run permission cache; without it every marker is unverified (never
+   * trusted), so a retry re-records rather than trusting an unverified receipt.
    */
   readonly trust?: (repository: string) => TrustDecision;
 }
@@ -249,11 +251,12 @@ interface IssueState {
   readonly edited?: string | null;
 }
 
-/** Impact reads comment author/edit evidence (#215) and the description edit time (staleness). */
-const commentNode = (d: MetricDescriptor) =>
-  d === complexityMetric
-    ? "body"
-    : "body createdAt author { __typename login } lastEditedAt includesCreatedEdit editor { __typename login }";
+/**
+ * Both metrics read comment author/edit evidence, so provenance authority can be checked (#215,
+ * #269); impact also reads the description edit time (staleness).
+ */
+const commentNode = (_d: MetricDescriptor) =>
+  "body createdAt author { __typename login } lastEditedAt includesCreatedEdit editor { __typename login }";
 const issueQuery = (
   number: number,
   d: MetricDescriptor = complexityMetric,
@@ -318,24 +321,21 @@ export type ProvenanceScan<N> =
 
 /**
  * The newest relevant provenance among comment nodes (oldest-first order), shared by the writer
- * and the trusted-provenance reader so they cannot diverge (#245). With a trust decision
- * (impact), a confirmed-untrusted marker is skipped (noted in `ignored`) and the search goes on;
- * a marker whose author or editor authority is unknown stops the search as `unknown`, so an older
- * trusted record is never accepted behind it. Without a trust decision (complexity, #269) the
- * newest valid marker is taken as before.
+ * and the trusted-provenance readers of both metrics so they cannot diverge (#245, #269). A
+ * confirmed-untrusted marker is skipped (noted in `ignored`) and the search goes on; a marker
+ * whose author or editor authority is unknown stops the search as `unknown`, so an older trusted
+ * record is never accepted behind it.
  */
 export async function scanProvenance<N>(
   d: MetricDescriptor,
   nodes: readonly N[],
-  trust: TrustDecision | undefined,
+  trust: TrustDecision,
 ): Promise<ProvenanceScan<N>> {
   const ignored: string[] = [];
   for (const node of [...nodes].reverse()) {
     const provenance = parseMetricProvenance(d, text(prop(node, "body")));
     if (!provenance) continue;
-    const authority = trust
-      ? await trust(node as unknown as Comment)
-      : { status: "trusted" as const };
+    const authority = await trust(node as unknown as Comment);
     if (authority.status === "trusted") return { status: "trusted", provenance, node, ignored };
     if (authority.status === "unknown") return { status: "unknown", why: authority.why, ignored };
     ignored.push(`untrusted provenance ignored (${authority.why})`);
@@ -539,10 +539,10 @@ export async function runEstimate(
         `${Title} is disabled for ${target.repository} (${d.enabledKey} = false); nothing was recorded.`,
         `Opt in with: pdb config set ${d.enabledKey} true`,
       );
-    const trust: TrustDecision | undefined = impact
-      ? (runtime.trust?.(target.repository) ??
-        (async () => ({ status: "unknown", why: "no trust boundary supplied" })))
-      : undefined;
+    // Both metrics (#269): only a trusted stored record proves an identical request completed.
+    const trust: TrustDecision =
+      runtime.trust?.(target.repository) ??
+      (async () => ({ status: "unknown", why: "no trust boundary supplied" }));
 
     const [owner, name] = target.repository.split("/") as [string, string];
     const vars = { owner, name, label };
