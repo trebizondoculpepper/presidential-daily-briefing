@@ -564,8 +564,10 @@ async function identityChecks(
       ? `${resolution.source} (signals: ${resolution.signals.join(", ")})`
       : resolution.source;
   const select = `--entry ${entry}`;
+  // #314: obtaining or completing an identity is `pdb setup identity` (it keeps an existing
+  // name, imports a matching legacy entry once, or generates one).
   const initialise = TRIAGE_ROLES.map((role) =>
-    withRepo(`pdb config set identity.triage_role ${role} ${select}`, repository),
+    withRepo(`pdb setup identity --role ${role} ${select}`, repository),
   );
   const record = await readIdentity(root, entry, fs);
   if (record.source === "legacy-not-imported") {

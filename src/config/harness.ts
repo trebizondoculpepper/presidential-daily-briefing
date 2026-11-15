@@ -230,7 +230,8 @@ export async function resolveEntry(options: {
   if (detector.entryKey === null) {
     if (candidates.length === 0) {
       // #310: say plainly that this harness has no entry, and how to create one.
-      const create = `pdb config set identity.triage_role ROLE --entry ${harness}.SERVER`;
+      // #314: the one documented way to obtain an identity.
+      const create = `pdb setup identity --role ROLE --entry ${harness}.SERVER`;
       return {
         status: "unresolved",
         reason: "no-entry-key",

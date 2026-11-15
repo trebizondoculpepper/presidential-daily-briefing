@@ -35,6 +35,7 @@ import {
   readIdentity,
   resolveIdentityTarget,
   setIdentity,
+  TRIAGE_ROLES,
   validateEntryKey,
   validateIdentityValue,
 } from "./identity.js";
@@ -682,4 +683,178 @@ function identityListText(identity: Awaited<ReturnType<typeof identityListing>>)
           .join("\n")}\n`;
   }
   return `Agent identity (entry ${identity.entry} in ${identity.path}${identity.store === "legacy-not-imported" ? ", legacy-not-imported" : identity.fileExists ? "" : ", not present"}; ${selectionText(identity)}):\n${identity.settings.map((s) => `  ${s.key} = ${s.value ?? "(unset)"} (${s.source})`).join("\n")}\n${identity.problems.map((p) => `  ${p}\n`).join("")}`;
+}
+
+export const setupUsage =
+  "Usage: pdb setup identity --role implementer|designer [--entry KEY | --harness NAME] [--dry-run] [--json] [--repo owner/name]";
+
+/**
+ * `pdb setup identity` (#314, doc/design/identity.md "setup identity"): the one documented way
+ * for a new agent to obtain its own persistent identity. It resolves the project and logical
+ * entry through the shared resolver, then initializes through the same locked writer as
+ * `config set identity.triage_role`: a missing entry gets a locally unique generated name once
+ * (or imports a matching legacy entry once), a rerun keeps the existing name, and another
+ * harness's entry is never borrowed. Local only: no service is contacted and nothing is
+ * reserved. `--dry-run` writes nothing.
+ */
+export async function runSetup(
+  args: string[],
+  output: (text: string) => Promise<void>,
+  runtime: ConfigRuntime = {},
+): Promise<number> {
+  const json = args.includes("--json");
+  try {
+    let values: {
+      role?: string;
+      entry?: string;
+      harness?: string;
+      repo?: string;
+      json?: boolean;
+      "dry-run"?: boolean;
+    };
+    let positionals: string[];
+    try {
+      ({ values, positionals } = parseArgs({
+        args,
+        allowPositionals: true,
+        options: {
+          role: { type: "string" },
+          entry: { type: "string" },
+          harness: { type: "string" },
+          repo: { type: "string" },
+          json: { type: "boolean" },
+          "dry-run": { type: "boolean" },
+        },
+      }));
+    } catch (caught) {
+      throw new ConfigUsageError("usage", (caught as Error).message, setupUsage);
+    }
+    if (positionals.length !== 1 || positionals[0] !== "identity")
+      throw new ConfigUsageError("usage", "pdb setup takes one subject: identity.", setupUsage);
+    const role = values.role;
+    if (!role || !(TRIAGE_ROLES as readonly string[]).includes(role))
+      throw new ConfigUsageError(
+        "usage",
+        `--role is required: one of ${TRIAGE_ROLES.join(", ")}.`,
+        setupUsage,
+      );
+    if (values.entry !== undefined && values.harness !== undefined)
+      throw new ConfigUsageError("usage", "Use --entry or --harness, not both.", setupUsage);
+    if (values.entry !== undefined) validateEntryKey(values.entry);
+    if (values.harness !== undefined) validateHarness(values.harness);
+    if (values.repo !== undefined && !/^[\w.-]+\/[\w.-]+$/.test(values.repo))
+      throw new ConfigUsageError("usage", "--repo must be owner/name.", setupUsage);
+    const parsed = { entry: values.entry, harness: values.harness, repo: values.repo };
+    const fs = runtime.fs ?? nodeFileSystem;
+    const target = await resolveIdentityTarget(
+      runtime.cwd ?? process.cwd(),
+      values.repo,
+      runtime.git ?? nodeGit,
+    );
+    const resolution = await resolveFor(parsed, target.root, runtime);
+    const repoFlag = values.repo ? ` --repo ${values.repo}` : "";
+    if (resolution.status === "unresolved") {
+      // No entry for this harness (Ori): name this agent's own key; never borrow another's.
+      const harness = resolution.harnesses[0];
+      const recovery =
+        resolution.create && !resolution.candidates.length && harness
+          ? `Create this agent's own entry (SERVER: this ${harness} server's name):\npdb setup identity --role ${role} --entry ${harness}.SERVER${repoFlag}`
+          : `Select the entry explicitly:\n${(resolution.candidates.length ? resolution.candidates : ["KEY"]).map((key) => `pdb setup identity --role ${role} --entry ${key}${repoFlag}`).join("\n")}`;
+      throw new ConfigError("identity-unresolved", unresolvedText(resolution), recovery);
+    }
+    const entry = resolution.entry;
+    const before = await readIdentity(target.root, entry, fs);
+    const dryRun = !!values["dry-run"];
+    // The preview refuses what the write would refuse (the writer re-checks under its lock):
+    // an existing entry without a valid name is never "initialized" with a generated one.
+    if (dryRun && before.entryExists && !before.name)
+      throw new ConfigError(
+        "invalid-value",
+        `Entry [agents.${entry}] in ${IDENTITY_FILE} has no valid name, so no identity was set up and nothing was changed.`,
+        `Set one explicitly: pdb config set identity.name NAME --entry ${entry}${repoFlag}`,
+      );
+    const write = dryRun
+      ? null
+      : await setIdentity(target, entry, "identity.triage_role", role, {
+          fs,
+          git: runtime.git ?? nodeGit,
+          random: runtime.random,
+          requireName: true,
+        });
+    const record = write?.record ?? before;
+    // Where the name comes from: kept, imported once from the legacy file, or generated.
+    const nameSource = write?.generatedName
+      ? "generated"
+      : write?.importedFrom
+        ? "legacy-import"
+        : before.source === "pdb" && before.name
+          ? "existing"
+          : before.source === "legacy-not-imported" && before.name
+            ? "legacy-import"
+            : "generated";
+    const name = record.name;
+    if (!dryRun && !name)
+      throw new ConfigError(
+        "invalid-value",
+        `Entry [agents.${entry}] in ${IDENTITY_FILE} has no valid name, so no identity was set up.`,
+        `Set one explicitly: pdb config set identity.name NAME --entry ${entry}${repoFlag}`,
+      );
+    const next = name
+      ? [`pdb --agent ${name} --role ${role}${repoFlag}`, `pdb claim N --agent ${name}${repoFlag}`]
+      : [];
+    const unchanged = before.source === "pdb" && !!before.name && before.triageRole === role;
+    const result = {
+      schemaVersion: 1,
+      kind: "setup-identity",
+      repository: target.repository,
+      path: IDENTITY_FILE,
+      entry,
+      ...selectionJson(resolution),
+      dryRun,
+      name,
+      nameSource,
+      triageRole: role,
+      previousTriageRole: before.triageRole,
+      changed: write ? write.changed : !unchanged,
+      createdEntry: write?.createdEntry ?? false,
+      excludeRuleAdded: write?.excluded ?? false,
+      next,
+    };
+    if (json) {
+      await output(JSON.stringify(result, null, 2) + "\n");
+      return 0;
+    }
+    const who = name
+      ? `${name}${nameSource === "existing" ? " (existing name, kept)" : nameSource === "legacy-import" ? ` (imported once from ${LEGACY_IDENTITY_FILE})` : " (newly generated)"}`
+      : "a newly generated, locally unique name (chosen when written; nothing is reserved)";
+    const roleNote =
+      before.triageRole && before.triageRole !== role ? ` (was ${before.triageRole})` : "";
+    const lead = dryRun
+      ? "Dry run, nothing written: would set up"
+      : result.changed
+        ? "Set up"
+        : "Already set up";
+    await output(
+      `${lead} identity ${who} for entry ${entry} in ${IDENTITY_FILE} (${selectionText(selectionJson(resolution))}), triage role ${role}${roleNote}.${write?.excluded ? `\n  added /${IDENTITY_FILE} to this repository's local Git exclude file` : ""}${next.length ? `\nNext:\n${next.map((c) => `  ${c}`).join("\n")}` : "\nRun without --dry-run to write it, then use the reported name with --agent."}\n`,
+    );
+    return 0;
+  } catch (caught) {
+    const error = filesystemRefusal(caught) ?? caught;
+    if (!(error instanceof ConfigError || error instanceof ConfigUsageError)) throw error;
+    if (!json) throw new Error(`${error.message}\n${error.recovery}`, { cause: error });
+    await output(
+      JSON.stringify(
+        {
+          schemaVersion: 1,
+          kind: "config-error",
+          code: error.code,
+          message: error.message,
+          recovery: error.recovery,
+        },
+        null,
+        2,
+      ) + "\n",
+    );
+    return 1;
+  }
 }

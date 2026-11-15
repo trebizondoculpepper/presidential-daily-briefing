@@ -154,9 +154,7 @@ describe("verified Codex MCP identity (#402)", () => {
     const read = await t.resolve({ clientName: undefined, env: { ORI_SESSION_ID: "s" } });
     expect(read).toMatchObject({ agent: null, source: "unresolved" });
     expect(read.diagnostic).toMatch(/^No entry exists for the ori harness/);
-    expect(read.diagnostic).toContain(
-      "pdb config set identity.triage_role ROLE --entry ori.SERVER",
-    );
+    expect(read.diagnostic).toContain("pdb setup identity --role ROLE --entry ori.SERVER");
     expect(read.diagnostic).toContain("claude (claude harness), codex (codex harness)");
     expect(read.diagnostic).not.toMatch(/"other"|"another"/);
     expect(t.writes).toEqual([]);
