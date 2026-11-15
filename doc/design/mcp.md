@@ -91,6 +91,8 @@ Blended role queues ([blended-action-queues.md](blended-action-queues.md)) requi
 
 For the same repository, agent, since, limit, role, order, collected facts, configuration and clock, the envelope `result` carries the same compact report fields as CLI `--json` with those flags: `actions`, `role` (including `role.next`), `rankedActions`, `estimation` and `impactEstimation` are equal, including order, reasons, counts and omissions. Without `role` the result is unchanged. Role is not inferred from the identity entry's `triage_role`; the selection reports `triageRole` so a client can pass it explicitly. The envelope stays `schemaVersion: 1`; only additive fields appear in `result`, and the advertised input schema gains the two optional properties.
 
+`role` also accepts `human` (#457): the result then carries the [human briefing](human-briefing.md) object `human` instead of the agent queue, and only the tool-level `agent` names the human.
+
 `limit` applies to `rankedActions` after ranking, as in the CLI. Size follows the response contract in force: today's version-1 envelope until #266 ships, then [mcp-bounded-results.md](mcp-bounded-results.md), whose byte budget, rank-before-limit and explicit omission rules apply to role views as to any briefing. A role view never bypasses that cap.
 
 ## HTTP MCP through `pdb serve` (#373, #390)

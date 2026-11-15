@@ -911,6 +911,57 @@ export async function planClaim(
   };
 }
 
+/** The parts of a needs-human question record comment. */
+export interface QuestionRecordParts {
+  designer: string;
+  agent: string;
+  why: string;
+  questions: string[];
+}
+/** The needs-human comment body; parseQuestionRecordBody is its inverse (#457). */
+export function questionRecordBody(parts: QuestionRecordParts, op: string): string {
+  return [
+    claimPolicy.questionsHeading,
+    "",
+    `Designer: \`${parts.designer}\` · Raised by: \`${parts.agent}\``,
+    "",
+    `**Why:** ${parts.why}`,
+    "",
+    ...parts.questions.map((q, i) => `${i + 1}. ${q}`),
+    "",
+    op,
+  ].join("\n");
+}
+/**
+ * Parse the text before the marker of a needs-human comment written by questionRecordBody.
+ * Multiline values are kept: a question runs until the next line numbered with the next index
+ * (`2. ` after question 1), and the reason runs until the blank line before `1. `. Null when
+ * the heading or routing line is missing.
+ */
+export function parseQuestionRecordBody(text: string): QuestionRecordParts | null {
+  const lines = text.replace(/\r\n/g, "\n").split("\n");
+  const heading = lines.indexOf(claimPolicy.questionsHeading);
+  if (heading < 0) return null;
+  const routing = /^Designer: `([^`]*)` · Raised by: `([^`]*)`$/.exec(lines[heading + 2] ?? "");
+  if (!routing) return null;
+  const whyAt = heading + 4;
+  if (!(lines[whyAt] ?? "").startsWith("**Why:** ")) return null;
+  let first = lines.findIndex((l, i) => i > whyAt && l.startsWith("1. ") && lines[i - 1] === "");
+  if (first < 0) first = lines.length;
+  const why = [lines[whyAt].slice("**Why:** ".length), ...lines.slice(whyAt + 1, first - 1)].join(
+    "\n",
+  );
+  const questions: string[] = [];
+  for (const line of lines.slice(first)) {
+    const next = `${questions.length + 1}. `;
+    if (line.startsWith(next)) questions.push(line.slice(next.length));
+    else if (questions.length) questions[questions.length - 1] += `\n${line}`;
+  }
+  // The writer ends the list with one blank line before the marker.
+  if (questions.length) questions[questions.length - 1] = questions.at(-1)!.replace(/\n+$/, "");
+  return { designer: routing[1], agent: routing[2], why, questions };
+}
+
 /**
  * Plan `needs-human N --agent NAME --designer NAME --why TEXT --question TEXT...`.
  */
@@ -1011,17 +1062,7 @@ export async function planNeedsHuman(
         "--repo",
         repository,
         "--body",
-        [
-          claimPolicy.questionsHeading,
-          "",
-          `Designer: \`${designer}\` · Raised by: \`${agent}\``,
-          "",
-          `**Why:** ${why}`,
-          "",
-          ...questions.map((q, i) => `${i + 1}. ${q}`),
-          "",
-          op,
-        ].join("\n"),
+        questionRecordBody({ designer, agent, why, questions }, op),
       ],
     });
   for (const name of add.filter((l) => !repoLabels.has(l)))

@@ -24,4 +24,6 @@ export const commandKinds: Record<string, string> = {
   design: "detail",
   inspect: "detail",
   "inspect-assessment": "detail",
+  "answer-questions": "detail",
+  "sign-off": "pr",
 };

@@ -13,7 +13,7 @@ import { validateEntryKey } from "../config/identity.js";
 import type { ConfigFileSystem, GitRunner } from "../config/config.js";
 import { resolveReadIdentity } from "../config/readidentity.js";
 import type { ReadIdentity } from "../config/readidentity.js";
-import { roleNames } from "../briefing/roles.js";
+import { briefingRoleNames } from "../briefing/roles.js";
 import { pickupOrders } from "../briefing/ranking.js";
 import type { PickupOrder } from "../briefing/ranking.js";
 import { readBriefing } from "../briefing/service.js";
@@ -574,8 +574,8 @@ export function readApi(
       const selection = await identity(values, served);
       setSelection(selection);
       const role = values.get("role");
-      if (role !== undefined && !roleNames().includes(role))
-        throw invalid(`role must be one of ${roleNames().join(", ")}.`);
+      if (role !== undefined && !briefingRoleNames().includes(role))
+        throw invalid(`role must be one of ${briefingRoleNames().join(", ")}.`);
       const order = values.get("order");
       if (order !== undefined && !isPickupOrder(order))
         throw invalid(`order must be one of ${pickupOrders.join(", ")}.`);
@@ -587,7 +587,11 @@ export function readApi(
         throw invalid("since must be an ISO timestamp with a time and timezone.");
       const read = await readBriefing(readRuntime(served.project, served.repository), {
         repository: served.repository,
-        agent: selection.agent ?? undefined,
+        // The human role names its human only explicitly (doc/design/human-briefing.md).
+        agent:
+          role === "human" && selection.identitySource !== "tool"
+            ? undefined
+            : (selection.agent ?? undefined),
         issue,
         since: sinceText === undefined ? undefined : new Date(sinceText).toISOString(),
         limit: integerParam(values, "limit", 1, 100, 10),
