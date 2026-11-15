@@ -31,7 +31,7 @@ const isSubjectAnswer = (error: unknown): boolean =>
   error instanceof SubjectUnavailable ||
   error instanceof UnservedRepository;
 import type { Clock } from "../mcp/polling.js";
-import type { AuthContext } from "../serve.js";
+import type { AuthContext } from "./types.js";
 import { STALE_WINDOW_MS } from "./options.js";
 
 /** Most entries kept. */
