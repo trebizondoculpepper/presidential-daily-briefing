@@ -4,6 +4,7 @@ import type { CliRuntime as RebriefRuntime } from "./rebrief/cli.js";
 import { resolveEngineSetting } from "./config/engine-setting.js";
 import { resolveReviewPolicy } from "./config/review-setting.js";
 import { resolveProjectRulesSetting } from "./config/project-rules-setting.js";
+import { projectRulesContext } from "./rules/project-context.js";
 /** One read-only intake command. Contract: doc/pdb-cli.md. */
 import { realpathSync } from "node:fs";
 import { initializeCrashes } from "./telemetry/crashes.js";
@@ -101,7 +102,7 @@ import { declaredRulesContext } from "./rules/declared-context.js";
 import { runConfig, runSetup } from "./config/configcli.js";
 import { quotaRefusal } from "./github/readplan.js";
 import { STALE_WINDOW_MS } from "./serve/options.js";
-import { nodeGit } from "./config/config.js";
+import { nodeGit, resolveRepositoryTarget } from "./config/config.js";
 import {
   firstUseHint,
   firstUseHintOptOutEnv,
@@ -1277,6 +1278,7 @@ async function showFirstUseHint(args: string[], runtime: Runtime): Promise<boole
  */
 async function runRules(args: string[], output: Output, runtime: Runtime): Promise<number> {
   const stderr = runtime.stderr ?? ((text: string) => process.stderr.write(text));
+  if (args[0] === "init") return runRulesInit(args.slice(1), output, runtime, stderr);
   let values: { json?: boolean; rule?: string; role?: string; help?: boolean };
   try {
     ({ values } = parseArgs({
@@ -1301,18 +1303,101 @@ async function runRules(args: string[], output: Output, runtime: Runtime): Promi
     await output(rules.rulesHelp);
     return 0;
   }
+  // #516: the checkout this command runs in decides whether project preferences are in force.
+  const guide = runtime.guide ?? {};
+  let repository: string | null = null;
+  try {
+    repository = (
+      await resolveRepositoryTarget(guide.cwd ?? process.cwd(), undefined, guide.git ?? nodeGit)
+    ).repository;
+  } catch {
+    repository = null;
+  }
+  const { project, limits } = await projectRulesContext(
+    repository
+      ? { repository, runtime: guide }
+      : {
+          unknown:
+            "pdb rules is not running inside a GitHub project checkout, so no project configuration is read and whether project preferences are in force is unknown",
+        },
+  );
   let text: string;
   try {
-    const document = rules.rulesDocument(declaredRulesContext(), {
-      rule: values.rule,
-      role: values.role,
-    });
+    const document = rules.rulesDocument(
+      { ...declaredRulesContext(), project },
+      { rule: values.rule, role: values.role },
+      undefined,
+      limits,
+    );
     text = values.json ? `${JSON.stringify(document, null, 2)}\n` : rules.rulesText(document);
   } catch (error) {
     stderr(`pdb rules: ${error instanceof Error ? error.message : String(error)}\n`);
     return error instanceof rules.RulesArgumentError ? 2 : 1;
   }
   await output(text);
+  return 0;
+}
+
+/**
+ * `pdb rules init` (#516): writes a reviewable `pdb.rules.edn` starter bound to the shipped
+ * policy into the verified checkout this runs in. It never overwrites a file (or a symlink) and
+ * never enables anything: enabling is the explicit `pdb config set rules.project.enabled true`.
+ */
+async function runRulesInit(
+  args: string[],
+  output: Output,
+  runtime: Runtime,
+  stderr: (text: string) => void,
+): Promise<number> {
+  if (args.includes("--help") || args.includes("-h")) {
+    await output(
+      "Usage: pdb rules init\nWrites a starter pdb.rules.edn, bound to the shipped policy, at the root of this Git checkout.\nIt refuses to overwrite an existing file and enables nothing: review and commit it, then run\npdb config set rules.project.enabled true.\n",
+    );
+    return 0;
+  }
+  if (args.length) {
+    stderr("pdb rules init: takes no arguments. Run pdb rules init --help.\n");
+    return 2;
+  }
+  const guide = runtime.guide ?? {};
+  let root: string;
+  try {
+    root = (
+      await resolveRepositoryTarget(guide.cwd ?? process.cwd(), undefined, guide.git ?? nodeGit)
+    ).root;
+  } catch {
+    stderr(
+      "pdb rules init: run it inside the GitHub project checkout the rules are for; no file was written.\n",
+    );
+    return 2;
+  }
+  const rules = await import("./rules/datalog/datalog.js");
+  const base = { policyVersion: rules.policyVersion, rulesHash: rules.rulesHash };
+  const text = rules.starterProjectRules(base);
+  // The starter must itself validate against the shipped policy before it is written.
+  rules.compileProjectPolicy(text, base);
+  const { open } = await import("node:fs/promises");
+  const { join } = await import("node:path");
+  try {
+    // Exclusive create: an existing file, directory or symlink (even a dangling one) is refused.
+    const handle = await open(join(root, "pdb.rules.edn"), "wx", 0o644);
+    try {
+      await handle.writeFile(text, "utf8");
+    } finally {
+      await handle.close();
+    }
+  } catch (error) {
+    const code = (error as { code?: unknown }).code;
+    stderr(
+      code === "EEXIST"
+        ? "pdb rules init: pdb.rules.edn already exists in this checkout; it was not changed. Review it with pdb rules, or move it aside to generate a new starter.\n"
+        : `pdb rules init: pdb.rules.edn could not be written (${typeof code === "string" ? code : "error"}); nothing was enabled.\n`,
+    );
+    return 1;
+  }
+  await output(
+    `Wrote pdb.rules.edn (bound to policy ${base.policyVersion}, rulesHash ${base.rulesHash.slice(0, 12)}) at the root of this checkout. Nothing is enabled yet.\nReview it (pdb rules shows it once enabled), commit it, then enable it:\n  pdb config set rules.project.enabled true\n`,
+  );
   return 0;
 }
 

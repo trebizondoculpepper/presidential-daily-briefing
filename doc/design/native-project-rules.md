@@ -206,7 +206,15 @@ installed CLI/MCP/web parity.
 - The human role and full issue intake carry no project ranking.
 - The EDN reader (`edn-data`) is now a runtime dependency, and the loader, projection and worker load with the evaluator chunk.
 
-Part 2 (effective English and `pdb rules init`) and part 3 (serve/MCP generation caches, isolation and installed surface parity) follow. All three depend on this reviewed contract and their
+Part 2 (effective English and `pdb rules init`) is also implemented:
+
+- `rulesDocument` takes the project's state (`ProjectRulesView`) and renders `effectivePolicy` plus a `project` section: preferences with their conditions, priority and witness bindings, helpers, protected bands, limits, the age-order statement and the projection lexicon. Each is compiled with the shared structural renderer, never merged into the default lexicon.
+- `--rule` accepts active project preference and helper IDs.
+- `pdb rules` and the serve rules page resolve that state through `projectRulesContext` (`src/rules/project-context.ts`), using the same setting and loader as the briefing, so they name the same effective hash.
+- A missing checkout, or a `--repo`-only served project, is `unknown`. It is never shown as the effective policy.
+- `pdb rules init` writes a validated starter bound to the shipped hash into the verified checkout with an exclusive create, refuses an existing file or symlink, and enables nothing.
+
+Part 3 (serve/MCP generation caches, isolation and installed surface parity) follows. All three depend on this reviewed contract and their
 native predecessors. #75 remains open until its full default/override/output/test
 requirements are verified; a schema or worker alone does not complete it.
 

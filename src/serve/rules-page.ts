@@ -21,6 +21,7 @@ import {
 import type { ConfigFileSystem, GitRunner } from "../config/config.js";
 import type { EffectiveSettings, RulesDocument } from "../rules/datalog/rules-command.js";
 import { declaredRulesContext } from "../rules/declared-context.js";
+import { projectRulesContext } from "../rules/project-context.js";
 import { HttpFailure } from "./http.js";
 
 /** Local, read-only boundaries for effective settings; tests inject fakes. */
@@ -149,6 +150,10 @@ export function rulesPageHtml(doc: RulesDocument, text: string, page: PageContex
     notices.push(
       '<p class="warn" role="status">This server serves more than one project; select one above to see its effective settings. The policy below is the same for every project.</p>',
     );
+  if (doc.effectivePolicy.state === "error")
+    notices.push(
+      `<p class="error" role="alert">Project policy error: ${escapeHtml(doc.effectivePolicy.reason)}. ${doc.effectivePolicy.next.map(escapeHtml).join(" ")}</p>`,
+    );
   if (!doc.scope.complete)
     notices.push(
       `<p class="warn" role="status">Filtered subset (${filters
@@ -159,7 +164,16 @@ export function rulesPageHtml(doc: RulesDocument, text: string, page: PageContex
     );
   const identity = `<dl class="identity">
 <dt>Policy version</dt><dd><code>${escapeHtml(doc.policy.policyVersion)}</code></dd>
-<dt>rulesHash</dt><dd><code>${escapeHtml(doc.policy.rulesHash)}</code></dd>
+<dt>Default rulesHash</dt><dd><code>${escapeHtml(doc.policy.rulesHash)}</code></dd>
+<dt>Effective policy</dt><dd>${
+    doc.effectivePolicy.state === "active"
+      ? `default plus project preferences, <code>${escapeHtml(doc.effectivePolicy.effectiveRulesHash)}</code>`
+      : doc.effectivePolicy.state === "disabled"
+        ? "the shipped default only (project preferences disabled)"
+        : doc.effectivePolicy.state === "error"
+          ? '<span class="error">error: project preferences are enabled but not in force</span>'
+          : "unknown"
+  }</dd>
 <dt>Sources</dt><dd>${doc.policy.sources.map((s) => `<code>${escapeHtml(s)}</code>`).join(", ")}</dd>
 <dt>English model</dt><dd><code>${escapeHtml(doc.policy.englishModelVersion)}</code></dd>
 <dt>Scope</dt><dd>${doc.scope.complete ? "complete" : "filtered subset"}</dd>
@@ -180,7 +194,7 @@ ${notices.join("\n")}
 ${identity}<nav aria-label="Sections"><ol class="toc">${toc}</ol></nav>
 ${body}
 </main>
-<footer>Read-only. Compiled from the packaged policy artifact; the same document as <code>pdb rules${filters.map(([k, v]) => ` --${escapeHtml(k)} ${escapeHtml(v)}`).join("")}</code>. Loading this page makes no GitHub requests.</footer>
+<footer>Read-only. Compiled from the packaged policy artifact and, when enabled, the project's <code>pdb.rules.edn</code>; the same document as <code>pdb rules${filters.map(([k, v]) => ` --${escapeHtml(k)} ${escapeHtml(v)}`).join("")}</code>. Loading this page makes no GitHub requests.</footer>
 </body>
 </html>
 `;
@@ -257,8 +271,29 @@ export async function rulesPage(
         status: "unknown",
         reason: "No project is selected, so no project's effective settings are shown.",
       } as EffectiveSettings);
+  // #516: the same project enablement and loader the briefing uses, from the verified checkout.
+  const { project, limits } = await projectRulesContext(
+    !selected
+      ? {
+          unknown:
+            "No project is selected, so whether project preferences are in force is unknown.",
+        }
+      : selected.project === undefined
+        ? {
+            unknown: `${selected.repository} is served without a local project (--repo only), so its project configuration and pdb.rules.edn are not read; whether project preferences are in force is unknown. Serve it with --project.`,
+          }
+        : {
+            repository: selected.repository,
+            runtime: { cwd: selected.project, git: runtime.git, fs: runtime.fs },
+          },
+  );
   try {
-    const doc = rules.rulesDocument({ ...declaredRulesContext(), effective }, filters);
+    const doc = rules.rulesDocument(
+      { ...declaredRulesContext(), effective, project },
+      filters,
+      undefined,
+      limits,
+    );
     return { status: 200, html: rulesPageHtml(doc, rules.rulesText(doc), page) };
   } catch (error) {
     if (error instanceof rules.RulesArgumentError)

@@ -184,3 +184,50 @@ export async function effectivePolicy<A extends AdmittedAction & { why?: { ruleI
     return failed(failureDetail(error), identity);
   }
 }
+
+/**
+ * The project half of the effective English document (#516): the same enablement and loader the
+ * briefing uses, so `pdb rules`, the web page and the briefing name the same revision.
+ */
+export async function projectRulesView(
+  setting: ProjectRulesSetting,
+  base: { policyVersion: number; rulesHash: string },
+  runtime: Pick<ProjectPolicyRuntime, "loadPolicy"> = {},
+): Promise<import("../rules-command.js").ProjectRulesView> {
+  if (setting.enabled === false)
+    return {
+      state: "disabled",
+      reason:
+        setting.source === "no-matching-project"
+          ? "no local checkout of this repository was selected, so no project configuration applies"
+          : setting.source === "not-read"
+            ? "project configuration was not read"
+            : "rules.project.enabled is false",
+    };
+  if (setting.enabled === "unknown")
+    return {
+      state: "error",
+      reason: `whether project rules are enabled is unknown (${setting.reason})`,
+      next: repair,
+    };
+  try {
+    const load = runtime.loadPolicy ?? (await engine()).loadProjectPolicy;
+    const policy = await load(setting.root, base);
+    return { state: "active", policy };
+  } catch (error) {
+    return { state: "error", reason: failureDetail(error), next: repair };
+  }
+}
+
+/** The fixed v1 facts the English document states about how project preferences apply. */
+export async function projectLimits(): Promise<import("../rules-command.js").ProjectLimits> {
+  const { projectionLimits, protectedBands, workerLimits, projectionVocabulary } = await engine();
+  return {
+    protectedBands: [...protectedBands].sort((a, b) => a - b),
+    actions: projectionLimits.actions,
+    datoms: projectionLimits.datoms,
+    evaluationMs: workerLimits.evaluationMs,
+    startupMs: workerLimits.startupMs,
+    lexicon: projectionVocabulary.lexicon,
+  };
+}
