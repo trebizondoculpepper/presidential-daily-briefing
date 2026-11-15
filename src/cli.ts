@@ -1006,6 +1006,41 @@ export interface StaleFallback {
 }
 
 /**
+ * The cached snapshot's history, fitted to the requested window (#371). No window requested:
+ * none is shown. A cached complete window that starts at or before the requested one: its
+ * changes narrowed to the request. Otherwise the inventory is kept and the requested window is
+ * marked failed, so its changes are unknown rather than none. Briefing-mode change evidence is
+ * dropped: it belongs to the cached window, not the requested one.
+ */
+function staleWindow(snapshot: Snapshot, requestedSince: string | undefined): Snapshot {
+  const { changeEvidence: _dropped, history, ...rest } = snapshot;
+  if (requestedSince === undefined) return { ...rest, since: null, changed: [] };
+  const cachedFrom = snapshot.since === null ? Number.NaN : Date.parse(snapshot.since);
+  const from = Date.parse(requestedSince);
+  const covered =
+    Number.isFinite(cachedFrom) &&
+    cachedFrom <= from &&
+    (history === undefined || history.state === "complete");
+  if (covered)
+    return {
+      ...rest,
+      since: requestedSince,
+      changed: snapshot.changed.filter((c) => Date.parse(c.updatedAt) >= from),
+      ...(history ? { history: { ...history, since: requestedSince } } : {}),
+    };
+  return {
+    ...rest,
+    since: requestedSince,
+    changed: [],
+    history: { since: requestedSince, state: "failed", failure: "rate-limited", sources: [] },
+    warnings: [
+      ...snapshot.warnings,
+      `The requested history window since ${requestedSince} is not covered by the cached snapshot (${snapshot.since === null ? "it holds no history window" : `its window starts at ${snapshot.since}${history && history.state !== "complete" ? ` and is ${history.state}` : ""}`}); changes in that window are unknown, not none.`,
+    ],
+  };
+}
+
+/**
  * On a quota refusal of the live read, reuse the caller's explicit `--cache` snapshot when it is
  * a valid snapshot of the same repository observed within the age limit (#371). Anything else
  * (no cache, absent, corrupt, foreign, focused, expired) is a distinct diagnosis, never an empty
@@ -1016,6 +1051,8 @@ export async function quotaFallback(
   cache: string | undefined,
   repository: string,
   now: Date,
+  /** The history window this read requested (--since or the checkpoint); undefined for none. */
+  requestedSince?: string,
 ): Promise<{ snapshot: Snapshot; stale: StaleFallback }> {
   const retry = prop(error, "retry");
   const retryAfterSeconds = prop(retry, "retryAfterSeconds");
@@ -1056,12 +1093,13 @@ export async function quotaFallback(
     resetAt: typeof resetAt === "string" ? resetAt : null,
     maxAgeSeconds,
   };
+  const fitted = staleWindow(snapshot, requestedSince);
   return {
     stale,
     snapshot: {
-      ...snapshot,
+      ...fitted,
       warnings: [
-        ...snapshot.warnings,
+        ...fitted.warnings,
         `STALE: ${refused}; showing the ${cache} snapshot observed at ${snapshot.fetchedAt} (${Math.max(0, age)}s old, limit ${maxAgeSeconds}s). Refresh before acting: claims and other changes read live and will not use it.`,
       ],
     },
@@ -2017,6 +2055,7 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
           options.cache,
           repository,
           runtime.now?.() ?? new Date(),
+          options.since ?? previous,
         ));
         options.offline = true;
         return briefingFrom(snapshot, stale);

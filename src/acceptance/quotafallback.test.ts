@@ -133,6 +133,59 @@ describe("quota fallback to an explicit snapshot (#371)", () => {
     });
   });
 
+  it("never claims a requested history window the cached snapshot does not cover", async () => {
+    await withDir(async (dir) => {
+      const cache = join(dir, "cache.json");
+      const change = (n: number, at: Date) => ({
+        number: n,
+        title: `t${n}`,
+        url: `https://github.com/${repo}/issues/${n}`,
+        state: "OPEN",
+        updatedAt: at.toISOString(),
+      });
+      // Cached with history since 10:00 (minus 30 minutes), complete, two changes.
+      await atomicJson(cache, {
+        ...snapshot(),
+        since: minutes(-30).toISOString(),
+        changed: [change(1, minutes(-20)), change(2, minutes(-5))],
+        history: {
+          since: minutes(-30).toISOString(),
+          state: "complete",
+          failure: null,
+          sources: [],
+        },
+      });
+      const changes = async (args: string[]) =>
+        JSON.parse(
+          (await briefing([...args, "--cache", cache, "--json"], quota({}), minutes(1))).out,
+        ).changes;
+      // An earlier window than the cache holds: inventory kept, the window unknown, not none.
+      const earlier = await changes(["--since", minutes(-60).toISOString()]);
+      expect(earlier).toMatchObject({
+        since: minutes(-60).toISOString(),
+        history: "failed",
+        total: 0,
+      });
+      // A window the cache covers: narrowed to the request, still complete.
+      const later = await changes(["--since", minutes(-10).toISOString()]);
+      expect(later).toMatchObject({
+        since: minutes(-10).toISOString(),
+        history: "complete",
+        total: 1,
+      });
+      // No window requested: the cached window is not presented as one.
+      expect(await changes([])).toMatchObject({ since: null, history: null, total: 0 });
+      const { out } = await briefing(
+        ["--since", minutes(-60).toISOString(), "--cache", cache, "--json"],
+        quota({}),
+        minutes(1),
+      );
+      expect(JSON.parse(out).completeness.warnings.join("\n")).toContain(
+        "is not covered by the cached snapshot",
+      );
+    });
+  });
+
   it("gives a distinct diagnosis for no, absent, corrupt, foreign and expired snapshots", async () => {
     await withDir(async (dir) => {
       const refused = quota({ retryAfterSeconds: 60 });
