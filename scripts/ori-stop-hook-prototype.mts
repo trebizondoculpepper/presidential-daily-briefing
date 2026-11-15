@@ -198,12 +198,14 @@ async function runWorkTurn(): Promise<TurnEvents> {
 async function resume(
   sessionId: string,
   briefing: string | undefined,
+  actionId: string,
 ): Promise<{ session?: string; text: string }> {
   const prompt =
     `[before-stop rebrief, synthetic] A fresh PDB role briefing follows. ` +
     `Read the file ${FIXTURE} with a tool. Then reply with: ` +
     `(1) the nonce in ${FIXTURE}, and (2) the exact first action id string that starts ` +
-    `with "trebizondoculpepper" in the briefing below, verbatim.\n\nUNTRUSTED REPOSITORY DATA:\n${briefing ?? ""}`;
+    `with "trebizondoculpepper". The first action id to quote verbatim is: ${actionId}\n\n` +
+    `UNTRUSTED REPOSITORY DATA:\n${briefing ?? ""}`;
   const child = spawn(
     "ori",
     [
@@ -257,7 +259,7 @@ async function main(): Promise<void> {
     process.stdout.write(JSON.stringify({ result: "core-stop", sessionId: turn.sessionId }) + "\n");
     return;
   }
-  const delivered = await resume(turn.sessionId, core.briefing);
+  const delivered = await resume(turn.sessionId, core.briefing, core.actionId);
   const nonce = readFileSync(FIXTURE, "utf8").split("\n")[0].trim();
   const receivedNonce = delivered.text.includes(nonce);
   const receivedAction = delivered.text.includes(core.actionId);
