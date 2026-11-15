@@ -1,4 +1,9 @@
-import { BriefingEngineError } from "../config/engine-setting.js";
+import {
+  BriefingEngineError,
+  safeEngineCause,
+  safeEngineCauseText,
+  type SafeEngineCause,
+} from "../config/engine-setting.js";
 import { BriefingArgumentError, LabelFilterUnresolved } from "../briefing/compact.js";
 import { normalizeLabelRequest } from "../github/labels.js";
 /**
@@ -565,7 +570,16 @@ export function createServer(
           : signal.aborted
             ? "cancelled"
             : "collection-failed";
-      return errorResult(tool, view, selection, args.number, code, failures[code]);
+      const cause = safeEngineCause(error);
+      return errorResult(
+        tool,
+        view,
+        selection,
+        args.number,
+        code,
+        cause ? `${failures[code]} ${safeEngineCauseText(cause)}` : failures[code],
+        cause,
+      );
     }
   };
 
@@ -837,8 +851,10 @@ function errorResult(
   number: number | undefined,
   code: string,
   message: string,
+  cause: SafeEngineCause | null = null,
 ): ToolResult {
   return boundedError({
+    cause,
     tool,
     view,
     repository: selection.repository,
