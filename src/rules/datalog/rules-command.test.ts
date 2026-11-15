@@ -204,4 +204,25 @@ describe("pdb rules command (#416)", () => {
     expect(out).toContain("    (1) all of:");
     expect(out).toContain("    (2) blocked(?x) all of:");
   });
+
+  it("defines every predicate a filtered view names, context included (#480 review)", () => {
+    const names = new Set(model.predicates.map((p) => p.name));
+    const filters = [
+      ...model.decisions.map((d) => ({ rule: d.id })),
+      ...model.denials.map((d) => ({ rule: d.id })),
+      ...model.predicates.map((p) => ({ rule: p.name })),
+      { role: "implementer" },
+      { role: "designer" },
+    ];
+    for (const filter of filters) {
+      const doc = rulesDocument(context, filter);
+      const out = rulesText(doc);
+      const glossary = new Set(doc.predicates.map((p) => p.name));
+      // Every predicate call rendered anywhere, as name(...), must be defined in the glossary.
+      const called = [...out.matchAll(/(?<![\w-])([a-z][a-z-]*)\((?=[?"\d_a])/g)]
+        .map((m) => m[1])
+        .filter((n) => names.has(n));
+      for (const n of called) expect(glossary.has(n), `${JSON.stringify(filter)}: ${n}`).toBe(true);
+    }
+  });
 });
