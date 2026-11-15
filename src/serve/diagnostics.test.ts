@@ -218,6 +218,7 @@ describe("serve diagnostics (#459)", () => {
         ["api/v1/diagnostics/cache?repo=example/one&cursor=abc", 400],
         ["api/v1/diagnostics/cache", 400],
         ["api/v1/diagnostics/cache?repo=someone/else", 403],
+        ["api/v1/diagnostics/inflight?repo=owner/ghp_secretvalue", 403],
         ["api/v1/diagnostics/nothing", 404],
       ];
       for (const [path, status] of cases) expect((await s.get(path)).status, path).toBe(status);
@@ -228,6 +229,12 @@ describe("serve diagnostics (#459)", () => {
       });
       expect(post.status).toBe(405);
       // A secret-looking parameter value is never reflected.
+      const unserved = await s.get("api/v1/diagnostics/cache?repo=owner/ghp_secretvalue");
+      expect(unserved.text).not.toContain("ghp_secretvalue");
+      expect(JSON.parse(unserved.text).error).toMatchObject({
+        code: "REPOSITORY_NOT_SERVED",
+        message: "That repository is not served by this server.",
+      });
       const reflected = await s.get("api/v1/diagnostics/projects?ghp_abc=1&%2FUsers%2Fme=2");
       expect(reflected.status).toBe(400);
       expect(reflected.text).not.toContain("ghp_abc");

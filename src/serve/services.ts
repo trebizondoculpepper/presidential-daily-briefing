@@ -9,6 +9,7 @@ import { readApi, selectRepository } from "./api.js";
 import type { ServeReadRuntime } from "./api.js";
 import { randomUUID } from "node:crypto";
 import { ServeCache } from "./cache.js";
+import { HttpFailure } from "./http.js";
 import { diagnosticViews, diagnosticsApi } from "./diagnostics.js";
 import { httpMcp } from "./mcp.js";
 import type { ServeOptions } from "./options.js";
@@ -44,7 +45,26 @@ export function readServices(
     const diagnostics = diagnosticsApi(
       facts,
       () => cache.diagnostics(),
-      (repo) => selectRepository(facts.served, repo).repository,
+      (repo) => {
+        try {
+          return selectRepository(facts.served, repo).repository;
+        } catch (error) {
+          // Same status, code and choices, but diagnostics never echo the supplied value (#459).
+          if (error instanceof HttpFailure)
+            throw new HttpFailure(
+              error.status,
+              error.code,
+              error.code === "REPOSITORY_NOT_SERVED"
+                ? "That repository is not served by this server."
+                : error.code === "INVALID_ARGUMENT"
+                  ? "repo must be owner/name."
+                  : error.message,
+              error.next,
+              error.headers,
+            );
+          throw error;
+        }
+      },
       randomUUID(),
       () => serve.clock.now(),
     );
