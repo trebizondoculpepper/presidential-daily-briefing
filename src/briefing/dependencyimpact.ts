@@ -96,6 +96,30 @@ const transitiveHow =
   "Not computed. Routine questions use direct edges; `deps N --tree` is the explicit, bounded and expensive diagnosis.";
 
 /** The direct impact of completing the report's selected ticket; null without direct evidence. */
+/**
+ * Why the pickup gates cannot decide an issue from this read, or null: labels beyond the first
+ * page (a ready or blocking label may be unseen), or a native blocker closed as not planned
+ * (inspect or decide, as the briefing's dependency-not-planned check says), or a blocker list
+ * too long to rule that out.
+ */
+export function undecidable(
+  labels: Issue["labels"],
+  blockers: { stateReason?: string | null }[],
+  blockersTruncated: boolean,
+): string | null {
+  if (labels.pageInfo.hasNextPage)
+    return "labels beyond the first 100 not read; readiness and blocking labels unknown";
+  if (blockers.some((b) => b.stateReason === "NOT_PLANNED"))
+    return "a native blocker was closed as not planned; a person should verify the dependency before pickup";
+  if (blockersTruncated)
+    return "blocker list truncated; a blocker closed as not planned may be unseen";
+  return null;
+}
+/** ` --repo owner/name`, so every suggested command keeps its repository context. */
+const repoFlag = (repository: string): string => ` --repo ${repository}`;
+const repositoryOf = (url: string, fallback: string): string =>
+  /github\.com\/([^/]+\/[^/]+)\/issues\//.exec(url)?.[1] ?? fallback;
+
 export function directImpact(
   report: DependencyReport,
   context: PickupContext = { prs: [] },
@@ -128,9 +152,24 @@ export function directImpact(
       }),
     ),
   };
-  const dependants = direct.dependants.map(dependantIssue);
+  // A dependant the gates cannot decide is unknown impact, never a proven unlock or a "no".
+  const undecided = new Map<string, string>();
+  const dependants = direct.dependants
+    .filter((facts) => {
+      const why = undecidable(
+        facts.labels,
+        facts.blockedBy.nodes,
+        facts.blockedBy.pageInfo.hasNextPage,
+      );
+      if (why) undecided.set(facts.url, why);
+      return !why;
+    })
+    .map(dependantIssue);
   const byUrl = new Map([subjectIssue, ...dependants].map((issue) => [issue.url, issue]));
-  const notRead = new Map(direct.notRead.map((n) => [n.url, n.reason]));
+  const notRead = new Map([
+    ...direct.notRead.map((n): [string, string] => [n.url, `not read (${n.reason})`]),
+    ...[...undecided].map(([url, why]): [string, string] => [url, `pickup unknown (${why})`]),
+  ]);
   const impact = immediateUnlocks(subjectIssue, byUrl, context);
   // Name why an unread dependant is unknown, rather than "not in this snapshot".
   const unknown = impact.unknown.map((reason) => {
@@ -138,12 +177,18 @@ export function directImpact(
       const m = /github\.com\/([^/]+\/[^/]+)\/issues\/(\d+)$/.exec(u);
       return !!m && reason === `dependant ${m[1]}#${m[2]} not in this snapshot`;
     });
-    return url ? `dependant ${url} not read (${notRead.get(url)})` : reason;
+    return url ? `dependant ${url} ${notRead.get(url)}` : reason;
   });
   let startNow = pickupEligibility(subjectIssue, context);
   // A read that did not return the subject's closing-PR list cannot prove it has none.
   if (!direct.subject.closedByPullRequestsReferences && startNow.status === "eligible")
     startNow = { status: "unknown", reasons: ["open closing PRs not read"] };
+  // Truncated labels or a not-planned blocker: never recommend pickup on this evidence.
+  const subjectWhy = undecidable(subjectIssue.labels, node.upstream, false);
+  if (subjectWhy && startNow.status === "eligible")
+    startNow = { status: "unknown", reasons: [subjectWhy] };
+  else if (subjectWhy && startNow.status === "unknown")
+    startNow = { status: "unknown", reasons: [...startNow.reasons, subjectWhy] };
   const unlocked = new Set(impact.unlocks.map((d) => d.url));
   const newlyPickable = [...impact.unlocks]
     .sort(
@@ -180,7 +225,7 @@ export function directImpact(
     nextAction: "",
     policy: finishFirst,
   };
-  result.nextAction = nextAction(result, subjectIssue, node.upstream);
+  result.nextAction = nextAction(result, subjectIssue, node.upstream, report.repository);
   return result;
 }
 
@@ -197,15 +242,29 @@ function unlockClause(impact: DirectImpact): string {
 function nextAction(
   impact: DirectImpact,
   subject: Issue,
-  upstream: { number: number; state: string; stateReason?: string | null }[],
+  upstream: {
+    number: number;
+    url: string;
+    state: string;
+    stateReason?: string | null;
+    repository?: { nameWithOwner: string };
+  }[],
+  repository: string,
 ): string {
   const n = `#${subject.number}`;
+  const here = repositoryOf(subject.url, repository);
   if (subject.state !== "OPEN")
     return `${n} is closed${subject.stateReason ? ` (${subject.stateReason.toLowerCase().replace("_", " ")})` : ""}; nothing to start.${subject.stateReason === "NOT_PLANNED" ? " Its dependants still list it as a blocker that GitHub counts as closed: a person should check whether those dependencies still make sense." : ""}`;
   const unlocks = unlockClause(impact);
   const { startNow, openClosingPrs } = impact.subject;
+  // A not-planned blocker comes first: inspect or decide, never pick up (as the briefing).
+  if (
+    upstream.some((b) => b.stateReason === "NOT_PLANNED") &&
+    !upstream.some((b) => b.state === "OPEN")
+  )
+    return `A blocker of ${n} was closed as not planned; a person should verify whether the dependency still makes sense before anyone picks it up (pdb ticket ${subject.number}${repoFlag(here)}). When it completes, ${unlocks}.`;
   if (startNow.status === "eligible")
-    return `Start ${n}: claim it (pdb claim ${subject.number}) and implement it; ${unlocks}.`;
+    return `Start ${n}: claim it (pdb claim ${subject.number}${repoFlag(here)}) and implement it; ${unlocks}.`;
   if (openClosingPrs.length)
     return `Advance open PR ${openClosingPrs.map((p) => `#${p}`).join(", ")} for ${n} toward merge (PR follow-up, not new pickup); ${n} completes when its whole delivery merges, not at a first PR merge. Then ${unlocks}.`;
   const owners = subject.labels.nodes
@@ -215,11 +274,9 @@ function nextAction(
     return `${n} is claimed (${owners.join(", ")}); do not pick it up. When it completes, ${unlocks}.`;
   const blockers = upstream.filter((b) => b.state === "OPEN");
   if (blockers.length)
-    return `${n} is blocked by ${list(blockers)}; start there (pdb deps ${blockers[0].number}). When ${n} completes, ${unlocks}.`;
-  if (upstream.some((b) => b.stateReason === "NOT_PLANNED"))
-    return `A blocker of ${n} was closed as not planned; a person should inspect before anyone picks it up.`;
+    return `${n} is blocked by ${list(blockers)}; start there (pdb deps ${blockers[0].number}${repoFlag(blockers[0].repository?.nameWithOwner ?? repositoryOf(blockers[0].url, here))}). When ${n} completes, ${unlocks}.`;
   if (startNow.status === "unknown")
-    return `Inspect ${n} before acting (pdb ticket ${subject.number}): ${startNow.reasons.join("; ")}. When it completes, ${unlocks}.`;
+    return `Inspect ${n} before acting (pdb ticket ${subject.number}${repoFlag(here)}): ${startNow.reasons.join("; ")}. When it completes, ${unlocks}.`;
   return `${n} is not pickable: ${startNow.reasons.join("; ")}. When it completes, ${unlocks}.`;
 }
 
