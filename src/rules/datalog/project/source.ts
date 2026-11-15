@@ -5,7 +5,7 @@
  */
 import { createHash } from "node:crypto";
 import { constants } from "node:fs";
-import { open, realpath } from "node:fs/promises";
+import { open, realpath, lstat } from "node:fs/promises";
 import { isAbsolute, join, relative, sep } from "node:path";
 import { EdnSourceError, printEdn, readOne } from "../edn.js";
 
@@ -197,7 +197,12 @@ export interface ProjectSourceIO {
 const sourceIO: ProjectSourceIO = {
   realpath,
   async read(path, limit) {
-    const handle = await open(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+    // Reject special files before opening; NONBLOCK also guards a raced FIFO replacement.
+    if (!(await lstat(path)).isFile()) fail("source-file", "Selected source is not a regular file");
+    const handle = await open(
+      path,
+      constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0),
+    );
     try {
       const stat = await handle.stat();
       if (!stat.isFile()) fail("source-file", "Selected source is not a regular file");

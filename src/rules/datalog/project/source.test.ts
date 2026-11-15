@@ -1,5 +1,6 @@
 import { describe, it, expect, afterEach } from "vite-plus/test";
 import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { mkdtemp, writeFile, mkdir, symlink, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -203,6 +204,41 @@ describe("project source boundary (#514, parsing stage only)", () => {
       code: expect.stringMatching(/^source-(file|unreadable)$/),
     });
   });
+  it.skipIf(process.platform === "win32")(
+    "refuses a named pipe without waiting for a writer",
+    async () => {
+      const root = await temp();
+      const made = spawnSync("mkfifo", [join(root, projectRulesFile)], { timeout: 2000 });
+      expect(made.error).toBeUndefined();
+      expect(made.status).toBe(0);
+      // Isolate a regressed blocking open in a killable child, not this test worker's pool.
+      const script = `
+      const { readProjectSource } = await import(process.env.PDB_SOURCE_ENTRY);
+      try {
+        await readProjectSource(process.env.PDB_FIFO_ROOT, {policyVersion:1,rulesHash:process.env.PDB_BASE_HASH});
+        process.exitCode = 1;
+      } catch (error) {
+        if (error.code !== "source-file") throw error;
+      }
+    `;
+      const child = spawnSync(
+        process.execPath,
+        ["--import", "tsx", "--input-type=module", "-e", script],
+        {
+          timeout: 5000,
+          env: {
+            ...process.env,
+            PDB_SOURCE_ENTRY: new URL("./source.ts", import.meta.url).href,
+            PDB_FIFO_ROOT: root,
+            PDB_BASE_HASH: base.rulesHash,
+          },
+          encoding: "utf8",
+        },
+      );
+      expect(child.error).toBeUndefined();
+      expect(child.status, child.stderr).toBe(0);
+    },
+  );
   it.skipIf(process.platform === "win32")(
     "allows internal symlinks but refuses an escaping symlink",
     async () => {
