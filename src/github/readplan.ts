@@ -179,6 +179,21 @@ const outcomeOf = (error: unknown, signal?: AbortSignal): Exclude<CallOutcome, "
       ? "rate-limited"
       : "failed";
 
+/** The outcome of an answered REST request, from its own status and classified evidence. */
+export function restOutcome(answer: RestAnswer): CallOutcome {
+  const status = answer.status;
+  const message = prop(answer.body, "message");
+  if (
+    status === 429 ||
+    prop(answer, "evidence", "category") === "rate-limited" ||
+    (status === 403 && typeof message === "string" && rateLimitText.test(message))
+  )
+    return "rate-limited";
+  return status !== null && ((status >= 200 && status < 300) || status === 304)
+    ? "success"
+    : "failed";
+}
+
 /** True when a failure is a definitive quota refusal: stop scheduling further reads. */
 export const quotaRefusal = (error: unknown): boolean =>
   prop(error, "rateLimited") === true ||
@@ -278,13 +293,9 @@ export class ReadMeter {
         });
       try {
         const answer = await base(path, options);
-        // A REST boundary answers failures with a status rather than throwing.
-        record(
-          answer,
-          answer.status === 429 || prop(answer, "evidence", "category") === "rate-limited"
-            ? "rate-limited"
-            : "success",
-        );
+        // A REST boundary answers failures with a status rather than throwing: only a 2xx
+        // (or 304) answer is a success; a quota refusal is rate-limited; anything else failed.
+        record(answer, restOutcome(answer));
         return answer;
       } catch (error) {
         record(null, outcomeOf(error, this.signal));
@@ -314,13 +325,18 @@ export class ReadMeter {
       profileVersion: this.version,
     });
   }
-  /** The collection record, with telemetry summed from the recorded calls. */
-  collection(): ReadCollection {
-    const graphql = this.calls.filter((c) => c.route === "graphql");
+  /**
+   * The collection record, with telemetry summed from the recorded calls. With `prior`, an
+   * earlier record of the same command (for example its snapshot read) is included, so the
+   * telemetry is the whole command's cost.
+   */
+  collection(prior?: ReadCollection): ReadCollection {
+    const calls = [...(prior?.telemetry.calls ?? []), ...this.calls];
+    const graphql = calls.filter((c) => c.route === "graphql");
     const unknownCost = graphql.filter((c) => c.cost === null).length;
     const knownCost = graphql.reduce((sum, c) => sum + (c.cost ?? 0), 0);
     const failures: ReadTelemetry["failures"] = {};
-    for (const c of this.calls)
+    for (const c of calls)
       if (c.outcome !== "success") failures[c.outcome] = (failures[c.outcome] ?? 0) + 1;
     return {
       schemaVersion: 1,
@@ -328,20 +344,22 @@ export class ReadMeter {
       profileVersion: this.version,
       operation: this.operation,
       bounds: { ...readProfiles[this.profile].bounds },
-      coverage: [...this.coverage],
-      notAttempted: [...this.notAttempted],
+      coverage: [...(prior?.coverage ?? []), ...this.coverage],
+      notAttempted: [...(prior?.notAttempted ?? []), ...this.notAttempted],
       telemetry: {
-        requests: this.calls.length,
+        requests: calls.length,
         graphqlRequests: graphql.length,
-        restRequests: this.calls.length - graphql.length,
-        bytes: this.calls.reduce((sum, c) => sum + (c.bytes ?? 0), 0),
+        restRequests: calls.length - graphql.length,
+        bytes: calls.reduce((sum, c) => sum + (c.bytes ?? 0), 0),
         cost: unknownCost ? null : knownCost,
         knownCost,
         unknownCostRequests: unknownCost,
-        durationMs: Math.max(0, Math.round(this.monotonic() - this.started)),
-        rateLimit: this.rate,
+        durationMs:
+          (prior?.telemetry.durationMs ?? 0) +
+          Math.max(0, Math.round(this.monotonic() - this.started)),
+        rateLimit: this.rate ?? prior?.telemetry.rateLimit ?? null,
         failures,
-        calls: [...this.calls],
+        calls,
       },
     };
   }

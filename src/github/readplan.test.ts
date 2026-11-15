@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vite-plus/test";
 import { RateLimitError } from "./dependencies.js";
-import { hydrate, quotaRefusal, ReadMeter, readProfiles, shapeId } from "./readplan.js";
+import {
+  hydrate,
+  quotaRefusal,
+  ReadMeter,
+  readProfiles,
+  restOutcome,
+  shapeId,
+} from "./readplan.js";
 
 const clock = () => new Date("2026-11-15T00:00:00.000Z");
 
@@ -65,7 +72,7 @@ describe("read profiles, coverage and telemetry (#367, collection-profiles.md)",
     await rest("repos/o/r/collaborators/bob/permission");
     const [a, b] = meter.collection().telemetry.calls;
     expect(a).toMatchObject({ route: "rest", status: 200, cost: null, outcome: "success" });
-    expect(b.status).toBe(404);
+    expect(b).toMatchObject({ status: 404, outcome: "failed" });
     // Same template for both logins: the shape never carries a variable.
     expect(a.shape).toBe(b.shape);
     expect(a.shape).toBe(shapeId("repos/{owner}/{repo}/collaborators/{login}/permission"));
@@ -115,5 +122,51 @@ describe("read profiles, coverage and telemetry (#367, collection-profiles.md)",
       return n;
     });
     expect(results.map((r) => r.state)).toEqual(["failed", "done", "done", "done"]);
+  });
+
+  it("classifies REST outcomes by HTTP status, not by the call returning", async () => {
+    const answer = (status: number | null, body: unknown = {}) => ({ status, body });
+    expect(restOutcome(answer(200))).toBe("success");
+    expect(restOutcome(answer(304))).toBe("success");
+    for (const status of [401, 403, 404, 410, 500, 502, null])
+      expect(restOutcome(answer(status)), String(status)).toBe("failed");
+    expect(restOutcome(answer(429))).toBe("rate-limited");
+    expect(restOutcome(answer(403, { message: "API rate limit exceeded" }))).toBe("rate-limited");
+    expect(
+      restOutcome({ status: 403, body: {}, evidence: { category: "rate-limited" } } as never),
+    ).toBe("rate-limited");
+    const meter = new ReadMeter("pr-status-v1", "pr", clock);
+    const rest = meter.rest(async () => answer(502), "delivery-records", "o/r#1");
+    await rest("repos/o/r/compare/a...b");
+    expect(meter.collection().telemetry.failures).toEqual({ failed: 1 });
+  });
+
+  it("a prior record makes telemetry the whole command's cost", async () => {
+    const first = new ReadMeter("compatibility-full-v1", "issue-intake", clock);
+    await first.query(
+      async () => ({ pdbReadRate: { cost: 5 } }),
+      "snapshot",
+      "o/r",
+    )("query{x}", {});
+    first.cover("open-issues", "o/r", "complete");
+    const second = new ReadMeter("compatibility-full-v1", "issue-intake", clock);
+    await second.query(
+      async () => ({ pdbReadRate: { cost: 1 } }),
+      "delivery-records",
+      "o/r#1",
+    )("query{y}", {});
+    await second.rest(
+      async () => ({ status: 200, body: {} }),
+      "permissions",
+      "o/r#1",
+    )("repos/o/r/collaborators/a/permission");
+    const merged = second.collection(first.collection());
+    expect(merged.telemetry).toMatchObject({
+      requests: 3,
+      graphqlRequests: 2,
+      restRequests: 1,
+      cost: 6,
+    });
+    expect(merged.coverage.map((c) => c.source)).toEqual(["open-issues"]);
   });
 });
