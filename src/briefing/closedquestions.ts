@@ -153,8 +153,8 @@ interface Entry {
   comments: Comment[];
   next: string | null;
   /**
-   * While a changed issue's history is reread, the comments known before the reread. Questions
-   * on them stay visible (with an unknown outcome) until the reread completes (Codex, #609).
+   * While a changed issue's history is reread, the question records known before the reread.
+   * They stay visible (with an unknown outcome) until the reread completes (Codex, #609).
    */
   earlier?: Comment[];
 }
@@ -347,7 +347,13 @@ async function scan(
       issue: node,
       comments: [...node.comments.nodes],
       next,
-      ...(before && next !== null ? { earlier: known(before) } : {}),
+      // Only earlier question records are kept: an earlier resolution not yet reread may have
+      // been edited or deleted, so it never settles anything until reread (Codex, #609).
+      ...(before && next !== null
+        ? {
+            earlier: known(before).filter((c) => (c.body ?? "").includes(questionMarkerPrefix)),
+          }
+        : {}),
     });
   };
 
