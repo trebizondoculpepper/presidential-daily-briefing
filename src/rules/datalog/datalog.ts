@@ -9,6 +9,7 @@ export {
   rulesHash,
   compareKeys,
   type DatalogOptions,
+  type QuestionRecordFact,
   type DatalogResult,
   type DatalogAction,
   type Explanation,

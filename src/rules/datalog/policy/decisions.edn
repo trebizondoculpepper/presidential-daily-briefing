@@ -199,10 +199,56 @@
    :kind "inspect"
    :band 6
    :preference 0
-   :when [(issue ?t) (possible ?t) (uncertain ?t)]
+   :when [(issue ?t) (possible ?t) (uncertain ?t) [1 "role" ?role] [(not= ?role "human")]]
    :why "Eligibility is unproven: inspect incomplete evidence or state the required platform."
    :codes ["ordinary" "inspection"]
-   :witnesses {"uncertainty" [(or-join [?t ?value] (and [?t "labels-complete" false] [(str "labels incomplete") ?value]) (and [?t "native-complete" false] [(str "native dependencies incomplete") ?value]) (and (not (closing-complete ?t)) [(str "closing PR evidence incomplete") ?value]) (and (platform-unknown ?t) [(str "viewer platform unknown") ?value]))]}}]
+   :witnesses {"uncertainty" [(or-join [?t ?value] (and [?t "labels-complete" false] [(str "labels incomplete") ?value]) (and [?t "native-complete" false] [(str "native dependencies incomplete") ?value]) (and (not (closing-complete ?t)) [(str "closing PR evidence incomplete") ?value]) (and (platform-unknown ?t) [(str "viewer platform unknown") ?value]))]}}
+
+  ;; Human briefing (doc/design/human-briefing.md, #457): input a named human owes. Explicit
+  ;; items come from trusted records or attention; inferred ones are candidates, never requests.
+  {:id "D-HUMAN-ASK-YOU"
+   :kind "answer-questions"
+   :band 1
+   :preference 0
+   :when [[1 "role" "human"] (open-question ?t) (asks-viewer ?t)]
+   :why "A trusted question record routed to you ({routedTo}) awaits answers on the ticket."
+   :codes ["explicit" "addressed"]
+   :witnesses {"routedTo" [(trusted-record ?t ?r) [?r "record-to" ?value]]}}
+
+  {:id "D-HUMAN-ASK"
+   :kind "answer-questions"
+   :band 3
+   :preference 0
+   :when [[1 "role" "human"] (open-question ?t) (not (asks-viewer ?t))]
+   :why "A trusted question record routed to {routedTo} awaits answers on the ticket."
+   :codes ["explicit"]
+   :witnesses {"routedTo" [(trusted-record ?t ?r) [?r "record-to" ?value]]}}
+
+  {:id "D-HUMAN-UNVERIFIED"
+   :kind "decide"
+   :band 3
+   :preference 1
+   :when [[1 "role" "human"] (open-unrecorded ?t) (unverified-record ?t)]
+   :why "Labelled {questionLabel}; a question record exists but its author's authority is unverified. Inferred: confirm the decision needed."
+   :codes ["inferred"]
+   :witnesses {"questionLabel" [[?t "label" ?value] [1 "question-label" ?value]]}}
+
+  {:id "D-HUMAN-DECIDE"
+   :kind "decide"
+   :band 3
+   :preference 2
+   :when [[1 "role" "human"] (open-unrecorded ?t)]
+   :why "Labelled {questionLabel} without a trusted question record. Inferred: a decision may be needed."
+   :codes ["inferred"]
+   :witnesses {"questionLabel" [[?t "label" ?value] [1 "question-label" ?value]]}}
+
+  {:id "D-HUMAN-SIGNOFF"
+   :kind "sign-off"
+   :band 3
+   :preference 3
+   :when [[1 "role" "human"] (open ?t) (accepted-pr ?t) (clean-pr ?t)]
+   :why "Accepted at head {head}: verify passed, head reviewed, no findings. Inferred: merge sign-off candidate; nobody asked explicitly."
+   :codes ["inferred"]}]
  :denials
  {"D-DENY-CLAIM" "Someone already claims the ticket."
   "D-DENY-PREREQUISITE" "A prerequisite label (design, question, blocked or parked) is present."
