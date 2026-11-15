@@ -3,6 +3,7 @@
  * by the JSON read API and HTTP MCP, and the status counters.
  */
 import { collect, ghQueryWith, ghRest } from "../github/github.js";
+import { collectShortlist } from "../github/shortlist.js";
 import { dependencyReport } from "../github/dependencies.js";
 import type { ServeExtensions, ServeRuntime } from "./types.js";
 import { readApi, selectRepository } from "./api.js";
@@ -22,6 +23,7 @@ import type { ServeOptions } from "./options.js";
 /** Production read boundaries: authenticated gh through the existing argument-array runners. */
 export const defaultReadRuntime = (serve: ServeRuntime): ServeReadRuntime => ({
   collect,
+  collectShortlist,
   dependencyReport,
   rest: ghRest,
   queryWith: ghQueryWith,

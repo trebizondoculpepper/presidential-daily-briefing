@@ -34,6 +34,8 @@ export interface SignalSource {
 /** GitHub read boundaries for the data routes. */
 export interface ServeReadRuntime {
   collect: typeof Collect;
+  /** Shared routine discovery/hydration plan (#368/#453). */
+  collectShortlist?: ReadRuntime["collectShortlist"];
   /** Test seam for the lazily loaded Datalog engine (#346). */
   loadEngine?: ReadRuntime["loadEngine"];
   /** Focused `who` read (issue-detail-v1, #367); default: the gh collector over queryWith. */

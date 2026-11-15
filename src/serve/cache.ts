@@ -40,6 +40,7 @@ export const MAX_ENTRIES = 256;
 /** Recent failures kept for diagnostics (doc/design/serve-diagnostics-api.md "Errors"). */
 export const MAX_ERROR_EVENTS = 100;
 const errorHints: Record<CollectionCode, string> = {
+  CACHE_INVALIDATED: "Facts changed during this read; request a fresh view before acting.",
   GITHUB_RATE_LIMITED:
     "GitHub refused for quota; wait for the reported reset or read cached results. Nothing retries automatically.",
   GITHUB_AUTH: "Run gh auth status on the host running pdb serve.",
@@ -54,7 +55,11 @@ export const MAX_RATE_LIMIT_COOLDOWN_MS = 10 * 60_000;
 /** Cooldown when a rate limit names no retry-after or reset time. */
 export const DEFAULT_RATE_LIMIT_COOLDOWN_MS = 60_000;
 
-export type CollectionCode = "GITHUB_UNAVAILABLE" | "GITHUB_AUTH" | "GITHUB_RATE_LIMITED";
+export type CollectionCode =
+  | "GITHUB_UNAVAILABLE"
+  | "GITHUB_AUTH"
+  | "GITHUB_RATE_LIMITED"
+  | "CACHE_INVALIDATED";
 
 /** A failed live collection with a sanitized, stable code and message. */
 export class CollectionError extends Error {
@@ -724,6 +729,7 @@ export class ServeCache {
         // Never overwrite newer facts, and never insert across a refresh that came later.
         if (
           !this.closed &&
+          !controller.signal.aborted &&
           this.auth === collectedAs &&
           keep(value) &&
           this.epochOf(repository) === epoch &&
@@ -734,10 +740,11 @@ export class ServeCache {
           this.bytes += entry.bytes;
           this.enforceBounds(storeKey);
         }
-        this.lastSeen.set(repository.toLowerCase(), {
-          observedAt: new Date(entry.observedAt).toISOString(),
-          lastError: this.lastSeen.get(repository.toLowerCase())?.lastError ?? null,
-        });
+        if (this.epochOf(repository) === epoch)
+          this.lastSeen.set(repository.toLowerCase(), {
+            observedAt: new Date(entry.observedAt).toISOString(),
+            lastError: this.lastSeen.get(repository.toLowerCase())?.lastError ?? null,
+          });
         return entry;
       } catch (error) {
         // Already aborted here means every waiter cancelled (or shutdown began): no GitHub
@@ -849,7 +856,19 @@ export class ServeCache {
         if (this.cooldownUntil > now && this.cooldownError) throw this.cooldownError;
         flight = this.startCollection(key, cacheKey, produce, keep);
       }
-      return served(await this.wait(key, flight, signal), "live");
+      const collected = await this.wait(key, flight, signal);
+      // Invalidation also applies to the waiting response, not just cache insertion.
+      // Never label pre-write facts current, even when their fetch completed afterward.
+      if (flight.epoch !== this.epochOf(cacheKey.repository))
+        return served(
+          collected,
+          "stale",
+          new CollectionError(
+            "CACHE_INVALIDATED",
+            "Facts were invalidated while this read was running; refresh before acting.",
+          ),
+        );
+      return served(collected, "live");
     } catch (error) {
       if (signal?.aborted) throw abortError(signal);
       // An unavailable issue is a result (its diagnosis), not a failure: never stale.
