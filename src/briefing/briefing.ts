@@ -14,6 +14,7 @@ import type { SubjectAssessments } from "./assessments.js";
 import { labelEstimationReport } from "../estimation/complexitylabels.js";
 import type { LabelEstimationInput } from "../estimation/complexitylabels.js";
 import type { Action, Dependency, Issue, PullRequest, Snapshot } from "../github/types.js";
+import { classifyChecks } from "../github/requiredchecks.js";
 import { snapshotPolicyReview } from "../workflow/reviewpolicy.js";
 import { workflow } from "../workflow/definition.js";
 
@@ -367,7 +368,14 @@ analysisRules.set("pull-requests", ({ snapshot, prs }) =>
   prs.flatMap((pr) => {
     const checks = prChecks(pr);
     const failed = checks.filter((check) => workflow.failure.includes(check.outcome));
-    const pending = checks.filter((check) => workflow.unfinished.includes(check.outcome));
+    // #343: only required (or unknown) checks make a PR wait; a pending advisory job is context.
+    // An expected required check that has not reported keeps it waiting too.
+    const requiredness = classifyChecks(pr);
+    const advisory = new Set(requiredness.advisoryPending);
+    const pending = checks.filter(
+      (check) => workflow.unfinished.includes(check.outcome) && !advisory.has(check.name),
+    );
+    const missingRequired = requiredness.missingRequired;
     const unknown = checks.filter(
       (check) =>
         ![...workflow.pass, ...workflow.failure, ...workflow.unfinished].includes(check.outcome),
@@ -411,13 +419,21 @@ analysisRules.set("pull-requests", ({ snapshot, prs }) =>
           "Coordinate with the branch owner and resolve conflicts; rerun checks.",
         ),
       );
-    if (pending.length)
+    if (pending.length || missingRequired.length)
       findings.push(
         action(
           "pr-pending",
           pr,
           50,
-          `Pending: ${pending.map((check) => check.name).join(", ")}`,
+          [
+            pending.length ? `Pending: ${pending.map((check) => check.name).join(", ")}` : "",
+            missingRequired.length
+              ? `Required, not yet reported: ${missingRequired.join(", ")}`
+              : "",
+            advisory.size ? `Advisory, still running: ${[...advisory].join(", ")}` : "",
+          ]
+            .filter(Boolean)
+            .join("; "),
           "Wait for the current head checks; continue independent work.",
         ),
       );
@@ -432,6 +448,7 @@ analysisRules.set("pull-requests", ({ snapshot, prs }) =>
       complete &&
       !failed.length &&
       !pending.length &&
+      !missingRequired.length &&
       !unknown.length &&
       !unresolved.length &&
       !workflow.changesRequested.includes(pr.reviewDecision ?? "") &&
@@ -444,6 +461,7 @@ analysisRules.set("pull-requests", ({ snapshot, prs }) =>
       complete &&
       !failed.length &&
       !pending.length &&
+      !missingRequired.length &&
       !unknown.length &&
       !unresolved.length &&
       !workflow.changesRequested.includes(pr.reviewDecision ?? "") &&

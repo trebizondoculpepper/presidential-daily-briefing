@@ -40,6 +40,8 @@ type CheckContext = {
   completedAt?: string | null;
   /** The GitHub App that published a check run: provider identity, never its display name. */
   checkSuite?: { app: { slug: string } | null } | null;
+  /** Whether GitHub requires this check for this PR (#343); null/absent is unknown. */
+  isRequired?: boolean | null;
 };
 type ReviewNode = {
   author: Login;
@@ -97,7 +99,17 @@ export type PullRequestNode = {
   closingIssuesReferences: { nodes: LinkedIssueNode[]; pageInfo?: PageInfo };
 };
 
-export type CheckClass = "passed" | "pending" | "cancelled" | "failed" | "unknown";
+/**
+ * `advisory-pending` (#343): still running, but GitHub reports it is not required for this PR;
+ * shown, never a waiting blocker. A pending check with unknown requiredness stays `pending`.
+ */
+export type CheckClass =
+  | "passed"
+  | "pending"
+  | "advisory-pending"
+  | "cancelled"
+  | "failed"
+  | "unknown";
 export type Receipt = {
   by: string;
   at: string;
@@ -182,7 +194,7 @@ export type PrStatusReport = {
 };
 
 const query = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){number title url state isDraft merged mergeable mergeStateStatus reviewDecision headRefOid headRefName baseRefName updatedAt
-commits(last:1){nodes{commit{oid committedDate statusCheckRollup{state contexts(first:100){nodes{__typename ... on CheckRun{name status conclusion detailsUrl startedAt completedAt checkSuite{app{slug}}} ... on StatusContext{context state targetUrl}} pageInfo{hasNextPage}}}}}}
+commits(last:1){nodes{commit{oid committedDate statusCheckRollup{state contexts(first:100){nodes{__typename ... on CheckRun{name status conclusion detailsUrl startedAt completedAt isRequired(pullRequestNumber:$number) checkSuite{app{slug}}} ... on StatusContext{context state targetUrl isRequired(pullRequestNumber:$number)}} pageInfo{hasNextPage}}}}}}
 reviews(last:50){nodes{author{__typename login} state submittedAt url commit{oid}} pageInfo{hasPreviousPage}}
 reviewThreads(first:100){nodes{isResolved isOutdated path line first:comments(first:1){totalCount nodes{author{__typename login} body createdAt url}} latest:comments(last:1){nodes{author{login} createdAt url}}} pageInfo{hasNextPage}}
 comments(last:100){nodes{author{__typename login} body createdAt url} pageInfo{hasPreviousPage}}
@@ -240,7 +252,9 @@ export function prStatus(
   const contexts = (rollup?.contexts.nodes ?? []).map((c) => ({
     name: c.name ?? c.context ?? "unnamed",
     outcome: c.conclusion ?? c.state ?? c.status ?? "UNKNOWN",
-    class: classifyCheck(c),
+    class: ((cls) => (cls === "pending" && c.isRequired === false ? "advisory-pending" : cls))(
+      classifyCheck(c),
+    ) as CheckClass,
     url: c.detailsUrl ?? c.targetUrl ?? pr.url,
     noRunTime: c.__typename === "CheckRun" && !c.startedAt,
   }));
@@ -528,10 +542,9 @@ export function prStatus(
           }
         : null,
       counts: Object.fromEntries(
-        (["passed", "pending", "cancelled", "failed", "unknown"] as const).map((k) => [
-          k,
-          byClass(k).length,
-        ]),
+        (["passed", "pending", "advisory-pending", "cancelled", "failed", "unknown"] as const).map(
+          (k) => [k, byClass(k).length],
+        ),
       ),
       problems: problems
         .slice(0, limits.failures)
