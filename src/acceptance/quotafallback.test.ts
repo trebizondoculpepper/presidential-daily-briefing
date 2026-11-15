@@ -94,6 +94,32 @@ describe("quota fallback to an explicit snapshot (#371)", () => {
     });
   });
 
+  it("keeps the stale label in the human-role briefing, JSON and text", async () => {
+    await withDir(async (dir) => {
+      const cache = join(dir, "cache.json");
+      await atomicJson(cache, snapshot());
+      const resetAt = "2026-11-12T10:20:00.000Z";
+      const json = await briefing(
+        ["--role", "human", "--agent", "owner", "--cache", cache, "--json"],
+        quota({ resetAt }),
+        minutes(2),
+      );
+      expect(json.code).toBe(2);
+      expect(JSON.parse(json.out).freshness).toMatchObject({
+        source: "stale",
+        fallback: { reason: "live-read-quota-refused", resetAt },
+      });
+      const text = await briefing(
+        ["--role", "human", "--agent", "owner", "--cache", cache],
+        quota({ resetAt }),
+        minutes(2),
+      );
+      expect(text.code).toBe(2);
+      expect(text.out.split("\n")[0]).toContain("STALE CACHE (live read refused for quota)");
+      expect(text.out.split("\n")[0]).toContain("refresh before acting");
+    });
+  });
+
   it("applies a --label filter from the snapshot, making no further GitHub request", async () => {
     await withDir(async (dir) => {
       const cache = join(dir, "cache.json");
