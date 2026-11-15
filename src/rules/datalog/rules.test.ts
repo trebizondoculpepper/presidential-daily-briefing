@@ -88,6 +88,12 @@ const audience: Record<
   "D-UNFAVORABLE": { role: "implementer", kind: "issue" },
   "D-OWN-UNFAVORABLE": { role: "implementer", kind: "issue" },
   "D-INSPECT": { role: "agents", kind: "issue" },
+  // Retained claims (#413): the viewer's own issue claims only.
+  "D-OWN-RESUME": { role: "implementer", kind: "issue" },
+  "D-REVIEW-OWNED": { role: "implementer", kind: "issue" },
+  "D-REVIEW-OWNED-PARTIAL": { role: "implementer", kind: "issue" },
+  "D-OWN-UNKNOWN": { role: "implementer", kind: "issue" },
+  "D-OWN-WAIT": { role: "implementer", kind: "issue" },
   "D-HUMAN-ASK-YOU": { role: "human", kind: "issue" },
   "D-HUMAN-ASK": { role: "human", kind: "issue" },
   "D-HUMAN-UNVERIFIED": { role: "human", kind: "issue" },

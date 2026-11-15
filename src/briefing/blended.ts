@@ -34,10 +34,17 @@ export type ActionKind =
   | "assess-impact"
   | "inspect-assessment"
   | "inspect"
-  | "design";
+  | "design"
+  // Retained claims (#413): an explicit resume, the owned-work review and a visible wait.
+  | "resume-claim"
+  | "review-owned-work"
+  | "wait-claim";
 export type BlendedRole = "implementer" | "designer";
-/** 1 addressed, 2 PR follow-up, 3 designer duties, 4 easy win, 5 assessment, 6 ordinary, 7 unfavorable. */
-export type Band = 1 | 2 | 3 | 4 | 5 | 6 | 7;
+/**
+ * 1 addressed, 2 PR follow-up, 3 designer duties and owned-work review/resume, 4 easy win,
+ * 5 assessment, 6 ordinary, 7 unfavorable, 8 waiting (#413: shown, never work).
+ */
+export type Band = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
 
 const small: readonly ComplexitySize[] = ["XS", "S"];
 const large: readonly ComplexitySize[] = ["L", "XL", "XXL"];
@@ -94,7 +101,14 @@ export function classify(
     decide: [3, "designer-duty"],
     document: [3, "designer-duty"],
     "design-review": [3, "designer-duty"],
+    // Retained claims (#413), as decisions.edn D-OWN-RESUME, D-REVIEW-OWNED and D-OWN-WAIT.
+    "resume-claim": [3, "resume-required"],
+    "review-owned-work": [3, "review-owned-work"],
+    "wait-claim": [8, "waiting"],
   };
+  // An own claim whose activity is unknown is inspected ahead of new work (D-OWN-UNKNOWN).
+  if (a.kind === "inspect" && a.extraReasonCodes?.includes("own-claim-unknown"))
+    return { band: 3, boosted: false, reasonCodes: ["own-claim", "inspection"] };
   const known = fixed[a.kind];
   if (known) return { band: known[0], boosted: false, reasonCodes: [known[1]] };
   if (assessmentKinds.includes(a.kind)) {
@@ -143,6 +157,16 @@ const identity = (a: ActionFacts, b: ActionFacts): number =>
  * unstarted and creation time; explicit age order uses creation time alone for band 6. Stable
  * identity breaks every remaining tie.
  */
+/** decisions.edn preferences of the band-3 retained-claim rows; other rows keep their order. */
+const retainedPreference = (a: ActionFacts): number =>
+  a.kind === "resume-claim"
+    ? 0
+    : a.kind === "review-owned-work"
+      ? 1
+      : a.kind === "inspect" && a.extraReasonCodes?.includes("own-claim-unknown")
+        ? 2
+        : 3;
+
 export function compareActions(order: PickupOrder = "impact") {
   return (a: ActionFacts, b: ActionFacts): number => {
     const ca = classify(a, order);
@@ -150,6 +174,8 @@ export function compareActions(order: PickupOrder = "impact") {
     if (ca.band !== cb.band) return ca.band - cb.band;
     if (ca.band <= 3)
       return (
+        // #413: retained-claim rows follow the rules' preferences (resume, review, unknown).
+        retainedPreference(a) - retainedPreference(b) ||
         (a.sequence ?? Number.MAX_SAFE_INTEGER) - (b.sequence ?? Number.MAX_SAFE_INTEGER) ||
         identity(a, b)
       );
@@ -317,6 +343,14 @@ export interface CandidateInput {
   isParked: (url: string) => boolean;
   urgency: (url: string) => 0 | 1 | 2;
   ownedByViewer: (url: string) => boolean;
+  /**
+   * Retained claims (#413), the same facts the Datalog rules read: the viewer's open claims and,
+   * on a live read, each one's activity. Absent: not read, so ordinary continuation applies.
+   */
+  retained?: {
+    ownedClaims: { urls: readonly string[]; complete: boolean };
+    claimActivity?: ReadonlyMap<string, { state: string; reason: string }>;
+  };
 }
 
 /**
@@ -329,9 +363,17 @@ export interface CandidateInput {
 export function roleCandidates(input: CandidateInput): ActionFacts[] {
   const metric = input.role === "implementer" ? "complexity" : "impact";
   const agent = input.agent ?? "NAME";
-  // The viewer's active claims: open issues carrying the viewer's agent label.
+  const activity = (url: string) => input.retained?.claimActivity?.get(url)?.state;
+  // The viewer's claims that block another claim: open issues carrying the viewer's agent label,
+  // except those verified waiting, which the claim guard admits alongside (#412/#413).
   const ownActive = [...input.subjects.values()]
-    .filter((s) => s.isIssue && s.state === "OPEN" && input.ownedByViewer(s.url))
+    .filter(
+      (s) =>
+        s.isIssue &&
+        s.state === "OPEN" &&
+        input.ownedByViewer(s.url) &&
+        activity(s.url) !== "waiting",
+    )
     .map((s) => s.number);
   const facts = (url: string, kind: ActionKind, sequence?: number): ActionFacts | null => {
     const s = input.subjects.get(url);
@@ -356,6 +398,8 @@ export function roleCandidates(input: CandidateInput): ActionFacts[] {
         : null;
     const command: Partial<Record<ActionKind, string | null>> = {
       implement: otherClaims.length ? handoff : claim,
+      "resume-claim": `pdb claim resume ${s.number} --repo ${input.repository} --agent ${agent}`,
+      "review-owned-work": `pdb team --repo ${input.repository}`,
       "estimate-complexity": estimate("complexity"),
       "assess-impact": estimate("impact"),
       // Inspection of known bad evidence carries the Ticket Doctor fix for the role's metric
@@ -402,13 +446,44 @@ export function roleCandidates(input: CandidateInput): ActionFacts[] {
   };
   const out: ActionFacts[] = [];
   let sequence = 0;
+  // #413: an own claim's activity decides its row, as decisions.edn does for the Datalog engine.
+  const ownKind = (url: string): [ActionKind, string[]] => {
+    switch (activity(url)) {
+      case "resume-required":
+        return ["resume-claim", []];
+      case "waiting":
+        return ["wait-claim", []];
+      case "unknown":
+        return ["inspect", ["own-claim-unknown"]];
+      default:
+        return ["continue-implementation", []];
+    }
+  };
   for (const section of input.sections) {
     const kind = sectionKinds[section.name];
     if (section.background || !kind) continue;
     for (const row of section.rows) {
-      const f = facts(row.url, kind, sequence++);
-      if (f) out.push(f);
+      const [k, codes] =
+        kind === "continue-implementation" && input.role === "implementer"
+          ? ownKind(row.url)
+          : [kind, []];
+      const f = facts(row.url, k, sequence++);
+      if (f) out.push(codes.length ? { ...f, extraReasonCodes: codes } : f);
     }
+  }
+  const owned = input.retained?.ownedClaims;
+  // One review row on the first listed claim (unparked first), shown when it is foreground, as
+  // the Datalog rule's owned-review-subject.
+  const first = owned?.urls[0];
+  if (
+    input.role === "implementer" &&
+    owned &&
+    owned.urls.length > 1 &&
+    first &&
+    (!input.isParked(first) || input.isAddressed(first))
+  ) {
+    const f = facts(first, "review-owned-work");
+    if (f) out.push(f);
   }
   for (const [url, a] of input.assessments) {
     const s = input.subjects.get(url);

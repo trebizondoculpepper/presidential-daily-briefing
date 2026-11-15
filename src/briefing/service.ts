@@ -18,6 +18,8 @@ import type { DeclaredReviewPolicy } from "../workflow/reviewpolicy.js";
 import { collect, ghQuery, IssueUnavailable, permissionLookup } from "../github/github.js";
 import { classifyChecks } from "../github/requiredchecks.js";
 import type { IssueDiagnosis, Query, Rest } from "../github/github.js";
+import type { GraphQuery } from "../workflow/claims.js";
+import { readRetainedFacts } from "../workflow/retainedfacts.js";
 import { diagnoseDelivery } from "../workflow/deliverydoctor.js";
 import { deliveryRead } from "../workflow/deliveryread.js";
 import type { DeliveryRead } from "../workflow/deliveryread.js";
@@ -200,8 +202,29 @@ export async function presentBriefing(
     source: "default" as const,
   };
   const roleSource = options.role === undefined ? ("default" as const) : ("request" as const);
+  const datalogPath = selection.requested === "datalog" && !options.full && !options.issue;
+  // #413: the viewer's retained claims and, on a live read, their activity: the same facts for
+  // the Datalog rules and the TypeScript rollback ranking.
+  // Facts a caller already holds (tests, a future shared read) are used as given.
+  const retained =
+    options.retained ??
+    (!options.full &&
+    !options.issue &&
+    (datalogPath ? (options.role ?? defaultEngineRole) : options.role) === "implementer"
+      ? await readRetainedFacts(
+          snapshot,
+          options.agent,
+          live
+            ? {
+                query: live.query as GraphQuery,
+                permission: permissionLookup(snapshot.repository, live.rest, signal),
+              }
+            : undefined,
+        )
+      : undefined);
+  if (retained) options = { ...options, retained };
   // Full issue intake is outside the experimental next-action slice.
-  if (selection.requested === "datalog" && !options.full && !options.issue) {
+  if (datalogPath) {
     options = { ...options, role: options.role ?? defaultEngineRole };
     if (options.role !== "implementer" && options.role !== "designer")
       throw new BriefingEngineError(
@@ -215,6 +238,8 @@ export async function presentBriefing(
         agent: options.agent,
         platform: options.platform,
         order: options.order,
+        ...(retained ? { ownedClaims: retained.ownedClaims } : {}),
+        ...(retained?.claimActivity ? { claimActivity: retained.claimActivity } : {}),
         responsible: responsibility.responsible,
         responsibilityUnknown: responsibility.unknown.map((u) => u.issue),
         ...datalogReviewFacts(snapshot),
