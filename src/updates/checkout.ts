@@ -271,6 +271,27 @@ async function probe({
     return result;
   }
 
+  /**
+   * Every non-Git await (filesystem reads) goes through this: it settles with `fallback` when
+   * the remaining overall budget runs out first, or when the operation throws.
+   */
+  async function bounded<T>(work: () => Promise<T>, fallback: T): Promise<T> {
+    const left = Math.max(0, deadlineMs - (now() - started));
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const expired = new Promise<T>((resolve) => {
+      timer = setTimeout(() => {
+        timedOut = true;
+        resolve(fallback);
+      }, left);
+    });
+    return Promise.race([
+      Promise.resolve()
+        .then(work)
+        .catch(() => fallback),
+      expired,
+    ]).finally(() => clearTimeout(timer));
+  }
+
   const info = await call([
     "rev-parse",
     "--show-toplevel",
@@ -287,7 +308,10 @@ async function probe({
   const [toplevel = "", gitDir = "", commonDir = "", shallow = ""] = info.split(/\r?\n/);
   // The repository found must be this installation itself, not one that merely contains a
   // copy of it (for example pdb vendored or unpacked inside some other project).
-  if (!(await samePath(toplevel, repo)))
+  const same = await bounded<boolean | null>(() => samePath(toplevel, repo), null);
+  if (same === null)
+    return blank(now, "unknown", "timed out checking the installation root against Git");
+  if (!same)
     return blank(now, "unknown", "installation root is not the top level of a Git checkout");
   const result: CheckoutStatus = { ...blank(now, "checkout", ""), reason: undefined };
 
@@ -300,18 +324,15 @@ async function probe({
   // FETCH_HEAD lives in the common directory; a worktree's own git dir is checked too.
   const abs = (p: string) => (isAbsolute(p) ? p : join(root, p));
   // A stalled filesystem must not outlast the overall deadline either.
-  const left = Math.max(0, deadlineMs - (now() - started));
-  let fsTimer: ReturnType<typeof setTimeout> | undefined;
-  const times = await Promise.race([
-    Promise.all(
-      [...new Set([commonDir, gitDir].filter(Boolean))].map((d) =>
-        mtime(join(abs(d), "FETCH_HEAD")).catch(() => null),
+  const times = await bounded(
+    () =>
+      Promise.all(
+        [...new Set([commonDir, gitDir].filter(Boolean))].map((d) =>
+          mtime(join(abs(d), "FETCH_HEAD")).catch(() => null),
+        ),
       ),
-    ),
-    new Promise<null[]>((resolve) => {
-      fsTimer = setTimeout(() => resolve([]), left);
-    }),
-  ]).finally(() => clearTimeout(fsTimer));
+    [] as (number | null)[],
+  );
   const fetched = Math.max(...times.map((t) => t ?? -Infinity));
   if (Number.isFinite(fetched)) {
     result.lastFetch = new Date(fetched).toISOString();
