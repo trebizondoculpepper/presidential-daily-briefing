@@ -33,16 +33,7 @@ import { markerTrust } from "../workflow/delivery.js";
 import { readPullRequest, readReviewHistory, readTeam, readWho } from "../workflow/readservices.js";
 import type { DeliveryBoundaries } from "../workflow/readservices.js";
 import { defaultStaleHours } from "../workflow/team.js";
-import { collect, ghQueryWith, ghRest } from "../github/github.js";
-import { dependencyReport } from "../github/dependencies.js";
-import type {
-  RequestContext,
-  Routes,
-  ServedRepository,
-  ServeExtensions,
-  ServeRuntime,
-  ServerFacts,
-} from "../serve.js";
+import type { RequestContext, Routes, ServedRepository, ServerFacts } from "../serve.js";
 import { CollectionError, ServeCache, UnservedRepository } from "./cache.js";
 import type { Freshness } from "./cache.js";
 import { HttpFailure, readJsonBody, sendJson } from "./http.js";
@@ -290,23 +281,20 @@ const refreshScopes = {
   prs: ["pr", "pr-history"],
 } as const;
 
-/** Build the read API routes over one cache. */
-export function readApi(
-  options: ServeOptions,
+/**
+ * Cached GitHub boundaries over one cache, shared by the JSON API and HTTP MCP: whole collected
+ * results per key, and auxiliary reads memoised in the entry being presented. Every GitHub read
+ * is confined to the served set (`isServed`): an indirection (a transfer, a dependency edge, a
+ * delivery record naming another repository) never reaches a repository the user did not
+ * choose to serve (#373 review).
+ */
+export function cachedBoundaries(
   runtime: ServeReadRuntime,
   cache: ServeCache,
-): (facts: ServerFacts) => Routes {
-  // The served set, known once listening. Every GitHub read below is confined to it: an
-  // indirection (a transfer, a dependency edge, a delivery record naming another repository)
-  // never reaches a repository the user did not choose to serve (#373 review).
-  let servedSet: readonly ServedRepository[] = [];
-  const isServed = (repository: string): boolean =>
-    servedSet.some((s) => s.repository.toLowerCase() === repository.toLowerCase());
+  isServed: (repository: string) => boolean,
+) {
   const guardedQueryWith = runtime.queryWith && servedOnlyQuery(runtime.queryWith, isServed);
   const guardedRest = runtime.rest && servedOnlyRest(runtime.rest, isServed);
-
-  // Cached GitHub boundaries: whole collected results per key; auxiliary reads memoised in the
-  // entry being presented.
   const cachedCollect: typeof Collect = (repository, collectOptions) => {
     const { signal, ...coverage } = collectOptions ?? {};
     return cache.read(
@@ -346,6 +334,48 @@ export function readApi(
           )
     : undefined;
 
+  return {
+    collect: cachedCollect,
+    dependencyReport: cachedDependencies,
+    rest: memoRest,
+    queryWith: memoQueryWith,
+    /** Uncached but confined boundaries, for whole-result collectors (pull requests). */
+    guardedQueryWith,
+    guardedRest,
+  };
+}
+
+/** Project-rooted local configuration readers (estimation and workflow-guide settings). */
+export const projectReaders = (
+  runtime: ServeReadRuntime,
+  project: string | undefined,
+  repository: string,
+): Pick<ReadRuntime, "estimation" | "guide"> =>
+  project
+    ? (runtime.projectRuntime?.(project) ?? {
+        estimation: { cwd: project },
+        guide: { cwd: project },
+      })
+    : noLocalProject(repository);
+
+/** Build the read API routes over one cache. */
+export function readApi(
+  options: ServeOptions,
+  runtime: ServeReadRuntime,
+  cache: ServeCache,
+): (facts: ServerFacts) => Routes {
+  // The served set, known once listening.
+  let servedSet: readonly ServedRepository[] = [];
+  const isServed = (repository: string): boolean =>
+    servedSet.some((s) => s.repository.toLowerCase() === repository.toLowerCase());
+  const {
+    collect: cachedCollect,
+    dependencyReport: cachedDependencies,
+    rest: memoRest,
+    queryWith: memoQueryWith,
+    guardedQueryWith,
+    guardedRest,
+  } = cachedBoundaries(runtime, cache, isServed);
   const known = localPaths(...options.projects);
   const redact = <T>(value: T): T => redactPaths(value, known);
 
@@ -356,12 +386,7 @@ export function readApi(
     queryWith: memoQueryWith,
     now: runtime.now,
     redactDiagnostic: redactLocalText,
-    ...(project
-      ? (runtime.projectRuntime?.(project) ?? {
-          estimation: { cwd: project },
-          guide: { cwd: project },
-        })
-      : noLocalProject(repository)),
+    ...projectReaders(runtime, project, repository),
   });
 
   const boundaries = (repository: string, signal: AbortSignal): DeliveryBoundaries =>
@@ -819,39 +844,6 @@ export function readApi(
         return true;
       }
       return false;
-    };
-  };
-}
-
-/** Production read boundaries: authenticated gh through the existing argument-array runners. */
-export const defaultReadRuntime = (serve: ServeRuntime): ServeReadRuntime => ({
-  collect,
-  dependencyReport,
-  rest: ghRest,
-  queryWith: ghQueryWith,
-  now: () => serve.clock.now(),
-  env: process.env,
-});
-
-/** The cache, read routes and status counters, built once the server is listening. */
-export function readServices(
-  options: ServeOptions,
-  serve: ServeRuntime,
-  read: ServeReadRuntime,
-): ServeExtensions {
-  return (facts) => {
-    const cache = new ServeCache({
-      ttlMs: options.ttlMs,
-      clock: serve.clock,
-      authContext: serve.authContext,
-      initialAuth: facts.auth,
-      // A different gh login (gh auth switch) cleared the cache; status shows the new one.
-      onAuthChange: (auth) => (facts.auth = auth),
-    });
-    return {
-      routes: readApi(options, read, cache)(facts),
-      status: { cache: () => cache.status(), repositories: () => cache.repositories() },
-      close: async () => cache.close(),
     };
   };
 }
