@@ -11,7 +11,9 @@ import { evaluateProjectPreferences, ProjectEvaluationError } from "./evaluate.j
 import type { ProjectEvaluationOptions } from "./evaluate.js";
 import { projectionSchema } from "./projection.js";
 import type { AdmittedAction, ProjectionSubject } from "./projection.js";
-import { workerLimits } from "./worker.js";
+import { workerLimits, workerSource } from "./worker.js";
+import { runInNewContext } from "node:vm";
+import ds from "datascript";
 
 const fixture = readFileSync(
   new URL("../../../../doc/reports/fixtures/project-rules-v1.edn", import.meta.url),
@@ -250,6 +252,60 @@ describe("bounded project worker (#515)", () => {
     expect(await code(evaluateProjectPreferences(forged, actions, subjects, options()))).toBe(
       "invalid-policy",
     );
+  });
+  it("serializes a self-contained entry that runs with only its allowed globals", () => {
+    const policy = compile();
+    const posted: unknown[] = [];
+    let onJob: ((job: unknown) => void) | undefined;
+    const allowed = {
+      worker_threads: {
+        workerData: { datascript: "datascript", tuples: 5000, outputChars: 262144 },
+        parentPort: {
+          postMessage: (m: unknown) => posted.push(m),
+          once: (_: string, f: (job: unknown) => void) => (onJob = f),
+        },
+      },
+      module: { createRequire: () => (id: string) => (id === "datascript" ? ds : null) },
+    };
+    // A fresh context: only a process exposing the two allowed builtins. Any reference to this
+    // module's scope (an import, helper or transpiler shim) would throw a ReferenceError here.
+    runInNewContext(workerSource, {
+      process: {
+        getBuiltinModule: (name: string) =>
+          name === "node:worker_threads"
+            ? allowed.worker_threads
+            : name === "node:module"
+              ? allowed.module
+              : undefined,
+      },
+    });
+    expect(posted).toEqual([{ type: "ready" }]);
+    onJob!({
+      generation: "g1",
+      effectiveRulesHash: "e",
+      projectRulesHash: "p",
+      datoms: [
+        [100, "pdb.action-id", "x"],
+        [100, "pdb.action-label", "project:priority"],
+      ],
+      schema: projectionSchema,
+      rules: policy.rules,
+      preferences: policy.preferences.map((p) => ({
+        id: p.id,
+        matchQuery: p.matchQuery,
+        query: p.query,
+        witnesses: Object.entries(p.witnesses),
+      })),
+    });
+    const result = posted[1] as { type: string; text: string };
+    expect(result.type).toBe("result");
+    expect(JSON.parse(result.text).preferences).toEqual([
+      {
+        id: "project-hotfix",
+        matched: [100],
+        rows: [[100, "x", 10, { label: ["project:priority"] }]],
+      },
+    ]);
   });
   it("declares the same projection schema the compiler validated against", () => {
     expect(projectionSchema).toEqual(projectionVocabulary.schema);
