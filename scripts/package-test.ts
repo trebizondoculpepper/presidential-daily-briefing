@@ -11,7 +11,7 @@
 import { execFile, spawn } from "node:child_process";
 import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { delimiter, join, resolve } from "node:path";
+import { delimiter, dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { resolveEngineSetting, defaultEngine } from "../src/config/engine-setting.js";
 import { parityDifference } from "../src/mcp/parity.js";
@@ -475,6 +475,62 @@ try {
   if (!serveHelpText.stdout.startsWith("Usage: pdb serve"))
     throw new Error("Installed pdb serve printed no help.");
   console.log("ok   installed pdb serve validates arguments (exit 2) and prints help");
+  // pdb rules (#416): the compiled policy from the installed package, outside any checkout, with
+  // no GitHub CLI or credentials on PATH. Complete stdout; errors only on stderr with exit 2.
+  {
+    const outside = join(work, "rules-outside");
+    await mkdir(outside);
+    const bare: NodeJS.ProcessEnv = {
+      PATH: dirname(process.execPath),
+      PDB_NO_UPDATE_CHECK: "1",
+      ...(windows ? { SystemRoot: process.env.SystemRoot, ComSpec: process.env.ComSpec } : {}),
+    };
+    const rules = (rulesArgs: string[]) =>
+      run(windows ? `"${bin}"` : bin, ["rules", ...rulesArgs], {
+        cwd: outside,
+        env: bare,
+        shell: windows,
+        maxBuffer: 64 * 1024 * 1024,
+      });
+    const listing = await rules([]);
+    const lines = listing.stdout.split("\n");
+    if (
+      !lines[0]?.startsWith("pdb rules: the represented policy") ||
+      !lines[1]?.startsWith("Policy: version ") ||
+      !listing.stdout.includes("== Not formalized here ==") ||
+      !/Coverage of the full policy: \d+ decision rules/.test(listing.stdout) ||
+      !listing.stdout.endsWith("\n") ||
+      listing.stderr !== ""
+    )
+      throw new Error("Installed pdb rules printed no complete listing outside a checkout.");
+    const document = JSON.parse((await rules(["--json", "--role", "designer"])).stdout) as {
+      schemaVersion?: number;
+      scope?: { complete?: boolean; filters?: { role?: string } };
+      decisions?: { id: string }[];
+    };
+    if (
+      document.schemaVersion !== 1 ||
+      document.scope?.complete !== false ||
+      document.scope.filters?.role !== "designer" ||
+      !document.decisions?.some((d) => d.id === "D-DESIGN")
+    )
+      throw new Error("Installed pdb rules --json --role designer is not a labelled subset.");
+    const unknown = await rules(["--rule", "D-NO-SUCH-RULE"]).then(
+      () => null,
+      (error: { code?: unknown; stdout?: unknown; stderr?: unknown }) => error,
+    );
+    if (
+      unknown?.code !== 2 ||
+      unknown.stdout !== "" ||
+      !String(unknown.stderr).includes("unknown rule or predicate")
+    )
+      throw new Error("Installed pdb rules --rule with an unknown ID must fail on stderr, exit 2.");
+    if (!(await rules(["--help"])).stdout.startsWith("Usage: pdb rules"))
+      throw new Error("Installed pdb rules printed no help.");
+    console.log(
+      `ok   installed pdb rules outside a checkout, no gh or credentials: ${lines.length} lines; --json --role filter labelled; unknown --rule exits 2 on stderr`,
+    );
+  }
   if (windows)
     // execFile("gh") resolves only gh.exe on Windows, so a script stand-in cannot be found.
     console.log(

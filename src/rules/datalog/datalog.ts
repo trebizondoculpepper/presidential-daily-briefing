@@ -14,3 +14,11 @@ export {
   type DatalogAction,
   type Explanation,
 } from "./adapter.js";
+export {
+  rulesDocument,
+  rulesText,
+  rulesHelp,
+  RulesArgumentError,
+  RulesArtifactError,
+  type RulesDocument,
+} from "./rules-command.js";
