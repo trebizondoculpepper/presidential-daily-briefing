@@ -3,7 +3,8 @@
  *
  * One registry of verified signals decides which harness is running; one resolver turns
  * explicit selection or that detection into an exact `[agents.KEY]` entry of the root
- * `agent-inbox.toml` (read through identity.ts, never parsed here).
+ * `pdb.toml`, counting legacy `agent-inbox.toml` entry keys too (read through identity.ts,
+ * never parsed here).
  *
  * Precedence: explicit `--entry KEY`, then explicit supported `--harness KEY`, then verified
  * detection. Missing, conflicting or ambiguous evidence is "unresolved", never a guess:

@@ -224,14 +224,16 @@ Rollback: pdb config set briefing.engine typescript.
                         records updated in that window (closed but not delivered; open PRs left
                         after a not-planned closure). Never reopens anything.
   doctor [--agent NAME] [--role NAME] [--entry KEY | --harness NAME]  Read-only local
-                        configuration checks: Node, gh install/auth, checkout, agent-inbox.toml
-                        presence, parse, Git ignore vs tracked, selected entry, persisted name
+                        configuration checks: Node, gh install/auth, checkout, pdb.toml
+                        presence (a legacy agent-inbox.toml entry is reported as not
+                        imported), parse, Git ignore vs tracked, selected entry, persisted name
                         and triage_role; exact next commands per check, nothing repaired
   config get KEY | set KEY VALUE | list | convert | help [KEY]  Repository settings
                         in .github/triage.toml of this checkout (an earlier
                         .github/triage.json is read until config convert); identity.name and
-                        identity.triage_role in local agent-inbox.toml, entry chosen by
-                        --entry KEY, --harness NAME or the detected harness
+                        identity.triage_role in local pdb.toml (the first set imports a
+                        matching legacy agent-inbox.toml entry once, never changing it), entry
+                        chosen by --entry KEY, --harness NAME or the detected harness
   --repo owner/name     Repository (default: current gh checkout)
   --json                Versioned structured output (from a checkout: npm run --silent pdb)
   --issue N             Include full issue body/history, even if closed; diagnoses
@@ -289,7 +291,7 @@ ${guideRules()
   Details: ${PROCESS_COMMAND}
 Exit: 0 complete; 2 incomplete evidence; 1 invalid arguments/API/cache failure.
 The briefing never changes GitHub; only ${mutatingCommands().join(", ")} do;
-config set/convert change only the local .github/triage.toml/.json or agent-inbox.toml. Hints require inspection.
+config set/convert change only the local .github/triage.toml/.json or pdb.toml (never agent-inbox.toml). Hints require inspection.
 `;
 export const ticketHelp = `Usage: pdb ticket N [--repo owner/name] [--agent NAME] [--platform NAME]
                     [--json] [--limit-prs N] [--max-chars N]
