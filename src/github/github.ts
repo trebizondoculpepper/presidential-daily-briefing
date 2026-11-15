@@ -119,8 +119,8 @@ export const ghQueryWith =
           outcome: category,
           httpStatus: outcome?.status ?? evidence?.httpStatus ?? null,
           errorTypes: evidence?.errorTypes ?? [],
-          bodyBytes: outcome?.bodyBytes ?? null,
-          cost: outcome?.cost ?? null,
+          bodyBytes: outcome?.bodyBytes ?? attemptOf(failure)?.bodyBytes ?? null,
+          cost: outcome?.cost ?? attemptOf(failure)?.cost ?? null,
           observation: outcome?.observation ?? evidence?.observation ?? quotaObservation(new Map()),
         });
       } catch {
@@ -129,6 +129,11 @@ export const ghQueryWith =
     }
   };
 
+/** The body size and cost a failed attempt's response carried, if any. */
+const attemptOf = (error: unknown): { bodyBytes: number; cost: number | null } | null => {
+  const attempt = prop(error, "attempt");
+  return isRecord(attempt) ? (attempt as { bodyBytes: number; cost: number | null }) : null;
+};
 /** The same-response classification a failed attempt carries, if any. */
 const evidenceOf = (error: unknown): FailureClassification | null => {
   const evidence = prop(error, "evidence");
@@ -139,10 +144,31 @@ const evidenceOf = (error: unknown): FailureClassification | null => {
  * error already carries (a RateLimitError's own). Non-enumerable, so error serialisation and
  * messages are unchanged.
  */
-function withEvidence<E extends Error>(error: E, evidence: FailureClassification): E {
+function withEvidence<E extends Error>(
+  error: E,
+  evidence: FailureClassification,
+  response: GhResponse | null = null,
+): E {
   if (!evidenceOf(error))
     Object.defineProperty(error, "evidence", { value: evidence, enumerable: false });
+  // The bytes and reported cost of a failed response still count (#293): a failure is not free.
+  if (response && prop(error, "attempt") === undefined)
+    Object.defineProperty(error, "attempt", { value: sizeAndCost(response), enumerable: false });
   return error;
+}
+
+/** UTF-8 body bytes and a reported GraphQL cost, from one response. */
+function sizeAndCost(response: GhResponse): { bodyBytes: number; cost: number | null } {
+  let cost: unknown = null;
+  try {
+    cost = prop(JSON.parse(response.body), "data", "rateLimit", "cost");
+  } catch {
+    cost = null;
+  }
+  return {
+    bodyBytes: Buffer.byteLength(response.body, "utf8"),
+    cost: typeof cost === "number" && Number.isFinite(cost) && cost >= 0 ? cost : null,
+  };
 }
 
 /** One gh GraphQL attempt: the data plus its same-response evidence for telemetry. */
@@ -183,6 +209,7 @@ async function ghQueryAttempt(
     throw withEvidence(
       failure,
       classifyGhFailure({ response, exitCode: prop(error, "code"), timedOut }),
+      response,
     );
   }
   let response: GhResponse;
@@ -196,10 +223,11 @@ async function ghQueryAttempt(
   const errors = prop(parsed, "errors");
   if (Array.isArray(errors) && errors.length && !graphqlAnswer(stdout)) {
     const limited = sameResponseLimit(response) ?? rateLimitFailure("", stdout);
-    if (limited) throw withEvidence(limited, classifyGhFailure({ response }));
+    if (limited) throw withEvidence(limited, classifyGhFailure({ response }), response);
     throw withEvidence(
       new Error("GitHub returned incomplete query data; no fresh report saved."),
       classifyGhFailure({ response }),
+      response,
     );
   }
   const data = prop(parsed, "data");
@@ -208,17 +236,13 @@ async function ghQueryAttempt(
   return attemptResult(data, response);
 }
 
-const attemptResult = (data: JsonObject, response: GhResponse) => {
-  const cost = prop(data, "rateLimit", "cost");
-  return {
-    data,
-    status: response.status,
-    bodyBytes: Buffer.byteLength(response.body, "utf8"),
-    cost: typeof cost === "number" && Number.isFinite(cost) && cost >= 0 ? cost : null,
-    observation: quotaObservation(response.headers),
-    evidence: null,
-  };
-};
+const attemptResult = (data: JsonObject, response: GhResponse) => ({
+  data,
+  status: response.status,
+  ...sizeAndCost(response),
+  observation: quotaObservation(response.headers),
+  evidence: null,
+});
 const text = (value: unknown): string =>
   typeof value === "string" ? value : Buffer.isBuffer(value) ? value.toString() : "";
 /**

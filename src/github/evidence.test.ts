@@ -329,6 +329,9 @@ describe("per-attempt telemetry (#293, slice 2)", () => {
         ["server", 502],
       ]);
       expect(events[0]!.observation.remaining).toBe(5000);
+      // A failed response still has a size (and would carry a reported cost): never null.
+      expect(events[0]!.bodyBytes).toBe(Buffer.byteLength(JSON.stringify(limited)));
+      expect(events[1]!.bodyBytes).toBe(Buffer.byteLength('{"message":"oops"}'));
       expect(events[0]!.errorTypes).toEqual(["RATE_LIMIT"]);
       const serialized = JSON.stringify(events);
       for (const sentinel of ["783193", "ghp_secretToken", "viewer", "oops"])
@@ -417,5 +420,31 @@ describe("per-attempt telemetry (#293, slice 2)", () => {
       failures: { "rate-limited": 1 },
     });
     expect(summary.latest.graphql!.remaining).toBe(3998);
+    // A newer observation of the resource replaces it even without a remaining count.
+    const newer = quotaObservation(
+      new Map([
+        ["x-ratelimit-resource", "graphql"],
+        ["retry-after", "30"],
+      ]),
+    );
+    const replaced = summarizeAttempts([
+      event({ observation: graphql(4000) }),
+      event({ observation: newer }),
+    ]);
+    expect(replaced.latest.graphql).toMatchObject({ remaining: null, retryAfterSeconds: 30 });
   });
+
+  it.skipIf(process.platform === "win32")(
+    "a partial-error response keeps its reported cost on the failed attempt",
+    async () => {
+      const events: AttemptEvent[] = [];
+      const partial = { data: { rateLimit: { cost: 7 } }, errors: [{ type: "SOMETHING" }] };
+      await withGh(response(quota(100), partial), 0, async () => {
+        await ghQueryWith(undefined, { observer: (e) => events.push(e) })(query, {}).catch(
+          () => undefined,
+        );
+      });
+      expect(events.map((e) => [e.outcome, e.cost])).toEqual([["unknown", 7]]);
+    },
+  );
 });

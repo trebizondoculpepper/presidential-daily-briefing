@@ -289,7 +289,9 @@ export function summarizeAttempts(events: readonly AttemptEvent[]): AttemptSumma
     if (e.cost === null) summary.unknownCostAttempts++;
     else summary.knownCost += e.cost;
     const resource = e.observation.resource;
-    if (resource && e.observation.remaining !== null) summary.latest[resource] = e.observation;
+    // The newest observation of a resource replaces the older one even when it lacks a
+    // remaining count: older numbers must not pass for current evidence.
+    if (resource) summary.latest[resource] = e.observation;
   }
   return summary;
 }
