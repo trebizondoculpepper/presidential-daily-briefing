@@ -393,4 +393,29 @@ describe("closed-ticket scans kept between serve requests (#414)", () => {
     expect(second.coverage.complete).toBe(false);
     expect(g.calls.filter((x) => x === "comments #11")).toHaveLength(1);
   });
+
+  it("keeps known questions and the diagnostic when a refreshed issue vanishes (Codex, #609)", async () => {
+    const late = question(14, "Beyond the first page?");
+    const long = (n: number, updatedAt: string): Issue => ({
+      ...closed(n, [], updatedAt),
+      comments: page([], true, "p1"),
+    });
+    const g = gh([long(14, "2026-11-10T00:00:00Z"), long(15, "2026-11-10T00:00:00Z")], {
+      14: [late],
+      15: [],
+    });
+    const { c, now } = clockAt("2026-11-15T12:00:00Z");
+    const slot = new ClosedQuestionStore(30 * 60_000).slot(undefined, repo);
+    await discoverClosedQuestions(repo, runtime(g, now, slot, {}));
+    g.state.issues = [long(14, "2026-11-15T12:01:00Z"), long(15, "2026-11-15T12:01:00Z")];
+    g.state.gone.add(14).add(15);
+    for (const minute of [2, 3]) {
+      c.t = Date.parse(`2026-11-15T12:0${minute}:00Z`);
+      const read = await discoverClosedQuestions(repo, runtime(g, now, slot, {}));
+      expect(read.sources.map((x) => x.issue.number)).toEqual([14]);
+      expect(read.sources[0]!.facts[0]!.outcome).toBe("unknown");
+      expect(read.coverage.complete).toBe(false);
+      expect(read.warnings.filter((w) => /no longer returns this issue/.test(w))).toHaveLength(2);
+    }
+  });
 });

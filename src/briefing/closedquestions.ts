@@ -453,7 +453,7 @@ async function scan(
       entry.next = null;
       entry.unavailable =
         "GitHub no longer returns this issue (deleted, transferred or inaccessible)";
-      delete entry.earlier;
+      // Questions known before stay visible with an unknown outcome (Codex, #609).
       continue;
     }
     let page: ReturnType<typeof pageOf>;
@@ -480,9 +480,14 @@ async function scan(
     warnings.push(
       `${url}: ${e.unavailable}; its comment history could not be completed, so questions found on it have an unknown resolution.`,
     );
-  // Hydrated issues without any marker hold nothing to fold: keep only their URL.
+  // Fully hydrated issues without any marker hold nothing to fold: keep only their URL. An
+  // unavailable issue is kept, so its unread history is reported on every read until relisted.
   for (const [url, e] of s.entries)
-    if (e.next === null && !e.comments.some((c) => (c.body ?? "").includes("<!-- github-triage:")))
+    if (
+      e.next === null &&
+      !e.unavailable &&
+      !known(e).some((c) => (c.body ?? "").includes("<!-- github-triage:"))
+    )
       s.entries.delete(url);
 
   // 3. Advance the watermark only past fully read listings and comment histories.
