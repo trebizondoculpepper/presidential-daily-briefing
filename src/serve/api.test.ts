@@ -1381,6 +1381,44 @@ describe("pdb serve failure behaviour (#373)", () => {
     }
   });
 
+  it("a deps tree stopped by a quota refusal starts the cooldown and is not cached (#196)", async () => {
+    const { query: base, calls } = graphQuery({
+      edges: Array.from({ length: 6 }, (_, i): [number, number] => [10 + i, 1]),
+    });
+    let sent = 0;
+    const refusing: Query = async (source, variables) => {
+      if (++sent === 3) throw new RateLimitError("rate limited", { retryAfterSeconds: 90 });
+      return base(source, variables);
+    };
+    const s = await setup(["--repo", fakeRepo], {
+      dependencyReport: (repository, number, options) =>
+        dependencyReport(repository, number, options, refusing),
+    });
+    try {
+      const first = await call(s.running.port, "/api/v1/issues/1/deps?tree=true");
+      expect(first.status).toBe(200);
+      expect(first.json.status).toBe("incomplete");
+      expect(first.json.result.treeBounds).toMatchObject({ complete: false, stoppedBy: "quota" });
+      expect(first.json.result.collection.quota).toEqual({
+        retryAfterSeconds: 90,
+        resetAt: null,
+      });
+      // The shared cooldown is in force for every live read.
+      const during = await call(s.running.port, "/api/v1/briefing");
+      expect(during.json.error.code).toBe("GITHUB_RATE_LIMITED");
+      expect(during.headers["retry-after"]).toBe("90");
+      expect(s.calls.collect).toHaveLength(0);
+      s.clock.advance(91_000);
+      // Not cached: the next tree read runs live again.
+      const before = calls.length;
+      const after = await call(s.running.port, "/api/v1/issues/1/deps?tree=true");
+      expect(after.json.freshness.source).not.toBe("cached");
+      expect(calls.length).toBeGreaterThan(before);
+    } finally {
+      await s.close();
+    }
+  });
+
   it("an incomplete collection is cached and served as incomplete", async () => {
     const s = await setup(["--repo", repo], {
       collect: async (repository, options) => ({
