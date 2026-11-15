@@ -4,9 +4,14 @@ import { prepareExperiment, scoreResponse } from "../../../scripts/formal-compre
 
 describe("offline formal comprehension preparation", () => {
   let pack: Awaited<ReturnType<typeof prepareExperiment>>;
-  beforeAll(async () => {
-    pack = await prepareExperiment(resolve(import.meta.dirname, "../../.."));
-  }, 60_000);
+  beforeAll(
+    async () => {
+      pack = await prepareExperiment(resolve(import.meta.dirname, "../../.."));
+      // Exhaustive preparation evaluates every native case and its formal projection, then
+      // compiles the engine. Windows main runs exceeded the former 60s under suite contention.
+    },
+    process.platform === "win32" ? 180_000 : 60_000,
+  );
   it("checks the projection against every native scenario and separates answers from prompts", () => {
     expect(pack.manifest.nativeCasesVerified).toBeGreaterThan(70);
     expect(pack.inputs).toHaveLength(12);
