@@ -83,6 +83,15 @@
                      {:subject 110 :rule "D-ORDINARY" :kind "implement" :band 6}]
            :denials #{[100 "D-DENY-CLAIM"]}}}
 
+ {:id "a-claim-released-since-the-snapshot-is-not-continued"
+  :doc "The live read found the claim released after the snapshot: no continuation and no release-first step for new work, although the stale label still denies pickup."
+  :viewer {:role "implementer" :agent "me"}
+  :facts [{:e 1 "forward-complete" true "owned-claims" 0 "owned-claims-complete" true}
+          {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "t1" "created" 1 "label" "status:ready" "labels-complete" true "native-complete" true "reverse-complete" true "blocking-complete" true "open-blockers" 0 "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "owner" "me" "claim-activity" "not-owned" "wait-reason" "me has no open claim on #1"}
+          {:e 101 "kind" "issue" "state" "OPEN" "number" 2 "target" "t2" "created" 2 "label" "status:ready" "labels-complete" true "native-complete" true "reverse-complete" true "blocking-complete" true "open-blockers" 0 "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M"}]
+  :expect {:actions [{:subject 101 :rule "D-ORDINARY" :kind "implement" :band 6}]
+           :denials #{[100 "D-DENY-CLAIM"]}}}
+
  {:id "another-agents-claims-do-not-count-as-yours"
   :doc "Viewer separation: another agent's claim is never your continuation, wait or review."
   :viewer {:role "implementer" :agent "me"}

@@ -15,7 +15,7 @@ import type { PermissionLookup } from "../github/github.js";
 import { claimPolicy, type GraphQuery } from "./claims.js";
 import { describeBlocker, readRetained, type RetainedRead } from "./retained.js";
 
-export type ClaimActivityState = "active" | "waiting" | "resume-required" | "unknown";
+export type ClaimActivityState = "active" | "waiting" | "resume-required" | "unknown" | "not-owned";
 export interface ClaimActivityFact {
   state: ClaimActivityState;
   /** What a wait awaits (and why), what cleared, or why the activity is unknown. */
@@ -47,15 +47,23 @@ export function ownedClaims(snapshot: Snapshot, agent: string): RetainedFacts["o
         Date.parse(a.createdAt) - Date.parse(b.createdAt) ||
         a.number - b.number,
     );
-  // A label page that was cut short could hide this agent's claim label.
+  // Whole only when every open issue was seen with complete labels: a cut-short label page could
+  // hide this agent's claim label, and a routine shortlist read (#368) may have capped discovery
+  // or withdrawn issues it could not hydrate, whose claims this snapshot then does not hold.
+  const present = new Set(snapshot.issues.map((i) => i.url));
+  const shortlist = snapshot.shortlist;
+  const inventoryWhole =
+    !shortlist ||
+    (shortlist.discovered.complete &&
+      shortlist.notHydrated.every((n) => n.kind !== "issue" || present.has(n.url)));
   return {
     urls: mine.map((i) => i.url),
-    complete: open.every((i) => !i.labels.pageInfo.hasNextPage),
+    complete: inventoryWhole && open.every((i) => !i.labels.pageInfo.hasNextPage),
   };
 }
 
 /** One claim's activity, as the ranking facts state it. */
-export function activityFact(number: number, read: RetainedRead): ClaimActivityFact | null {
+export function activityFact(number: number, read: RetainedRead): ClaimActivityFact {
   const a = read.activity;
   switch (a.state) {
     case "active":
@@ -71,8 +79,10 @@ export function activityFact(number: number, read: RetainedRead): ClaimActivityF
     case "unknown":
       return { state: "unknown", reason: short(a.why.join("; ")), number };
     case "not-owned":
-      // The label changed since the snapshot: no longer this viewer's claim to rank.
-      return null;
+      // Released, transferred or closed since the snapshot: stated, so both engines stop
+      // treating the stale label as an active claim (and readRetainedFacts drops it from the
+      // inventory).
+      return { state: "not-owned", reason: short(a.why), number };
   }
 }
 
@@ -94,7 +104,7 @@ export async function readRetainedFacts(
         number,
         await read(snapshot.repository, number, agent, live.query, live.permission),
       );
-      if (fact) claimActivity.set(url, fact);
+      claimActivity.set(url, fact);
     } catch (error) {
       // A failed read is unknown, never waiting and never silently active.
       claimActivity.set(url, {
@@ -104,5 +114,7 @@ export async function readRetainedFacts(
       });
     }
   }
-  return { ownedClaims: owned, claimActivity };
+  // A claim observed released is no longer in the inventory the review counts.
+  const urls = owned.urls.filter((u) => claimActivity.get(u)?.state !== "not-owned");
+  return { ownedClaims: { ...owned, urls }, claimActivity };
 }

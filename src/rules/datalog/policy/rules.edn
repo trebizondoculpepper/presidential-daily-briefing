@@ -17,7 +17,8 @@
 [(foreground ?t) (open ?t) (addressed ?t)]
 ;; Human input is waiting whatever the ticket's parking: the human view sees parked work (#457).
 [(foreground ?t) (open ?t) [1 "role" "human"]]
-[(own-issue ?t) (issue ?t) (open ?t) (mine ?t)]
+;; #413: a claim the live read found released since the snapshot is no longer the viewer's.
+[(own-issue ?t) (issue ?t) (open ?t) (mine ?t) (not [?t "claim-activity" "not-owned"])]
 ;; #413: a retained claim with no activity record is active (legacy claims count as active);
 ;; waiting, resume-required and unknown claims are not continued as implementation.
 [(own-active ?t) (own-issue ?t) (not [?t "claim-activity" _])]

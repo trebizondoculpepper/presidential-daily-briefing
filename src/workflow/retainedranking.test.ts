@@ -45,6 +45,42 @@ describe("retained-claim facts (#413)", () => {
       issues: s.issues.map((i, n) => (n === 3 ? { ...i, labels: page(i.labels.nodes, true) } : i)),
     };
     expect(ownedClaims(truncated, me).complete).toBe(false);
+    // #368 shortlist reads: capped discovery, or an issue withdrawn after failed hydration.
+    const shortlist = {
+      schemaVersion: 1 as const,
+      profile: "briefing-shortlist-v1" as const,
+      discovered: { issues: 4, pullRequests: 0, complete: true },
+      hydrated: [],
+      notHydrated: [],
+      rounds: 1,
+      provisional: false,
+      notice: null,
+    };
+    expect(ownedClaims({ ...s, shortlist }, me).complete).toBe(true);
+    expect(
+      ownedClaims(
+        {
+          ...s,
+          shortlist: { ...shortlist, discovered: { ...shortlist.discovered, complete: false } },
+        },
+        me,
+      ).complete,
+    ).toBe(false);
+    const gone = `https://github.com/${s.repository}/issues/99`;
+    expect(
+      ownedClaims(
+        {
+          ...s,
+          shortlist: {
+            ...shortlist,
+            notHydrated: [
+              { number: 99, url: gone, kind: "issue" as const, reason: "failed" as const },
+            ],
+          },
+        },
+        me,
+      ).complete,
+    ).toBe(false);
   });
 
   it("states each activity, and never reads an unowned claim as waiting", () => {
@@ -64,7 +100,11 @@ describe("retained-claim facts (#413)", () => {
     );
     expect(waiting).toEqual({ state: "waiting", reason: "o/r#9 (needs the parser)", number: 1 });
     expect(activityFact(1, read({ state: "unknown", why: ["a", "b"] }))?.reason).toBe("a; b");
-    expect(activityFact(1, read({ state: "not-owned", why: "gone" }))).toBeNull();
+    expect(activityFact(1, read({ state: "not-owned", why: "gone" }))).toEqual({
+      state: "not-owned",
+      reason: "gone",
+      number: 1,
+    });
   });
 
   it("reads activity only on a live read; a failed read is unknown", async () => {
@@ -80,6 +120,14 @@ describe("retained-claim facts (#413)", () => {
     });
     expect(facts?.claimActivity?.get(s.issues[0]!.url)).toMatchObject({ state: "unknown" });
     expect(facts?.claimActivity?.get(s.issues[1]!.url)).toMatchObject({ state: "active" });
+    // A claim released since the snapshot is stated and leaves the inventory.
+    const released = await readRetainedFacts(s, me, live, async (_r, n) =>
+      n === 1
+        ? read({ state: "not-owned", why: "no open claim" })
+        : read({ state: "active", lastActivity: null }),
+    );
+    expect(released?.ownedClaims.urls).toEqual([s.issues[1]!.url]);
+    expect(released?.claimActivity?.get(s.issues[0]!.url)?.state).toBe("not-owned");
   });
 });
 
@@ -104,10 +152,19 @@ async function ranked(
     new Date(Date.UTC(2026, 5, 1)),
   );
   const report = presented.report as {
-    rankedActions?: { items: { kind: string; target: string }[] } | null;
+    rankedActions?: { items: { kind: string; target: string; why?: { text: string } }[] } | null;
   };
   const items = report.rankedActions?.items ?? [];
-  return items.map((i) => `${i.kind} #${i.target.split("/").pop()}`);
+  // Retained-claim rows carry their explanation in both engines; compare it too.
+  const retainedKinds = ["resume-claim", "review-owned-work", "wait-claim"];
+  return items.map(
+    (i) =>
+      `${i.kind} #${i.target.split("/").pop()}${
+        retainedKinds.includes(i.kind) || i.why?.text.startsWith("Your claim's activity")
+          ? ` | ${i.why?.text ?? "(no explanation)"}`
+          : ""
+      }`,
+  );
 }
 
 describe("both engines rank retained claims alike (#413)", () => {
@@ -135,6 +192,14 @@ describe("both engines rank retained claims alike (#413)", () => {
       ]),
     },
     "offline: inventory only": { ownedClaims: { urls: [url(1), url(2)], complete: true } },
+    "incomplete inventory": { ownedClaims: { urls: [url(1), url(2)], complete: false } },
+    "released since the snapshot": {
+      ownedClaims: { urls: [url(2)], complete: true },
+      claimActivity: new Map([
+        [url(1), { state: "not-owned" as const, reason: "no open claim" }],
+        [url(2), { state: "active" as const, reason: "" }],
+      ]),
+    },
   };
   const only = (snap: Snapshot, keep: number[]) => ({
     ...snap,
@@ -142,7 +207,11 @@ describe("both engines rank retained claims alike (#413)", () => {
   });
   for (const [name, retained] of Object.entries(cases))
     it(name, async () => {
-      const keep = [...retained.ownedClaims.urls.map((u) => Number(u.split("/").pop())), 4];
+      const urls = [
+        ...retained.ownedClaims.urls,
+        ...("claimActivity" in retained ? retained.claimActivity.keys() : []),
+      ];
+      const keep = [...urls.map((u) => Number(u.split("/").pop())), 4];
       const view = only(s, keep);
       const datalog = await ranked(view, "datalog", retained);
       expect(await ranked(view, "typescript", retained)).toEqual(datalog);
@@ -150,7 +219,9 @@ describe("both engines rank retained claims alike (#413)", () => {
     });
 
   it("orders resume and review ahead of new work, and waits after it", async () => {
-    const order = await ranked(s, "datalog", cases["waiting, resume-required and unknown"]);
+    const order = (await ranked(s, "datalog", cases["waiting, resume-required and unknown"])).map(
+      (r) => r.split(" | ")[0]!,
+    );
     const at = (row: string) => order.indexOf(row);
     expect(at("resume-claim #2")).toBeLessThan(at("implement #4"));
     expect(at("review-owned-work #1")).toBeLessThan(at("implement #4"));
@@ -169,7 +240,7 @@ describe("both engines rank retained claims alike (#413)", () => {
         [url(2), { state: "active" as const, reason: "" }],
       ]),
     };
-    const shown = await ranked(busy, "datalog", retained, 10);
+    const shown = (await ranked(busy, "datalog", retained, 10)).map((r) => r.split(" | ")[0]!);
     expect(shown).toHaveLength(10);
     expect(shown[0]).toBe("review-owned-work #1");
     expect(shown.filter((r) => r.startsWith("estimate-complexity"))).toHaveLength(9);
