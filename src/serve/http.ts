@@ -26,7 +26,8 @@ export type ServeErrorCode =
   | "GITHUB_RATE_LIMITED"
   | "SHUTTING_DOWN"
   | "INTERNAL"
-  | "RESULT_TOO_LARGE";
+  | "RESULT_TOO_LARGE"
+  | "DIAGNOSTIC_CURSOR_EXPIRED";
 
 export interface ServeError {
   code: ServeErrorCode;

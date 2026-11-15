@@ -5,9 +5,11 @@
 import { collect, ghQueryWith, ghRest } from "../github/github.js";
 import { dependencyReport } from "../github/dependencies.js";
 import type { ServeExtensions, ServeRuntime } from "../serve.js";
-import { readApi } from "./api.js";
+import { readApi, selectRepository } from "./api.js";
 import type { ServeReadRuntime } from "./api.js";
+import { randomUUID } from "node:crypto";
 import { ServeCache } from "./cache.js";
+import { diagnosticViews, diagnosticsApi } from "./diagnostics.js";
 import { httpMcp } from "./mcp.js";
 import type { ServeOptions } from "./options.js";
 
@@ -38,12 +40,21 @@ export function readServices(
     });
     const api = readApi(options, read, cache)(facts);
     const mcp = httpMcp(options, facts, read, cache, serve.clock, serve.stderr);
+    // Public, random per process: scopes diagnostic cursors; not a credential (#459).
+    const diagnostics = diagnosticsApi(
+      facts,
+      () => cache.diagnostics(),
+      (repo) => selectRepository(facts.served, repo).repository,
+      randomUUID(),
+      () => serve.clock.now(),
+    );
     return {
       routes: async (context) => {
         if (context.url.pathname === "/mcp") {
           await mcp.handle(context);
           return true;
         }
+        if (await diagnostics(context)) return true;
         return api(context);
       },
       status: {
@@ -53,6 +64,7 @@ export function readServices(
           mcpSessionsInitializing: mcp.initializing,
         }),
         repositories: () => cache.repositories(),
+        diagnostics: () => diagnosticViews.map((v) => `/api/v1/diagnostics/${v}`),
       },
       // Sessions first, then in-flight collections; dropping sessions never drops entries.
       close: async () => {
