@@ -87,14 +87,40 @@ export function classifyChecks(pr: PullRequest): CheckClassification {
         : result.unknownPending
     ).push(name);
   }
-  if (bound && evidence!.expected)
-    for (const expected of evidence!.expected) {
-      const reported = evidence!.checks.some(
+  const nameOf = (c: (typeof contexts)[number]) => c.name ?? c.context ?? "unnamed";
+  if (bound) {
+    // A run the later requiredness read saw but this snapshot's checks lack has an unexamined
+    // outcome (it started after the snapshot): it waits, as unknown.
+    for (const run of evidence!.checks) {
+      const seen = contexts.some(
         (c) =>
-          c.name === expected.context && (expected.appId === null || c.appId === expected.appId),
+          nameOf(c) === run.name &&
+          (run.databaseId == null || c.databaseId == null || c.databaseId === run.databaseId),
       );
-      if (!reported) result.missingRequired.push(expected.context);
+      if (!seen) result.unknownPending.push(run.name);
     }
+    // An expected required check is reported only by a check in this snapshot (whose outcome
+    // the rules examine), from the required app when the requirement names one.
+    if (evidence!.expected)
+      for (const expected of evidence!.expected) {
+        const reported = contexts.some(
+          (c) =>
+            nameOf(c) === expected.context &&
+            (expected.appId === null ||
+              evidence!.checks.some(
+                (run) =>
+                  run.name === expected.context &&
+                  run.appId === expected.appId &&
+                  (run.databaseId == null || run.databaseId === c.databaseId),
+              )),
+        );
+        if (!reported) result.missingRequired.push(expected.context);
+      }
+  }
+  // Consumers match by name, so a name is advisory only when every pending run with that name
+  // is advisory; one required or unknown run of the same name keeps it pending.
+  const blocking = new Set([...result.requiredPending, ...result.unknownPending]);
+  result.advisoryPending = result.advisoryPending.filter((name) => !blocking.has(name));
   return result;
 }
 

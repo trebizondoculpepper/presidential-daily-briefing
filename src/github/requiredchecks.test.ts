@@ -74,6 +74,34 @@ describe("classifying checks (#343)", () => {
     expect(classifyChecks(p).missingRequired).toEqual(["verify"]);
   });
 
+  it("a name is advisory only when every pending run with that name is advisory", () => {
+    const p = withChecks(
+      [
+        { name: "test", status: "IN_PROGRESS", conclusion: null, databaseId: 1 },
+        { name: "test", status: "IN_PROGRESS", conclusion: null, databaseId: 2 },
+      ],
+      {
+        checks: [
+          { name: "test", databaseId: 1, appId: ACTIONS, required: "required" as const },
+          { name: "test", databaseId: 2, appId: ACTIONS, required: "advisory" as const },
+        ],
+      },
+    );
+    expect(classifyChecks(p)).toMatchObject({ requiredPending: ["test"], advisoryPending: [] });
+  });
+
+  it("a required run that appeared after the snapshot is unexamined: missing and waiting", () => {
+    const p = withChecks([{ name: "test", status: "IN_PROGRESS", conclusion: null }], {
+      checks: [run("test", "advisory"), run("verify", "required")],
+      expected: [{ context: "verify", appId: ACTIONS }],
+    });
+    expect(classifyChecks(p)).toMatchObject({
+      advisoryPending: ["test"],
+      unknownPending: ["verify"],
+      missingRequired: ["verify"],
+    });
+  });
+
   it("ambiguous duplicates stay unknown", () => {
     const p = withChecks([{ name: "test", status: "IN_PROGRESS", conclusion: null }], {
       checks: [run("test", "required"), run("test", "advisory")],
@@ -271,9 +299,22 @@ describe("both engines decide the same way (#343)", () => {
       expected: [{ context: "verify", appId: ACTIONS }],
     });
     const unknown = withChecks([verifyPassed, freebsd], null);
+    // Same name, one run required: still waiting in both engines.
+    const sameName = withChecks(
+      [verifyPassed, { ...freebsd, databaseId: 1 }, { ...freebsd, databaseId: 2 }],
+      {
+        checks: [
+          run("verify", "required"),
+          { name: "test (freebsd)", databaseId: 1, appId: ACTIONS, required: "required" as const },
+          { name: "test (freebsd)", databaseId: 2, appId: ACTIONS, required: "advisory" as const },
+        ],
+        expected: [{ context: "verify", appId: ACTIONS }],
+      },
+    );
     for (const engine of ["datalog", "typescript"] as const) {
       expect((await present(advisory, engine)).actions.items, engine).toContain(advisory.url);
       expect((await present(unknown, engine)).actions.items, engine).not.toContain(unknown.url);
+      expect((await present(sameName, engine)).actions.items, engine).not.toContain(sameName.url);
     }
   });
 });
