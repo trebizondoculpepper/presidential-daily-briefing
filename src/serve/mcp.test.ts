@@ -265,6 +265,64 @@ describe("pdb serve HTTP MCP (#373)", () => {
     }
   });
 
+  it("answers every role exactly as stdio does for the same facts (#390)", async () => {
+    const servedCheckout = async (args: string[]) =>
+      args[0] === "rev-parse"
+        ? "/checkout\n"
+        : "origin\thttps://github.com/example/one.git (fetch)\n";
+    const noConfig = {
+      readText: async () => null,
+      writeText: async () => undefined,
+      rename: async () => undefined,
+      remove: async () => undefined,
+      makeDirectory: async () => undefined,
+    };
+    const s = await setup(["--repo", "example/one"]);
+    const http = await connect(s.url);
+    // stdio: the same factory over an in-memory transport, reading the same facts and clock.
+    const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+    const runtime = {
+      collect: collectorFor(s.clock, [], [])(),
+      dependencyReport: async () => {
+        throw new Error("unused");
+      },
+      currentRepository: async () => "example/one",
+      now: () => s.clock.now(),
+      env: {},
+      // A checkout of the served repository with no local configuration, never this test's cwd.
+      estimation: { fs: noConfig, git: servedCheckout, cwd: "/checkout" },
+      guide: { fs: noConfig, git: servedCheckout, cwd: "/checkout" },
+    } as unknown as McpRuntime;
+    await createServer({ repo: "example/one" }, runtime).connect(serverSide);
+    const stdio = new Client({ name: "stdio", version: "1.0.0" });
+    await stdio.connect(clientSide);
+    try {
+      for (const role of ["implementer", "designer", "human"]) {
+        const args = { agent: "me", role };
+        const rawHttp = await http.callTool({ name: "triage_briefing", arguments: args });
+        const rawStdio = await stdio.callTool({ name: "triage_briefing", arguments: args });
+        const [overHttp, overStdio] = [envelopeOf(rawHttp), envelopeOf(rawStdio)];
+        const where = role;
+        expect(overHttp.status, where).toBe(overStdio.status);
+        expect(overHttp.selection, where).toEqual(overStdio.selection);
+        expect(overHttp.data, where).toEqual(overStdio.data);
+        // The text differs only by the server's cache freshness line, if any.
+        const text = (r: { content?: unknown }) =>
+          (r.content as { text?: string }[] | undefined)?.map((c) => c.text ?? "").join("\n") ?? "";
+        expect(text(rawHttp).replace(/^.*cache.*\n/gim, ""), where).toBe(
+          text(rawStdio).replace(/^.*cache.*\n/gim, ""),
+        );
+        // Only the server adds cache freshness; stdio has no cache.
+        expect(overHttp.freshness, where).toMatchObject({ cache: { stale: false } });
+        expect(overStdio.freshness, where).not.toHaveProperty("cache");
+      }
+    } finally {
+      await http.close();
+      await stdio.close();
+      await s.running.close();
+    }
+  });
+
   it("keeps two sessions' repositories and agents apart, and refuses repositories not served", async () => {
     const s = await setup(["--repo", "example/one", "--repo", "example/two"]);
     const a = await connect(s.url, "client-a");

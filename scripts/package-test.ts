@@ -15,7 +15,7 @@ import { delimiter, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { resolveEngineSetting, defaultEngine } from "../src/config/engine-setting.js";
 import { parityDifference } from "../src/mcp/parity.js";
-import { Client } from "@modelcontextprotocol/client";
+import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 
 const run = promisify(execFile);
@@ -131,6 +131,30 @@ async function serveSmoke(bin: string, env: NodeJS.ProcessEnv, cwd: string): Pro
     };
     if (status.kind !== "serve-status" || status.auth?.login !== "package-test")
       throw new Error(`Installed pdb serve status is wrong: ${JSON.stringify(status)}`);
+    // HTTP MCP from the installed artifact (#390): initialize, list the read tools and read one
+    // role briefing through the shared cache, as a real SDK client would.
+    const mcp = new Client({ name: "package-test", version: "1.0.0" });
+    await mcp.connect(new StreamableHTTPClientTransport(new URL(`${url}mcp`)));
+    let mcpSummary: string;
+    try {
+      const tools = (await mcp.listTools()).tools.map((t) => t.name).sort();
+      if (!tools.includes("triage_briefing"))
+        throw new Error(`Installed HTTP MCP lists no triage_briefing: ${tools.join(", ")}`);
+      const briefing = await mcp.callTool({
+        name: "triage_briefing",
+        arguments: { agent: "package-test", role: "implementer" },
+      });
+      const envelope = briefing.structuredContent as
+        | { status?: string; freshness?: { cache?: { source?: string } } }
+        | undefined;
+      if (briefing.isError || !envelope || envelope.freshness?.cache?.source !== "live")
+        throw new Error(
+          `Installed HTTP MCP briefing failed: ${JSON.stringify(briefing).slice(0, 400)}`,
+        );
+      mcpSummary = `HTTP MCP ${tools.length} tools, briefing ${envelope.status}`;
+    } finally {
+      await mcp.close();
+    }
     const t0 = Date.now();
     child.kill("SIGTERM");
     const code = await Promise.race([
@@ -139,7 +163,7 @@ async function serveSmoke(bin: string, env: NodeJS.ProcessEnv, cwd: string): Pro
     ]);
     if (code !== 0)
       throw new Error(`Installed pdb serve exited ${String(code)} after SIGTERM, not 0.`);
-    return `${first} (stopped in ${Date.now() - t0}ms)`;
+    return `${first}; ${mcpSummary} (stopped in ${Date.now() - t0}ms)`;
   } finally {
     if (child.exitCode === null) child.kill("SIGKILL");
   }
