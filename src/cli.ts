@@ -3,6 +3,7 @@ import { runRebrief } from "./rebrief/cli.js";
 import type { CliRuntime as RebriefRuntime } from "./rebrief/cli.js";
 import { resolveEngineSetting } from "./config/engine-setting.js";
 import { resolveReviewPolicy } from "./config/review-setting.js";
+import { resolveProjectRulesSetting } from "./config/project-rules-setting.js";
 /** One read-only intake command. Contract: doc/pdb-cli.md. */
 import { realpathSync } from "node:fs";
 import { initializeCrashes } from "./telemetry/crashes.js";
@@ -2102,6 +2103,10 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
         options.full || options.issue
           ? undefined
           : await resolveEngineSetting(repository, runtime.guide ?? {}),
+      // #516: native project preferences, enabled only by configuration.
+      ...(options.full || options.issue
+        ? {}
+        : { projectRules: await resolveProjectRulesSetting(repository, runtime.guide ?? {}) }),
       // #301: declared review policy from local configuration (legacy when undeclared).
       reviewPolicy: await resolveReviewPolicy(repository, runtime.guide ?? {}),
     };
@@ -2308,6 +2313,14 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
                 options.full || options.issue
                   ? undefined
                   : await resolveEngineSetting(snapshot.repository, runtime.guide ?? {}),
+              ...(options.full || options.issue
+                ? {}
+                : {
+                    projectRules: await resolveProjectRulesSetting(
+                      snapshot.repository,
+                      runtime.guide ?? {},
+                    ),
+                  }),
               // #301: declared review policy from local configuration (legacy when undeclared).
               reviewPolicy: await resolveReviewPolicy(snapshot.repository, runtime.guide ?? {}),
             },

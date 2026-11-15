@@ -578,8 +578,22 @@ try {
   const packed = parsePack(stdout);
   const files = packed.files.map((f) => f.path).sort();
   const engineChunks = files.filter((p) => /^dist\/datalog-[A-Za-z0-9_-]+\.mjs$/.test(p));
-  if (engineChunks.length !== 1)
-    throw new Error("Expected exactly one packaged lazy evaluator chunk.");
+  // The CLI and MCP entries are built separately; each references one lazy evaluator chunk, which
+  // may be the same file. Every chunk an entry imports must be packaged, and nothing else.
+  const referenced = new Set<string>();
+  for (const entry of ["dist/cli.mjs", "dist/mcp.mjs"])
+    for (const m of (await readFile(join(root, entry), "utf8")).matchAll(
+      /import\("\.\/(datalog-[A-Za-z0-9_-]+\.mjs)"\)/g,
+    ))
+      referenced.add(`dist/${m[1]}`);
+  if (
+    engineChunks.length < 1 ||
+    engineChunks.length > 2 ||
+    JSON.stringify([...referenced].sort()) !== JSON.stringify(engineChunks)
+  )
+    throw new Error(
+      `Packaged evaluator chunks ${JSON.stringify(engineChunks)} differ from those the entries load ${JSON.stringify([...referenced])}.`,
+    );
   const expectedFiles = [
     ...expected,
     ...engineChunks,
@@ -637,7 +651,7 @@ try {
   console.log(
     "ok   installed native Codex adapter: stdin, literal args, framing and deadline outside checkout",
   );
-  await projectWorkerSmoke(join(packageDir, engineChunks[0]!), work);
+  for (const chunk of engineChunks) await projectWorkerSmoke(join(packageDir, chunk), work);
   console.log("ok   installed evaluator runs a project-preference worker from its own chunk");
 
   const bin = windows ? join(prefix, "pdb.cmd") : join(prefix, "bin", "pdb");
