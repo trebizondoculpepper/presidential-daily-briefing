@@ -580,6 +580,7 @@ async function runIdentity(
     createdEntry: write.createdEntry,
     generatedName: write.generatedName,
     importedFrom: write.importedFrom,
+    legacyIgnored: write.legacyIgnored,
     excludeRuleAdded: write.excluded,
     ...setting,
   };
@@ -588,6 +589,9 @@ async function runIdentity(
     write.generatedName ? `generated name ${write.generatedName} for new entry ${entry}` : "",
     write.importedFrom
       ? `imported the name${write.record.triageRole !== null && parsed.key !== "identity.triage_role" ? " and triage_role" : ""} of [agents.${entry}] from ${write.importedFrom} once (that file was not changed)`
+      : "",
+    write.legacyIgnored
+      ? `ignored the legacy identity file (nothing imported; it was not changed): ${write.legacyIgnored}`
       : "",
     write.excluded ? `added /${IDENTITY_FILE} to this repository's local Git exclude file` : "",
   ].filter(Boolean);

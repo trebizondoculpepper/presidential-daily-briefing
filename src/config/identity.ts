@@ -651,6 +651,11 @@ export interface IdentityWriteResult {
   readonly generatedName: string | null;
   /** The legacy file a new entry's name/triage_role were imported from, if any (read only). */
   readonly importedFrom: typeof LEGACY_IDENTITY_FILE | null;
+  /**
+   * Why an unusable legacy agent-inbox.toml was ignored when an explicit `identity.name` created
+   * the entry (nothing imported, the legacy file unchanged); null otherwise.
+   */
+  readonly legacyIgnored: string | null;
   /** Whether a repository-local exclude rule was added before writing. */
   readonly excluded: boolean;
   readonly record: IdentityRecord;
@@ -705,10 +710,22 @@ interface LegacyImport {
   readonly triageRole: TriageRole | null;
 }
 
+/** An unusable legacy file; `reason` states why without claiming what was (not) written. */
+class LegacyRefusal extends ConfigError {
+  readonly reason: string;
+  constructor(reason: string, recovery: string) {
+    super(
+      "legacy-unsafe",
+      `${reason}; nothing was imported and neither file was changed.`,
+      recovery,
+    );
+    this.reason = reason;
+  }
+}
+
 const legacyRefusal = (detail: string, recovery?: string): ConfigError =>
-  new ConfigError(
-    "legacy-unsafe",
-    `${LEGACY_IDENTITY_FILE} ${detail}; nothing was imported and neither file was changed.`,
+  new LegacyRefusal(
+    `${LEGACY_IDENTITY_FILE} ${detail}`,
     recovery ??
       `Fix ${LEGACY_IDENTITY_FILE} by hand, or set the name explicitly with pdb config set identity.name NAME --entry KEY, then retry. pdb never writes ${LEGACY_IDENTITY_FILE}.`,
   );
@@ -857,17 +874,28 @@ export async function setIdentity(
         createdEntry: false,
         generatedName: null,
         importedFrom: null,
+        legacyIgnored: null,
         excluded,
         record: before,
       };
     }
 
     let imported: LegacyImport | null = null;
+    let legacyIgnored: string | null = null;
     let generatedName: string | null = null;
     if (!document.agents || !isTable(document.agents)) document.agents = Object.create(null);
     const agents = document.agents as Table;
     if (!before.entryExists) {
-      const legacy = await readLegacyImport(target.root, entry, fs, git);
+      let legacy: { found: LegacyImport | null; document: Table | null };
+      try {
+        legacy = await readLegacyImport(target.root, entry, fs, git);
+      } catch (error) {
+        // An explicit name is the way out of an unusable legacy file: nothing is imported or
+        // generated, so nothing can hide the legacy identity. Other writes still refuse.
+        if (field !== "name" || !(error instanceof ConfigError)) throw error;
+        legacyIgnored = error instanceof LegacyRefusal ? error.reason : error.message;
+        legacy = { found: null, document: null };
+      }
       imported = legacy.found;
       const table: Table = Object.create(null);
       if (imported !== null) {
@@ -936,6 +964,7 @@ export async function setIdentity(
       createdEntry: !before.entryExists,
       generatedName,
       importedFrom: imported === null ? null : LEGACY_IDENTITY_FILE,
+      legacyIgnored,
       excluded,
       record: recordFor(parseIdentityDocument(text), entry),
     };
