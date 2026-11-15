@@ -152,6 +152,13 @@ export function dashboardRenderers(): DashboardRenderers {
     const titles = new Map(
       list(result.subjects).map((s) => [record(s).url, record(s).title] as const),
     );
+    // The TypeScript engine gives no `why`: fall back to the role view's reason, then the reason
+    // codes, exactly as the CLI text renderer does (briefing/compact.ts).
+    const roleReasons = new Map(
+      list(record(result.role).sections).flatMap((section) =>
+        list(record(section).items).map((row) => [record(row).url, record(row).reason] as const),
+      ),
+    );
     const rows = items.map((raw) => {
       const item = record(raw);
       const why = record(item.why);
@@ -166,8 +173,14 @@ export function dashboardRenderers(): DashboardRenderers {
         .filter((c) => typeof c === "string" && c)
         .map((c) => `<div><code>${escapeHtml(c)}</code></div>`)
         .join("");
-      const rules = list(item.ruleIds).map(escapeHtml).join(", ");
-      return `<li>${name}<span class="kind">${escapeHtml(item.kind)}</span><p class="why">${escapeHtml(why.text)}${rules ? ` <small>(${rules})</small>` : ""}</p>${commands}</li>`;
+      const codes = list(item.reasonCodes);
+      const reason =
+        why.text ??
+        roleReasons.get(target) ??
+        `Ranked ${String(item.kind)}${codes.length ? ` (${codes.join(", ")})` : ""}.`;
+      const ids = list(item.ruleIds).length ? list(item.ruleIds) : codes;
+      const rules = ids.map(escapeHtml).join(", ");
+      return `<li>${name}<span class="kind">${escapeHtml(item.kind)}</span><p class="why">${escapeHtml(reason)}${rules ? ` <small>(${rules})</small>` : ""}</p>${commands}</li>`;
     });
     const omitted = Number(ranked.omitted ?? 0);
     return `<ol>${rows.join("")}</ol>${omitted > 0 ? `<p>${omitted} more not shown.</p>` : ""}`;

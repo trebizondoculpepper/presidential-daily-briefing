@@ -74,6 +74,30 @@ describe("dashboard renderers (#374)", () => {
     expect(html).not.toMatch(/<b>|<script/);
   });
 
+  it("falls back to the role view's reason, then the reason codes, for the TypeScript engine", () => {
+    const typescript = envelope(
+      {},
+      {
+        decisionEngine: undefined,
+        role: {
+          name: "implementer",
+          sections: [{ items: [{ url: url(1), reason: "Unclaimed, ready, impact <M>." }] }],
+        },
+        rankedActions: {
+          omitted: 0,
+          items: [
+            { kind: "implement", target: url(1), reasonCodes: ["ordinary"] },
+            { kind: "estimate-complexity", target: url(2), reasonCodes: ["assessment"] },
+          ],
+        },
+      },
+    );
+    const html = render.renderActions(typescript);
+    expect(html).toContain("Unclaimed, ready, impact &lt;M&gt;. <small>(ordinary)</small>");
+    expect(html).toContain("Ranked estimate-complexity (assessment). <small>(assessment)</small>");
+    expect(render.renderState(typescript, false)).toContain("role implementer");
+  });
+
   it("links only to GitHub, keeps the server's order and reports an empty list", () => {
     const hostile = envelope(
       {},
