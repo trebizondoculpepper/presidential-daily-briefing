@@ -354,6 +354,19 @@ describe("ticket ledger", () => {
     ).toEqual(["alice", "bob"]);
   });
 
+  it("counts a requeue when release and reclaim share an instant, by comment id", async () => {
+    const l = await ticketLedger(
+      withComments([
+        claim("alice", t(1)),
+        { ...release("alice", t(2)), databaseId: 99 },
+        claim("bob", t(2), "writer", 100),
+      ]),
+      trust,
+      now,
+    );
+    expect(l.requeues).toEqual({ known: true, value: 1 });
+  });
+
   it("counts a comment seen twice once", async () => {
     const c = claim("alice", t(1));
     const r = release("alice", t(2));

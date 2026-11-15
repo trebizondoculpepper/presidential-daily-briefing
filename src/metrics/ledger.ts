@@ -344,8 +344,11 @@ export async function ticketLedger(
   };
 
   // A requeue is a release followed by a later pickup from either source.
-  const pickups = [...markerTrusted, ...labelTrusted].map((p) => Date.parse(p.at));
-  const requeued = releases.filter((r) => pickups.some((p) => p > Date.parse(r.at))).length;
+  // Ordered as the ledger orders events: creation time, then numeric comment id.
+  const follows = (p: { at: string; key: string }, r: { at: string; key: string }): boolean =>
+    (Date.parse(p.at) - Date.parse(r.at) || tieOf(p.key) - tieOf(r.key)) > 0;
+  const pickups = [...markerTrusted, ...labelTrusted];
+  const requeued = releases.filter((r) => pickups.some((p) => follows(p, r))).length;
   const undecided = releases.length - requeued;
   const requeueGap =
     coverage.comments !== "complete"
@@ -355,7 +358,7 @@ export async function ticketLedger(
         : undecided && coverage.timeline !== "complete"
           ? "a release has no later claim marker and the label timeline was not read in full"
           : labelUnverified.some((u) =>
-                releases.some((r) => u.at === null || u.at > Date.parse(r.at)),
+                releases.some((r) => u.at === null || u.at >= Date.parse(r.at)),
               )
             ? "a later label add could not be verified"
             : null;
