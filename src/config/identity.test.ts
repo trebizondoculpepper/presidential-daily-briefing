@@ -403,7 +403,7 @@ x = 1
     expect(await noOri.call("get", "identity.name", "--json")).toBe(1);
     expect(noOri.json().message).toMatch(/^No entry exists for the ori harness/);
     expect(noOri.json().recovery).toContain(
-      "Create this agent's own entry:\npdb config set identity.triage_role ROLE --entry ori.SERVER",
+      "Create this agent's own entry:\npdb setup identity --role ROLE --entry ori.SERVER",
     );
     expect(noOri.json().recovery).not.toContain("--entry claude");
 
