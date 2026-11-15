@@ -323,14 +323,12 @@ export async function discoverClosedQuestions(
     );
     for (const gap of folded.unknown)
       warnings.push(`${url}: a question-resolution record could not be verified (${gap}).`);
-    const facts: QuestionRecordFact[] = [];
-    const records: HumanRecord[] = [];
-    const seen = new Set<string>();
-    let labelGapReported = false;
-    for (const { comment, record } of [...candidates].reverse()) {
-      // Only a trusted record reserves its marker: an untrusted copy of a genuine marker must not
-      // hide the original (Codex, #607).
-      if (seen.has(record.marker)) continue;
+    // A question is its marker: retries and copies by trusted authors are one question whose
+    // canonical source is the oldest trusted comment, and an explicit outcome on any of those
+    // comments settles it (Codex, #607). Only trusted comments join a question, so an untrusted
+    // copy can neither hide nor answer the original.
+    const questions = new Map<string, { record: HumanRecord; ids: (string | null)[] }>();
+    for (const { comment, record } of candidates) {
       const authority = await trust(comment);
       if (authority.status === "untrusted") {
         counts.untrusted++;
@@ -343,21 +341,36 @@ export async function discoverClosedQuestions(
         );
         continue;
       }
-      seen.add(record.marker);
       const id = typeof comment.databaseId === "number" ? String(comment.databaseId) : null;
-      const outcome = id ? folded.outcomes.get(id) : undefined;
+      const known = questions.get(record.marker);
+      if (known) known.ids.push(id);
+      else questions.set(record.marker, { record, ids: [id] });
+    }
+    const facts: QuestionRecordFact[] = [];
+    const records: HumanRecord[] = [];
+    if (
+      [...questions.values()].some((q) => q.record.version === 1) &&
+      issue.labels.pageInfo.hasNextPage
+    )
+      warnings.push(
+        `${url}: closed ticket's labels are truncated; whether its legacy question is resolved is unknown.`,
+      );
+    // Newest question first, as items list them.
+    for (const { record, ids } of [...questions.values()].reverse()) {
+      const outcome = ids.map((id) => (id ? folded.outcomes.get(id) : undefined)).find(Boolean);
+      const missingId = ids.includes(null);
       const state: NonNullable<QuestionRecordFact["outcome"]> = outcome
         ? outcome.op === "resolve"
           ? "resolved"
           : "withdrawn"
-        : !id || !historyComplete || folded.unknown.length
+        : missingId || !historyComplete || folded.unknown.length
           ? "unknown"
           : "none";
       if (state === "resolved") counts.resolved++;
       else if (state === "withdrawn") counts.withdrawn++;
       else if (state === "unknown") counts.unknown++;
       else counts.noOutcome++;
-      if (state === "unknown" && !id)
+      if (state === "unknown" && missingId)
         warnings.push(
           `${url}: question record ${record.url} has no comment id; its resolution is unknown.`,
         );
@@ -368,12 +381,6 @@ export async function discoverClosedQuestions(
         record.version === 1 &&
         !issue.labels.pageInfo.hasNextPage &&
         !issue.labels.nodes.some((l) => legacyQuestionLabels.includes(l.name));
-      if (record.version === 1 && issue.labels.pageInfo.hasNextPage && !labelGapReported) {
-        labelGapReported = true;
-        warnings.push(
-          `${url}: closed ticket's labels are truncated; whether its legacy question is resolved is unknown.`,
-        );
-      }
       if ((state === "none" || state === "unknown") && !legacyResolved) records.push(record);
     }
     if (facts.length)

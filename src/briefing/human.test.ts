@@ -537,6 +537,38 @@ describe("human briefing role (#457)", () => {
       expect(view.coverage.warnings.join(" ")).toMatch(/labels are truncated/);
     });
 
+    it("binds an outcome to the question, whichever trusted copy it names (Codex, #607)", async () => {
+      const original = record("owner", ["Copied?"], { v2: 33, marker: "cccccccccccccccc" });
+      const copy = record("owner", ["Copied?"], { v2: 33, marker: "cccccccccccccccc" });
+      const answered = closedIssue(33, [], [original, copy, outcome(33, original, "resolve")]);
+      const { view } = await human([], [], { closed: [answered] });
+      expect(view.total).toBe(0);
+      const open = closedIssue(
+        34,
+        [],
+        [
+          record("owner", ["Open?"], { v2: 34, marker: "dddddddddddddddd" }),
+          record("owner", ["Open?"], { v2: 34, marker: "dddddddddddddddd" }),
+        ],
+      );
+      const shown = await human([], [], { closed: [open] });
+      expect(shown.view.items[0].source).toBe(open.comments.nodes[0].url);
+      expect(shown.view.items[0].requested).toEqual(["Open?"]);
+    });
+
+    it("reports each unreadable record on a closed source, even beside a readable one (Codex, #607)", async () => {
+      const blank = record("owner", [], { v2: 35 });
+      const readable = record("owner", ["Readable?"], { v2: 35 });
+      const { view, complete } = await human([], [], {
+        closed: [closedIssue(35, [], [blank, readable])],
+      });
+      expect(view.items[0].requested).toEqual(["Readable?"]);
+      expect(complete).toBe(false);
+      expect(view.coverage.warnings.join(" ")).toContain(
+        `questions of record ${blank.url} could not be read`,
+      );
+    });
+
     it("keeps legacy v1 label resolution: labelled stays, labels removed is answered", async () => {
       const labelled = closedIssue(25, ["question"], [record("designer-a", ["Legacy?"])]);
       const cleared = closedIssue(26, [], [record("designer-a", ["Cleared?"])]);
