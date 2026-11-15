@@ -63,6 +63,7 @@ const briefingFields = [
   "sections",
   "role",
   "focus",
+  "filter",
   "rankedActions",
   "estimation",
   "impactEstimation",
@@ -157,6 +158,14 @@ export function briefingView(
       const lines = [
         `Presidential Daily Briefing: ${base.repository} — fetched ${str(freshness.fetchedAt)}${freshness.offline ? " (OFFLINE CACHE)" : ""}`,
       ];
+      // #312: a filtered view says so before any row.
+      if (d.filter) {
+        const filter = obj(d.filter);
+        const outside = obj(filter.outside);
+        lines.push(
+          `Filtered view: only subjects carrying every label ${list(filter.labels).map(String).join(" AND ")}; not a whole-board view.${Number(outside.owned ?? 0) || Number(outside.addressed ?? 0) ? ` Outside this filter: ${Number(outside.owned ?? 0)} owned and ${Number(outside.addressed ?? 0)} addressed obligation(s).` : ""}`,
+        );
+      }
       // #311: an explicit section request renders only that section, as CLI --section does;
       // completeness warnings travel as envelope notices. Other fields stay in structured data.
       if (d.focus) {

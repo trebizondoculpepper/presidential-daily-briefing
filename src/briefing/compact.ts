@@ -149,6 +149,14 @@ const unfocusedIdentityNotice =
 export class BriefingArgumentError extends Error {
   override name = "BriefingArgumentError";
 }
+/**
+ * A label filter that could not be resolved (#312): permission, quota or timeout while reading
+ * the repository's labels. Never treated as "no such label" or as an empty queue.
+ */
+export class LabelFilterUnresolved extends Error {
+  override name = "LabelFilterUnresolved";
+  readonly code = "label-filter-unresolved";
+}
 
 export function compactBriefing(
   snapshot: Snapshot,
@@ -156,6 +164,8 @@ export function compactBriefing(
     role?: string;
     /** One registered section, every row (#311, doc/design/briefing-focus-controls.md). */
     section?: string;
+    /** Canonical labels a candidate must all carry (#312); already resolved and validated. */
+    labels?: string[];
   },
   expanded: Briefing,
   assessments?: ReadonlyMap<string, SubjectAssessments>,
@@ -178,6 +188,19 @@ export function compactBriefing(
   const labelNames = (item: Subject): string[] => item.labels.nodes.map(({ name }) => name);
   const isAddressed = (item: Subject | undefined): boolean =>
     !!options.agent && !!item && labelNames(item).includes(`attention:${options.agent}`);
+  // #312: the label filter (AND) scopes the candidate pool only; every fact stays collected, so
+  // a nonmatching blocker or claim still counts. Truncated labels leave membership unknown.
+  const wanted = (options.labels ?? []).map((name) => name.toLowerCase());
+  const unknownMembership = new Set<string>();
+  const inScope = (url: string): boolean => {
+    if (!wanted.length) return true;
+    const item = byUrl.get(url);
+    if (!item) return false;
+    const have = new Set(labelNames(item).map((name) => name.toLowerCase()));
+    if (wanted.every((name) => have.has(name))) return true;
+    if (item.labels.pageInfo.hasNextPage) unknownMembership.add(url);
+    return false;
+  };
   // Targets and section entries always come from snapshot objects, so a lookup by URL is
   // defined at runtime; an undefined item fails exactly as the untyped code did.
   // Trusted delivery responsibility (#182) keeps a submitted PR the viewer's own follow-up after
@@ -245,6 +268,7 @@ export function compactBriefing(
     findings.find((f) => f.rule === "ready-unclaimed")?.priority ??
     Math.max(...findings.map((f) => f.priority));
   const next = groups
+    .filter(({ target }) => inScope(target))
     .filter(({ target, findings }) => {
       const item = byUrl.get(target);
       if (isAddressed(item)) return true;
@@ -290,7 +314,7 @@ export function compactBriefing(
     .map((item) => item.url);
   sectionLists.deferred = snapshot.issues.filter(isParked).map((item) => item.url);
   const sections: Record<string, Bounded<string>> = Object.fromEntries(
-    Object.entries(sectionLists).map(([name, urls]) => [name, bound(urls)]),
+    Object.entries(sectionLists).map(([name, urls]) => [name, bound(urls.filter(inScope))]),
   );
   // Every subject the non-role briefing would show, with the reason it would show it.
   const baseline = new Map<string, string>();
@@ -326,7 +350,7 @@ export function compactBriefing(
   // --section other-context asks for all (#311).
   const datalogContext = (targets: ReadonlySet<string>) =>
     objects
-      .filter((item) => item.state === "OPEN" && !targets.has(item.url))
+      .filter((item) => item.state === "OPEN" && !targets.has(item.url) && inScope(item.url))
       .map((item) => ({
         url: item.url,
         reason: isParked(item)
@@ -359,7 +383,7 @@ export function compactBriefing(
           })),
         }
       : options.role && roleContext
-        ? roleView(options.role, roleContext, { expand: options.section })
+        ? roleView(options.role, roleContext, { expand: options.section, keep: inScope })
         : null;
   const rowsBySection = new Map(
     !experimental && options.role && roleContext
@@ -374,7 +398,7 @@ export function compactBriefing(
   // "Output and compatibility"); views without a blended ranking keep their previous order.
   const blendedRole: BlendedRole | null =
     role && (role.name === "implementer" || role.name === "designer") ? role.name : null;
-  const fullRanking: RankedActions | null =
+  const unscopedRanking: RankedActions | null =
     experimental ??
     (role && blendedRole && assessments
       ? rankActions(
@@ -417,7 +441,21 @@ export function compactBriefing(
           { order: facts.ranking.order, limit: Number.MAX_SAFE_INTEGER },
         )
       : null);
+  // #312: scope the ranked candidates before the display limit. Ranking already ran over every
+  // fact, so included items keep their exact reasons, order and tie-breaks.
+  const fullRanking: RankedActions | null =
+    unscopedRanking && wanted.length
+      ? (() => {
+          const items = unscopedRanking.items.filter((i) => inScope(i.target));
+          return { ...unscopedRanking, total: items.length, items };
+        })()
+      : unscopedRanking;
   const shownRanked = fullRanking?.items.slice(0, Math.max(0, options.limit)) ?? [];
+  // #312: presentation counts describe the filtered pool; evaluation above used the full map.
+  const scopedAssessments =
+    assessments && wanted.length
+      ? new Map([...assessments].filter(([url]) => inScope(url)))
+      : assessments;
   const rankedActions: RankedActions | null = fullRanking && {
     ...fullRanking,
     omitted: fullRanking.total - shownRanked.length,
@@ -425,7 +463,7 @@ export function compactBriefing(
   };
   const impactEstimation: ImpactEstimation | null =
     fullRanking && blendedRole === "designer" && assessments
-      ? impactEstimationReport(impactStatus, assessments, fullRanking.items, shownRanked)
+      ? impactEstimationReport(impactStatus, scopedAssessments!, fullRanking.items, shownRanked)
       : null;
   const projection = fullRanking ? [...new Set(fullRanking.items.map((i) => i.target))] : null;
   const ordered = projection
@@ -464,7 +502,7 @@ export function compactBriefing(
   const complexityCounts =
     fullRanking && blendedRole === "implementer" && assessments
       ? {
-          eligible: [...assessments.values()].filter((a) =>
+          eligible: [...scopedAssessments!.values()].filter((a) =>
             ["unassessed", "stale"].includes(a.complexity.state),
           ).length,
           ranked: fullRanking.items.filter((i) => i.kind === "estimate-complexity").length,
@@ -472,11 +510,41 @@ export function compactBriefing(
         }
       : null;
   const estimates = new Map(facts.estimation.entries.map((e) => [e.url, e]));
-  const { entries: _entries, queue, conflicts, ...estimationFacts } = facts.estimation;
+  const {
+    entries: _entries,
+    queue: unscopedQueue,
+    conflicts: unscopedConflicts,
+    ...estimationFacts
+  } = facts.estimation;
+  // #312: the estimation queue and its conflicts follow the same candidate scope.
+  const queue =
+    unscopedQueue && wanted.length
+      ? (() => {
+          const items = unscopedQueue.items.filter((e) => inScope(e.url));
+          return { ...unscopedQueue, total: items.length, omitted: 0, items };
+        })()
+      : unscopedQueue;
+  const conflicts = unscopedConflicts.filter((e) => inScope(e.url));
   const shownQueue = queue?.items.slice(0, options.limit) ?? [];
   const shownConflicts = conflicts.slice(0, options.limit);
+  // #312: under a label filter the summary line and unknown count describe the scoped pool,
+  // so a view with nothing to estimate never claims repository-wide work.
+  const scopedSummary = wanted.length
+    ? (() => {
+        const unknown = facts.estimation.entries.filter(
+          (e) => e.state === "unknown" && inScope(e.url),
+        ).length;
+        return estimationFacts.status === "available"
+          ? {
+              unknown,
+              detail: `${queue?.total ?? 0} ticket(s) to estimate within the label filter (unestimated or stale, blocked included)${conflicts.length ? `; ${conflicts.length} with conflicting size evidence to inspect, not queued` : ""}${unknown ? `; ${unknown} unknown, not queued` : ""}.`,
+            }
+          : { unknown };
+      })()
+    : {};
   const estimation = {
     ...estimationFacts,
+    ...scopedSummary,
     conflicts: {
       total: conflicts.length,
       omitted: conflicts.length - shownConflicts.length,
@@ -510,9 +578,10 @@ export function compactBriefing(
     const view =
       role?.sections.find((s) => s.name === options.section) ??
       defined(
-        roleView(options.role, roleContext, { expand: options.section }).sections.find(
-          (s) => s.name === options.section,
-        ),
+        roleView(options.role, roleContext, {
+          expand: options.section,
+          keep: inScope,
+        }).sections.find((s) => s.name === options.section),
       );
     return {
       role: options.role,
@@ -565,11 +634,41 @@ export function compactBriefing(
       ),
     };
   });
+  // #312: a filtered view says so, names the obligations it leaves out, and is incomplete while
+  // any ticket's label membership is unknown (truncated labels are not a known nonmatch).
+  const filter = wanted.length
+    ? {
+        labels: options.labels ?? [],
+        semantics: "all" as const,
+        outside: {
+          // Claims, retained delivery responsibility and PRs linked to either (the same
+          // ownership predicate the role views use).
+          owned: objects.filter((i) => i.state === "OPEN" && linkedMine(i) && !inScope(i.url))
+            .length,
+          addressed: objects.filter((i) => i.state === "OPEN" && isAddressed(i) && !inScope(i.url))
+            .length,
+        },
+        unknownMembership: [...unknownMembership].sort(),
+      }
+    : null;
+  const completeness =
+    filter && filter.unknownMembership.length
+      ? {
+          ...facts.completeness,
+          complete: false,
+          warnings: [
+            ...facts.completeness.warnings,
+            `${filter.unknownMembership.length} subject(s) have truncated labels, so whether they match the label filter is unknown; they are not shown.`,
+          ],
+        }
+      : facts.completeness;
   return {
     schemaVersion: 2 as const,
     repository: snapshot.repository,
     freshness: facts.freshness,
-    completeness: facts.completeness,
+    completeness,
+    // Additive (#312): present only for a --label request.
+    ...(filter ? { filter } : {}),
     rateLimit: facts.rateLimit,
     ranking: facts.ranking,
     metrics: snapshot.metrics ?? null,
@@ -646,6 +745,12 @@ export function compactText(
         `${report.summary.issues} issues; ${report.summary.pullRequests} PRs; ${report.summary.findings} findings on ${report.summary.distinctSubjects} subjects.`,
       ];
   if (report.guidance.includes(unfocusedIdentityNotice)) lines.push(unfocusedIdentityNotice);
+  // #312: a filtered view says so once, with the obligations it leaves out.
+  const filterNotice =
+    "filter" in report && report.filter
+      ? `Filtered view: only subjects carrying every label ${report.filter.labels.join(" AND ")}; not a whole-board view.${report.filter.outside.owned || report.filter.outside.addressed ? ` Outside this filter: ${report.filter.outside.owned} owned and ${report.filter.outside.addressed} addressed obligation(s).` : ""}`
+      : null;
+  if (filterNotice) lines.push(filterNotice);
   const rows: string[] = [];
   const shown = new Set<string>();
   const add = (
@@ -678,6 +783,7 @@ export function compactText(
       `${report.repository} — ${f.role} section ${f.section} (fetched ${report.freshness.fetchedAt}${report.freshness.offline ? "; OFFLINE CACHE, live verification unavailable" : ""})`,
     ];
     if (report.guidance.includes(unfocusedIdentityNotice)) header.push(unfocusedIdentityNotice);
+    if (filterNotice) header.push(filterNotice);
     add(
       f.background ? `${f.title} (background)` : f.title,
       { total: f.total, omitted: f.omitted, items: f.items.map((row) => row.url) },
@@ -794,9 +900,11 @@ export function compactText(
   else add("NEXT STEPS", report.actions, roleReasons);
   if (brief && !(ranked ? ranked.total : report.actions.total))
     rows.push(
-      report.completeness.complete
-        ? "\nNo next steps found."
-        : "\nNo next steps found, but evidence is incomplete: this does not mean no work exists.",
+      filterNotice
+        ? "\nNo next steps match the label filter (other work may exist outside it)."
+        : report.completeness.complete
+          ? "\nNo next steps found."
+          : "\nNo next steps found, but evidence is incomplete: this does not mean no work exists.",
     );
   // With a ranked queue, estimates appear in NEXT STEPS itself; no "offered below" pointer.
   if (!brief && !ranked && estimation.offered && !estimation.requested)
