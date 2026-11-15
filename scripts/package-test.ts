@@ -88,6 +88,8 @@ const issue = (number, labels, createdAt) => ({
 const args = process.argv.slice(2);
 // pdb serve reads the login once at startup (doc/design/serve.md); no token is involved.
 if (args[0] === "api" && args[1] === "user") { process.stdout.write(JSON.stringify({ login: "package-test" })); process.exit(0); }
+// #516: only when asked, pdb serve --project resolves the checkout's repository to this fixture.
+if (process.env.PDB_FAKE_REPO_VIEW && args[0] === "repo" && args[1] === "view") { process.stdout.write("example/parity\\n"); process.exit(0); }
 // pdb quotas (#547): one REST GET /rate_limit with --include; synthetic counts, no token.
 if (args[0] === "api" && args[1] === "--include" && args[2] === "rate_limit") {
   const reset = Math.floor(Date.now() / 1000) + 1800;
@@ -569,6 +571,88 @@ async function packagedCrash(
   return frames.map((f) => `${f.filename}:${f.lineno}`).join(" <- ");
 }
 
+/**
+ * Installed project preferences (#516): `pdb rules init` and `pdb config set` in a checkout, then
+ * the installed CLI briefing, `pdb rules`, the MCP briefing (through blendedParity, which compares
+ * decisionEngine) and a `pdb serve --project` briefing and /rules page must all name the same
+ * active effective revision, without a source checkout or development dependency.
+ */
+async function projectRulesParity(
+  bin: string,
+  mcpCommand: { command: string; args: string[] },
+  env: NodeJS.ProcessEnv,
+  checkout: string,
+): Promise<string> {
+  await run(bin, ["rules", "init"], { cwd: checkout, env });
+  const before = JSON.parse(
+    (await run(bin, ["rules", "--json"], { cwd: checkout, env })).stdout,
+  ) as {
+    effectivePolicy: { state: string };
+  };
+  if (before.effectivePolicy.state !== "disabled")
+    throw new Error(
+      `A pdb.rules.edn file alone changed the policy: ${before.effectivePolicy.state}.`,
+    );
+  await run(bin, ["config", "set", "rules.project.enabled", "true"], { cwd: checkout, env });
+  try {
+    const rules = JSON.parse(
+      (await run(bin, ["rules", "--json"], { cwd: checkout, env })).stdout,
+    ) as {
+      effectivePolicy: { state: string; effectiveRulesHash: string };
+    };
+    const hash = rules.effectivePolicy.effectiveRulesHash;
+    if (rules.effectivePolicy.state !== "active" || !/^[0-9a-f]{64}$/.test(hash))
+      throw new Error(`Installed pdb rules does not report an active project policy.`);
+    const briefing = JSON.parse(
+      (
+        await run(
+          bin,
+          ["--repo", "example/parity", "--role", "implementer", "--json", "--no-update-check"],
+          { cwd: checkout, env, maxBuffer: 64 * 1024 * 1024 },
+        )
+      ).stdout,
+    ) as { decisionEngine: { rulesHash: string; effectivePolicy?: { state: string } } };
+    if (
+      briefing.decisionEngine.rulesHash !== hash ||
+      briefing.decisionEngine.effectivePolicy?.state !== "active"
+    )
+      throw new Error("Installed CLI briefing and pdb rules name different effective revisions.");
+    // MCP: blendedParity fails unless its decisionEngine (with effectivePolicy) equals the CLI's.
+    await blendedParity(bin, mcpCommand, "example/parity", "implementer", "impact", env, checkout);
+    const child = spawn(bin, ["serve", "--project", checkout, "--port", "0"], {
+      cwd: checkout,
+      env: { ...env, PDB_FAKE_REPO_VIEW: "1" },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf8").on("data", (t: string) => (stdout += t));
+    child.stderr.setEncoding("utf8").on("data", (t: string) => (stderr += t));
+    try {
+      const deadline = Date.now() + 20_000;
+      while (!stdout.includes("\n")) {
+        if (Date.now() > deadline || child.exitCode !== null)
+          throw new Error(`pdb serve --project printed no banner. stderr: ${stderr}`);
+        await new Promise((done) => setTimeout(done, 50));
+      }
+      const url = /listening on (http:\/\/127\.0\.0\.1:\d+\/)/.exec(stdout)?.[1];
+      const served = (await (
+        await fetch(`${url}api/v1/briefing?repo=example%2Fparity&role=implementer`)
+      ).json()) as { result?: { decisionEngine?: { rulesHash?: string } } };
+      if (served.result?.decisionEngine?.rulesHash !== hash)
+        throw new Error("Installed pdb serve briefing names a different effective revision.");
+      const page = await (await fetch(`${url}rules?repo=example%2Fparity`)).text();
+      if (!page.includes(hash) || !page.includes("Project preferences"))
+        throw new Error("Installed /rules page does not show the effective project policy.");
+    } finally {
+      child.kill("SIGTERM");
+    }
+    return hash.slice(0, 12);
+  } finally {
+    await run(bin, ["config", "set", "rules.project.enabled", "false"], { cwd: checkout, env });
+  }
+}
+
 const work = await mkdtemp(join(tmpdir(), "triage-package-"));
 try {
   const { stdout } = await npm(
@@ -1001,6 +1085,9 @@ try {
           );
         console.log(`ok   installed CLI = MCP ${role} (${order}): ${kinds.join(", ")}`);
       }
+    console.log(
+      `ok   installed project preferences: CLI, pdb rules, MCP, serve and /rules name ${await projectRulesParity(bin, mcpCommand, env, checkout)}`,
+    );
     await run(bin, ["config", "set", "briefing.engine", "typescript"], { cwd: checkout, env });
     for (const role of ["implementer", "designer"])
       for (const order of ["impact", "oldest"]) {

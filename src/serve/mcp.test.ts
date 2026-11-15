@@ -205,6 +205,21 @@ function raw(
   });
 }
 
+/**
+ * #516: a served --repo-only repository cannot read its project configuration, so its effective
+ * policy is "unavailable", while a checkout without configuration reports "disabled". Everything
+ * else must be identical; this removes only that manifest and returns the states it held.
+ */
+const splitPolicy = (value: unknown): { rest: unknown; states: string[] } => {
+  const states: string[] = [];
+  const rest = JSON.parse(JSON.stringify(value), (key: string, v: unknown) => {
+    if (key !== "effectivePolicy") return v;
+    states.push((v as { state: string }).state);
+    return undefined;
+  }) as unknown;
+  return { rest, states };
+};
+
 describe("pdb serve HTTP MCP (#373)", () => {
   it("initializes, lists the stdio tool set and calls every read tool with cache freshness", async () => {
     const s = await setup(["--repo", "example/one"]);
@@ -305,7 +320,13 @@ describe("pdb serve HTTP MCP (#373)", () => {
         const where = role;
         expect(overHttp.status, where).toBe(overStdio.status);
         expect(overHttp.selection, where).toEqual(overStdio.selection);
-        expect(overHttp.data, where).toEqual(overStdio.data);
+        // Served --repo only: project rules unavailable; the stdio checkout: disabled (#516).
+        const [httpData, stdioData] = [splitPolicy(overHttp.data), splitPolicy(overStdio.data)];
+        expect(httpData.rest, where).toEqual(stdioData.rest);
+        if (role !== "human") {
+          expect(httpData.states, where).toEqual(["unavailable"]);
+          expect(stdioData.states, where).toEqual(["disabled"]);
+        }
         // The text differs only by the server's cache freshness line, if any.
         const text = (r: { content?: unknown }) =>
           (r.content as { text?: string }[] | undefined)?.map((c) => c.text ?? "").join("\n") ?? "";

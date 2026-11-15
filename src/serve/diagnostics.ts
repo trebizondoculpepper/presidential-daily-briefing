@@ -96,6 +96,8 @@ export interface RulesDiagnostic {
   supportedRoles: string[];
   validation: { state: string; detail: string };
   englishRules: { cli: string; page: string | null };
+  /** #516: where the selected repository's project preferences come from, never held here. */
+  projectPolicy: { state: "per-request" | "unknown"; detail: string };
 }
 
 /** What the diagnostics read, all supplied by services.ts (no import of the serve group). */

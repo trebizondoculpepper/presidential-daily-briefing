@@ -253,7 +253,10 @@ export async function presentBriefing(
   let effective: { manifest: EffectivePolicyManifest; warnings: string[] } | undefined;
   if (experimental) {
     const applied = await effectivePolicy(
-      options.projectRules ?? { enabled: false, source: "not-read" },
+      options.projectRules ?? {
+        enabled: "unavailable",
+        reason: "project configuration was not read for this briefing",
+      },
       experimental.items,
       (await import("../rules/datalog/datalog.js")).projectionSubjects(snapshot),
       {
@@ -273,7 +276,7 @@ export async function presentBriefing(
     !options.full &&
     !options.issue &&
     options.projectRules &&
-    options.projectRules.enabled !== false
+    (options.projectRules.enabled === true || options.projectRules.enabled === "unknown")
   ) {
     // Enabled project rules are native Datalog: the TypeScript rollback cannot honour them.
     const reason =
@@ -568,6 +571,12 @@ export interface ReadRuntime {
   /** Filesystem, git and working directory for the workflow-guide setting (#71). */
   guide?: GuideRuntime;
   /**
+   * #516: the project-rules setting when the front end already knows it (`pdb serve --repo`
+   * states that no local checkout is selected). Absent: resolved from `guide`, and without one
+   * reported as unavailable, never read from the working directory.
+   */
+  projectRules?: ProjectRulesSetting;
+  /**
    * The declared review policy when the front end already knows it (#301): pdb serve with only
    * --repo states it is undeclared rather than reading any directory (#271). Absent: resolved
    * from `guide`.
@@ -672,7 +681,8 @@ export async function readBriefing(
   // #516: program-mediated enablement and the verified checkout the policy file is read from.
   const projectRules = request.issue
     ? undefined
-    : await resolveProjectRulesSetting(request.repository, runtime.guide);
+    : (runtime.projectRules ??
+      (await resolveProjectRulesSetting(request.repository, runtime.guide)));
   const reviewPolicy =
     runtime.reviewPolicy ?? (await resolveReviewPolicy(request.repository, runtime.guide));
   const setting = await resolveGuideSetting(request.repository, undefined, runtime.guide);

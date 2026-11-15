@@ -17,18 +17,9 @@ export async function projectRulesContext(
   if ("unknown" in target) return { project: { state: "unknown", reason: target.unknown }, limits };
   const { rulesHash, policyVersion } = await import("./datalog/datalog.js");
   const setting = await resolveProjectRulesSetting(target.repository, target.runtime);
-  // A remote repository with no matching checkout has no readable project configuration.
-  if (setting.enabled === false && setting.source === "no-matching-project")
-    return {
-      project: {
-        state: "unknown",
-        reason: `${target.repository} has no matching local checkout here, so its project configuration is not read and whether project preferences are in force is unknown`,
-      },
-      limits,
-    };
   // The briefing applies project preferences only with the Datalog engine; the TypeScript
   // rollback reports a policy error there, so the listing must not call them in force either.
-  if (setting.enabled !== false) {
+  if (setting.enabled === true || setting.enabled === "unknown") {
     let engine: string;
     try {
       engine = (await resolveEngineSetting(target.repository, target.runtime)).requested;

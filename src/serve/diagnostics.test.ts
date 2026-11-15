@@ -387,6 +387,7 @@ describe("serve diagnostics (#459)", () => {
           "complexity.enabled",
           "impact.enabled",
           "processGuide",
+          "rules.project.enabled",
           "serve.cacheEntries",
           "serve.port",
           "serve.staleWindowSeconds",
@@ -409,6 +410,7 @@ describe("serve diagnostics (#459)", () => {
         rulesHash: expect.stringMatching(/^[0-9a-f]{64}$/),
         validation: { state: "build-checked" },
         englishRules: { cli: "pdb rules", page: "/rules" },
+        projectPolicy: { state: "unknown", detail: expect.stringContaining("--project") },
       });
       expect(rules.supportedRoles).toEqual(
         expect.arrayContaining(["implementer", "designer", "human"]),
