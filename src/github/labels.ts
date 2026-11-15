@@ -59,7 +59,7 @@ export async function resolveLabels(
   const vars = Object.fromEntries(labels.map((label, i) => [`l${i}`, label]));
   // GitHub label names are unique ignoring case, but `label(name:)` matches exactly; a bounded
   // `labels(query:)` search in the same request finds the canonical spelling.
-  const source = `query($owner:String!,$name:String!,${labels.map((_, i) => `$l${i}:String!`).join(",")}){repository(owner:$owner,name:$name){${labels.map((_, i) => `l${i}:label(name:$l${i}){name} s${i}:labels(first:20,query:$l${i}){nodes{name}}`).join(" ")}}}`;
+  const source = `query($owner:String!,$name:String!,${labels.map((_, i) => `$l${i}:String!`).join(",")}){repository(owner:$owner,name:$name){${labels.map((_, i) => `l${i}:label(name:$l${i}){name} s${i}:labels(first:100,query:$l${i}){nodes{name} pageInfo{hasNextPage}}`).join(" ")}}}`;
   let data: Record<string, unknown>;
   try {
     data = await query(source, { owner: owner!, name: name!, ...vars });
@@ -75,7 +75,10 @@ export async function resolveLabels(
   const missing: string[] = [];
   for (const [i, label] of labels.entries()) {
     const exact = repo[`l${i}`] as { name?: unknown } | null | undefined;
-    const search = repo[`s${i}`] as { nodes?: { name?: unknown }[] } | null | undefined;
+    const search = repo[`s${i}`] as
+      | { nodes?: { name?: unknown }[]; pageInfo?: { hasNextPage?: unknown } }
+      | null
+      | undefined;
     if (exact && typeof exact.name === "string") {
       canonical.push(exact.name);
       continue;
@@ -88,6 +91,12 @@ export async function resolveLabels(
       (n) => typeof n.name === "string" && n.name.toLowerCase() === label.toLowerCase(),
     );
     if (match) canonical.push(match.name as string);
+    // A search page that was cut short may hold the label beyond it: unresolved, not unknown.
+    else if (search.pageInfo?.hasNextPage !== false)
+      return {
+        status: "unresolved",
+        why: `too many labels resemble ${label} to confirm whether it exists`,
+      };
     else missing.push(label);
   }
   return missing.length

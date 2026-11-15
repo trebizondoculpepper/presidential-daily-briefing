@@ -403,7 +403,7 @@ describe("--label and the MCP label input filter identically (#312)", () => {
         for (const [key, value] of Object.entries(vars))
           if (/^l\d$/.test(key)) {
             repository[key] = repoLabels.includes(String(value)) ? { name: value } : null;
-            repository[`s${key.slice(1)}`] = { nodes: [] };
+            repository[`s${key.slice(1)}`] = { nodes: [], pageInfo: { hasNextPage: false } };
           }
         return { repository };
       }

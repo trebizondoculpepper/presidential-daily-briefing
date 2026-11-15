@@ -17,6 +17,7 @@ const reader = (labels = repoLabels): { query: Query; calls: number } => {
         nodes: labels
           .filter((l) => l.toLowerCase().includes(String(value).toLowerCase()))
           .map((name) => ({ name })),
+        pageInfo: { hasNextPage: false },
       };
     }
     return { repository };
@@ -54,6 +55,19 @@ describe("label filter requests (#312)", () => {
     expect(await resolveLabels("o/r", ["sound", "nope"], reader().query)).toEqual({
       status: "unknown",
       missing: ["sound", "nope"],
+    });
+  });
+
+  it("a search page cut short is unresolved, not a confirmed unknown label", async () => {
+    const truncated: Query = async () => ({
+      repository: {
+        l0: null,
+        s0: { nodes: [{ name: "bugfix" }], pageInfo: { hasNextPage: true } },
+      },
+    });
+    expect(await resolveLabels("o/r", ["BUG"], truncated)).toEqual({
+      status: "unresolved",
+      why: "too many labels resemble BUG to confirm whether it exists",
     });
   });
 

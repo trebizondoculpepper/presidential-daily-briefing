@@ -620,7 +620,9 @@ export function compactBriefing(
         labels: options.labels ?? [],
         semantics: "all" as const,
         outside: {
-          owned: snapshot.issues.filter((i) => i.state === "OPEN" && isMine(i) && !inScope(i.url))
+          // Claims, retained delivery responsibility and PRs linked to either (the same
+          // ownership predicate the role views use).
+          owned: objects.filter((i) => i.state === "OPEN" && linkedMine(i) && !inScope(i.url))
             .length,
           addressed: objects.filter((i) => i.state === "OPEN" && isAddressed(i) && !inScope(i.url))
             .length,

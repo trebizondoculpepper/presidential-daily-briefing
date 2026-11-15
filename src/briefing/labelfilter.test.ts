@@ -93,6 +93,23 @@ describe("--label (#312)", () => {
     expect(text).not.toContain("No next steps found.");
   });
 
+  it("counts retained delivery responsibility outside the filter, not only claims", () => {
+    const submitted = issue(5, []);
+    const data = snapshot([submitted, issue(6, ["status:ready", "sfx"])], []);
+    const r = compactBriefing(
+      data,
+      {
+        limit: 10,
+        agent: "me",
+        role: "implementer",
+        labels: ["sfx"],
+        responsible: new Map([[submitted.url, ["me"]]]),
+      },
+      briefing(data, { limit: 1000, agent: "me" }, new Date(time)),
+    );
+    expect(r.filter?.outside.owned).toBe(1);
+  });
+
   it("truncated labels leave membership unknown and the result incomplete, never a known nonmatch", () => {
     const truncated = issue(1, ["status:ready"]);
     truncated.labels = { ...truncated.labels, pageInfo: { hasNextPage: true, endCursor: "c" } };
