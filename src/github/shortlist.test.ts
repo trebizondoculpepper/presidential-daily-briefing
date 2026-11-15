@@ -396,6 +396,73 @@ describe("routine briefing: discover all, rank, hydrate only the shortlist (#368
     ).toEqual([2, 7]);
   });
 
+  describe("a hydration unit is read whole or not at all (#368)", () => {
+    const setup = (discoveredCloses: number[]) => {
+      const a = ready(1);
+      const b = ready(2);
+      const p: PullRequest = {
+        ...pr(),
+        number: 9,
+        url: `https://github.com/${repo}/pull/9`,
+        closingIssuesReferences: page(
+          discoveredCloses.map((n) => ({
+            number: n,
+            url: `https://github.com/${repo}/issues/${n}`,
+          })),
+        ),
+      };
+      a.closedByPullRequestsReferences = page([{ number: 9, url: p.url, state: "OPEN" }]);
+      return { a, b, p };
+    };
+
+    it("overlapping units resolve to their union before allocation", async () => {
+      // A links to P, and P closes A and B: A's unit is {A, P, B}, which does not fit in two.
+      const { a, b, p } = setup([1, 2]);
+      b.closedByPullRequestsReferences = page([{ number: 9, url: p.url, state: "OPEN" }]);
+      const fake = fakeGitHub([a, b], [p]);
+      const snapshot = await collectShortlist(
+        repo,
+        { select: async () => [a.url], bounds: { maxHydrated: 2 } },
+        fake.query,
+        clock,
+      );
+      expect(fake.calls.pullRequests).toEqual([]);
+      expect(fake.calls.issueBatches.flat()).toEqual([]);
+      expect(snapshot.shortlist!.hydrated).toEqual([]);
+      expect(snapshot.shortlist!.notHydrated.map((i) => [i.number, i.reason]).sort()).toEqual([
+        [1, "hydration-cap"],
+        [2, "hydration-cap"],
+        [9, "hydration-cap"],
+      ]);
+    });
+
+    it("a PR whose hydrated links grow beyond the bound is withdrawn, not shown", async () => {
+      // Discovery says P closes A; the hydrated P also closes B, and no place is left for B.
+      const { a, b, p } = setup([1]);
+      const hydrated = {
+        ...p,
+        closingIssuesReferences: page([
+          { number: 1, url: a.url },
+          { number: 2, url: b.url },
+        ]),
+      };
+      const fake = fakeGitHub([a, b], [p], { pr: { 9: hydrated } });
+      const snapshot = await collectShortlist(
+        repo,
+        { select: async () => [p.url], bounds: { maxHydrated: 2 } },
+        fake.query,
+        clock,
+      );
+      expect(fake.calls.pullRequests).toEqual([9]);
+      expect(snapshot.pullRequests).toEqual([]);
+      expect(snapshot.shortlist!.hydrated).not.toContain(p.url);
+      expect(snapshot.shortlist!.notHydrated).toEqual(
+        expect.arrayContaining([expect.objectContaining({ number: 9, reason: "hydration-cap" })]),
+      );
+      expect(snapshot.shortlist!.notice).toContain("hydration bound reached");
+    });
+  });
+
   it("final presentation sends nothing after the read's quota refusal, and counts it", async () => {
     const holder: Issue = {
       ...ready(1),

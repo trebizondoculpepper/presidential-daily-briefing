@@ -282,33 +282,63 @@ export async function collectShortlist(
    * responsibility records live): a subject's rules read the items it is linked to.
    */
   const needed = (subjects: string[]): string[] => [...new Set(units(subjects).flat())];
-  /**
-   * Each subject with the items linked to it, as one hydration unit: a PR's own-work and
-   * delivery facts come through its linked issues, so the bound never splits a unit.
-   */
-  const units = (subjects: string[]): string[][] => {
+  /** The discovered items one item links to, from its hydrated facts when it has them. */
+  const linksOf = (url: string): string[] => {
     const prefix = `https://github.com/${repository}/`.toLowerCase();
-    const result: string[][] = [];
-    for (const url of subjects) {
-      if (!stubs.has(url)) continue;
-      const unit = [url];
-      result.push(unit);
-      const item = hydratedIssues.get(url) ?? hydratedPrs.get(url) ?? stubs.get(url);
-      if (!item) continue;
-      const links: string[] =
-        kinds.get(url) === "pull-request"
-          ? [
-              ...(item as PullRequest).closingIssuesReferences.nodes.map((ref) => ref.url),
-              ...(referencedBy.get(url) ?? []),
-            ]
-          : (item.closedByPullRequestsReferences?.nodes ?? [])
-              .filter((ref) => ref.state === "OPEN")
-              .map((ref) => ref.url);
-      unit.push(
-        ...links.filter((link) => link.toLowerCase().startsWith(prefix) && stubs.has(link)),
-      );
+    const item = hydratedIssues.get(url) ?? hydratedPrs.get(url) ?? stubs.get(url);
+    if (!item) return [];
+    const links: string[] =
+      kinds.get(url) === "pull-request"
+        ? [
+            ...(item as PullRequest).closingIssuesReferences.nodes.map((ref) => ref.url),
+            ...(referencedBy.get(url) ?? []),
+          ]
+        : (item.closedByPullRequestsReferences?.nodes ?? [])
+            .filter((ref) => ref.state === "OPEN")
+            .map((ref) => ref.url);
+    return links.filter((link) => link.toLowerCase().startsWith(prefix) && stubs.has(link));
+  };
+  /**
+   * An item with everything it links to, transitively: one hydration unit. A PR's own-work and
+   * delivery facts come through its linked issues, so a unit is read whole or not at all, and
+   * overlapping units resolve to their union.
+   */
+  const closureOf = (url: string): string[] => {
+    const seen = new Set<string>([url]);
+    const queue = [url];
+    while (queue.length)
+      for (const link of linksOf(queue.shift()!))
+        if (!seen.has(link) && !gone.has(link)) {
+          seen.add(link);
+          queue.push(link);
+        }
+    return [...seen];
+  };
+  const units = (subjects: string[]): string[][] =>
+    subjects.filter((url) => stubs.has(url)).map(closureOf);
+  /**
+   * Withdraw every hydrated item whose unit is not wholly hydrated (a link was capped, failed,
+   * withdrawn or, once rounds end, never read): its rules would otherwise run without linked
+   * evidence. Returns whether anything was withdrawn; repeats until stable.
+   */
+  const withdrawIncomplete = (final: boolean): boolean => {
+    let changed = false;
+    for (let again = true; again;) {
+      again = false;
+      for (const url of [...hydratedOrder]) {
+        const missing = closureOf(url).some(
+          (member) =>
+            !isHydrated(member) && !gone.has(member) && (final || unhydratable.has(member)),
+        );
+        if (!missing) continue;
+        hydratedIssues.delete(url);
+        hydratedPrs.delete(url);
+        hydratedOrder.splice(hydratedOrder.indexOf(url), 1);
+        if (!unhydratable.has(url)) unhydratable.set(url, "hydration-cap");
+        again = changed = true;
+      }
     }
-    return result;
+    return changed;
   };
 
   const commentsSource = `query($owner:String!,$name:String!,$number:Int!,$cursor:String){repository(owner:$owner,name:$name){issue(number:$number){comments(first:100,after:$cursor){nodes{${comment}} ${info}}}}}`;
@@ -455,6 +485,7 @@ export async function collectShortlist(
   // 2. Rank, hydrate the frontier, re-rank: until the shown subjects are all hydrated.
   let rounds = 0;
   let capped = false;
+  let spent = 0;
   const unread = (subjects: string[]) =>
     subjects.filter((url) => stubs.has(url) && !isHydrated(url) && !gone.has(url));
   /** The last ranking already showed only hydrated subjects: no verification pass needed. */
@@ -473,7 +504,8 @@ export async function collectShortlist(
       converged = !unread(subjects).length;
       break;
     }
-    const room = bounds.maxHydrated - hydratedOrder.length;
+    // The bound counts reads spent, including those of items later withdrawn.
+    const room = bounds.maxHydrated - spent;
     if (room <= 0 || meter.refused) {
       capped = true;
       for (const url of pending)
@@ -485,18 +517,29 @@ export async function collectShortlist(
     const take: string[] = [];
     const left: string[] = [];
     for (const unit of units([...subjects, ...prObligations])) {
-      const members = [...new Set(unit.filter(open))].filter((url) => !take.includes(url));
+      // A unit with a member that can no longer be read can never be whole: read none of it.
+      if (unit.some((url) => unhydratable.has(url))) continue;
+      const members = unit.filter(open).filter((url) => !take.includes(url));
       if (!members.length) continue;
       if (take.length + members.length <= room) take.push(...members);
       else left.push(...members);
     }
     for (const url of left) if (!take.includes(url)) unhydratable.set(url, "hydration-cap");
     if (left.some((url) => !take.includes(url))) capped = true;
+    spent += take.length;
     await hydrateIssues(take.filter((url) => kinds.get(url) === "issue"));
     await hydratePrs(take.filter((url) => kinds.get(url) === "pull-request"));
+    // Hydration may reveal links discovery did not show; a unit that cannot now be whole is
+    // withdrawn rather than shown without its linked evidence.
+    if (withdrawIncomplete(false)) capped = true;
   }
   // 3. Never show a stub: withdraw any shown subject that is still unhydrated, then re-rank.
+  if (withdrawIncomplete(true)) {
+    capped = true;
+    converged = false;
+  }
   for (let guard = 0; !converged; guard++) {
+    if (withdrawIncomplete(true)) capped = true;
     const stale = unread(await options.select(build()));
     if (!stale.length) break;
     for (const url of stale) if (!unhydratable.has(url)) unhydratable.set(url, "hydration-cap");
