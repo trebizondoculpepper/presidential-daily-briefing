@@ -96,6 +96,25 @@ const audience: Record<
 };
 const roles = ["implementer", "designer", "human"] as const;
 
+/**
+ * The designer half of `pr-action` (rules.edn), restated independently of the policy: a design PR
+ * (a design label on the PR or on an issue it closes) linked to the viewer as owner, as
+ * responsible, or by closing an issue the viewer owns.
+ */
+const designLabels = ["documentation", "status:needs-design"];
+function ownDesignPr(datoms: Datom[], pr: number, agent: string): boolean {
+  const has = (e: number, a: string, v: unknown) =>
+    datoms.some(([x, y, z]) => x === e && y === a && z === v);
+  const closes = datoms.filter(([e, a]) => e === pr && a === "closes").map(([, , v]) => Number(v));
+  const design = [pr, ...closes].some((e) => designLabels.some((l) => has(e, "label", l)));
+  const mine =
+    !!agent &&
+    (has(pr, "owner", agent) ||
+      has(pr, "responsible", agent) ||
+      closes.some((i) => has(i, "owner", agent)));
+  return design && mine;
+}
+
 describe("rule audience: roles and subject kinds (#469)", () => {
   it("pins every decision rule's audience", () => {
     expect(policy.definitions.map((d) => d.id).sort()).toEqual(Object.keys(audience).sort());
@@ -132,14 +151,13 @@ describe("rule audience: roles and subject kinds (#469)", () => {
         for (const d of result.decisions) {
           const meant = audience[d.ruleId]!;
           const where = `${d.ruleId} on ${String(kindOf.get(d.subject))} ${d.subject} as ${role}${subject === null ? "" : ` (kind of ${subject} flipped)`}`;
-          const own = datoms.some(
-            ([e, a, v]) => e === d.subject && a === "responsible" && v === s.viewer.agent,
-          );
           const allowed =
             meant.role === "any" ||
             meant.role === role ||
             (meant.role === "agents" && role !== "human") ||
-            (meant.role === "pr-action" && (role === "implementer" || own));
+            (meant.role === "pr-action" &&
+              (role === "implementer" ||
+                (role === "designer" && ownDesignPr(datoms, d.subject, s.viewer.agent))));
           expect(allowed, where).toBe(true);
           expect(meant.kind === "any" || meant.kind === kindOf.get(d.subject), where).toBe(true);
         }
