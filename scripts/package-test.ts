@@ -290,6 +290,64 @@ async function blendedParity(
   return rankedKinds(cli);
 }
 
+/**
+ * The bounded project-preference worker (#515) from the installed evaluator chunk, in a separate
+ * Node process: the fixed worker entry and its DataScript dependency must resolve from the
+ * installed package, with no source checkout. The policy is compiled here because the compiler
+ * (and its development-only EDN reader) is deliberately not part of the installed chunk.
+ */
+async function projectWorkerSmoke(chunk: string, cwd: string): Promise<void> {
+  const fixture = await readFile(join(root, "doc/reports/fixtures/project-rules-v1.edn"), "utf8");
+  const { rulesHash, policyVersion } = await import("../src/rules/datalog/engine.js");
+  const { compileProjectPolicy } = await import("../src/rules/datalog/project/compile.js");
+  const policy = compileProjectPolicy(
+    fixture.replace(/:base-rules-hash "[0-9a-f]{64}"/, `:base-rules-hash "${rulesHash}"`),
+    { policyVersion, rulesHash },
+  );
+  const action = (n: number) => ({
+    id: `o/r https://github.com/o/r/issues/${n} implement`,
+    kind: "implement",
+    role: "implementer",
+    target: `https://github.com/o/r/issues/${n}`,
+    band: 6,
+    impact: { state: "current", size: "M" },
+    complexity: { state: "current", size: "M" },
+    unlocks: 0,
+    unlocksUnknown: [],
+  });
+  const input = join(cwd, "project-worker-input.json");
+  await writeFile(
+    input,
+    JSON.stringify({
+      policy,
+      actions: [action(1), action(2)],
+      subjects: [[action(2).target, { labels: ["project:priority"], labelsComplete: true }]],
+    }),
+  );
+  const script = `
+    import { readFileSync } from "node:fs";
+    import { pathToFileURL } from "node:url";
+    const [chunk, input] = process.argv.slice(1);
+    const { evaluateProjectPreferences } = await import(pathToFileURL(chunk).href);
+    const { policy, actions, subjects } = JSON.parse(readFileSync(input, "utf8"));
+    const result = await evaluateProjectPreferences(policy, actions, new Map(subjects), {
+      generation: "package-test",
+      viewer: { role: "implementer", order: "impact" },
+    });
+    process.stdout.write(JSON.stringify(result.items.map((a) => a.target)));
+  `;
+  const { stdout } = await run(
+    process.execPath,
+    ["--input-type=module", "-e", script, chunk, input],
+    {
+      cwd,
+    },
+  );
+  const order = JSON.parse(stdout) as string[];
+  if (!order[0]?.endsWith("/issues/2") || order.length !== 2)
+    throw new Error(`Installed project worker returned ${stdout}.`);
+}
+
 const work = await mkdtemp(join(tmpdir(), "triage-package-"));
 try {
   const { stdout } = await npm(
@@ -333,6 +391,8 @@ try {
   if (manifest?.scripts?.postinstall || manifest?.scripts?.install || manifest?.scripts?.preinstall)
     throw new Error("The package must not run install scripts on installation.");
   console.log("ok   installed globally into an isolated prefix without install scripts");
+  await projectWorkerSmoke(join(packageDir, engineChunks[0]!), work);
+  console.log("ok   installed evaluator runs a project-preference worker from its own chunk");
 
   const bin = windows ? join(prefix, "pdb.cmd") : join(prefix, "bin", "pdb");
   // Compatibility aliases are deliberately not renamed: existing launchers keep working.
