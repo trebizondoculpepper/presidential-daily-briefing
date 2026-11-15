@@ -2,7 +2,7 @@
 ;; Each witness is a vector of where-clauses binding ?value for subject ?t.
 {:policy-version 1
  :many
- ["label" "owner" "responsible" "platform" "attention" "blocker" "dependent" "closes" "closing" "check" "review" "receipt" "thread" "matched" "overridden" "unlocks-dependent" "permit" "deny" "unknown" "unlock-unknown" "question-record"]
+ ["label" "owner" "responsible" "platform" "attention" "blocker" "dependent" "closes" "closing" "check" "review" "receipt" "provider-review" "thread" "matched" "overridden" "unlocks-dependent" "permit" "deny" "unknown" "unlock-unknown" "question-record"]
  :constants
  {"small" ["XS" "S"]
   "large" ["L" "XL" "XXL"]
@@ -74,6 +74,9 @@
    "platform" "required platform"
    "pr-complete" "completeness of pull request evidence"
    "preference" "preference"
+   "provider-commit" "provider-reviewed commit"
+   "provider-review" "configured review provider evidence"
+   "provider-state" "provider review state"
    "question-record" "question record"
    "receipt" "review receipt"
    "receipt-commit" "reviewed commit"
@@ -83,6 +86,7 @@
    "record-trust" "trust level"
    "resolved" "resolved flag"
    "responsible" "responsible agent"
+   "review-coverage" "declared review coverage"
    "reverse-complete" "completeness of reverse closing-PR evidence"
    "review" "review"
    "review-commit" "reviewed commit"

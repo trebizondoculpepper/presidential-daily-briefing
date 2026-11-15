@@ -21,7 +21,8 @@ import { prChecks } from "../briefing/briefing.js";
 import { prEvidenceGaps } from "../github/previdence.js";
 import { workflow } from "./definition.js";
 import type { PrStatusReport } from "./prstatus.js";
-import { codexMarker, headCodexFindings, headReviewed } from "./reviewevidence.js";
+import { snapshotPolicyReview } from "./reviewpolicy.js";
+import type { DeclaredReviewPolicy } from "./reviewpolicy.js";
 
 /**
  * Follow-up for one required deliverable: `waiting` on checks or review (attention released,
@@ -143,8 +144,14 @@ export function classifyFollowUp(f: FollowUpFacts): [FollowUp, string] {
 }
 
 /** Facts from a PR as the snapshot collects it. */
-export function snapshotFollowUpFacts(pr: PullRequest, warnings: string[]): FollowUpFacts {
+export function snapshotFollowUpFacts(
+  pr: PullRequest,
+  warnings: string[],
+  reviewPolicy?: DeclaredReviewPolicy,
+): FollowUpFacts {
   const checks = prChecks(pr);
+  // #301: acceptance and findings under the declared review policy (legacy when absent).
+  const review = snapshotPolicyReview(pr, warnings, reviewPolicy);
   const known = [...workflow.pass, ...workflow.failure, ...workflow.unfinished];
   return {
     draft: !!pr.isDraft,
@@ -160,14 +167,8 @@ export function snapshotFollowUpFacts(pr: PullRequest, warnings: string[]): Foll
     unresolvedThreads: (pr.reviewThreads?.nodes ?? []).some((t) => !t.isResolved),
     mergeable: pr.mergeable,
     mergeState: pr.mergeStateStatus ?? "UNKNOWN",
-    headReviewed: headReviewed(pr),
-    headFindings: headCodexFindings(
-      pr.headRefOid,
-      (pr.comments?.nodes ?? []).map((c) => ({
-        by: c.author?.login ?? "",
-        state: codexMarker(c.body)?.code_review,
-      })),
-    ),
+    headReviewed: review.headReviewed,
+    headFindings: review.headFindings,
   };
 }
 
@@ -197,11 +198,12 @@ function openFollowUp(
   pr: PullRequest | undefined,
   draft: boolean,
   warnings: string[],
+  reviewPolicy?: DeclaredReviewPolicy,
 ): [FollowUp, string] {
   if (draft) return ["actionable", "draft: the responsible agent finishes it"];
   if (!pr)
     return ["unknown", "the pull request is not in this read; its checks and review are unknown"];
-  return classifyFollowUp(snapshotFollowUpFacts(pr, warnings));
+  return classifyFollowUp(snapshotFollowUpFacts(pr, warnings, reviewPolicy));
 }
 
 function memberView(
@@ -210,6 +212,7 @@ function memberView(
   prs: Map<string, PullRequest>,
   warnings: string[],
   closure: Closure,
+  reviewPolicy?: DeclaredReviewPolicy,
 ): DeliverableView[] {
   const evaluated = d.evaluation?.perDeliverable;
   return d.members.map((m, i) => {
@@ -248,6 +251,7 @@ function memberView(
             : undefined,
           e.state === "draft",
           warnings,
+          reviewPolicy,
         );
     }
     // S5: an open required PR on an issue closed not planned, duplicate or otherwise is closure
@@ -272,6 +276,7 @@ export function deliveryView(
   d: IssueDeliveryDiagnosis,
   prs: Map<string, PullRequest>,
   warnings: string[] = [],
+  reviewPolicy?: DeclaredReviewPolicy,
 ): DeliveryView {
   const known = d.fold === "known";
   const legacyUnknown = d.fold === "known" && !d.trustedRecord && d.legacy?.status === "unknown";
@@ -316,7 +321,14 @@ export function deliveryView(
         }
       : null,
     deliverables: known
-      ? memberView(repository, d, prs, warnings, closureOf(issue.state, issue.stateReason))
+      ? memberView(
+          repository,
+          d,
+          prs,
+          warnings,
+          closureOf(issue.state, issue.stateReason),
+          reviewPolicy,
+        )
       : [],
     next: [
       `pdb --issue ${issue.number} --json --repo ${repository}`,
@@ -345,6 +357,7 @@ export function deliveryRead(snapshot: Snapshot, diagnosis: DeliveryDiagnosis): 
         diagnosis.issues.get(i.number)!,
         prs,
         snapshot.warnings ?? [],
+        snapshot.reviewPolicy,
       ),
     );
   // Per-ticket coverage gaps (truncated history, member cap) are omissions too, so the

@@ -14,7 +14,7 @@ import type { SubjectAssessments } from "./assessments.js";
 import { labelEstimationReport } from "../estimation/complexitylabels.js";
 import type { LabelEstimationInput } from "../estimation/complexitylabels.js";
 import type { Action, Dependency, Issue, PullRequest, Snapshot } from "../github/types.js";
-import { headReviewed } from "../workflow/reviewevidence.js";
+import { snapshotPolicyReview } from "../workflow/reviewpolicy.js";
 import { workflow } from "../workflow/definition.js";
 
 export { urgencyBand };
@@ -449,7 +449,8 @@ analysisRules.set("pull-requests", ({ snapshot, prs }) =>
       !workflow.changesRequested.includes(pr.reviewDecision ?? "") &&
       !workflow.conflicts.includes(pr.mergeable) &&
       !pr.isDraft &&
-      headReviewed(pr);
+      // #301: the declared review policy (legacy when the front end resolved none).
+      snapshotPolicyReview(pr, snapshot.warnings, snapshot.reviewPolicy).headReviewed;
     if (
       accepted &&
       (workflow.unknownMergeable.includes(pr.mergeable) ||
