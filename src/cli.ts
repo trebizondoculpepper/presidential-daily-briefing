@@ -279,7 +279,8 @@ at most --limit-prs PRs, required delivery members first. No repository catch-up
 
   --limit-prs N         Detailed PR reads, 1-${ticketLimits.maxPullRequests} (default ${ticketLimits.defaultPullRequests}); PRs beyond it are listed as
                         omitted, unknown evidence, never absent
-  --max-chars N         Text budget (default 10000); whole rows, then "Truncated due to maximum size"
+  --max-chars N         Text budget (default 10000), never exceeded: whole rows, actionable first,
+                        then "Truncated due to maximum size." (shorter marker for tiny limits)
   --json                Versioned ticket-status document (never sliced by --max-chars)
   --agent NAME          Focus identity, reported only; never authorization
   --platform NAME       Focus platform, reported only

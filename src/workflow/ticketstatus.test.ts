@@ -460,16 +460,42 @@ describe("pdb ticket N (#197)", () => {
     expect(r.report.collection.notAttempted.length).toBeGreaterThan(0);
   });
 
-  it("text fits whole rows and says when the budget truncated it", async () => {
+  it("never exceeds --max-chars, counting header and notice, at any limit (#379)", async () => {
     const r = await read({
       issue: ticket(1),
       prs: Object.fromEntries([80, 81, 82, 83].map((n) => [n, { state: "OPEN" } as LivePr])),
       links: [80, 81, 82, 83].map((n) => ({ number: n, url: prLink(n), state: "OPEN" })),
     });
-    const text = ticketStatusText(r.report, 600);
-    expect(text.length).toBeLessThanOrEqual(600);
-    expect(text).toMatch(/Truncated due to maximum size; full detail: pdb ticket 1 --json/);
-    expect(text.split("\n")[1]).toMatch(/evidence complete|EVIDENCE INCOMPLETE/);
+    const full = ticketStatusText(r.report);
+    const lines = full.split("\n");
+    const headerLength = lines.slice(0, 3).join("\n").length + 1;
+    for (const max of [
+      1,
+      2,
+      5,
+      12,
+      20,
+      31,
+      headerLength,
+      headerLength + 40,
+      600,
+      full.length - 1,
+    ]) {
+      const text = ticketStatusText(r.report, max);
+      expect(text.length, `limit ${max}`).toBeLessThanOrEqual(max);
+      expect(text.length, `limit ${max}`).toBeGreaterThan(0);
+      expect(text, `limit ${max}`).toMatch(/…|\[truncated\]|Truncated due to maximum size\./);
+    }
+    expect(ticketStatusText(r.report, 1)).toBe("…");
+    expect(ticketStatusText(r.report, 20)).toBe("[truncated]\n");
+    expect(ticketStatusText(r.report, 31)).toBe("Truncated due to maximum size.\n");
+    // Room for the header: it is kept whole, and actionable PR rows come before optional detail.
+    const roomy = ticketStatusText(r.report, 600);
+    expect(roomy.split("\n").slice(0, 3)).toEqual(lines.slice(0, 3));
+    expect(roomy).toMatch(/Truncated due to maximum size\. Full detail: pdb ticket 1 --json/);
+    expect(roomy).toMatch(/Pull requests \(4 of 4 read/);
+    expect(roomy).not.toMatch(/Observed live/);
+    expect(ticketStatusText(r.report, full.length)).toBe(full);
   });
 });
 
