@@ -1,0 +1,13 @@
+;; Schema/example fixture, pinned to the historical source used in #499.
+;; Generate real projects with pdb rules init to bind the current shipped base hash.
+{:format-version 1
+ :projection-version 1
+ :base-policy-version 1
+ :base-rules-hash "811a2953071e3e54c081245f1b3b15f661cc7cb7a883e1b2c4f893d613195ba0"
+ :rules [[(project-hotfix ?a) [?a "pdb.action-label" "project:priority"]]]
+ :preferences [{:id "project-hotfix"
+                :when [(project-hotfix ?a)]
+                :priority [[(+ 0 10) ?value]]
+                :why "Project priority label matched: {label}."
+                :witnesses {"label" [[?a "pdb.action-label" "project:priority"]
+                                     [(str "project:priority") ?value]]}}]}
