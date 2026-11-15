@@ -60,6 +60,8 @@ export interface DirectEvidence {
   dependants: DependantFacts[];
   /** Last-open-blocker dependants not hydrated: beyond the bound, or after a quota refusal. */
   notRead: { url: string; reason: string }[];
+  /** Read dependants whose own blocker list was truncated: their evidence is partial. */
+  partial?: { url: string; reason: string }[];
 }
 
 export async function completeNative<T extends NativeFields & Pick<Issue, "number" | "url">>(
@@ -402,7 +404,7 @@ export function dependencyReportIncomplete(report: DependencyReport): boolean {
   if (report.tree && report.treeBounds?.complete !== true) return true;
   if (report.collection?.quota || report.collection?.notAttempted.length) return true;
   if (report.unfollowed?.length) return true;
-  if (report.direct?.notRead.length) return true;
+  if (report.direct?.notRead.length || report.direct?.partial?.length) return true;
   return report.nodes.some((node) => !node.known);
 }
 const dependantFields = (blockers: number) =>
@@ -477,15 +479,33 @@ async function readDependants(
     }
     batch.forEach((node, i) => {
       const facts = selected<DependantFacts>(prop(data, `d${i}`, "issue"));
-      if (facts) evidence.dependants.push(facts);
-      else evidence.notRead.push({ url: node.url, reason: "unavailable" });
+      if (facts) {
+        evidence.dependants.push(facts);
+        if (facts.blockedBy.pageInfo.hasNextPage)
+          (evidence.partial ??= []).push({
+            url: facts.url,
+            reason: `blockers beyond the first ${bounds.dependantBlockersListed} not read`,
+          });
+      } else evidence.notRead.push({ url: node.url, reason: "unavailable" });
     });
   }
+  const gaps = evidence.notRead.length + (evidence.partial?.length ?? 0);
   meter.cover(
     "dependant-eligibility",
     item.url,
-    evidence.notRead.length ? "partial" : "complete",
-    evidence.notRead.length ? { omission: `${evidence.notRead.length} dependant(s) not read` } : {},
+    gaps ? "partial" : "complete",
+    gaps
+      ? {
+          omission: [
+            ...(evidence.notRead.length
+              ? [`${evidence.notRead.length} dependant(s) not read`]
+              : []),
+            ...(evidence.partial?.length
+              ? [`${evidence.partial.length} dependant(s) with truncated blocker lists`]
+              : []),
+          ].join("; "),
+        }
+      : {},
   );
   return evidence;
 }

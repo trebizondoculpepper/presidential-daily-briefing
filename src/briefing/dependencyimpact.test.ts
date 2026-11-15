@@ -2,12 +2,17 @@
  * Direct dependency impact for routine `deps N` (#196): injected graphs only, never live GitHub.
  */
 import { describe, expect, it } from "vite-plus/test";
-import { dependencyReport, dependencyText } from "../github/dependencies.js";
+import {
+  dependencyReport,
+  dependencyReportIncomplete,
+  dependencyText,
+} from "../github/dependencies.js";
 import type { Query } from "../github/github.js";
 import { graphQuery } from "../testing/fakegh.js";
 import { clock, repo } from "../testing/snapshots.js";
-import { main } from "../cli.js";
-import { directImpact, directImpactText } from "./dependencyimpact.js";
+import { depsArgumentsFor, main, ticketArgumentsFor, workflowArgumentsFor } from "../cli.js";
+import { claimTemplate, directImpact, directImpactText } from "./dependencyimpact.js";
+import { commandTemplates } from "../rules/datalog/commands.js";
 
 const read = async (graph: Parameters<typeof graphQuery>[0], number = 1) => {
   const fake = graphQuery(graph);
@@ -55,7 +60,7 @@ describe("direct dependency impact (#196)", () => {
     // A platform restriction without a viewer platform is unknown, never zero.
     expect(impact.unknown.join()).toContain("#7");
     expect(impact.nextAction).toBe(
-      "Start #1: claim it (pdb claim 1 --repo example/project) and implement it; completing it makes at least 2 dependant(s) pickable immediately: #8, #2.",
+      "Start #1: claim it (pdb claim 1 --repo example/project --agent NAME) and implement it; completing it makes at least 2 dependant(s) pickable immediately: #8, #2.",
     );
     expect(impact.transitive.computed).toBe(false);
     const text = directImpactText(impact).join("\n");
@@ -161,7 +166,86 @@ describe("direct dependency impact (#196)", () => {
     const { query } = graphQuery({ states: { 1: { labels: ["status:ready"] } }, edges: [[2, 1]] });
     const other = await dependencyReport("Other/Repo", 1, { impact: true }, query, clock);
     // The fake answers for example/project; the command names the issue's own repository.
-    expect(directImpact(other)!.nextAction).toContain("pdb claim 1 --repo example/project");
+    expect(directImpact(other)!.nextAction).toContain(
+      "pdb claim 1 --repo example/project --agent NAME",
+    );
+  });
+
+  it("uses the briefing's own claim template", () => {
+    expect(claimTemplate).toBe(commandTemplates.claim);
+  });
+  it("suggests only commands the real argument parsers accept, with --agent filled", async () => {
+    const graphs: Parameters<typeof graphQuery>[0][] = [
+      { states: { 1: { labels: ["status:ready"] } }, edges: [[2, 1]] },
+      { states: { 1: { labels: ["status:ready"] } }, edges: [[1, 9]] },
+      { states: { 1: { labels: ["status:in-progress", "agent:ana"] } }, edges: [[2, 1]] },
+      { states: { 1: { labels: ["status:ready"], closedBy: [40] } }, edges: [[2, 1]] },
+      {
+        states: {
+          1: { labels: ["status:ready"] },
+          9: { state: "CLOSED", stateReason: "NOT_PLANNED" },
+        },
+        edges: [[1, 9]],
+      },
+      { states: { 1: { labels: ["platform:x", "status:ready"] } }, edges: [[2, 1]] },
+    ];
+    const parse = (command: string) => {
+      const [pdb, name, ...rest] = command.split(" ");
+      expect(pdb).toBe("pdb");
+      if (name === "claim") return workflowArgumentsFor("claim", rest);
+      if (name === "deps") return depsArgumentsFor(rest);
+      if (name === "ticket") {
+        const parsed = ticketArgumentsFor(rest);
+        expect(parsed.help).toBe(false);
+        return parsed;
+      }
+      throw new Error(`unexpected suggested command ${command}`);
+    };
+    let checked = 0;
+    for (const agent of [undefined, "kavya_sabbagh"])
+      for (const graph of graphs) {
+        const { query } = graphQuery(graph);
+        const report = await dependencyReport(repo, 1, { impact: true }, query, clock);
+        const impact = directImpact(report, { prs: [] }, agent)!;
+        for (const [command] of impact.nextAction.matchAll(/pdb [a-z]+ [^)]*/g)) {
+          expect(() => parse(command), command).not.toThrow();
+          if (command.startsWith("pdb claim"))
+            expect(command).toContain(`--agent ${agent ?? "NAME"}`);
+          checked++;
+        }
+      }
+    expect(checked).toBeGreaterThanOrEqual(8);
+  });
+
+  it("marks a read with a truncated dependant blocker list partial and exits 2", async () => {
+    // Dependant 2 has 25 blockers (only one open): more than the 20 listed.
+    const edges: [number, number][] = [[2, 1]];
+    const states: Record<number, { state?: string; labels?: string[] }> = {
+      1: { labels: ["status:ready"] },
+    };
+    for (let i = 0; i < 24; i++) {
+      edges.push([2, 100 + i]);
+      states[100 + i] = { state: "CLOSED" };
+    }
+    const { query } = graphQuery({ states, edges });
+    const report = await dependencyReport(repo, 1, { impact: true }, query, clock);
+    expect(report.direct?.partial).toMatchObject([
+      { reason: "blockers beyond the first 20 not read" },
+    ]);
+    const coverage = report.collection!.coverage.find((c) => c.source === "dependant-eligibility");
+    expect(coverage).toMatchObject({ state: "partial" });
+    expect(coverage?.omission).toContain("truncated blocker lists");
+    expect(dependencyReportIncomplete(report)).toBe(true);
+    expect(directImpact(report)!.unknown.join()).toContain("blocker list truncated");
+    const runtime = {
+      collect: async () => {
+        throw new Error("briefing collection must not run");
+      },
+      currentRepository: async () => repo,
+      dependencyReport: (r: string, n: number, o?: Parameters<typeof dependencyReport>[2]) =>
+        dependencyReport(r, n, o, query, clock),
+    };
+    expect(await main(["deps", "1"], async () => {}, runtime)).toBe(2);
   });
 
   it("bounds dependant hydration and reports the rest as unknown, never zero", async () => {
