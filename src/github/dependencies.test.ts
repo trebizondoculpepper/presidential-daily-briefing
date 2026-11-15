@@ -180,7 +180,28 @@ describe("bounded --tree diagnosis (#196)", () => {
     );
     expect(view.status).toBe("incomplete");
     expect(view.sourceCompleteness.complete).toBe(false);
-    expect(JSON.stringify(view.sourceCompleteness)).toContain("Tree incomplete");
+    expect(JSON.stringify(view.sourceCompleteness)).toContain("TREE INCOMPLETE (node limit 5)");
+  });
+  it("counts unserved repositories against completeness, as the node cap does", async () => {
+    const { query } = graphQuery({ edges: [[2, 1]] });
+    // Serve only the selected issue: its dependant counts as in an unserved repository.
+    let first = true;
+    const partial = await dependencyReport(
+      repo,
+      1,
+      {
+        tree: true,
+        follow: () => {
+          const ok = first;
+          first = false;
+          return ok;
+        },
+      },
+      query,
+      clock,
+    );
+    expect(partial.treeBounds).toMatchObject({ complete: false, stoppedBy: null, notServed: 1 });
+    expect(dependencyText(partial)).toContain("1 issue(s) in repositories not served");
   });
   it("rejects a node limit outside its bounds", async () => {
     const { query } = graphQuery({ edges: [[1, 2]] });

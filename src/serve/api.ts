@@ -33,6 +33,7 @@ import type {
   RestAnswer,
 } from "../github/github.js";
 import type { dependencyReport as DependencyReportFn } from "../github/dependencies.js";
+import { notReadText, treeIncompleteText } from "../github/dependencies.js";
 import type { Snapshot } from "../github/types.js";
 import { localPaths, redactLocalText, redactPaths } from "../mcp/redact.js";
 import { markerTrust } from "../workflow/delivery.js";
@@ -335,6 +336,9 @@ export function cachedBoundaries(
           follow: isServed,
         }),
       signal,
+      // Never store a partial tree or a quota-stopped read as the answer (#196).
+      (report) =>
+        !report.collection?.quota && (!report.tree || report.treeBounds?.complete === true),
     );
   };
   const memoRest: Rest | undefined = guardedRest
@@ -852,14 +856,26 @@ export function readApi(
               signal: context.signal,
             });
             const skipped = report.unfollowed ?? [];
-            return skipped.length
-              ? {
-                  status: "incomplete",
-                  result: report,
-                  warnings: [
+            // A capped, quota-stopped or unserved tree is partial (#196): same verdict as the CLI.
+            const bounds = report.treeBounds;
+            const truncated = report.tree && bounds?.complete !== true;
+            const warnings = [
+              ...(skipped.length
+                ? [
                     `${skipped.length} dependency node(s) in repositories this server does not serve were not read: ${skipped.map((n) => `${n.repository}#${n.number}`).join(", ")}.`,
-                  ],
-                }
+                  ]
+                : []),
+              ...(truncated
+                ? bounds
+                  ? [
+                      treeIncompleteText(bounds),
+                      ...(bounds.notRead ? [notReadText(bounds).trim()] : []),
+                    ]
+                  : ["Tree completeness unknown: no tree bounds were recorded."]
+                : []),
+            ];
+            return skipped.length || truncated
+              ? { status: "incomplete", result: report, warnings }
               : { status: "complete", result: report };
           });
           return true;
