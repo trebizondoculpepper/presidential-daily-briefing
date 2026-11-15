@@ -1019,6 +1019,79 @@ export async function collectIssueFocus(
         .map((ref) => [ref.number, ref]),
     ).values(),
   ];
+  const pullRequests = await hydratePullRequests(
+    repository,
+    targets,
+    { meter, signal, warnings, role: "linked" },
+    base,
+  );
+  const telemetry = meter.collection().telemetry;
+  return {
+    schemaVersion: 1,
+    repository,
+    startedAt,
+    fetchedAt: now().toISOString(),
+    issues: [issue],
+    pullRequests,
+    dependencies: [],
+    changed: [],
+    since: null,
+    warnings,
+    rateLimit:
+      telemetry.rateLimit?.remaining != null && telemetry.rateLimit.resetAt
+        ? { remaining: telemetry.rateLimit.remaining, resetAt: telemetry.rateLimit.resetAt }
+        : null,
+    metrics: {
+      requestCount: telemetry.requests,
+      durationMs: Date.parse(now().toISOString()) - Date.parse(startedAt),
+    },
+    collection: meter.collection(),
+  };
+}
+
+/**
+ * Hydrate open PRs of `repository` with the snapshot's PR fields and full comment history, at
+ * most `hydrationConcurrency` at once (issue-detail-v1, #367). Returns the PRs that are open; a
+ * closed or merged one is read but left out, as the full snapshot holds open PRs only. A failed
+ * read is `failed` coverage and a warning; after a quota refusal the rest are `not-requested`,
+ * listed in `meter.notAttempted` and warned about. Nothing unread is ever reported absent.
+ */
+export async function hydratePullRequests(
+  repository: string,
+  targets: readonly { number: number; url: string }[],
+  options: {
+    meter: ReadMeter;
+    signal?: AbortSignal;
+    /** Receives a warning for every PR whose evidence is incomplete or unknown. */
+    warnings: string[];
+    /** How the PR relates to the ticket, for warnings: a closing link or a delivery member. */
+    role: "linked" | "delivery member";
+  },
+  base: Query = ghQueryWith(options.signal),
+): Promise<PullRequest[]> {
+  const { meter, signal, warnings, role } = options;
+  const bounds = readProfiles["issue-detail-v1"].bounds;
+  const [owner, name] = repository.split("/");
+  const read = async (q: Query, source: string, variables: QueryVariables) => {
+    signal?.throwIfAborted();
+    const data = await q(source, { owner, name, ...variables });
+    if (!data.repository) throw new Error(`Repository unavailable: ${repository}`);
+    return data.repository;
+  };
+  const commentsSource = `query($owner:String!,$name:String!,$number:Int!,$cursor:String){repository(owner:$owner,name:$name){issueOrPullRequest(number:$number){... on PullRequest{comments(first:100,after:$cursor){nodes{${comment}} ${info}}}}}}`;
+  const completeComments = async (item: PullRequest, q: Query) => {
+    if (!item.comments.pageInfo.hasNextPage) return;
+    const initial = item.comments;
+    item.comments.nodes = await pages<Comment>(async (cursor) => {
+      if (!cursor) return initial;
+      const node = prop(
+        await read(q, commentsSource, { number: item.number, cursor }),
+        "issueOrPullRequest",
+      );
+      return prop(node, "comments");
+    });
+    item.comments.pageInfo = { hasNextPage: false, endCursor: null };
+  };
   const hydrated = await hydrate(
     targets,
     async (ref) => {
@@ -1073,7 +1146,7 @@ export async function collectIssueFocus(
     } else if (outcome.state === "failed") {
       const rateLimited = quotaRefusal(outcome.error);
       warnings.push(
-        `${ref.url}: linked pull request could not be read${rateLimited ? " (rate limited)" : ""}; its ownership and review evidence is unknown.`,
+        `${ref.url}: ${role} pull request could not be read${rateLimited ? " (rate limited)" : ""}; its ownership and review evidence is unknown.`,
       );
       meter.cover("pull-request", prSubject, "failed", {
         failure: rateLimited ? "rate-limited" : "read-failed",
@@ -1081,35 +1154,14 @@ export async function collectIssueFocus(
     } else {
       meter.notAttempted.push(ref.url);
       warnings.push(
-        `${ref.url}: linked pull request not read after a rate-limit refusal; its evidence is unknown.`,
+        `${ref.url}: ${role} pull request not read after a rate-limit refusal; its evidence is unknown.`,
       );
       meter.cover("pull-request", prSubject, "not-requested", {
         omission: "not attempted after a quota refusal",
       });
     }
   });
-  const telemetry = meter.collection().telemetry;
-  return {
-    schemaVersion: 1,
-    repository,
-    startedAt,
-    fetchedAt: now().toISOString(),
-    issues: [issue],
-    pullRequests,
-    dependencies: [],
-    changed: [],
-    since: null,
-    warnings,
-    rateLimit:
-      telemetry.rateLimit?.remaining != null && telemetry.rateLimit.resetAt
-        ? { remaining: telemetry.rateLimit.remaining, resetAt: telemetry.rateLimit.resetAt }
-        : null,
-    metrics: {
-      requestCount: telemetry.requests,
-      durationMs: Date.parse(now().toISOString()) - Date.parse(startedAt),
-    },
-    collection: meter.collection(),
-  };
+  return pullRequests;
 }
 
 const summarize = (nodes: (Issue | PullRequest)[]): Snapshot["changed"] =>

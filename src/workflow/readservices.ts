@@ -3,11 +3,12 @@
  * summary", #373). The CLI and `pdb serve` call these directly; neither runs the other or parses
  * terminal text, so both emit the same versioned JSON for the same facts.
  */
-import { collectIssueFocus, ghQueryWith } from "../github/github.js";
+import { collectIssueFocus, ghQueryWith, hydratePullRequests } from "../github/github.js";
 import type { FocusOptions, Query, Rest } from "../github/github.js";
 import { ReadMeter } from "../github/readplan.js";
 import type { Snapshot } from "../github/types.js";
 import { diagnoseDelivery } from "./deliverydoctor.js";
+import type { DeliveryDiagnosis } from "./deliverydoctor.js";
 import type { TrustDecision } from "./delivery.js";
 import {
   deliveryFields,
@@ -78,12 +79,14 @@ export async function readWho(
   number: number,
   options: { staleHours: number; now: Date; offline: boolean },
   boundaries: DeliveryBoundaries,
+  /** A diagnosis of this ticket already made over the same boundaries; read when absent. */
+  diagnosis?: DeliveryDiagnosis,
 ) {
   const ownership = ticketOwnership(snapshot, number, options);
   // #192: delivery, responsibility and closure from the shared fold and evaluator.
   // Only the requested issue is evaluated, so the evaluation cap can never skip it.
   const scoped = { ...snapshot, issues: snapshot.issues.filter((i) => i.number === number) };
-  const read = deliveryRead(scoped, await diagnoseDelivery(scoped, boundaries));
+  const read = deliveryRead(scoped, diagnosis ?? (await diagnoseDelivery(scoped, boundaries)));
   const view = read.tickets.find((t) => t.number === number) ?? null;
   const issue = scoped.issues[0];
   const report = withDeliveryCompleteness(
@@ -195,17 +198,43 @@ export async function readWhoLive(
   const refused =
     meter.notAttempted.length > 0 || meter.calls.some((c) => c.outcome === "rate-limited");
   const metered = refused ? {} : meteredBoundaries(boundaries, meter, subject);
+  let diagnosis: DeliveryDiagnosis | undefined;
+  if (!refused && metered.trust && metered.live) {
+    // Required members of the ticket's trusted delivery records are read too, not only PRs
+    // with a closing reference: a member without "Closes #N" is still this ticket's work. The
+    // full snapshot held every open PR; here only open members are hydrated (same bound,
+    // concurrency and quota stop). A member not read stays unknown in its follow-up.
+    const scoped = { ...snapshot, issues: snapshot.issues.filter((i) => i.number === number) };
+    diagnosis = await diagnoseDelivery(scoped, metered);
+    snapshot.pullRequests.push(
+      ...(await hydrateMembers(
+        repository,
+        diagnosis,
+        number,
+        snapshot,
+        meter,
+        options.signal,
+        query,
+      )),
+    );
+  }
   const read = await readWho(
     snapshot,
     number,
     { staleHours: options.staleHours, now: options.now, offline: false },
     metered,
+    diagnosis,
   );
-  if (refused) {
+  const quotaLater = !refused && meter.calls.some((c) => c.outcome === "rate-limited");
+  if (refused || quotaLater) {
     const omission = "not read: GitHub refused a request for quota earlier in this read";
-    meter.cover("delivery-records", subject, "not-requested", { omission });
-    meter.cover("permissions", subject, "not-requested", { omission });
-    const warning = `Delivery and permission evidence for #${number} was not read after a rate-limit refusal; delivery is unknown.`;
+    if (refused) {
+      meter.cover("delivery-records", subject, "not-requested", { omission });
+      meter.cover("permissions", subject, "not-requested", { omission });
+    } else coverDelivery(meter, subject, metered, read.delivery);
+    const warning = refused
+      ? `Delivery and permission evidence for #${number} was not read after a rate-limit refusal; delivery is unknown.`
+      : `A delivery member of #${number} was not read after a rate-limit refusal; its follow-up is unknown.`;
     const report = {
       ...read.report,
       completeness: {
@@ -220,6 +249,51 @@ export async function readWhoLive(
   coverDelivery(meter, subject, metered, metered.trust && metered.live ? read.delivery : null);
   const report = { ...read.report, collection: meter.collection() };
   return { report, text: read.text, complete: read.complete };
+}
+
+/** States whose follow-up memberView derives from the PR's own checks and review. */
+const settledMemberStates = new Set(["merged", "closed-unmerged", "merged-off-target", "unknown"]);
+const memberLabel = /^([\w.-]+\/[\w.-]+)#(\d+)$/;
+
+/**
+ * Hydrate the open required members of one ticket's evaluated delivery that the focused read
+ * does not already hold. Cross-repository members are never read here (the full snapshot held
+ * only this repository's PRs); they are recorded `not-requested` and stay unknown.
+ */
+async function hydrateMembers(
+  repository: string,
+  diagnosis: DeliveryDiagnosis,
+  number: number,
+  snapshot: Snapshot,
+  meter: ReadMeter,
+  signal: AbortSignal | undefined,
+  query: Query,
+) {
+  const d = diagnosis.issues.get(number);
+  const evaluated = d?.evaluation?.perDeliverable ?? [];
+  const held = new Set(snapshot.pullRequests.map((p) => p.number));
+  const targets = new Map<number, { number: number; url: string }>();
+  (d?.members ?? []).forEach((m, i) => {
+    const match = memberLabel.exec(m.deliverable);
+    const state = evaluated[i]?.state;
+    if (!match || !state || settledMemberStates.has(state)) return;
+    if (match[1].toLowerCase() !== repository.toLowerCase()) {
+      meter.cover("pull-request", m.deliverable, "not-requested", {
+        omission: "delivery member in another repository; its follow-up is unknown",
+      });
+      return;
+    }
+    const n = Number(match[2]);
+    if (!held.has(n))
+      targets.set(n, { number: n, url: `https://github.com/${match[1]}/pull/${n}` });
+  });
+  if (!targets.size) return [];
+  return hydratePullRequests(
+    repository,
+    [...targets.values()],
+    { meter, signal, warnings: snapshot.warnings, role: "delivery member" },
+    query,
+  );
 }
 
 /** `pr N --history`: review rounds, findings and recurring files. */
