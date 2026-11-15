@@ -8,7 +8,7 @@
  */
 import englishJson from "./english.generated.json" with { type: "json" };
 import { rulesHash as engineRulesHash, policyVersion } from "./engine.js";
-import { clauseLines, conjunctionText } from "./english-render.js";
+import { clauseLines, conjunctionText, predicateHead } from "./english-render.js";
 import type {
   Clause,
   CompiledDecision,
@@ -387,7 +387,10 @@ export function rulesText(doc: RulesDocument): string {
   for (const p of doc.predicates) {
     push(`  ${p.name}(${p.params.join(", ")})${p.set === "ordering" ? " [ordering rules]" : ""}`);
     p.alternatives.forEach((a, i) => {
-      push(`    (${i + 1}) all of:`, ...clauseLines(a.clauses, "        "));
+      // An alternative written over different head variables is shown with its own head.
+      const own =
+        a.params.join(", ") === p.params.join(", ") ? "" : ` ${predicateHead(p.name, a.params)}`;
+      push(`    (${i + 1})${own} all of:`, ...clauseLines(a.clauses, "        "));
     });
     const used = p.usedBy;
     const parts = used
