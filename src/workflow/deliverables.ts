@@ -12,7 +12,7 @@
  */
 import { parseArgs } from "node:util";
 import { workflow } from "./definition.js";
-import { claimPolicy, shellQuote } from "./claims.js";
+import { claimPolicy, failStep, retryLine, shellQuote, ticketGuard } from "./claims.js";
 import type { Comment, GhRun, GraphQuery, PlanStep, ReworkAuthority } from "./claims.js";
 import {
   attestApplicability,
@@ -1636,12 +1636,24 @@ export async function applyDeliverables(
     const step: PlanStep = { ...next, status: "pending" };
     steps.push(step);
     try {
-      await rt.run(step.command);
+      await rt.run(step.command, {
+        guard: ticketGuard(repository, request.number, rt.query),
+        // After a throttle wait, re-run this command's own prerequisite reads (PR states, the
+        // delivery fold, readiness): retry only if the fresh plan still makes this exact write.
+        stillApplicable: async () => {
+          const again = await planDeliverables(repository, request, rt);
+          const next = again.ok ? again.changes[0] : undefined;
+          // The record body carries its issue time, so compare the write without its body.
+          const shape = (c: string[]) => JSON.stringify(c.filter((_, i) => c[i - 1] !== "--body"));
+          return next && next.step === step.step && shape(next.command) === shape(step.command)
+            ? null
+            : "the delivery prerequisites changed during the wait";
+        },
+      });
       step.status = "done";
       if (step.step === "record" && plan.record) posted = { plan, record: plan.record };
     } catch (error) {
-      step.status = "failed";
-      step.reason = error instanceof Error ? error.message : undefined;
+      failStep(step, error);
       return { ...(posted?.plan ?? plan), steps, exitCode: done ? 2 : 1 };
     }
   }
@@ -1720,7 +1732,13 @@ export function deliverablesText(
   if ("conflict" in result && result.conflict) lines.push(`CONFLICT: ${result.conflict}`);
   if ("unverified" in result && result.unverified) lines.push(`UNVERIFIED: ${result.unverified}`);
   if ("exitCode" in result && result.exitCode !== 0)
-    lines.push(`Retry (safe; completes only the missing steps): ${result.retry}`);
+    lines.push(
+      retryLine(
+        "steps" in result ? (result.steps ?? []) : [],
+        "Retry (safe; completes only the missing steps)",
+        result.retry,
+      ),
+    );
   return lines.join("\n") + "\n";
 }
 

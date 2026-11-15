@@ -83,6 +83,14 @@ describe("estimate N records a size label with provenance (#152)", () => {
       /** Fail removal of this label name, the first N times. */
       failRemove?: { name: string; times: number };
       failComment?: boolean;
+      /**
+       * Comment outcomes in order (#345): "throttled" is GitHub's UNPROCESSABLE "submitted too
+       * quickly"; "lost" accepts the comment but loses the reply; "ok" posts normally.
+       */
+      commentOutcomes?: ("throttled" | "lost" | "ok")[];
+      retryAfterSeconds?: number;
+      /** #345: after a lost-reply comment lands, another writer relabels the ticket. */
+      relabelAfterComment?: string[];
       /** Comment bodies written by an untrusted author (#269). */
       untrusted?: string[];
       /** Comment bodies whose author's permission cannot be verified (#269). */
@@ -125,6 +133,8 @@ describe("estimate N records a size label with provenance (#152)", () => {
     let queries = 0;
     let pageQueries = 0;
     let removeFailures = 0;
+    let clock = Date.parse("2026-11-13T12:00:00Z");
+    const sleeps: number[] = [];
     const page = (end: number) => {
       const start = Math.max(0, end - 100);
       return {
@@ -173,6 +183,11 @@ describe("estimate N records a size label with provenance (#152)", () => {
         },
         now: () => new Date("2026-11-13T12:00:00Z"),
         estimate: {
+          clock: () => clock,
+          sleep: async (ms: number) => {
+            sleeps.push(ms);
+            clock += ms;
+          },
           fs,
           git,
           cwd: root,
@@ -228,7 +243,26 @@ describe("estimate N records a size label with provenance (#152)", () => {
                 return ok({ removeLabelsFromLabelable: { clientMutationId: null } });
               }
               if (options.failComment) throw new Error("network down");
+              const outcome = options.commentOutcomes?.shift() ?? "ok";
+              if (outcome === "throttled")
+                return {
+                  data: { addComment: null },
+                  errors: [{ type: "UNPROCESSABLE", message: "was submitted too quickly" }],
+                  ...(options.retryAfterSeconds !== undefined
+                    ? {
+                        response: {
+                          status: 200,
+                          retryAfterSeconds: options.retryAfterSeconds,
+                          retryAt: null,
+                          requestId: "R:1",
+                        },
+                      }
+                    : {}),
+                };
               remote.comments.push(vars.body!);
+              if (options.relabelAfterComment)
+                remote.labels = options.relabelAfterComment.map(define);
+              if (outcome === "lost") throw new Error("connection reset");
               return ok({ addComment: { commentEdge: { node: { url: "https://c/1" } } } });
             },
           },
@@ -250,6 +284,7 @@ describe("estimate N records a size label with provenance (#152)", () => {
       queries: () => queries,
       pageQueries: () => pageQueries,
       json: () => JSON.parse(out.at(-1)!),
+      sleeps,
     };
   }
   const harnessMarker = (size: "L" | "M") =>
@@ -712,5 +747,70 @@ describe("estimate N records a size label with provenance (#152)", () => {
         '<!-- github-triage:complexity-estimate v1 {"kind":"complexity-estimate","fieldId":"F","size":"S","rationale":"x"} -->',
       ),
     ).toBeNull();
+  });
+  describe("throttled provenance comment recovery (#345)", () => {
+    const count = (t: { remote: { comments: string[] } }) =>
+      t.remote.comments.filter((c) => parseLabelProvenance(c)).length;
+    it("retries once after GitHub's Retry-After and records the comment", async () => {
+      const t = harness({ commentOutcomes: ["throttled", "ok"], retryAfterSeconds: 7 });
+      expect(await t.call(...base)).toBe(0);
+      expect(t.json()).toMatchObject({
+        status: "recorded",
+        provenanceWritten: true,
+        commentRecovery: { status: "posted", attempts: 2, waitedMs: 7000 },
+      });
+      expect(t.sleeps).toEqual([7000]);
+      expect(t.kinds().filter((k) => k === "addComment")).toHaveLength(2);
+      expect(count(t)).toBe(1);
+    });
+    it("reports partial with the throttle reason and retry time when still throttled", async () => {
+      const t = harness({ commentOutcomes: ["throttled", "throttled"] });
+      expect(await t.call(...base)).toBe(2);
+      const json = t.json();
+      expect(json).toMatchObject({
+        status: "partial",
+        provenanceWritten: false,
+        labelsAdded: ["complexity:M"],
+        commentRecovery: {
+          status: "throttled",
+          category: "secondary-rate-limit",
+          attempts: 2,
+          defaultDelay: true,
+        },
+      });
+      // No Retry-After: GitHub's 60-second minimum, then the retry time is reported.
+      expect(t.sleeps).toEqual([60_000]);
+      expect(json.recovery).toContain(`after ${json.commentRecovery.retryAt}`);
+      expect(json.message ?? "").not.toContain("network");
+      expect(count(t)).toBe(0);
+    });
+    it("never reposts when the comment was accepted but the reply was lost", async () => {
+      const t = harness({ commentOutcomes: ["lost"] });
+      expect(await t.call(...base)).toBe(0);
+      expect(t.json()).toMatchObject({
+        status: "recorded",
+        provenanceWritten: true,
+        commentRecovery: { status: "posted", matchedReceipt: true, attempts: 1 },
+      });
+      expect(t.kinds().filter((k) => k === "addComment")).toHaveLength(1);
+      expect(count(t)).toBe(1);
+    });
+    it("reports a conflict, not success, when a lost-reply receipt's labels changed", async () => {
+      const t = harness({ commentOutcomes: ["lost"], relabelAfterComment: ["complexity:L"] });
+      expect(await t.call(...base)).toBe(2);
+      expect(t.json()).toMatchObject({
+        status: "conflict",
+        provenanceWritten: true,
+        commentRecovery: { status: "conflict", acceptance: "confirmed", matchedReceipt: true },
+      });
+      expect(t.kinds().filter((k) => k === "addComment")).toHaveLength(1);
+    });
+    it("does not retry when the required wait exceeds the recovery deadline", async () => {
+      const t = harness({ commentOutcomes: ["throttled", "ok"], retryAfterSeconds: 600 });
+      expect(await t.call(...base)).toBe(2);
+      expect(t.json().commentRecovery).toMatchObject({ status: "throttled", attempts: 1 });
+      expect(t.sleeps).toEqual([]);
+      expect(t.kinds().filter((k) => k === "addComment")).toHaveLength(1);
+    });
   });
 });
