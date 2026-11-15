@@ -149,6 +149,19 @@ describe("verified Codex MCP identity (#402)", () => {
     }
   });
 
+  it("an Ori session with no ori entry gets the same create step as doctor, never another's entry (#310)", async () => {
+    const t = fixture('[agents.claude]\nname = "other"\n[agents.codex]\nname = "another"\n');
+    const read = await t.resolve({ clientName: undefined, env: { ORI_SESSION_ID: "s" } });
+    expect(read).toMatchObject({ agent: null, source: "unresolved" });
+    expect(read.diagnostic).toMatch(/^No entry exists for the ori harness/);
+    expect(read.diagnostic).toContain(
+      "pdb config set identity.triage_role ROLE --entry ori.SERVER",
+    );
+    expect(read.diagnostic).toContain("claude (claude harness), codex (codex harness)");
+    expect(read.diagnostic).not.toMatch(/"other"|"another"/);
+    expect(t.writes).toEqual([]);
+  });
+
   it("checks project selection and repository agreement before reading local identity", async () => {
     const t = fixture();
     expect(await t.resolve({ repository: "other/repo" })).toMatchObject({

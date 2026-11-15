@@ -134,12 +134,8 @@ export async function resolveReadIdentity(options: ReadIdentityOptions): Promise
       root: target.root,
       fs,
     });
-    if (resolution.status === "unresolved") {
-      const candidates = resolution.candidates.length
-        ? ` Candidate entries: ${resolution.candidates.join(", ")}.`
-        : "";
-      return unresolved(`${resolution.message}${candidates}`);
-    }
+    // The resolver's message names candidates, or that no entry exists and how to create one.
+    if (resolution.status === "unresolved") return unresolved(resolution.message);
     entry = resolution.entry;
     source = client ? "client" : SOURCE[resolution.source];
     const record = await readIdentity(target.root, entry, fs);

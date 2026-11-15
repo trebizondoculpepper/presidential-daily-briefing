@@ -22,7 +22,7 @@
 
 import { ConfigError } from "./config.js";
 import type { ConfigFileSystem } from "./config.js";
-import { listEntryKeys, validateEntryKey } from "./identity.js";
+import { listEntryKeys, TRIAGE_ROLES, validateEntryKey } from "./identity.js";
 
 export type HarnessId = "claude" | "codex" | "ori";
 
@@ -145,7 +145,19 @@ export type EntryResolution =
       readonly signals: string[];
       /** Existing entry keys for the harness when several logical entries share it. */
       readonly candidates: string[];
+      /**
+       * Every other entry key in the identity file with the harness it belongs to (keys only,
+       * never values), so a missing entry is never mistaken for one to borrow (#310).
+       */
+      readonly others: { key: string; harness: string | null }[];
+      /** The supported command that creates this agent's own entry, when none exists (#310). */
+      readonly create: string | null;
     };
+
+/** The harness an entry key belongs to: its exact key or `HARNESS.` prefix; null if none. */
+export const harnessOfKey = (key: string): HarnessId | null =>
+  HARNESS_DETECTORS.find((d) => key === d.harness || key.startsWith(`${d.harness}.`))?.harness ??
+  null;
 
 const harnessEntries = (keys: readonly string[], harness: HarnessId): string[] =>
   keys.filter((key) => key === harness || key.startsWith(`${harness}.`));
@@ -186,6 +198,8 @@ export async function resolveEntry(options: {
         harnesses: [],
         signals: [],
         candidates: [],
+        others: [],
+        create: null,
       };
     }
     if (detection.status === "conflict") {
@@ -196,6 +210,8 @@ export async function resolveEntry(options: {
         harnesses: detection.harnesses,
         signals: detection.signals,
         candidates: [],
+        others: [],
+        create: null,
       };
     }
     harness = detection.harness;
@@ -203,28 +219,50 @@ export async function resolveEntry(options: {
     source = "environment";
   }
   const detector = HARNESS_DETECTORS.find((d) => d.harness === harness)!;
-  const candidates = harnessEntries(
-    await listEntryKeys(options.root, options.fs, detector.entryKey ?? undefined),
-    harness,
-  );
+  const keys = await listEntryKeys(options.root, options.fs, detector.entryKey ?? undefined);
+  const candidates = harnessEntries(keys, harness);
+  const others = keys
+    .filter((key) => !candidates.includes(key))
+    .map((key) => ({ key, harness: harnessOfKey(key) }));
+  const listed = others.length
+    ? ` Existing entries: ${others.map((o) => `${o.key} (${o.harness ?? "unknown"} harness)`).join(", ")}; none of them is this agent's, and another harness's entry must never be reused.`
+    : " The identity file has no entries yet.";
   if (detector.entryKey === null) {
+    if (candidates.length === 0) {
+      // #310: say plainly that this harness has no entry, and how to create one.
+      const create = `pdb config set identity.triage_role ROLE --entry ${harness}.SERVER`;
+      return {
+        status: "unresolved",
+        reason: "no-entry-key",
+        message: `No entry exists for the ${harness} harness (${harness} uses one [agents.${harness}.SERVER] entry per configured server).${listed} Create this agent's own entry with \`${create}\` (SERVER: this ${harness} server's name; ROLE: ${TRIAGE_ROLES.join(" or ")}).`,
+        harnesses: [harness],
+        signals,
+        candidates,
+        others,
+        create,
+      };
+    }
     return {
       status: "unresolved",
       reason: "no-entry-key",
-      message: `The ${harness} harness has one entry per configured server and this call does not say which, so no entry is chosen.`,
+      message: `The ${harness} harness has one entry per configured server and this call does not say which, so no entry is chosen. Candidate entries: ${candidates.join(", ")}.`,
       harnesses: [harness],
       signals,
       candidates,
+      others,
+      create: null,
     };
   }
   if (candidates.some((key) => key !== detector.entryKey)) {
     return {
       status: "unresolved",
       reason: "several-entries",
-      message: `Several logical agent entries use the ${harness} harness, so no entry is chosen.`,
+      message: `Several logical agent entries use the ${harness} harness, so no entry is chosen. Candidate entries: ${candidates.join(", ")}.`,
       harnesses: [harness],
       signals,
       candidates,
+      others,
+      create: null,
     };
   }
   return { status: "resolved", entry: detector.entryKey, source, harness, signals };
