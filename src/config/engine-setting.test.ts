@@ -149,7 +149,13 @@ describe("repository-scoped experimental engine selection", () => {
     expect(cli.decisionEngine.used).toBe("datalog");
     const result = await readBriefing(
       { ...runtime, dependencyReport },
-      { repository: snapshot.repository, role: "implementer", limit: 10, maxChars: 10000 },
+      {
+        repository: snapshot.repository,
+        role: "implementer",
+        limit: 10,
+        maxChars: 10000,
+        context: true,
+      },
     );
     expect(result.kind).toBe("report");
     if (result.kind !== "report") throw new Error("expected report");
@@ -175,6 +181,7 @@ it("keeps background parked context without restoring TypeScript next actions", 
       role: "implementer",
       limit: 10,
       maxChars: 10000,
+      context: true,
       engineSetting: { requested: "datalog", source: "config" },
     },
     local(),

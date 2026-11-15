@@ -87,7 +87,11 @@ const countsLine = (sections: Json): string => {
   return counts.length ? `Sections (totals): ${counts.join(", ")}.` : "Sections: none.";
 };
 
-export function briefingView(base: ViewBase, report: Json): BoundedView {
+export function briefingView(
+  base: ViewBase,
+  report: Json,
+  { context = false }: { context?: boolean } = {},
+): BoundedView {
   const data: Json = {
     reportSchemaVersion: report.schemaVersion,
     ...pick(report, briefingFields),
@@ -164,6 +168,17 @@ export function briefingView(base: ViewBase, report: Json): BoundedView {
               ? "No human input is waiting."
               : "No human input found; coverage is incomplete.",
           );
+      }
+      // Next steps only by default (#355); the background lines need `context: true`. With no
+      // ranked queue, the action targets are the next steps, so they stay.
+      if (!context && d.rankedActions) {
+        if (!list(ranked.items).length && Number(ranked.total ?? 0) === 0)
+          lines.push(
+            completenessOf(report).complete
+              ? "No next steps found."
+              : "No next steps found, but evidence is incomplete: this does not mean no work exists.",
+          );
+        return lines;
       }
       const targets = list(obj(d.actions).items).map(String);
       if (targets.length) lines.push(`Action targets: ${targets.join(" ")}`);
