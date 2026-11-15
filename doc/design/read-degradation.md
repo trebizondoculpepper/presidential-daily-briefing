@@ -93,6 +93,28 @@ remain conditional on those live gates; where a necessary fact is stale, prefer 
 inspection/refresh next step instead of a conclusive actionable permission claim.
 No action is automatically performed by this read path.
 
+Implementation note (#371): a CLI briefing whose live collection is refused for quota uses its
+explicit `--cache` snapshot through the existing `cachedSnapshot` validation (schema, repository,
+full profile). It does so only when that snapshot is at most `STALE_WINDOW_MS` (30 minutes) old,
+the bound `pdb serve` already uses. The read then continues exactly as an offline read: no live
+verification, no checkpoint advance, and no cache write. The JSON `freshness` gains:
+
+- `source` (`live`/`offline`/`stale`);
+- `renderedAt`;
+- for a fallback, a `fallback` record: the reason, the cache, the refusal's own `retryAfterSeconds`/`resetAt` (null when GitHub sent none) and `maxAgeSeconds`.
+
+A `STALE:` warning makes the read incomplete (exit 2), and the text says `STALE CACHE`. No cache,
+or an absent, corrupt, foreign, focused or expired snapshot, is a distinct error naming the
+refusal's retry evidence, never an empty report. Other failures, including authentication,
+never fall back.
+
+`pdb serve` already serves stale entries within that window and pauses live reads until the
+reported Retry-After or reset, bounded to 10 minutes, or for a 60-second default cooldown. Its
+`refreshError` now also carries `retryNotBefore` and `resetReported`. When GitHub reported no
+reset, the message says so, so the default cooldown is never presented as GitHub's reset.
+
+Mutating commands are unchanged: they read live evidence themselves and never use a snapshot.
+
 ## Cache and checkpoint safety
 
 An incomplete, failed, stale or offline collection cannot overwrite the whole
