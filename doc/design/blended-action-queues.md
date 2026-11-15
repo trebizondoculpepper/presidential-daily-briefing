@@ -1,5 +1,9 @@
 # Blended role action queues
 
+## Ownership-first shared-pool amendment (#651)
+
+[unified-activity-ranking.md](unified-activity-ranking.md) is the reviewed replacement for agent role-exclusive membership and assessment-over-owned-work priority, to be implemented separately in #652. Both roles receive the same pre-limit activity pool; ownership precedes role affinity and existing within-role bands. It explicitly supersedes #378, including the single owned M/M exception below. Human briefing, eligibility, mutation authority and retained-claim admission remain separate and unchanged. Conflicting ranking passages below describe the pre-#652 baseline, not additional exceptions to the amendment.
+
 Owner-approved direction, 13 November 2026. This is the documentation-first implementation contract for the next-action views, not a claim that this policy has shipped. It supersedes the fixed implementation-before-estimation policy in complexity-estimation.md and the fixed own-work/pickup ordering in briefings.md. The earlier simple ranking baseline in PR #251 remains an independent deliverable; this change replaces its assessment-last portion when implemented. Repository catch-up `briefing` remains a history view, not this scheduler.
 
 ## Why
