@@ -258,6 +258,8 @@ export const ghRun: GhRun = async (args) => {
   }
 };
 /** A write refused because of a GitHub (secondary) rate limit: stop all further writes. */
+import type { FailureClassification } from "./evidence.js";
+
 export class RateLimitError extends Error {
   rateLimited = true;
   /**
@@ -267,6 +269,11 @@ export class RateLimitError extends Error {
   constructor(
     message: string,
     readonly retry: { retryAfterSeconds?: number | null; resetAt?: string | null } = {},
+    /**
+     * Same-response evidence (#293): category, quota consistency and the allowlisted headers of
+     * the refused response. Absent when gh printed no headers.
+     */
+    readonly evidence?: FailureClassification,
   ) {
     super(message);
   }
