@@ -118,6 +118,7 @@ jobs:
             pkg install -y git node26 npm-node26
           run: |
             set -e
+            export SENTRY_DISABLED=1
             node --version
             npm --version
             npm ci
