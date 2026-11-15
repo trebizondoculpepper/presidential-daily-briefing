@@ -126,9 +126,13 @@ function evaluateInline(
     preferences: policy.preferences.map((p) => ({
       id: p.id,
       rows: ds.q(p.query, db, policy.rules).map(([a, value]): ProjectRow => {
-        const witnesses: Record<string, Value[]> = {};
-        for (const [name, q] of Object.entries(p.witnesses))
-          witnesses[name] = ds.q(q, db, policy.rules, a).flat();
+        // Object.fromEntries, like the worker: a witness named __proto__ stays an own key.
+        const witnesses: Record<string, Value[]> = Object.fromEntries(
+          Object.entries(p.witnesses).map(([name, q]) => [
+            name,
+            ds.q(q, db, policy.rules, a).flat(),
+          ]),
+        );
         return [Number(a), projection.identities.get(Number(a))!, Number(value), witnesses];
       }),
     })),
@@ -325,6 +329,30 @@ describe("immutable exact-action admission (#515)", () => {
     expect(reason.text.endsWith(" / mine")).toBe(true);
     expect(reason.omitted).toEqual({ label: 3 });
   });
+  it("keeps witnesses named __proto__ or constructor as ordinary prototype-free bindings", () => {
+    const s = snapshot([issue(1, ["status:ready", "project:priority"])]);
+    const defaults = runDefault(s);
+    const policy = compile((t) =>
+      t.replace(
+        /:preferences \[[\s\S]*\]\}\s*$/,
+        `:preferences [{:id "project-proto" :when [[?a "pdb.action-label" "project:priority"]] :priority [[(+ 0 1) ?value]] :why "{__proto__} {constructor}" :witnesses {"__proto__" [[(str "p") ?value]] "constructor" [[(str "c") ?value]]}}]}`,
+      ),
+    );
+    const projection = project(defaults, s);
+    const admitted = admitProjectResult(
+      evaluateInline(policy, projection),
+      policy,
+      projection,
+      "g1",
+    );
+    const [reason] = [...admitted.matches.values()][0].reasons;
+    expect(Object.getPrototypeOf(reason.facts)).toBeNull();
+    expect(Object.getPrototypeOf(reason.omitted)).toBeNull();
+    expect(Object.keys(reason.facts)).toEqual(["__proto__", "constructor"]);
+    expect(reason.facts.constructor).toBe("c");
+    expect(Object.getOwnPropertyDescriptor(reason.facts, "__proto__")?.value).toBe("p");
+    expect(reason.text).toBe("p c");
+  });
   it("keeps the highest key, source-order reasons and every matched ID", () => {
     const s = snapshot([issue(1, ["status:ready", "a", "b"]), issue(2, ["status:ready", "b"])]);
     const defaults = runDefault(s);
@@ -373,6 +401,11 @@ describe("immutable exact-action admission (#515)", () => {
       /admission-violated/,
     );
     expect(changed((a) => ({ ...a, why: { ...a.why, text: "forged" } }))).toThrow(
+      /admission-violated/,
+    );
+    // Each rule-ID list is checked on its own: emptying either one is caught.
+    expect(changed((a) => ({ ...a, ruleIds: [] }))).toThrow(/admission-violated/);
+    expect(changed((a) => ({ ...a, why: { ...a.why, ruleIds: [] } }))).toThrow(
       /admission-violated/,
     );
     expect(changed((a) => ({ ...a, why: { ...a.why, ruleIds: ["project-x"] } }))).toThrow(
