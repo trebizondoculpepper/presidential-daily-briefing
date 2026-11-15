@@ -17,7 +17,7 @@ import {
 } from "./evidence.js";
 import type { AttemptEvent } from "./evidence.js";
 import { RateLimitError } from "./dependencies.js";
-import { ghQueryWith } from "./github.js";
+import { ghQueryWith, ghRestWith } from "./github.js";
 
 const secret = "API rate limit already exceeded for user ID 783193.";
 const headers = (h: Record<string, string>, status = "HTTP/2.0 200 OK") =>
@@ -447,4 +447,63 @@ describe("per-attempt telemetry (#293, slice 2)", () => {
       expect(events.map((e) => [e.outcome, e.cost])).toEqual([["unknown", 7]]);
     },
   );
+});
+
+describe("REST through the same parser (#293, slice 3)", () => {
+  async function withGh(output: string, code: number, run: () => Promise<void>) {
+    const dir = await mkdtemp(join(tmpdir(), "triage-gh-rest-"));
+    const path = process.env.PATH;
+    try {
+      await writeFile(join(dir, "out"), output);
+      await writeFile(
+        join(dir, "gh"),
+        `#!/bin/sh\ncase " $* " in *" --include "*) ;; *) exit 97 ;; esac\ncat "${join(dir, "out")}"\nexit ${code}\n`,
+        { mode: 0o700 },
+      );
+      process.env.PATH = `${dir}:${path}`;
+      await run();
+    } finally {
+      process.env.PATH = path;
+      await rm(dir, { recursive: true });
+    }
+  }
+
+  it.skipIf(process.platform === "win32")(
+    "takes the status from the response and classifies a refused one from its own headers",
+    async () => {
+      await withGh(response(quota(4000), { role_name: "write" }), 0, async () => {
+        expect(await ghRestWith()("repos/o/r/collaborators/x/permission")).toEqual({
+          status: 200,
+          body: { role_name: "write" },
+        });
+      });
+      const refused = response(
+        quota(0),
+        { message: "API rate limit exceeded" },
+        "HTTP/2.0 403 Forbidden",
+      );
+      await withGh(refused, 1, async () => {
+        const answer = await ghRestWith()("repos/o/r/collaborators/x/permission");
+        expect(answer.status).toBe(403);
+        expect(answer.evidence).toMatchObject({
+          category: "rate-limited",
+          quotaEvidence: "exhausted",
+        });
+      });
+      await withGh(
+        response({}, { message: "Not Found" }, "HTTP/2.0 404 Not Found"),
+        1,
+        async () => {
+          const answer = await ghRestWith()("repos/o/r/collaborators/x/permission");
+          expect(answer).toMatchObject({ status: 404, body: { message: "Not Found" } });
+        },
+      );
+    },
+  );
+
+  it.skipIf(process.platform === "win32")("keeps working when gh prints no headers", async () => {
+    await withGh('{"ok":true}', 0, async () => {
+      expect(await ghRestWith()("rate_limit")).toEqual({ status: 200, body: { ok: true } });
+    });
+  });
 });
