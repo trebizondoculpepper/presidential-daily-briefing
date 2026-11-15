@@ -646,6 +646,23 @@ export class ServeCache {
     else this.running--;
   }
 
+  /**
+   * The current login for a read outside the collection path (the quota refresh, #548). With
+   * `force`, the login is re-read now, through the same check collections use, so a gh login
+   * switch is noticed (and clears the cache) before a reading is labelled. Null when the login
+   * cannot be read: the caller then treats the context as unverified and reuses nothing.
+   */
+  async verifiedAuth(force: boolean): Promise<{ auth: AuthContext | null; read: boolean }> {
+    if (force) this.authCheckedAt = Number.NEGATIVE_INFINITY;
+    const before = this.authCheckedAt;
+    try {
+      await this.checkAuth();
+      return { auth: this.auth, read: this.authCheckedAt !== before };
+    } catch {
+      return { auth: null, read: true };
+    }
+  }
+
   /** Re-read the login before live work at most once per TTL; a change clears the cache. */
   private async checkAuth(): Promise<void> {
     if (this.now() - this.authCheckedAt < this.ttlMs) return;

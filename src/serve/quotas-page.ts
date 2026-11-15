@@ -25,7 +25,11 @@ export const quotasPageParameters = [] as const;
 export const quotasApiParameters = ["refresh", "offline"] as const;
 
 /** `GET /api/v1/quotas[?refresh=true|offline=true]`: the shared view, never cached by browsers. */
-export function quotasApi(service: QuotaService, context: () => QuotaContext) {
+export function quotasApi(
+  service: QuotaService,
+  /** The verified gh context; a refresh re-reads the login first (a switched login is noticed). */
+  context: (refresh: boolean) => Promise<{ context: QuotaContext; contextRequests: number }>,
+) {
   return async (request: RequestContext): Promise<boolean> => {
     if (request.url.pathname !== "/api/v1/quotas") return false;
     if (request.request.method !== "GET" && request.request.method !== "HEAD")
@@ -48,10 +52,12 @@ export function quotasApi(service: QuotaService, context: () => QuotaContext) {
       throw new HttpFailure(400, "INVALID_ARGUMENT", "refresh and offline are mutually exclusive.");
     let view;
     try {
-      view = await service.view(context(), {
+      const selected = await context(!!flags.refresh);
+      view = await service.view(selected.context, {
         refresh: !!flags.refresh,
         offline: !!flags.offline,
         signal: request.signal,
+        contextRequests: selected.contextRequests,
       });
     } catch (error) {
       // The caller went away: nothing to answer.
@@ -185,7 +191,10 @@ export function quotaRenderers(base: DashboardRenderers): QuotaRenderers {
     const resource = str(row.resource);
     const name = names[resource] ?? resource;
     const unit = units[str(row.unit)] ?? "requests";
-    const state = str(row.state);
+    const resetAtRaw = str(row.resetAt);
+    // A crossed reset voids the claim to current capacity on this clock too, without a fetch.
+    const crossed = resetAtRaw !== "" && Date.parse(resetAtRaw) <= nowMs;
+    const state = crossed && str(row.state) !== "inconsistent" ? "reset-passed" : str(row.state);
     const limit = num(row.limit);
     const used = num(row.used);
     const remaining = num(row.remaining);
@@ -311,6 +320,8 @@ export function quotasClient(view: QuotaRenderers): void {
   const notes = byId("notes");
   let controller: AbortController | null = null;
   let generation = 0;
+  /** The last successful view, redrawn locally as time passes; never re-fetched. */
+  let shown: unknown = null;
   const show = (parts: { state: string; meters: string; secondary: string; notes: string }) => {
     state.innerHTML = parts.state;
     meters.innerHTML = parts.meters;
@@ -345,13 +356,14 @@ export function quotasClient(view: QuotaRenderers): void {
     }
     if (current !== generation) return;
     button.disabled = false;
+    shown = failure ? null : body;
     show(failure ? view.renderUnreachable(failure) : view.render(body, Date.now()));
   };
   button.addEventListener("click", () => void refresh());
-  // The countdown text moves on locally; no request is ever made by this timer.
+  // Countdowns move on locally, and a bucket whose reset passes loses its bar and becomes
+  // "reset passed; refresh needed". No request is ever made by this timer.
   setInterval(() => {
-    for (const el of Array.from(document.querySelectorAll<HTMLElement>(".countdown")))
-      el.textContent = view.countdown(el.dataset.reset ?? "", Date.now());
+    if (shown !== null) show(view.render(shown, Date.now()));
   }, 30_000);
 }
 

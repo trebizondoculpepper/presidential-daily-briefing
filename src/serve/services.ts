@@ -60,7 +60,16 @@ export function readServices(
         now: () => serve.clock.now(),
         telemetry: () => cache.quotaTelemetry(),
       }),
-      () => ({ host: facts.auth.host, login: facts.auth.login }),
+      async (refresh) => {
+        // A refresh re-reads the gh login first; an unreadable login is unverified (not reused).
+        const { auth, read: identityRead } = await cache.verifiedAuth(refresh);
+        return {
+          context: auth
+            ? { host: auth.host, login: auth.login }
+            : { host: facts.auth.host, login: null },
+          contextRequests: identityRead ? 1 : 0,
+        };
+      },
     );
     const mcp = httpMcp(options, facts, read, cache, serve.clock, serve.stderr);
     // Public, random per process: scopes diagnostic cursors; not a credential (#459).
