@@ -302,4 +302,26 @@ describe("closed-ticket scans kept between serve requests (#414)", () => {
       { trust: "trusted", to: "owner", version: 2, outcome: "none" },
     ]);
   });
+
+  it("never settles a question with a resolution not yet reread (Codex, #609)", async () => {
+    const asked = question(10, "Resolved on a later page?");
+    const answer = resolve(10, asked);
+    const long = (updatedAt: string): Issue => ({
+      ...closed(10, [asked], updatedAt),
+      comments: page([asked], true, "p1"),
+    });
+    const g = gh([long("2026-11-10T00:00:00Z")], { 10: [answer] });
+    const { c, now } = clockAt("2026-11-15T12:00:00Z");
+    const slot = new ClosedQuestionStore(30 * 60_000).slot(undefined, repo);
+    const baseline = await discoverClosedQuestions(repo, runtime(g, now, slot, {}));
+    expect(baseline.coverage.records).toMatchObject({ resolved: 1 });
+    // The resolution may have been edited or deleted: until reread it settles nothing.
+    g.state.issues[0] = long("2026-11-15T12:01:00Z");
+    g.state.later[10] = [];
+    c.t = Date.parse("2026-11-15T12:02:00Z");
+    const refresh = await discoverClosedQuestions(repo, runtime(g, now, slot, { commentPages: 0 }));
+    expect(refresh.sources[0]!.facts[0]!.outcome).toBe("unknown");
+    const done = await discoverClosedQuestions(repo, runtime(g, now, slot, {}));
+    expect(done.sources[0]!.facts[0]!.outcome).toBe("none");
+  });
 });
