@@ -1,12 +1,12 @@
 # Codex Stop prototype (#398)
 
-2026-11-15, priya_xu, actual Codex researcher session; researcher model identifier unavailable. Target: installed Codex CLI/app-server 0.169.0, macOS 27.2.1 arm64, Node 26.10.0. **Native trial status: blocked on hook trust, not supported or unsupported.** Zero model turns used; the approved allowance remains at most fifteen minutes and two short turns on the existing account/model.
+2026-11-15, priya_xu, actual Codex researcher session; researcher model identifier unavailable. Target: installed Codex CLI/app-server 0.169.0, macOS 27.2.1 arm64, Node 26.10.0. **Native trial status: natural Stop → fresh nonce → same-session continuation observed.** Resumed after the owner trusted the exact project definition. One `turn/start`, two short model completions (initial and hook continuation), approximately six seconds; no further model trials were run. Target model reported by `thread/start`: `gpt-6.1-sol`.
 
 ## Completed implementation
 
 `src/rebrief/codex.ts` translates a verified natural Codex Stop into the #506 shared core and maps an offered briefing to `decision: block` with that exact briefing as the reason. Wrong session, reentry, Interrupt, unknown natural-stop provenance and cancellation permit normal stop. It does not acknowledge delivery: stdout emission is not model-visible receipt. Synthetic tests reuse the actual shared briefing service and engine; they establish mapping and guards, not native event/receipt/continuation.
 
-`doc/reports/examples/codex-stop-trial.ts` is a disposable entry point over the shared session/state/transport implementation. It uses synthetic read-only facts, an unpredictable receipt nonce, a five-second deadline and private preinitialized session state. It never reads transcripts, invokes models or mutates live tickets. Natural-stop confirmation is off unless the controlled trial explicitly supplies `--natural-stop-confirmed`. Do not enable that flag for unknown Stop causes. No production hook is installed.
+`doc/reports/examples/codex-stop-trial.ts` is a disposable entry point over the shared session/state/transport implementation. It uses synthetic read-only facts, an unpredictable receipt nonce, a five-second deadline and private preinitialized session state. It never reads transcripts, invokes models or mutates live tickets. Natural-stop confirmation is off unless the controlled trial explicitly supplies `--natural-stop-confirmed`. Do not enable that flag for unknown Stop causes. The owner subsequently requested the project-local experimental installation and trusted it; it remains experimental, with state bound only to the disposable trial session.
 
 ## Actual-client preflight
 
@@ -17,10 +17,11 @@ The installed app-server protocol exposes `hooks/list` but no hook-trust mutatio
 | Boundary                                             | Outcome                                      |
 | ---------------------------------------------------- | -------------------------------------------- |
 | Real Codex discovers configured Stop command         | observed                                     |
-| Hook trusted/executed on native Stop                 | blocked / not run                            |
+| Hook trusted/executed on native Stop                 | observed after owner trust                   |
 | Shared core and thin translation                     | synthetic tests passed                       |
-| Fresh briefing delivered to client/model             | not run                                      |
-| Same-session nonce receipt/continuation              | not run                                      |
+| Fresh briefing delivered to client/model             | observed: exact unpredictable nonce echoed   |
+| Same-session nonce receipt/continuation              | observed; matching thread and turn IDs       |
+| Native reentry/normal final completion               | second hook completed without feedback       |
 | Native interruption, empty/error/unchanged/cap paths | not run; shared-core synthetic coverage only |
 
 ## Reproduction and removal
@@ -32,4 +33,48 @@ The installed app-server protocol exposes `hooks/list` but no hook-trust mutatio
 5. Within the existing two-turn/fifteen-minute bound, finish a short synthetic natural turn. Record native hook event, exact offered fingerprint/nonce, model-visible nonce receipt and matching session/turn before any acknowledgement. Do not count merely returning block as delivery. Stop on trust/auth/capability failure rather than spend repeated trials. No native success is claimed by this report.
 6. Stop the disposable client, remove only its temporary hooks/home/project/state directories, and retain only sanitized outcome metadata. Raw session IDs, event inputs and transcripts must not be published. Acknowledge only proven delivery, using the shared core's exact event/fingerprint mechanism; ambiguous delivery permits normal stop.
 
-The preflight directories were removed after retaining sanitized trust status. A later trial must create a fresh candidate and review its current definition. #398 stays open: normal trust and actual native evidence are still outstanding. Its existing allowance is sufficient; this is not a request for a renewed budget.
+## Resumed native trial, 15 November 2026
+
+The owner installed/trusted the project definition in the main checkout. Real
+`hooks/list` returned enabled, trusted, project-scoped Stop command, with no
+warnings/errors. The definition was left unchanged throughout this trial. No
+trust bypass or private trust-store modification was used.
+
+An ephemeral actual Codex app-server thread used the existing account/default
+model, read-only sandbox and no approvals. Instructions restricted it to synthetic
+text replies, with no tools, repository work or live ticket mutations. Initialized
+private shared-core state for the actual thread, `example/project`, `probe`,
+`implementer`, `codex`; the helper used the synthetic shared service, not a live
+GitHub repository or an HTTP MCP read. Sent one prompt requesting `READY` and a
+natural finish. Observed:
+
+1. Initial assistant final message `READY`.
+2. Native `hook/started` then `hook/completed`, status `blocked`, 368 ms. Its
+   feedback contained the fresh role briefing and unpredictable receipt nonce.
+3. The next assistant final message exactly equalled that nonce, in the same
+   thread and turn. The nonce had not appeared in the initial user input.
+4. A second Stop hook completed in 163 ms with no feedback, followed by
+   `turn/completed` status `completed`. No replacement session, second
+   `turn/start`, tools or live repository mutation occurred.
+
+Raw session/turn identifiers, transcripts and hook inputs are not published. The
+retained public evidence is this sanitized event sequence. Native cumulative usage
+reported 43,933 tokens: 43,900 input (29,568 cached) and 33 output, including both
+completions. Monetary cost was not exposed. The allowance is conservatively treated
+as consumed by the initial completion and its continuation; no repeated paid trial
+is authorized by this result. No automatic delivery acknowledgement was added.
+
+This establishes natural event, shared-core execution, client feedback, exact
+model-visible receipt and same-session continuation for the installed macOS CLI
+app-server target. It does not establish the hosting app's own hook execution,
+Windows, HTTP MCP freshness, native cancellation/error/empty/unchanged/cap cases,
+or a deployable packaged interface. The existing core/adapter tests cover guards
+synthetically; do not promote them to native observations.
+
+The owner also directed the final integration to invoke installed `pdb` directly,
+with any shell/PowerShell wrapper forwarding only arguments/stdin/status. The
+checkout-specific bundled helper remains trial scaffolding, not the final setup.
+A separate documentation-first CLI contract and packaged implementation are still
+required. Preserve the trusted local definition until deliberately replacing it;
+a changed definition must pass normal native trust again. #398 remains open for
+these delivery and validation boundaries.
