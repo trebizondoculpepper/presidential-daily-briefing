@@ -45,6 +45,17 @@ and permission errors remain unknown for affected decisions; they are not zero
 unlocks, no work, no questions or acceptance. Retain transferred/unavailable subject
 diagnoses and closed-source exclusions rather than deleting them to simplify output.
 
+Implementation note (#370): `collect` reads history after the current inventory and keeps
+each history source's observed pages when a later request fails (`--since`/`--checkpoint`
+and the catch-up change window alike). The snapshot gains `history` (`since`, `state`
+complete/partial/failed, the safe `failure` categories and per-source pages) and the read
+coverage a `history` entry; change-window coverage gains a `failure` category. A definitive
+quota refusal stops the next history source (`not-attempted`). A failed or partial window adds
+a warning, so the read is incomplete (exit 2) and the checkpoint does not advance; the text
+heading says the window's changes are unknown, not none. An incomplete history read never
+overwrites an explicit `--cache` snapshot (`historyComplete`), and says so. Cancellation still
+rejects. Failure categories come from the gh boundary's classification, never raw messages.
+
 ## Last-successful snapshots: #371
 
 Reuse the caller's existing explicit `--cache`/offline snapshot or the server's

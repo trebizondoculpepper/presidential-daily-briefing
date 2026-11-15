@@ -672,6 +672,8 @@ export function briefing(snapshot: Snapshot, options: BriefingOptions, now: Date
     dependencies: issues.map((item) => dependencyFacts(item, snapshot.repository)),
     changes: {
       since: snapshot.since,
+      /** The window's own outcome: anything but complete means unknown changes, not none. */
+      history: snapshot.history?.state ?? (snapshot.since ? "complete" : null),
       ...limit(
         [...snapshot.changed].sort(
           (a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.url.localeCompare(b.url),
@@ -764,7 +766,9 @@ export function textReport(report: Briefing): string {
   );
   if (report.changes.since)
     section(
-      `UPDATED SINCE ${report.changes.since} (current facts, not an event history)`,
+      report.changes.history && report.changes.history !== "complete"
+        ? `UPDATED SINCE ${report.changes.since} — ${report.changes.history.toUpperCase()}: changes in this window are unknown, not none (see warnings)`
+        : `UPDATED SINCE ${report.changes.since} (current facts, not an event history)`,
       report.changes.items.map((item) => `${item.state} #${item.number} ${item.title} ${item.url}`),
       report.changes.omitted,
     );
