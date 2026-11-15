@@ -119,23 +119,35 @@ export function dashboardRenderers(): DashboardRenderers {
     }
     const result = record(e.result);
     const completeness = record(result.completeness);
-    if (e.status === "incomplete" || completeness.complete === false)
-      parts.push(
-        `<p class="warn">Incomplete evidence: missing facts are unknown, never approval.</p>${list(
-          completeness.warnings,
-        )
-          .slice(0, 10)
-          .map((w) => `<p class="warn">${escapeHtml(w)}</p>`)
-          .join("")}`,
-      );
-    for (const w of list(e.warnings)) parts.push(`<p class="warn">${escapeHtml(w)}</p>`);
     const selection = record(e.selection);
-    if (selection.identityDiagnostic)
-      parts.push(`<p class="warn">${escapeHtml(selection.identityDiagnostic)}</p>`);
     // The role the briefing was ranked for, from the result itself: selection.triageRole is the
     // identity's configured role (null for an explicit agent), not the requested view.
     const role =
       record(record(result.decisionEngine).role).used ?? record(result.role).name ?? "unknown";
+    if (e.status === "incomplete" || completeness.complete === false) {
+      const warnings = list(completeness.warnings);
+      const shown = 10;
+      // Bounded like the CLI text, but never silent: say how many were left out and where to
+      // read them all (the same selection as JSON).
+      const full = briefingUrl({
+        repo: String(selection.repository ?? ""),
+        role: String(role),
+        agent: String(selection.agent ?? ""),
+      });
+      parts.push(
+        `<p class="warn">Incomplete evidence: missing facts are unknown, never approval.</p>${warnings
+          .slice(0, shown)
+          .map((w) => `<p class="warn">${escapeHtml(w)}</p>`)
+          .join("")}${
+          warnings.length > shown
+            ? `<p class="warn">${warnings.length - shown} more warning(s) not shown; every warning is in the <a href="${escapeHtml(full)}">JSON briefing</a>.</p>`
+            : ""
+        }`,
+      );
+    }
+    for (const w of list(e.warnings)) parts.push(`<p class="warn">${escapeHtml(w)}</p>`);
+    if (selection.identityDiagnostic)
+      parts.push(`<p class="warn">${escapeHtml(selection.identityDiagnostic)}</p>`);
     if (selection.repository)
       parts.push(
         `<p>${escapeHtml(selection.repository)} · role ${escapeHtml(role)} · agent ${escapeHtml(selection.agent ?? "none (unfocused)")}</p>`,

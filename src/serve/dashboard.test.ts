@@ -167,6 +167,24 @@ describe("dashboard renderers (#374)", () => {
       ),
     ).toContain('<p class="error">REPOSITORY_UNRESOLVED: pick one</p>');
     expect(render.renderState(null, true)).toContain("Loading…");
+    // Bounded warnings report what they leave out and link to the full JSON for the same view.
+    const many = render.renderState(
+      envelope(
+        { status: "incomplete" },
+        {
+          completeness: {
+            complete: false,
+            warnings: Array.from({ length: 13 }, (_, i) => `w${i}`),
+          },
+        },
+      ),
+      false,
+    );
+    expect(many).toContain('<p class="warn">w9</p>');
+    expect(many).not.toContain("w10");
+    expect(many).toContain(
+      '3 more warning(s) not shown; every warning is in the <a href="/api/v1/briefing?repo=o%2Fr&amp;role=designer&amp;limit=50&amp;agent=me">JSON briefing</a>.',
+    );
   });
 
   it("builds the briefing request from the explicit selection only", () => {
