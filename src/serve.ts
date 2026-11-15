@@ -17,6 +17,7 @@ import { systemClock } from "./mcp/polling.js";
 import type { Clock } from "./mcp/polling.js";
 import { installedVersion } from "./updates/updates.js";
 import { defaultReadRuntime, readServices } from "./serve/services.js";
+import { selectRepository } from "./serve/api.js";
 import type { ServeReadRuntime } from "./serve/api.js";
 import {
   allowedHostnames,
@@ -37,6 +38,8 @@ import {
   SHUTDOWN_GRACE_MS,
 } from "./serve/options.js";
 import type { ServeOptions } from "./serve/options.js";
+import { defaultRulesPageRuntime, rulesPage } from "./serve/rules-page.js";
+import type { RulesPageRuntime } from "./serve/rules-page.js";
 import {
   dashboardCss,
   dashboardPage,
@@ -74,6 +77,8 @@ export interface ServeRuntime {
   platform: NodeJS.Platform;
   /** GitHub read boundaries for the data routes; absent means the production gh runners. */
   read?: ServeReadRuntime;
+  /** Local read-only git/file boundaries of the rules page (#392); absent means the real ones. */
+  rulesPage?: RulesPageRuntime;
 }
 
 const execute = promisify(execFile);
@@ -389,6 +394,29 @@ export async function startServe(
         response.end(request.method === "HEAD" ? undefined : file.body);
         return;
       }
+      if (path === "/rules") {
+        // The compiled policy page (#392): local only, no GitHub request, no background work.
+        if (request.method !== "GET" && request.method !== "HEAD")
+          throw new HttpFailure(405, "METHOD_NOT_ALLOWED", "Use GET.", [], {
+            allow: "GET, HEAD",
+          });
+        const page = await rulesPage(
+          context.url.searchParams,
+          facts.url,
+          served,
+          runtime.rulesPage ?? defaultRulesPageRuntime(),
+          selectRepository,
+        );
+        response.writeHead(page.status, {
+          "content-type": "text/html; charset=utf-8",
+          "cache-control": "no-store",
+          "x-content-type-options": "nosniff",
+          "referrer-policy": "no-referrer",
+          "content-security-policy": dashboardSecurityPolicy,
+        });
+        response.end(request.method === "HEAD" ? undefined : page.html);
+        return;
+      }
       if (await routes(context)) return;
       throw new HttpFailure(404, "NOT_FOUND", `No route ${path}.`, ["GET /api/v1/status"]);
     } catch (error) {
@@ -487,6 +515,7 @@ export function banner(facts: ServerFacts): string {
     `  repositories: ${repositories}`,
     `  cache: memory only, ttl ${facts.ttlMs / 60_000}m; restart clears it`,
     `  mcp: ${facts.url}mcp`,
+    `  rules: ${facts.url}rules`,
     "  stop: Ctrl-C",
     "",
   ].join("\n");

@@ -43,7 +43,29 @@ export interface RulesContext {
   mutatingCommands: string[];
   /** Related command, cross-linked from the listing. */
   processCommand: string;
+  /**
+   * The selected project's effective settings, when a caller has verified and read them (the
+   * serve rules page, #392). Absent means unknown: defaults are never presented as effective.
+   */
+  effective?: EffectiveSettings;
 }
+
+/** One effective repository setting as read from a verified local checkout. */
+export interface EffectiveSettingValue {
+  name: string;
+  value: string | number | boolean | null;
+  /** "explicit": stored in the settings file; "default": nothing stored, the registry default applies. */
+  source: "explicit" | "default";
+}
+export type EffectiveSettings =
+  | {
+      status: "known";
+      repository: string;
+      /** Repository-relative settings file read, or a note that none exists. */
+      readFrom: string;
+      settings: EffectiveSettingValue[];
+    }
+  | { status: "unknown"; reason: string };
 export interface RulesFilters {
   rule?: string;
   role?: string;
@@ -263,11 +285,13 @@ export function rulesDocument(
     },
     defaults: {
       declared: context.defaults,
-      effective: {
-        status: "unknown" as const,
-        reason:
-          "pdb rules reads no project configuration, so this repository's effective settings are not known here and are not assumed to equal the defaults. Use pdb config list inside the project.",
-      },
+      effective:
+        context.effective ??
+        ({
+          status: "unknown",
+          reason:
+            "pdb rules reads no project configuration, so this repository's effective settings are not known here and are not assumed to equal the defaults. Use pdb config list inside the project.",
+        } as EffectiveSettings),
     },
     decisions: decisionOut,
     eligibility: {
@@ -342,7 +366,18 @@ export function rulesText(doc: RulesDocument): string {
   push("", "== Defaults ==", "Bundled defaults (declared by pdb, not read from any repository):");
   for (const d of doc.defaults.declared)
     push(`  ${d.name} = ${JSON.stringify(d.value)}  (${d.declaredBy})`);
-  push(`This repository's effective settings: unknown. ${doc.defaults.effective.reason}`);
+  const effective = doc.defaults.effective;
+  if (effective.status === "unknown")
+    push(`This repository's effective settings: unknown. ${effective.reason}`);
+  else {
+    push(
+      `Effective settings of ${effective.repository} (read from ${effective.readFrom} in its verified local checkout):`,
+    );
+    for (const s of effective.settings)
+      push(
+        `  ${s.name} = ${JSON.stringify(s.value)}  (${s.source === "explicit" ? "stored in the settings file" : "not stored; the registry default applies"})`,
+      );
+  }
 
   // A filtered view omits sections its filter emptied; the complete listing shows every section.
   const show = (n: number) => doc.scope.complete || n > 0;

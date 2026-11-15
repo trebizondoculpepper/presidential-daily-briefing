@@ -22,4 +22,6 @@ export {
   RulesArgumentError,
   RulesArtifactError,
   type RulesDocument,
+  type RulesContext,
+  type EffectiveSettings,
 } from "./rules-command.js";
