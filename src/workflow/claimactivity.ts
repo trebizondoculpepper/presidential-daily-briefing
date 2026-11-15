@@ -11,6 +11,7 @@
 import { createHash } from "node:crypto";
 import type { Comment } from "./claims.js";
 import type { TrustDecision } from "./delivery.js";
+import { isAgentName } from "../config/identity.js";
 
 export const activityMarkerPrefix = "<!-- github-triage:claim-activity ";
 export const resolutionMarkerPrefix = "<!-- github-triage:question-resolution ";
@@ -59,7 +60,6 @@ export interface QuestionResolutionRecord {
 }
 
 const ownerName = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})\/[A-Za-z0-9._-]{1,100}$/;
-const agentName = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const isObject = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
 const isString = (v: unknown): v is string => typeof v === "string" && v.length > 0;
@@ -98,7 +98,7 @@ export function activityProblem(v: unknown): string | null {
   if (!isString(v.repository) || !ownerName.test(v.repository))
     return "repository is not owner/name";
   if (!isIssue(v.issue)) return "issue is not a positive integer";
-  if (!isString(v.agent) || !agentName.test(v.agent)) return "agent is not a valid name";
+  if (!isString(v.agent) || !isAgentName(v.agent)) return "agent is not a valid name";
   if (!isString(v.claimStartedAt) || Number.isNaN(Date.parse(v.claimStartedAt)))
     return "claimStartedAt is not a timestamp";
   if (v.previousActivity !== null && !isCommentId(v.previousActivity))
@@ -133,7 +133,7 @@ export function resolutionProblem(v: unknown): string | null {
   if (!isIssue(v.issue)) return "issue is not a positive integer";
   if (!isCommentId(v.questionCommentId)) return "questionCommentId is not a comment id";
   if (!isString(v.questionOpId)) return "questionOpId is missing";
-  if (!isString(v.agent) || !agentName.test(v.agent)) return "agent is not a valid name";
+  if (!isString(v.agent) || !isAgentName(v.agent)) return "agent is not a valid name";
   if (!isReason(v.reason)) return "reason is missing or longer than 1000 characters";
   return onlyKeys(v, [
     "v",

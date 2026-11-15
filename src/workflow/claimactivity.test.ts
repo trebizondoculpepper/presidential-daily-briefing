@@ -82,6 +82,9 @@ describe("claim-activity markers (#412)", () => {
     expect(bad({ op: "resume" })).toBe("malformed"); // a resume carries no blocker
     expect(bad({ previousActivity: "not-an-id" })).toBe("malformed");
     expect(bad({ reason: " " })).toBe("malformed");
+    // Agent names follow the configured identity rule: up to 100 characters.
+    expect(bad({ agent: `a${"b".repeat(99)}` })).toBe("record");
+    expect(bad({ agent: `a${"b".repeat(100)}` })).toBe("malformed");
     expect(bad({ reason: "x".repeat(1001) })).toBe("malformed");
     expect(bad({ blocker: { ...human, questionCommentId: undefined } })).toBe("malformed");
     expect(bad({ blocker: { kind: "dependency", repository: repo, issue: 3, extra: true } })).toBe(
