@@ -22,7 +22,7 @@ From #584 and its owner-confirmed interaction comment, adopted without reopening
 - Values are validated by `validateValue`; `parseConfig` yields `EffectiveSetting { key, value, source: "explicit" | "default" }`; `loadConfig` only reads.
 - The files are the versioned `.github/triage.toml` (`TOML_CONFIG_PATH`) or the legacy `.github/triage.json` (`LEGACY_CONFIG_PATH`); both present is refused (`src/config/config.ts`).
 - Scope is repository only: `configArgumentsFor` in `src/config/configcli.ts` refuses `--global`, `--system`, `--machine`, `--user` and `--scope`.
-- Writes go through `updateConfig(target, changes, { expectedRaw? })`, where an `undefined` value unsets the key, and `replaceAtomically`, which writes a temp file, re-reads both config files and throws `ConflictError` (`"conflict"`) if either changed before renaming (`src/config/config.ts`). `expectedRaw` is an existing compare-and-swap precondition.
+- Writes go through `updateConfig(target, changes, { expectedRaw? })`, where an `undefined` value unsets the key, and `replaceAtomically`, which writes a temp file, re-reads both config files and throws `ConflictError` (`"conflict"`) if either changed before renaming (`src/config/config.ts`). `expectedRaw` is an existing compare-and-swap precondition. This path takes **no lock**: the re-read and the rename are separate steps, so two writers (for example a CLI `pdb config set` and a second writer) can both pass the re-read and the later rename silently wins. The lock helpers below are not wired into it.
 - Identity is separate: `identity.name` and `identity.triage_role` live in the Git-ignored root `pdb.toml` (`IDENTITY_FILE`) under `[agents.<entry>]`, written by the locked `setIdentity` (`src/config/identity.ts`).
 
 ### Safe writes
@@ -122,7 +122,7 @@ type SettingsErrorCode =
 Rules:
 
 1. Validation of every changed field runs before any write; any invalid field refuses the whole change with per-field messages.
-2. The write is `updateConfig` with `expectedRaw` matching `expectedRevision`, through the existing lock-and-recheck path. A mismatch is `CONFLICT` with the fresh view; nothing is merged automatically.
+2. **Prerequisite (slice 0):** every config writer, including the existing CLI `updateConfig`, takes the same per-file lock (`acquireFileLock`, through `updateTextFile` with `checkUnchanged`) around its re-read and rename. Locking only the new service would leave the CLI race. The write is then `updateConfig` with `expectedRaw` matching `expectedRevision` under that lock. A mismatch is `CONFLICT` with the fresh view; nothing is merged automatically.
 3. Unknown keys and values already present in the file are preserved byte-for-byte where the format allows (the existing TOML writer behaviour), and other scopes are never touched.
 4. After writing, the service re-reads the file and returns the new view; if re-read fails it returns `committed-with-error` and the page says the save may have succeeded and asks for reload.
 5. Global writes go to the #452 global file through the same locked writer; repository writes need a registered project with a verified local root, otherwise `NO_LOCAL_ROOT`. No write ever targets the server's cwd, a guessed clone or an unregistered path.
@@ -151,10 +151,11 @@ Under the #455 write session; no separate token scheme.
 
 ## Implementation slices
 
+0. **Shared config write lock.** Move `updateConfig`/`replaceAtomically` in `src/config/config.ts` onto the locked `updateTextFile` path for both `.github/triage.toml` and `.github/triage.json`. Checks: two concurrent `updateConfig` calls with injected filesystem interleaving produce one success and one `CONFLICT`, never a silent overwrite; a held lock reports `LOCKED` with the existing stuck-lock message; CLI output unchanged otherwise.
 1. **Descriptor fields and read service.** Add `scopes` and `applies` to `CONFIG_KEYS`; `settingsView` for repository scope; `pdb config list --json` parity. Checks: every registered key appears exactly once; source explicit/default/unknown; unreadable, future and both-formats files produce warnings and no rows marked editable; no GitHub access.
 2. **Read-only page and GET API** (repository scope; Global shows "not available until #452"). Checks: `/settings` without `repo` labelled Global; unserved repo refused without reads; project without a local root shows `NO_LOCAL_ROOT`; escaping; keyboard and narrow layout.
 3. **Global scope read** after #452 merges. Checks: global keys listed with restart/live state; no identity at Global; `serve.projects` read-only.
 4. **Write service and POST** after #455's write session ships. Checks: invalid fields refuse with nothing written; `CONFLICT` on concurrent CLI edit; unknown keys preserved; reset removes only the scoped override; lock held gives `LOCKED`; re-read failure gives `committed-with-error`; CSRF, Origin and edits-disabled refusals; cross-project and global/project race tests with injected filesystem.
 5. **Editing UI.** Checks: pending summary, Save, Cancel, Reset, discard prompt on scope change, conflict reconciliation, restart banner, no automatic restart, packaged-install smoke test.
 
-Slices 1–2 can start after this document merges; slice 3 needs #452; slices 4–5 need #452 and #455's write session.
+Slices 0–2 can start after this document merges, and slice 4 needs slice 0; slice 3 needs #452; slices 4–5 need #452 and #455's write session.
