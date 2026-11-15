@@ -213,6 +213,44 @@ describe("bots and apps", () => {
     expect(d.authority).toBe("none");
     expect(d.reasons.join()).toContain("never clear one");
   });
+  it.each([
+    ["lastEditedAt not collected", { lastEditedAt: undefined }],
+    ["includesCreatedEdit not collected", { includesCreatedEdit: undefined }],
+    [
+      "edited, editor not collected",
+      { lastEditedAt: "2026-11-14T11:00:00Z", includesCreatedEdit: true, editor: undefined },
+    ],
+  ] as const)(
+    "allowlisted Bot review state is unverified when %s, and cannot clear a blocker",
+    async (_, missing) => {
+      const d = await decide(
+        msg({ body: codex, author: bot("chatgpt-codex-connector"), ...missing }),
+        levels,
+      );
+      expect(d).toMatchObject({ visibility: "app", authority: "none" });
+      expect(d.reasons.join()).toContain("unverified");
+    },
+  );
+  it("allowlisted Bot review state edited by another account is ignored", async () => {
+    const d = await decide(
+      msg({
+        body: codex,
+        author: bot("chatgpt-codex-connector"),
+        lastEditedAt: "2026-11-14T11:00:00Z",
+        includesCreatedEdit: true,
+        editor: user("writer"),
+      }),
+      levels,
+    );
+    expect(d.authority).toBe("none");
+  });
+  it("a [bot] login without an account type is unknown, not external", async () => {
+    const d = await decide(
+      msg({ body: codex, author: { login: "chatgpt-codex-connector[bot]" } }),
+      levels,
+    );
+    expect(d).toMatchObject({ visibility: "unknown", authority: "none" });
+  });
   it("a non-allowlisted app is external and gets no workflow authority", async () => {
     const d = await decide(msg({ body: record("k"), author: bot("other-app[bot]") }), levels);
     expect(d).toMatchObject({ visibility: "external-untriaged", authority: "none" });
@@ -259,6 +297,18 @@ describe("explicit authorisation to consider one message", () => {
     expect(d.authority).toBe("none");
     expect(d.reasons.join()).toContain("void");
   });
+  it.each([
+    ["lastEditedAt", { lastEditedAt: undefined }],
+    ["includesCreatedEdit", { includesCreatedEdit: undefined }],
+  ] as const)(
+    "is void when the target's %s was not collected (unknown, not unedited)",
+    async (_, missing) => {
+      const unread = { ...target, comment: { ...target.comment, ...missing } };
+      const d = await decide(unread, levels, [grant("writer")]);
+      expect(d.authority).toBe("none");
+      expect(d.reasons.join()).toContain("not read");
+    },
+  );
   it("a self-issued authorisation inside the target is ignored", async () => {
     const self = msg({
       body: authorizationBody({

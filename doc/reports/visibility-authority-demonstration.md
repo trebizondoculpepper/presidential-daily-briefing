@@ -7,7 +7,7 @@ Demonstration for #205, under the contract in [workflow message trust](workflow-
 ## What was built
 
 - [`examples/visibility-authority/decide.ts`](examples/visibility-authority/decide.ts): `decide(message, permissionLookup, authorizations) → {visibility, authority, reasons, …}`, plus `listExternal` (external reports with source links and marker-stripped excerpts) and `planMutation` (the state/ownership gate; `executed` is always `false`).
-- [`examples/visibility-authority/decide.test.ts`](examples/visibility-authority/decide.test.ts): 26 fixture tests, run by `npm test` (the Vitest include already covers `doc/reports/examples/**/*.test.ts`).
+- [`examples/visibility-authority/decide.test.ts`](examples/visibility-authority/decide.test.ts): 33 fixture tests, run by `npm test` (the Vitest include already covers `doc/reports/examples/**/*.test.ts`).
 
 Reused, not duplicated:
 
@@ -52,6 +52,7 @@ The replay fixture uses the needs-human v2 binding, which is the binding that ex
 ## Design notes
 
 - `consider-only` is deliberately weaker than `workflow`. An authorised message may be read as input by a trusted agent, but it never supplies a trusted record and never passes `planMutation`. Its author gains nothing for any other message.
+- A field that was not collected is unknown, never a positive fact. An allowlisted app's review marker whose edit fields (or editor, when edited) were not read is unverified and cannot clear a blocker; a review marker edited by another account is ignored; a `[bot]` login without an account type is unknown; an authorisation is void when the target's edit fields were not read, since its revision cannot be established.
 - Unknown permission is kept apart from external. A token that cannot ask is missing evidence, not a verdict about the author.
 - `untrustedData` is `true` for everything except a verified-write message. A consumer that shows message text to an agent should quote it as data when this flag is set.
 
