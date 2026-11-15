@@ -18,6 +18,7 @@ import type { Closure, DeliveryDiagnosis, IssueDeliveryDiagnosis } from "./deliv
 import type { MemberState, TicketDelivery } from "./completion.js";
 import type { Issue, PullRequest, Snapshot } from "../github/types.js";
 import { prChecks } from "../briefing/briefing.js";
+import { prEvidenceGaps } from "../github/previdence.js";
 import { workflow } from "./definition.js";
 import type { PrStatusReport } from "./prstatus.js";
 import { codexMarker, headCodexFindings, headReviewed } from "./reviewevidence.js";
@@ -147,10 +148,8 @@ export function snapshotFollowUpFacts(pr: PullRequest, warnings: string[]): Foll
   const known = [...workflow.pass, ...workflow.failure, ...workflow.unfinished];
   return {
     draft: !!pr.isDraft,
-    complete:
-      !warnings.some((w) => w.startsWith(`${pr.url}:`)) && // not /pull/12 for /pull/1 (#448)
-      !!pr.reviewThreads &&
-      !pr.reviewThreads.pageInfo?.hasNextPage,
+    // Every PR evidence source, not only threads: a later page may hold a finding (#497).
+    complete: !prEvidenceGaps(pr, warnings).length,
     failing: checks.some((c) => workflow.failure.includes(c.outcome)),
     pending: checks.some((c) => workflow.unfinished.includes(c.outcome)),
     unknownChecks: checks.some((c) => !known.includes(c.outcome)),
@@ -158,13 +157,13 @@ export function snapshotFollowUpFacts(pr: PullRequest, warnings: string[]): Foll
       (c) => c.name === workflow.verify && workflow.verifySuccess.includes(c.outcome),
     ),
     changesRequested: workflow.changesRequested.includes(pr.reviewDecision ?? ""),
-    unresolvedThreads: pr.reviewThreads.nodes.some((t) => !t.isResolved),
+    unresolvedThreads: (pr.reviewThreads?.nodes ?? []).some((t) => !t.isResolved),
     mergeable: pr.mergeable,
     mergeState: pr.mergeStateStatus ?? "UNKNOWN",
     headReviewed: headReviewed(pr),
     headFindings: headCodexFindings(
       pr.headRefOid,
-      pr.comments.nodes.map((c) => ({
+      (pr.comments?.nodes ?? []).map((c) => ({
         by: c.author?.login ?? "",
         state: codexMarker(c.body)?.code_review,
       })),

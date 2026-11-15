@@ -191,19 +191,23 @@ function normalize(
       put(r, "record-to", record.to);
     }
     if (pr) {
-      const rollup = pr.commits.nodes[0]?.commit.statusCheckRollup;
+      const rollup = pr.commits?.nodes?.[0]?.commit.statusCheckRollup;
       for (const [k, v] of Object.entries({
         draft: pr.isDraft,
         mergeable: pr.mergeable,
         "merge-state": pr.mergeStateStatus,
         "review-decision": pr.reviewDecision ?? "",
+        // Warnings are `${url}: …`; the separator stops /pull/1 matching /pull/12 (#448).
+        // Every source must be read in full (#497), mirroring github/previdence.ts, which this
+        // lazily loaded chunk does not import; previdence.test.ts holds the two in agreement.
         "pr-complete":
-          // Warnings are `${url}: …`; the separator stops /pull/1 matching /pull/12 (#448).
           !snapshot.warnings.some((w) => w.startsWith(`${pr.url}:`)) &&
           !!rollup &&
-          !rollup.contexts.pageInfo.hasNextPage &&
-          !pr.reviewThreads.pageInfo.hasNextPage &&
-          !pr.reviews.pageInfo.hasNextPage,
+          [pr.comments, pr.reviews, pr.reviewThreads, rollup.contexts].every((c) => {
+            const info: { hasNextPage?: boolean; hasPreviousPage?: boolean } | undefined =
+              c?.pageInfo;
+            return !!info && !info.hasNextPage && !info.hasPreviousPage;
+          }),
       }))
         put(id, k, v);
       for (const ref of pr.closingIssuesReferences.nodes) {
@@ -217,13 +221,13 @@ function normalize(
         put(c, "outcome", check.conclusion ?? check.state ?? check.status ?? "UNKNOWN");
       }
       // Raw review evidence; the policy decides what binds to the current head (#182).
-      for (const review of pr.reviews.nodes) {
+      for (const review of pr.reviews?.nodes ?? []) {
         const r = nextId++;
         put(id, "review", r);
         put(r, "review-state", review.state);
         if (review.commit?.oid) put(r, "review-commit", review.commit.oid);
       }
-      for (const c of pr.comments.nodes) {
+      for (const c of pr.comments?.nodes ?? []) {
         if ((c.author?.login ?? "").replace(/\[bot\]$/, "") !== codexAccount) continue;
         const state = codexState(c.body ?? "");
         if (!state) continue;
@@ -234,7 +238,7 @@ function normalize(
         if (typeof state.has_unresolved_findings === "boolean")
           put(r, "receipt-findings", state.has_unresolved_findings);
       }
-      for (const thread of pr.reviewThreads.nodes) {
+      for (const thread of pr.reviewThreads?.nodes ?? []) {
         const c = nextId++;
         put(id, "thread", c);
         put(c, "resolved", thread.isResolved);
