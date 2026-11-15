@@ -99,7 +99,13 @@ interface InstallResult {
     kind: "identity" | "hook" | "mcp";
     file: string | null;
     action: "create" | "replace" | "remove" | "kept" | "absent" | "skipped";
-    outcome: "applied" | "planned" | "refused" | "failed" | "not-attempted";
+    outcome:
+      | "applied"
+      | "committed-with-error"
+      | "planned"
+      | "refused"
+      | "failed"
+      | "not-attempted";
     code: InstallErrorCode | null;
     message: string;
     diff: string | null; // exact change, for preview
@@ -116,6 +122,8 @@ interface InstallResult {
 ```
 
 Error codes: `NO_PROJECT`, `IDENTITY_REQUIRED`, `IDENTITY_AMBIGUOUS`, `UNSUPPORTED_SCOPE`, `UNSUPPORTED_CLIENT_VERSION`, `MALFORMED_CONFIG`, `UNSUPPORTED_SCHEMA`, `UNSAFE_TOML_EDIT`, `UNSAFE_PATH`, `CONFLICT`, `LOCKED`, `OWNED_ENTRY_EDITED`, `FOREIGN_ENTRY`, `HOOK_NOT_AVAILABLE` (hook withheld until the open questions are answered), `WRITE_FAILED`.
+
+A writer result of `committed-with-error` from `updateTextFile` (`src/config/safejson.ts`: the file was replaced but directory fsync or temp-file cleanup failed) is reported as `committed-with-error` with the redacted diagnostic, counts as written for later steps and for uninstall, and makes the overall exit 2; it is never shown as clean success or as not written ([safe-shared-file-writes.md](safe-shared-file-writes.md)).
 
 Order: identity, then MCP, then hook. A failed identity step marks the hook `not-attempted`; MCP does not depend on identity for user-wide scope. Each applied item is reported even when a later one fails, with its file path. Output never includes tokens, environment values or file contents other than PDB's own entries.
 
