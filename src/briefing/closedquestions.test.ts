@@ -66,12 +66,20 @@ const closed = (n: number, comments: Comment[], updatedAt = "2026-11-10T00:00:00
 
 /** A mutable GitHub: closed issues listed newest update first, with `since` filtering. */
 function gh(initial: Issue[], later: Record<number, Comment[]> = {}) {
-  const state = { issues: [...initial], later };
+  const state = {
+    issues: [...initial],
+    later,
+    gone: new Set<number>(),
+    failing: new Set<number>(),
+  };
   const calls: string[] = [];
   const query: Query = async (source, variables) => {
     const size = Number(/first:(\d+)/.exec(source)![1]);
     if (source.includes("issueOrPullRequest")) {
       calls.push(`comments #${variables.number}`);
+      if (state.gone.has(Number(variables.number)))
+        return { repository: { issueOrPullRequest: null } } as never;
+      if (state.failing.has(Number(variables.number))) throw new Error("HTTP 502");
       return {
         repository: {
           issueOrPullRequest: { comments: page(state.later[Number(variables.number)] ?? []) },
@@ -355,5 +363,34 @@ describe("closed-ticket scans kept between serve requests (#414)", () => {
     expect(g.calls).toEqual(["inventory start"]);
     expect(memoised.some((q) => q.includes("states:CLOSED"))).toBe(false);
     expect(slot.state?.watermark).not.toBeNull();
+  });
+
+  it("lets other sources progress past a failing or vanished one (Codex, #609)", async () => {
+    const long = (n: number, comments: Comment[]): Issue => ({
+      ...closed(n, comments),
+      comments: page(comments, true, "p1"),
+    });
+    const asked = question(11, "On a deleted issue?");
+    const g = gh([long(11, [asked]), long(12, []), long(13, [])], {
+      12: [question(12, "Reachable?")],
+    });
+    g.state.gone.add(11);
+    g.state.failing.add(13);
+    const { c, now } = clockAt("2026-11-15T12:00:00Z");
+    const slot = new ClosedQuestionStore(30 * 60_000).slot(undefined, repo);
+    const first = await discoverClosedQuestions(repo, runtime(g, now, slot, {}));
+    // #12 was hydrated despite #11 vanishing and #13 failing.
+    expect(first.sources.map((x) => x.issue.number).sort((a, b) => a - b)).toEqual([11, 12]);
+    expect(first.sources.find((x) => x.issue.number === 11)!.facts[0]!.outcome).toBe("unknown");
+    expect(first.warnings.join(" ")).toMatch(/no longer returns this issue/);
+    expect(first.coverage).toMatchObject({ complete: false, pending: [long(13, []).url] });
+    expect(first.coverage.scan.watermark).toBeNull();
+    // Once the transient failure clears, the baseline finishes despite the vanished issue.
+    g.state.failing.clear();
+    c.t += 60_000;
+    const second = await discoverClosedQuestions(repo, runtime(g, now, slot, {}));
+    expect(second.coverage.scan.watermark).not.toBeNull();
+    expect(second.coverage.complete).toBe(false);
+    expect(g.calls.filter((x) => x === "comments #11")).toHaveLength(1);
   });
 });
