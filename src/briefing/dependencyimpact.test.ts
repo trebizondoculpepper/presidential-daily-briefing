@@ -419,6 +419,13 @@ describe("deps --top: repository direct impact (#196)", () => {
       await main(["deps", "--top", "--limit", "2", "--json"], async (t) => void (out = t), runtime),
     ).toBe(2);
     expect(JSON.parse(out)).toMatchObject({ provisional: true, limit: 2 });
+    // A complete inventory exits 0.
+    expect(
+      await main(["deps", "--top"], async () => {}, {
+        ...runtime,
+        dependencyInventory: (r: string) => readDependencyInventory(r, {}, query, clock),
+      }),
+    ).toBe(0);
     await expect(main(["deps", "--top", "7"], async () => {}, runtime)).rejects.toThrow("--top");
   });
 });
