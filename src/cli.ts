@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { runRebrief } from "./rebrief/cli.js";
+import type { CliRuntime as RebriefRuntime } from "./rebrief/cli.js";
 import { resolveEngineSetting } from "./config/engine-setting.js";
 import { resolveReviewPolicy } from "./config/review-setting.js";
 /** One read-only intake command. Contract: doc/pdb-cli.md. */
@@ -12,6 +14,7 @@ import {
   currentRepository,
   collectIssueFocus,
   ghQuery,
+  ghQueryWith,
   ghRest,
   historyComplete,
   IssueUnavailable,
@@ -215,6 +218,7 @@ export interface Runtime {
   issueCreate?: Partial<IssueCreateRuntime>;
   /** gh REST, login resolver, host and clock for `quotas` (#547). */
   quotas?: Partial<QuotasRuntime>;
+  rebrief?: RebriefRuntime;
 }
 
 type Output = (text: string) => Promise<void>;
@@ -273,6 +277,7 @@ Rollback: pdb config set briefing.engine typescript.
   quotas [--json] [--refresh | --offline]  Read-only GitHub API allowance per resource for
                         the gh login: one /rate_limit read, no repository scan; secondary
                         limits are unmetered (quotas --help)
+  rebrief init|check|ack --json  Shared bounded continuation core (rebrief --help); no hook installed
   serve --repo owner/name | --project PATH [--port N]  Foreground local HTTP server: read-only
                         JSON API and HTTP MCP over a short-lived memory cache (serve --help)
   team [--stale-hours N]  Read-only: each agent's claims, linked PRs, activity and warnings
@@ -970,7 +975,8 @@ export async function main(
     rest[0] !== "process" &&
     rest[0] !== "rules" &&
     // A foreground server prints its banner first and runs until stopped; no advisory.
-    rest[0] !== "serve";
+    rest[0] !== "serve" &&
+    rest[0] !== "rebrief";
   const pending = eligible
     ? Promise.resolve()
         .then(() => check({ offline: rest.includes("--offline"), optOut }))
@@ -1110,6 +1116,18 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
       files: runtime.briefingFiles ?? { atomicJson, cachedSnapshot, checkpointSince },
     });
   if (args[0] === "serve") return runServe(args.slice(1), runtime.serve);
+  if (args[0] === "rebrief")
+    return runRebrief(args.slice(1), output, {
+      read: {
+        collect: runtime.collect,
+        dependencyReport: runtime.dependencyReport ?? dependencyReport,
+        rest: runtime.rest,
+        query: runtime.query,
+        queryWith: runtime.query === ghQuery ? ghQueryWith : undefined,
+        now: runtime.now,
+      },
+      ...runtime.rebrief,
+    });
   if (args[0] === "issue") return runIssue(args.slice(1), output, runtime);
   if (args[0] === "quotas")
     return runQuotas(args.slice(1), output, {
