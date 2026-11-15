@@ -76,20 +76,27 @@ describe("who is working on a ticket (#61, doc/design/diagnostics.md)", () => {
     expect(r.answer).toMatch(/^unknown/);
     expect(r.completeness.complete).toBe(false);
   });
-  it("runs through the CLI with --issue collection and validates arguments", async () => {
+  it("runs through the CLI with a focused read, not repository collection (#367)", async () => {
     let out = "";
-    let options: unknown;
+    let focused: unknown;
     const runtime = {
-      collect: async (_r: string, o: unknown) => {
-        options = o;
+      collect: async () => {
+        throw new Error("who N must not collect the repository");
+      },
+      collectIssueFocus: async (r: string, n: number) => {
+        focused = [r, n];
         return snapshot([ticket(["agent:ana"])], []);
       },
       currentRepository: async () => repo,
       now: () => new Date(time),
     };
     expect(await main(["who", "1", "--json"], async (t) => void (out = t), runtime)).toBe(0);
-    expect(options).toEqual({ issue: 1 });
+    expect(focused).toEqual([repo, 1]);
     expect(JSON.parse(out).answer).toBe("recorded claim: ana");
+    expect(JSON.parse(out).collection).toMatchObject({
+      profile: "issue-detail-v1",
+      operation: "who",
+    });
     for (const bad of [["who"], ["who", "x"], ["who", "1", "--stale-hours", "0"]])
       await expect(main(bad, async () => {}, runtime)).rejects.toThrow();
   });

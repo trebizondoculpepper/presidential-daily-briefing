@@ -1336,6 +1336,7 @@ describe("delivery, responsibility and closure on read surfaces (#192)", () => {
     const fake = live({ 92: "open" });
     const runtime = {
       collect: async () => snap,
+      collectIssueFocus: async () => snap,
       currentRepository: async () => repo,
       now: () => new Date(time),
       query: fake.rt.query as never,
@@ -1439,6 +1440,7 @@ describe("delivery, responsibility and closure on read surfaces (#192)", () => {
     });
     const runtime = (snap: Snapshot, fake: ReturnType<typeof live>, extra = {}) => ({
       collect: async () => snap,
+      collectIssueFocus: async () => snap,
       dependencyReport: async () => ({}) as never,
       now: () => new Date(time),
       query: fake.rt.query as never,

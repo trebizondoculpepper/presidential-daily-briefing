@@ -9,10 +9,12 @@ import { parseArgs } from "node:util";
 import {
   collect,
   currentRepository,
+  collectIssueFocus,
   ghQuery,
   ghRest,
   IssueUnavailable,
   permissionLookup,
+  prop,
 } from "./github/github.js";
 import {
   applyDependencyChange,
@@ -88,7 +90,13 @@ import type { LocalDoctorRuntime } from "./config/localdoctor.js";
 import type { GhRun } from "./github/dependencies.js";
 import type { Query, Rest } from "./github/github.js";
 import type { Snapshot } from "./github/types.js";
-import { readPullRequest, readReviewHistory, readTeam, readWho } from "./workflow/readservices.js";
+import {
+  readPullRequest,
+  readReviewHistory,
+  readTeam,
+  readWho,
+  readWhoLive,
+} from "./workflow/readservices.js";
 import { runServe } from "./serve.js";
 import type { ServeRuntime } from "./serve.js";
 
@@ -111,6 +119,8 @@ export type DepsArguments =
 /** Injected services for `main`; tests replace the GitHub-facing ones. */
 export interface Runtime {
   collect: typeof collect;
+  /** Focused issue read for `who N` (issue-detail-v1, #367); default: the gh collector. */
+  collectIssueFocus?: typeof collectIssueFocus;
   currentRepository: typeof currentRepository;
   dependencyReport?: typeof dependencyReport;
   planDependencyChange?: typeof planDependencyChange;
@@ -566,6 +576,12 @@ export async function cachedSnapshot(
   const data: unknown = JSON.parse(await readFile(path, "utf8"));
   if (!isSnapshotEnvelope(data, repository))
     throw new Error("Cache schema/repository is invalid or unsupported.");
+  // A focused read (#367) holds one ticket, not the repository's open inventory.
+  const profile = prop(data, "collection", "profile");
+  if (profile !== undefined && profile !== "compatibility-full-v1")
+    throw new Error(
+      `Cache holds a focused ${typeof profile === "string" ? profile : "unknown"} read, not a repository snapshot.`,
+    );
   return data;
 }
 export async function checkpointSince(
@@ -1009,6 +1025,23 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
       throw new Error("--stale-hours must be a positive number.");
     if (values.offline && !values.cache) throw new Error("--offline requires --cache PATH.");
     const number = Number(positionals[0]);
+    if (!values.offline && !values.cache) {
+      // issue-detail-v1 (#367): the ticket and its linked open PRs only, never the repository.
+      const repository = values.repo ?? (await runtime.currentRepository());
+      const { report, text } = await readWhoLive(
+        repository,
+        number,
+        { staleHours, now: runtime.now?.() ?? new Date() },
+        deliveryBoundaries(runtime, repository, false),
+        runtime.query ?? ghQuery,
+        runtime.now,
+        runtime.collectIssueFocus,
+      );
+      await output(values.json ? JSON.stringify(report, null, 2) + "\n" : text);
+      return report.completeness.complete ? 0 : 2;
+    }
+    // A cache is written or read: keep the full compatibility snapshot, which a later offline
+    // briefing may read as a repository inventory. A focused read is never cached as one.
     const snapshot = values.offline
       ? await cachedSnapshot(values.cache ?? "", values.repo)
       : await runtime.collect(values.repo ?? (await runtime.currentRepository()), {

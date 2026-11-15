@@ -1,23 +1,27 @@
 /**
- * Focused reads (#367, doc/design/collection-profiles.md "Command read plans"): each read
- * reports its profile, per-source coverage and cost; `--issue N` keeps the full compatibility
- * profile. Fixtures inject many closed PRs with few open, long comment histories, linked PRs
- * and incomplete evidence. No test touches GitHub.
+ * Focused reads (#367, doc/design/collection-profiles.md "Command read plans"): `who N`, `deps N`
+ * and `pr N` read only the target and its direct links; `--issue N` keeps the full
+ * compatibility profile. Fixtures inject many closed PRs with few open, long comment histories,
+ * linked PRs, permission lookups and incomplete evidence. No test touches GitHub.
  */
+import { join } from "node:path";
+import { mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { describe, expect, it } from "vite-plus/test";
 import { main } from "../cli.js";
-import { collect } from "../github/github.js";
-import type { JsonObject, Query } from "../github/github.js";
-import { dependencyReport, RateLimitError } from "../github/dependencies.js";
+import { collect, collectIssueFocus } from "../github/github.js";
+import type { JsonObject, Query, Rest } from "../github/github.js";
+import { dependencyReport } from "../github/dependencies.js";
+import { RateLimitError } from "../github/dependencies.js";
 import type { Comment, Issue, Page, PullRequest } from "../github/types.js";
 import { issue as baseIssue, pr as basePr, repo, time } from "../testing/snapshots.js";
-import { readPullRequest } from "./readservices.js";
+import { readPullRequest, readWho, readWhoLive } from "./readservices.js";
 import { presentBriefing } from "../briefing/service.js";
-import { markerTrust } from "./delivery.js";
-import { permissionLookup } from "../github/github.js";
+import { deliveryMarker, markerTrust } from "./delivery.js";
 import type { ReadCollection } from "../github/readplan.js";
-import { deliveryMarker } from "./delivery.js";
 import type { DeliveryRecord } from "./delivery.js";
+import { permissionLookup } from "../github/github.js";
+import { ReadMeter } from "../github/readplan.js";
 
 const clock = () => new Date(time);
 const issueUrl = (n: number) => `https://github.com/${repo}/issues/${n}`;
@@ -147,6 +151,220 @@ function fake(w: World) {
   };
   return { query, log };
 }
+const options = { staleHours: 48, now: clock() };
+const strip = <T extends { collection?: unknown }>(r: T) => {
+  const { collection: _collection, ...rest } = r;
+  return rest;
+};
+
+describe("who N reads only the ticket and its linked open PRs (#367)", () => {
+  it("never reads the repository inventory", async () => {
+    const w = world();
+    const { query, log } = fake(w);
+    const read = await readWhoLive(repo, 1, options, {}, query, clock);
+    expect(log.some((s) => s.includes("issues(first:50") || s.includes("pullRequests("))).toBe(
+      false,
+    );
+    // 1 issue + 3 more issue comment pages + 1 link continuation + 2 PRs + 2 more PR #10 pages.
+    expect(read.report.collection.telemetry.graphqlRequests).toBe(log.length);
+    expect(log.length).toBe(9);
+    expect(read.report.collection).toMatchObject({ profile: "issue-detail-v1", operation: "who" });
+  });
+
+  it("matches the full-snapshot answer when all relevant facts are known", async () => {
+    const w = world();
+    const { query } = fake(w);
+    const focused = await readWhoLive(repo, 1, options, {}, query, clock);
+    const full = await readWho(
+      await collect(repo, { issue: 1 }, query, clock),
+      1,
+      {
+        ...options,
+        offline: false,
+      },
+      {},
+    );
+    expect(strip(focused.report)).toEqual(full.report);
+    expect(focused.text).toBe(full.text);
+    // The long histories were read completely on both paths.
+    expect(focused.report.commentEvidence.map((e) => e.kind)).toEqual([
+      "handoff",
+      "handoff",
+      "reported-work",
+    ]);
+    expect(focused.report.pullRequests.map((p) => p.number)).toEqual([10, 11]);
+  });
+
+  it("records per-source coverage, cost and bytes", async () => {
+    const { query } = fake(world());
+    const { collection } = (await readWhoLive(repo, 1, options, {}, query, clock)).report;
+    const state = (source: string, subject = `${repo}#1`) =>
+      collection.coverage.find((c) => c.source === source && c.subject === subject)?.state;
+    expect(state("issue")).toBe("complete");
+    expect(state("comments")).toBe("complete");
+    expect(state("linked-pull-requests")).toBe("complete");
+    expect(state("pull-request", `${repo}#10`)).toBe("complete");
+    expect(state("native-blocked-by")).toBe("not-requested");
+    // No delivery boundary: delivery and permissions were not read, so they are not known.
+    expect(state("delivery-records")).toBe("not-requested");
+    expect(state("permissions")).toBe("not-requested");
+    expect(collection.telemetry.cost).toBe(collection.telemetry.graphqlRequests);
+    expect(collection.telemetry.bytes).toBeGreaterThan(0);
+    // The foreign PR is outside this repository's inventory and is never hydrated.
+    expect(collection.coverage.some((c) => c.subject.includes("other/fork"))).toBe(false);
+  });
+
+  it("an unread linked-PR continuation is partial and incomplete, never no PR", async () => {
+    const w = world();
+    w.links.set(
+      1,
+      Array.from({ length: 30 }, (_, i) => ({
+        number: 100 + i,
+        url: prUrl(100 + i),
+        state: "CLOSED",
+      })),
+    );
+    const { query } = fake(w);
+    const read = await readWhoLive(repo, 1, options, {}, query, clock);
+    expect(
+      read.report.collection.coverage.find((c) => c.source === "linked-pull-requests"),
+    ).toMatchObject({ state: "partial", omission: expect.stringContaining("not read") });
+    expect(read.complete).toBe(false);
+    expect(read.report.completeness.warnings.join(" ")).toMatch(/linked pull requests beyond/);
+    expect(read.report.pullRequests).toEqual([]);
+  });
+
+  it("a failed or rate-limited linked PR is unknown evidence, not an absent PR", async () => {
+    const w = world();
+    w.links.set(
+      1,
+      [10, 11, 12, 13].map((n) => ({ number: n, url: prUrl(n), state: "OPEN" })),
+    );
+    for (const n of [12, 13]) w.prs.set(n, { ...w.prs.get(11)!, number: n, url: prUrl(n) });
+    w.failPr = new Set([10]);
+    w.rateLimitPr = new Set([11]);
+    w.pageSize = 10;
+    const { query } = fake(w);
+    const read = await readWhoLive(repo, 1, options, {}, query, clock);
+    const states = read.report.collection.coverage
+      .filter((c) => c.source === "pull-request")
+      .map((c) => [c.subject, c.state]);
+    expect(states).toContainEqual([`${repo}#10`, "failed"]);
+    expect(states).toContainEqual([`${repo}#11`, "failed"]);
+    expect(read.complete).toBe(false);
+    expect(read.report.completeness.warnings.join(" ")).toMatch(/rate limited/);
+    // Nothing was scheduled after the quota refusal; started ones were kept.
+    const notAttempted = read.report.collection.notAttempted;
+    expect(notAttempted.length + read.report.pullRequests.length).toBe(2);
+  });
+
+  it("incomplete labels make ownership unknown on the focused path too", async () => {
+    const w = world();
+    const one = w.issues.get(1)!;
+    w.issues.set(1, {
+      ...one,
+      labels: { ...one.labels, pageInfo: { hasNextPage: true, endCursor: "x" } },
+    });
+    const { query } = fake(w);
+    const read = await readWhoLive(repo, 1, options, {}, query, clock);
+    expect(read.report.recordedOwners).toBeNull();
+    expect(read.report.collection.coverage.find((c) => c.source === "labels")?.state).toBe(
+      "partial",
+    );
+  });
+
+  it("meters permission lookups; an unanswered lookup leaves permissions partial", async () => {
+    const w = world();
+    const one = w.issues.get(1)!;
+    // Delivery records make the trust decision look up each author's current permission.
+    const marker = (agent: string, i: number) =>
+      deliveryMarker({
+        v: 1,
+        op: "submit",
+        opId: `op-${i}`,
+        repository: repo,
+        issue: 1,
+        agent,
+        deliverables: [],
+        issuedAt: time,
+      } as unknown as DeliveryRecord);
+    w.issues.set(1, {
+      ...one,
+      comments: page([
+        {
+          ...note(issueUrl(1), 1, marker("ana", 1), 1),
+          author: { __typename: "User", login: "ana" },
+        },
+        {
+          ...note(issueUrl(1), 1, marker("mallory", 2), 2),
+          author: { __typename: "User", login: "mallory" },
+        },
+      ]),
+    });
+    const { query } = fake(w);
+    const rest: Rest = async (path) =>
+      path.includes("/collaborators/ana/")
+        ? { status: 200, body: { user: { login: "ana" }, role_name: "write" } }
+        : { status: 404, body: { message: "Not Found" } };
+    const read = await readWhoLive(
+      repo,
+      1,
+      options,
+      {
+        trust: markerTrust(permissionLookup(repo, rest)),
+        trustWith: (r) => markerTrust(permissionLookup(repo, r)),
+        live: { query, rest },
+      },
+      query,
+      clock,
+    );
+    const { coverage, telemetry } = read.report.collection;
+    const lookups = telemetry.calls.filter((c) => c.source === "permissions");
+    expect(lookups.map((c) => c.status).sort((a, b) => (a ?? 0) - (b ?? 0))).toEqual([200, 404]);
+    expect(coverage.find((c) => c.source === "permissions")).toMatchObject({
+      state: "partial",
+      omission: "1 of 2 lookups unanswered; authority unknown",
+    });
+    expect(telemetry.restRequests).toBe(2);
+    expect(coverage.find((c) => c.source === "delivery-records")?.state).not.toBe("not-requested");
+  });
+
+  it("the CLI writes a cache only from the full compatibility snapshot", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "pdb-367-"));
+    const cache = join(dir, "snapshot.json");
+    const w = world();
+    const { query, log } = fake(w);
+    let out = "";
+    const runtime = {
+      collect: (r: string, o: Parameters<typeof collect>[1]) => collect(r, o, query, clock),
+      collectIssueFocus: (r: string, n: number, o: Parameters<typeof collectIssueFocus>[2]) =>
+        collectIssueFocus(r, n, o, query, clock),
+      currentRepository: async () => repo,
+      now: clock,
+    };
+    await main(
+      ["who", "1", "--json", "--cache", cache, "--repo", repo],
+      async (t) => void (out = t),
+      runtime,
+    );
+    expect(log.some((s) => s.includes("issues(first:50"))).toBe(true);
+    expect(JSON.parse(out).answer).toBe("recorded claim: ana");
+    // A focused read saved by hand is refused as a repository snapshot.
+    const focused = await collectIssueFocus(
+      repo,
+      1,
+      {
+        meter: new ReadMeter("issue-detail-v1", "who", clock),
+      },
+      query,
+      clock,
+    );
+    await writeFile(cache, JSON.stringify(focused));
+    await expect(
+      main(["--offline", "--cache", cache, "--repo", repo], async () => {}, runtime),
+    ).rejects.toThrow(/focused issue-detail-v1 read/);
+  });
+});
 
 describe("deps N and pr N report their profile, coverage and cost (#367)", () => {
   it("deps N reads one issue and says discussion was not requested", async () => {
