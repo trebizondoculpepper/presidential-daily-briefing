@@ -765,6 +765,14 @@ export async function runSetup(
     const entry = resolution.entry;
     const before = await readIdentity(target.root, entry, fs);
     const dryRun = !!values["dry-run"];
+    // The preview refuses what the write would refuse (the writer re-checks under its lock):
+    // an existing entry without a valid name is never "initialized" with a generated one.
+    if (dryRun && before.entryExists && !before.name)
+      throw new ConfigError(
+        "invalid-value",
+        `Entry [agents.${entry}] in ${IDENTITY_FILE} has no valid name, so no identity was set up and nothing was changed.`,
+        `Set one explicitly: pdb config set identity.name NAME --entry ${entry}${repoFlag}`,
+      );
     const write = dryRun
       ? null
       : await setIdentity(target, entry, "identity.triage_role", role, {

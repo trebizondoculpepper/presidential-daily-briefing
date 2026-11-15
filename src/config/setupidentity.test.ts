@@ -149,6 +149,10 @@ describe("pdb setup identity (#314)", () => {
       recovery: "Set one explicitly: pdb config set identity.name NAME --entry claude",
     });
     expect(t.files.get(file)).toBe(nameless);
+    // The dry run refuses the same way instead of promising a generated name.
+    expect(await t.call("identity", "--role", "implementer", "--dry-run", "--json")).toBe(1);
+    expect(t.json()).toMatchObject({ code: "invalid-value" });
+    expect(t.files.get(file)).toBe(nameless);
   });
 
   it("never overwrites a malformed identity file", async () => {
