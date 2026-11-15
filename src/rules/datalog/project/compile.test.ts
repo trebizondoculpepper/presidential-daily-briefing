@@ -38,6 +38,41 @@ describe("compiled native project policy (#514)", () => {
     ]);
     expect(ds.q(p.preferences[0].query, db, p.rules)).toEqual([]);
   });
+  it("matches pinned DataScript free-variable rules without rejecting prebound branch omissions", () => {
+    const db = ds.init_db([
+      [100, "pdb.action-id", "allowed:implement"],
+      [100, "pdb.action-label", "x"],
+      [1, "role", "implementer"],
+    ]);
+    const withWhen = (body: string) =>
+      fixture.replace(":when [(project-hotfix ?a)]", `:when [${body}]`);
+    for (const body of [
+      '(or [?a "pdb.action-label" "x"] [1 "role" "implementer"])',
+      '(or-join [?a] [?a "pdb.action-label" "x"] [1 "role" "implementer"])',
+    ]) {
+      const p = compileProjectPolicy(withWhen(body), base);
+      expect(ds.q(p.preferences[0].query, db, p.rules)).toEqual([[100, 10]]);
+    }
+    for (const body of [
+      '(or (not-join [?a] [?a "pdb.action-label" ?local]) [?a "pdb.action-label" "x"])',
+      '(or (or-join [?a] [?a "pdb.action-label" ?local] [?a "pdb.action-id" _]) [?a "pdb.action-label" "x"])',
+      '(or-join [?a ?missing] [?a "pdb.action-label" ?missing] [1 "role" "implementer"])',
+    ]) {
+      expect(() => ds.q(`[:find ?a :where [?a "pdb.action-id" _] ${body}]`, db)).toThrow(
+        /same set of free vars/,
+      );
+      expect(() => compileProjectPolicy(withWhen(body), base)).toThrow(
+        expect.objectContaining({ code: "native-grounding" }),
+      );
+    }
+    for (const op of ["or-join", "not-join"]) {
+      const body = `(${op} [] [1 "role" "implementer"])`;
+      expect(() => ds.q(`[:find ?a :where [?a "pdb.action-id" _] ${body}]`, db)).toThrow();
+      expect(() => compileProjectPolicy(withWhen(body), base)).toThrow(
+        expect.objectContaining({ code: "native-join" }),
+      );
+    }
+  });
   it("uses the contract's exact composite identity and is stable under layout/comments", () => {
     const p = compileProjectPolicy(fixture, base);
     expect(p.effectiveRulesHash).toBe(

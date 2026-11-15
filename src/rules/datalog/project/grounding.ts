@@ -18,6 +18,7 @@ function mentioned(cs: Clause[]): Set<string> {
     } else if (c.type === "or") {
       for (const a of c.alternatives) for (const v of mentioned(a)) out.add(v);
     }
+    if ((c.type === "not" || c.type === "or") && c.join) for (const v of c.join) out.add(v);
     for (const v of vars(terms)) out.add(v);
   }
   return out;
@@ -96,9 +97,21 @@ export function validateGrounding(g: ProjectGrammar): void {
         case "or": {
           if (c.join) {
             const input = new Set(c.join.filter((v) => bound.has(v)));
-            for (const a of c.alternatives) requireBound(c.join, sequence(a, input, at), at);
+            const required = c.join.filter((v) => !bound.has(v));
+            for (const a of c.alternatives) {
+              requireBound(required, mentioned(a), at);
+              requireBound(c.join, sequence(a, input, at), at);
+            }
             for (const v of c.join) bound.add(v);
           } else {
+            // DataScript checks syntactically used free variables, including nested
+            // join-local variables, after subtracting incoming bindings.
+            const free = c.alternatives.map(
+              (a) => new Set([...mentioned(a)].filter((v) => !bound.has(v))),
+            );
+            const expected = free[0] ?? new Set<string>();
+            for (const used of free)
+              if (used.size !== expected.size || [...expected].some((v) => !used.has(v))) fail(at);
             const results = c.alternatives.map((a) => sequence(a, bound, at));
             const first = results[0] ?? bound;
             for (const other of results)

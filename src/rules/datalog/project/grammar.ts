@@ -161,6 +161,8 @@ export function compileProjectGrammar(text: string, base: BaseIdentity): Project
   for (const group of all)
     for (const c of walk(group)) {
       if (++count > 1000) fail("native-clause-count", "clauses");
+      if ((c.type === "not" || c.type === "or") && c.join !== null && !c.join.length)
+        fail("native-join", "clauses");
       if (
         c.type === "call" &&
         (!arities.has(c.predicate) || arities.get(c.predicate) !== c.args.length)
