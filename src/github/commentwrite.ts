@@ -76,9 +76,16 @@ export interface CommentRecoveryBoundaries {
   now?: () => number;
   /** Abortable wait (production: a timer). */
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
+  /**
+   * The overall-deadline timer that in-flight POSTs and reads are raced against (production: a
+   * real timer; tests inject one to simulate the deadline passing mid-flight).
+   */
+  deadlineTimer?: (ms: number, signal: AbortSignal) => Promise<void>;
   signal?: AbortSignal;
   policy?: Partial<CommentRecoveryPolicy>;
 }
+
+const TIMED_OUT = Symbol("deadline");
 
 export type CommentRecoveryStatus =
   | "posted"
@@ -171,10 +178,29 @@ export async function postCommentWithRecovery(
       );
     return null;
   };
+  const deadlineTimer = b.deadlineTimer ?? realSleep;
+  /** Race in-flight work against what remains of the overall deadline. */
+  const within = async <T>(work: () => Promise<T>): Promise<T | typeof TIMED_OUT> => {
+    const remaining = start + policy.deadlineMs - now();
+    if (remaining <= 0) return TIMED_OUT;
+    const stop = new AbortController();
+    try {
+      return await Promise.race([
+        work(),
+        deadlineTimer(remaining, stop.signal).then(
+          (): typeof TIMED_OUT => TIMED_OUT,
+          () => new Promise<never>(() => {}),
+        ),
+      ]);
+    } finally {
+      stop.abort();
+    }
+  };
   const readBack = async (): Promise<CommentReceipt> => {
     if (!b.readBack) return { status: "unreadable" };
     try {
-      return await b.readBack();
+      const receipt = await within(b.readBack);
+      return receipt === TIMED_OUT ? { status: "unreadable" } : receipt;
     } catch {
       return { status: "unreadable" };
     }
@@ -186,7 +212,13 @@ export async function postCommentWithRecovery(
         acceptance: "not-accepted",
       });
     attempts += 1;
-    const attempt = await b.post();
+    const attempt = await within(b.post);
+    // The deadline passed with the POST in flight: it may still land, so never call it failed.
+    if (attempt === TIMED_OUT)
+      return done(
+        "unknown",
+        "The recovery deadline passed while the comment was being sent; it may have been posted. Inspect the ticket before re-running.",
+      );
     if (attempt.kind === "posted") return done("posted", "Posted.", { url: attempt.url });
     if (attempt.kind === "refused")
       return done("refused", attempt.message, { category: attempt.category });
@@ -207,13 +239,16 @@ export async function postCommentWithRecovery(
     // Throttled: the earliest retry is the latest of every applicable lower bound.
     const at = now();
     const bounds: number[] = [];
-    if (attempt.retryAfterSeconds !== null) bounds.push(at + attempt.retryAfterSeconds * 1000);
-    const retryAtMs = attempt.retryAt ? Date.parse(attempt.retryAt) : NaN;
+    // Only a bound in the future is timing evidence: a zero Retry-After, a past HTTP date or an
+    // already-passed reset is not permission to retry now, so the safe default applies instead.
+    const future = (ms: number) => {
+      if (Number.isFinite(ms) && ms > at) bounds.push(ms);
+    };
+    if (attempt.retryAfterSeconds !== null) future(at + attempt.retryAfterSeconds * 1000);
     // Wall-clock bounds are compared on the injected clock's own scale.
-    if (Number.isFinite(retryAtMs)) bounds.push(retryAtMs);
+    future(attempt.retryAt ? Date.parse(attempt.retryAt) : NaN);
     // An exhausted primary quota on the same response is a lower bound too: never earlier.
-    const resetMs = attempt.resetAt ? Date.parse(attempt.resetAt) : NaN;
-    if (Number.isFinite(resetMs)) bounds.push(resetMs);
+    future(attempt.resetAt ? Date.parse(attempt.resetAt) : NaN);
     const defaultDelay = bounds.length === 0;
     if (defaultDelay) bounds.push(at + policy.defaultDelayMs);
     const earliest = Math.max(...bounds);
@@ -240,7 +275,9 @@ export async function postCommentWithRecovery(
     let before: string | null = null;
     if (b.guard) {
       try {
-        before = await b.guard();
+        const read = await within(b.guard);
+        if (read === TIMED_OUT) throw new Error("deadline");
+        before = read;
       } catch {
         return throttled(" (its state could not be read before waiting)");
       }
@@ -269,12 +306,19 @@ export async function postCommentWithRecovery(
     if (found) return found;
     if (receipt.status === "unreadable" && b.readBack)
       return throttled(" (the ticket could not be re-read before retrying)");
+    const reread = "its state could not be re-read within the deadline";
     let conflict = b.stillApplicable
-      ? await b.stillApplicable().catch(() => "its state could not be re-read")
+      ? await within(b.stillApplicable).then(
+          (v) => (v === TIMED_OUT ? reread : v),
+          () => reread,
+        )
       : null;
     if (!conflict && b.guard) {
-      const after = await b.guard().catch(() => null);
-      if (after === null) conflict = "its state could not be re-read";
+      const after = await within(b.guard).then(
+        (v) => (v === TIMED_OUT ? null : v),
+        () => null,
+      );
+      if (after === null) conflict = reread;
       else if (after !== before)
         conflict = "the ticket changed during the wait (state, labels or comments)";
     }

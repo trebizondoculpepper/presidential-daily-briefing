@@ -127,6 +127,86 @@ describe("postCommentWithRecovery (#345)", () => {
     });
     expect(auth.sleeps).toEqual([]);
   });
+  it("treats a past Retry-After date, a passed reset or a zero delay as the 60s default", async () => {
+    for (const over of [
+      { retryAt: new Date(T0 - 5_000).toISOString() },
+      { resetAt: new Date(T0 - 1_000).toISOString() },
+      { retryAfterSeconds: 0 },
+    ]) {
+      const t = scripted([secondary(over)]);
+      const r = await postCommentWithRecovery(t.boundaries);
+      expect(t.sleeps).toEqual([60_000]);
+      expect(r).toMatchObject({ status: "posted", attempts: 2 });
+    }
+    const t = scripted([secondary({ retryAt: new Date(T0 - 5_000).toISOString() }), secondary()]);
+    expect(await postCommentWithRecovery(t.boundaries)).toMatchObject({
+      status: "throttled",
+      defaultDelay: true,
+    });
+  });
+  /** A deadline timer that fires as soon as `fire()` is called, advancing the injected clock. */
+  function slowDeadline() {
+    let fire: () => void = () => {};
+    return {
+      fire: () => fire(),
+      deadlineTimer: (_ms: number, signal: AbortSignal) =>
+        new Promise<void>((resolve, reject) => {
+          fire = resolve;
+          signal.addEventListener("abort", () => reject(new Error("cleared")), { once: true });
+        }),
+    };
+  }
+  it("reports a POST still in flight at the deadline as may-have-been-posted", async () => {
+    const d = slowDeadline();
+    let posts = 0;
+    const pending = postCommentWithRecovery({
+      post: () => {
+        posts += 1;
+        return new Promise<CommentAttempt>(() => {});
+      },
+      readBack: async () => ({ status: "absent" }),
+      deadlineTimer: d.deadlineTimer,
+    });
+    await Promise.resolve();
+    d.fire();
+    const r = await pending;
+    expect(r).toMatchObject({ status: "unknown", acceptance: "unknown", attempts: 1 });
+    expect(r.message).toContain("may have been posted");
+    expect(posts).toBe(1);
+  });
+  it("stops without retrying when a recovery read outlives the deadline", async () => {
+    const d = slowDeadline();
+    const t = scripted([secondary({ retryAfterSeconds: 1 })]);
+    const pending = postCommentWithRecovery({
+      ...t.boundaries,
+      readBack: () => {
+        setTimeout(() => d.fire(), 0);
+        return new Promise<CommentReceipt>(() => {});
+      },
+      deadlineTimer: d.deadlineTimer,
+    });
+    const r = await pending;
+    expect(r).toMatchObject({ status: "throttled", acceptance: "not-accepted", attempts: 1 });
+    expect(t.posts()).toBe(1);
+  });
+  it("stops when the guard re-read outlives the deadline", async () => {
+    const d = slowDeadline();
+    const t = scripted([secondary({ retryAfterSeconds: 1 })]);
+    let reads = 0;
+    const r = await postCommentWithRecovery({
+      ...t.boundaries,
+      guard: () => {
+        reads += 1;
+        if (reads === 1) return Promise.resolve("s");
+        setTimeout(() => d.fire(), 0);
+        return new Promise<string>(() => {});
+      },
+      deadlineTimer: d.deadlineTimer,
+    });
+    expect(r).toMatchObject({ status: "conflict" });
+    expect(r.message).toContain("within the deadline");
+    expect(t.posts()).toBe(1);
+  });
   it("finds a lost-reply comment by read-back and never posts it again", async () => {
     const t = scripted(["lost"]);
     const r = await postCommentWithRecovery(t.boundaries);
