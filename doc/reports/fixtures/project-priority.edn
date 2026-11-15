@@ -1,0 +1,4 @@
+;; Credential-free #499 research fixture. Native DataScript rule syntax.
+[[(project-priority ?t ?score)
+  [?t "label" "project:priority"]
+  [(+ 0 10) ?score]]]
