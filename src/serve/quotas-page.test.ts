@@ -36,12 +36,19 @@ const body = () => ({
 });
 const ok = (): RestAnswer => ({ status: 200, body: body() });
 
-async function setup(answer: (n: number) => RestAnswer | Promise<RestAnswer> = () => ok()) {
+async function setup(
+  answer: (n: number) => RestAnswer | Promise<RestAnswer> = () => ok(),
+  logins: string[] = ["octo"],
+) {
+  let authReads = 0;
   const calls: string[] = [];
   let collects = 0;
   const serve: ServeRuntime = {
     currentRepository: async () => "example/one",
-    authContext: async () => ({ host: "github.com", login: "octo" }),
+    authContext: async () => ({
+      host: "github.com",
+      login: logins[Math.min(authReads++, logins.length - 1)]!,
+    }),
     clock: { now: () => new Date(T0), setTimeout: () => ({}), clearTimeout: () => undefined },
     stdout: () => undefined,
     stderr: () => undefined,
@@ -148,7 +155,8 @@ describe("quota page and API (#548)", () => {
           reply.json.secondary.scope === "service"
             ? { scope: "service", since: reply.json.secondary.since, events: [], discarded: 0 }
             : null,
-        requests: { quota: 1, context: 0 },
+        // A refresh re-reads the gh login first: one identity read, counted.
+        requests: { quota: 1, context: 1 },
       });
       expect(reply.json).toEqual(expected);
       expect(quotasText(reply.json)).toBe(quotasText(expected));
@@ -177,6 +185,21 @@ describe("quota page and API (#548)", () => {
       expect(replies.map((r) => r.json.freshness)).toEqual(["live", "live"]);
     } finally {
       await slow.running.close();
+    }
+  });
+
+  it("re-reads the gh login on refresh, so a switched login is labelled and held apart", async () => {
+    const s = await setup(() => ok(), ["octo", "octo", "other-login"]);
+    try {
+      const first = (await get(s.running.port, "/api/v1/quotas?refresh=true")).json;
+      expect(first.account).toBe("octo");
+      const switched = (await get(s.running.port, "/api/v1/quotas?refresh=true")).json;
+      expect(switched.account).toBe("other-login");
+      expect(switched.freshness).toBe("live");
+      // The page names the login the server now verifies.
+      expect((await get(s.running.port, "/quotas")).body).toContain("<strong>other-login</strong>");
+    } finally {
+      await s.running.close();
     }
   });
 
@@ -274,6 +297,14 @@ describe("quota renderers (#548)", () => {
     expect(parts.meters.match(/No bar:/g)?.length).toBe(4);
   });
 
+  it("drops the bar locally once a reset passes, without fetching", () => {
+    const rows = body().resources;
+    const later = view.render(viewOf(rows), T0 + 31 * 60_000);
+    expect(later.meters).not.toContain("<meter ");
+    expect(later.meters.match(/↻ Reset passed: refresh needed/g)?.length).toBe(4);
+    expect(later.meters).toContain("reset passed; refresh needed");
+  });
+
   it("escapes every string and states unreachable failures without numbers", () => {
     const parts = view.renderUnreachable("TypeError: <img src=x onerror=alert(1)>");
     expect(parts.state).not.toContain("<img");
@@ -306,7 +337,11 @@ describe("quota browser script (#548)", () => {
         querySelectorAll: () => [],
       },
       AbortController,
-      Date,
+      Date: class extends Date {
+        static override now() {
+          return T0;
+        }
+      },
       setInterval: () => 0,
       fetch: (path: string, init: { signal: AbortSignal }) => {
         fetched.push({ path, signal: init.signal });
