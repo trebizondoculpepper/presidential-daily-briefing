@@ -31,7 +31,13 @@ import {
 } from "../config/config.js";
 import type { ConfigFileSystem, GitRunner } from "../config/config.js";
 import { sizeReport } from "./estimation.js";
-import type { EstimationFinding, EstimationReport, SizeReading, SizeSource } from "./estimation.js";
+import type {
+  EstimationFinding,
+  EstimationReport,
+  ProvenanceDecision,
+  SizeReading,
+  SizeSource,
+} from "./estimation.js";
 import type { PickupContext } from "../briefing/ranking.js";
 import type { Issue } from "../github/types.js";
 
@@ -147,6 +153,8 @@ export interface LabelEstimationInput {
   status: "available" | "disabled" | "unknown";
   unavailable: string | null;
   findings: EstimationFinding[];
+  /** Complexity provenance trust decisions by issue URL (#269), prepared by the read service. */
+  provenance?: ReadonlyMap<string, ProvenanceDecision>;
 }
 
 export interface LabelEstimationRuntime {
@@ -227,6 +235,7 @@ export function labelEstimationReport(
     findings: input.findings,
     evidence: "complexity size label",
     read: labelSizeReading,
+    provenance: input.provenance,
   };
   return sizeReport(issues, source, options);
 }

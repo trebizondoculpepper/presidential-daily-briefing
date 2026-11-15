@@ -25,7 +25,8 @@ import type { DependencyReport } from "../github/dependencies.js";
 import { compactBriefing, compactText } from "./compact.js";
 import { briefing, textReport } from "./briefing.js";
 import type { BriefingOptions } from "./briefing.js";
-import { readSnapshotAssessments } from "./assessments.js";
+import { readSnapshotAssessments, unknownTrust } from "./assessments.js";
+import { readComplexityProvenance } from "../estimation/estimation.js";
 import { collectLabelEstimationInput, metricStatus } from "../estimation/complexitylabels.js";
 import type { LabelEstimationRuntime } from "../estimation/complexitylabels.js";
 import type { Snapshot } from "../github/types.js";
@@ -79,7 +80,7 @@ export async function presentBriefing(
   const collected = await collectLabelEstimationInput(snapshot.repository, estimationRuntime);
   // Locally generated configuration diagnostics may name local directories; a remote front end
   // rewrites only these strings, never GitHub-authored evidence. The CLI passes no rewriter.
-  const estimation = redactDiagnostic
+  const redacted = redactDiagnostic
     ? {
         ...collected,
         unavailable: collected.unavailable && redactDiagnostic(collected.unavailable),
@@ -99,6 +100,18 @@ export async function presentBriefing(
     platform: options.platform,
     signal,
   });
+  // Complexity provenance trust (#269), after the paired read so the permission cache is warm.
+  const estimation =
+    collected.status === "available"
+      ? {
+          ...redacted,
+          provenance: await readComplexityProvenance(
+            snapshot.issues,
+            trust ?? unknownTrust,
+            signal,
+          ),
+        }
+      : redacted;
   // Trusted delivery responsibility (#182 over #190 records) from the comments already collected.
   const responsibility = await readSnapshotResponsibility(snapshot, trust, signal);
   options = { ...options, responsible: responsibility.responsible };

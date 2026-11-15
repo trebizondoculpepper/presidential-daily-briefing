@@ -14,6 +14,7 @@ import { main } from "../cli.js";
 import { compactBriefing } from "./compact.js";
 import type { CompactBriefing } from "./compact.js";
 import { collectLabelEstimationInput } from "../estimation/complexitylabels.js";
+import { readComplexityProvenance } from "../estimation/estimation.js";
 import { TOML_CONFIG_PATH } from "../config/config.js";
 import type { ConfigFileSystem, GitRunner } from "../config/config.js";
 import { markerTrust } from "../workflow/delivery.js";
@@ -454,7 +455,12 @@ describe("legacy complexity and estimation stay byte-compatible (#247)", () => {
       maxChars: 10000,
       engineSetting: { requested: "typescript" as const, source: "config" as const },
     };
-    const input = await collectLabelEstimationInput(repo, estimation());
+    const trust = markerTrust(permissionLookup(repo, permissions()));
+    // The legacy builder gets the same prepared provenance trust decisions (#269).
+    const input = {
+      ...(await collectLabelEstimationInput(repo, estimation())),
+      provenance: await readComplexityProvenance(snapshot.issues, trust),
+    };
     const wide = { ...options, estimation: input, limit: 2000 };
     const legacyExpanded = briefing(snapshot, wide, new Date(time));
     const legacy = compactBriefing(snapshot, options, legacyExpanded);
@@ -464,7 +470,7 @@ describe("legacy complexity and estimation stay byte-compatible (#247)", () => {
       estimation(),
       new Date(time),
       undefined,
-      markerTrust(permissionLookup(repo, permissions())),
+      trust,
     );
     const report = presented.report as CompactBriefing;
     expect(JSON.stringify(report.estimation)).toBe(JSON.stringify(legacy.estimation));
