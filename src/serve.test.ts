@@ -216,6 +216,10 @@ describe("pdb serve lifecycle (#373)", () => {
     expect((await call(port, "/dashboard.css")).headers["content-type"]).toBe(
       "text/css; charset=utf-8",
     );
+    // A bookmarked selection reloads; anything else in the query is still refused.
+    expect((await call(port, "/?repo=example%2Fone&role=designer&agent=me")).status).toBe(200);
+    expect((await call(port, "/?debug=1")).status).toBe(400);
+    expect((await call(port, "/dashboard.js?repo=x")).status).toBe(400);
     expect((await call(port, "/nope")).status).toBe(404);
     expect((await call(port, "/healthz?x=1")).status).toBe(400);
     const post = await call(port, "/healthz", { method: "POST" });

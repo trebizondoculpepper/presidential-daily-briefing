@@ -364,7 +364,18 @@ export async function startServe(
       }
       const file = dashboard.get(path);
       if (file) {
-        getOnly();
+        // The page keeps its selection in the URL so a view can be reloaded or bookmarked; only
+        // those parameters are accepted, and only on the page itself (#374).
+        const selection = ["repo", "role", "agent"];
+        if (
+          path === "/" &&
+          [...context.url.searchParams.keys()].every((k) => selection.includes(k))
+        ) {
+          if (request.method !== "GET" && request.method !== "HEAD")
+            throw new HttpFailure(405, "METHOD_NOT_ALLOWED", "Use GET.", [], {
+              allow: "GET, HEAD",
+            });
+        } else getOnly();
         response.writeHead(200, {
           "content-type": file.type,
           "cache-control": "no-store",

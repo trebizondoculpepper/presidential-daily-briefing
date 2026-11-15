@@ -19,10 +19,11 @@ const envelope = (over: Record<string, unknown> = {}, result: Record<string, unk
   kind: "serve-read",
   view: "briefing",
   status: "complete",
+  // An explicit agent has no configured triage role; the view's role comes from the result.
   selection: {
     repository: "o/r",
     agent: "me",
-    triageRole: "implementer",
+    triageRole: null,
     identityDiagnostic: null,
   },
   freshness: {
@@ -35,6 +36,7 @@ const envelope = (over: Record<string, unknown> = {}, result: Record<string, unk
   },
   result: {
     completeness: { complete: true, warnings: [] },
+    decisionEngine: { role: { used: "designer", source: "request" } },
     subjects: [{ url: url(1), title: "Fix <b>bold</b> & things" }],
     rankedActions: {
       total: 3,
@@ -131,6 +133,9 @@ describe("dashboard renderers (#374)", () => {
     );
     expect(unfocused).toContain("No identity &lt;entry&gt;");
     expect(unfocused).toContain("agent none (unfocused)");
+    // The header shows the role the briefing was ranked for, never the identity's configured role.
+    expect(render.renderState(envelope(), false)).toContain("o/r · role designer · agent me");
+    expect(unfocused).not.toContain("role implementer");
     expect(
       render.renderState(
         { status: "error", error: { code: "REPOSITORY_UNRESOLVED", message: "pick one" } },

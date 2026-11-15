@@ -132,9 +132,13 @@ export function dashboardRenderers(): DashboardRenderers {
     const selection = record(e.selection);
     if (selection.identityDiagnostic)
       parts.push(`<p class="warn">${escapeHtml(selection.identityDiagnostic)}</p>`);
+    // The role the briefing was ranked for, from the result itself: selection.triageRole is the
+    // identity's configured role (null for an explicit agent), not the requested view.
+    const role =
+      record(record(result.decisionEngine).role).used ?? record(result.role).name ?? "unknown";
     if (selection.repository)
       parts.push(
-        `<p>${escapeHtml(selection.repository)} · role ${escapeHtml(selection.triageRole ?? "")} · agent ${escapeHtml(selection.agent ?? "none (unfocused)")}</p>`,
+        `<p>${escapeHtml(selection.repository)} · role ${escapeHtml(role)} · agent ${escapeHtml(selection.agent ?? "none (unfocused)")}</p>`,
       );
     return parts.join("");
   };
