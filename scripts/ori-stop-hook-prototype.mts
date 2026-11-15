@@ -198,7 +198,7 @@ async function runWorkTurn(): Promise<TurnEvents> {
 async function resume(
   sessionId: string,
   briefing: string | undefined,
-): Promise<{ session: string; text: string }> {
+): Promise<{ session?: string; text: string }> {
   const prompt =
     `[before-stop rebrief, synthetic] A fresh PDB role briefing follows. ` +
     `Read the file ${FIXTURE} with a tool. Then reply with: ` +
@@ -222,7 +222,7 @@ async function resume(
     { cwd: PROJ, stdio: ["ignore", "pipe", "inherit"] },
   );
   return await new Promise((resolve) => {
-    const result = { session: sessionId, text: "" };
+    const result: { session?: string; text: string } = { text: "" };
     const rl = createInterface({ input: child.stdout });
     rl.on("line", (line) => {
       let o: Record<string, unknown>;
@@ -236,8 +236,10 @@ async function resume(
       const type = String(ev2?.type ?? o.type ?? "?");
       if (type === "assistant.text.delta")
         result.text += String((ev2?.payload as { delta?: string } | undefined)?.delta ?? "");
-      if (type === "result")
-        result.session = String((o as { sessionId?: string }).sessionId ?? sessionId);
+      if (type === "result") {
+        const resumedId = (o as { sessionId?: string }).sessionId;
+        if (typeof resumedId === "string" && resumedId.length > 0) result.session = resumedId;
+      }
     });
     rl.on("close", () => resolve(result));
   });
@@ -258,18 +260,21 @@ async function main(): Promise<void> {
   const delivered = await resume(turn.sessionId, core.briefing);
   const nonce = readFileSync(FIXTURE, "utf8").split("\n")[0].trim();
   const receivedNonce = delivered.text.includes(nonce);
-  const receivedAction = delivered.text.includes(
-    core.actionId.split(" ")[0].split("/").slice(0, 2).join("/"),
-  );
-  if (receivedNonce && receivedAction) rebriefAck(eventId, core.fingerprint);
+  const receivedAction = delivered.text.includes(core.actionId);
+  const sameSessionResumed =
+    delivered.session !== undefined && delivered.session === turn.sessionId;
+  const deliveredToSameSession = receivedNonce && receivedAction && sameSessionResumed;
+  if (deliveredToSameSession) rebriefAck(eventId, core.fingerprint);
   process.stdout.write(
     JSON.stringify({
       result: "continue",
       sessionId: turn.sessionId,
-      sameSessionResumed: delivered.session === turn.sessionId,
+      resumedSessionObserved: delivered.session !== undefined,
+      sameSessionResumed,
       eventId,
       receivedNonce,
       receivedAction,
+      acked: deliveredToSameSession,
       actionId: core.actionId.slice(0, 60),
       fingerprint: core.fingerprint.slice(0, 16),
       turnSawTool: turn.sawTool,

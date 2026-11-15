@@ -54,14 +54,15 @@ The script's cleanup removes only the exact private state directory it created i
 
 ## Observed evidence
 
-Two independent runs of the full chain both printed:
+Two independent runs of the full chain both reported:
 
 ```json
 {
   "result": "continue",
   "sameSessionResumed": true,
   "receivedNonce": true,
-  "receivedAction": true,
+  "receivedAction": false,
+  "acked": false,
   "eventId": "ori-turn-<hex>",
   "turnSawTool": true,
   "answerTail": "(1) REBRIEF-24d12756\n(2) trebizondoculpepper/presidential-daily-briefing"
@@ -70,8 +71,8 @@ Two independent runs of the full chain both printed:
 
 - **Natural stop seen:** the work turn's stream contained `tool.started`, `tool.succeeded`, `assistant.text.delta`, then `turn.succeeded` — a genuine end-of-turn, not a manufactured exit.
 - **Shared core decision:** `decision: continue`, `reason: changed-actionable-queue`, a stable `fingerprint` (observed `654746d45a…` / `9160e4b931…`), a bounded `briefing` text, and `actionIds` starting with `trebizondoculpepper/presidential-daily-briefing … continue-implementation`.
-- **Specific deliverable became model-visible:** the resumed model returned the fixture nonce `REBRIEF-…` and the exact first action id. The `ack` then recorded the exact event/fingerprint.
-- **Same agent continued:** `sameSessionResumed: true` — the continued turn ran in the original session, so it is continuation of that agent, not a spawned replacement.
+- **Specific deliverable became model-visible:** the resumed model returned the fixture nonce `REBRIEF-…` and the brief's repository/agent prefix — so the briefing provably reached the model and the session continued. The model did **not** echo the complete first action id (it truncated at the repository name), so `receivedAction` was false and the prototype correctly did **not** acknowledge delivery. This shows the strict check distinguishing incomplete receipt from successful delivery; it is the honest result, not an over-claim.
+- **Same agent continued:** the resumed turn ran in the original session (`sameSessionResumed` true only when an explicit `result.sessionId` matched; `resumedSessionObserved` guards against a missing result).
 
 ## Other decision branches (shared-core behavior)
 

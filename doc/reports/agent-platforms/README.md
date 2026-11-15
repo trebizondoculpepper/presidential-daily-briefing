@@ -8,6 +8,6 @@ Platform research feeds synthesis #20. Reports distinguish the researcher's actu
 - [Ori / OpenRouter](ori-openrouter.md) (#24): plain MCP is the baseline. Schedules and webhooks start new runs; steering into an idle session is unverified.
 - [Ori MCP acceptance result](ori-mcp-acceptance.md) (#255): conditional. Ori sends no MCP cancellation, and needs `--project` because servers start in the daemon's working directory.
 - [Ori Code stop hooks](ori-stop-hooks.md) (#388): no native stop hook. Mid-turn `steer` continues a turn; a steer at the natural stop was dropped. The workable adapter is an external watcher that resumes the same session with a new turn after `turn.succeeded`.
-- [Ori Code stop-hook prototype](ori-stop-hook-prototype.md) (#400): native continuation observed — a natural `turn.succeeded` → shared `pdb rebrief` core returns the specific briefing → the adapter resumes the **same session** and the model echoes the delivery nonce and the first action. Reuses the shared core; no hook installed.
+- [Ori Code stop-hook prototype](ori-stop-hook-prototype.md) (#400): native continuation observed — a natural `turn.succeeded` → shared `pdb rebrief` core returns the specific briefing → the adapter resumes the **same session** and the model echoes the delivery nonce and the brief's repo/agent prefix (the full action id echo was not confirmed, so delivery is not over-claimed). Reuses the shared core; no hook installed.
 
 Other platform report paths are listed in #20; an unmerged report is not represented as delivered by this index.
