@@ -12,6 +12,7 @@ import type { Schema } from "datascript";
  */
 export const requiredQueries = [
   "q0",
+  "declared-overrides",
   "q1",
   "q2",
   "q3",
@@ -36,6 +37,12 @@ export const requiredKeyQueries = [
   "urgency-key",
 ] as const;
 
+/** A declared precedence exception: when both rules match one subject, the winner overrides. */
+export interface OverridePair {
+  winner: string;
+  loser: string;
+}
+
 export interface DecisionRule {
   id: string;
   kind: string;
@@ -59,6 +66,11 @@ export interface PolicyBundle {
   /** rules.edn as one canonical EDN vector. */
   clauses: string;
   comparison: string[];
+  /**
+   * ordering.edn :overrides, in source order. The engine passes them to the
+   * `declared-overrides` query as [winner loser] tuples; `pdb rules` renders the same list.
+   */
+  overrides: OverridePair[];
   /** ordering.edn :rules as one canonical EDN vector; passed only with queries.q4. */
   sortClauses: string;
   definitions: DecisionRule[];

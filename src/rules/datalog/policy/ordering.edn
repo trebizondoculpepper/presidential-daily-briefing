@@ -1,6 +1,15 @@
 ;; Every sort column is inferred by these rules; the host only runs a fixed lexicographic
 ;; comparator over the emitted keys, in :comparison order.
-{:comparison ["band" "group" "primary" "urgency" "unlocks" "own" "incomplete" "created" "number" "target" "kind"]
+;; :overrides are the declared precedence exceptions between rules of the same kind that a
+;; generic band/preference comparison does not decide: when both rules match the same subject,
+;; the winner overrides the loser. The engine's :declared-overrides query and `pdb rules` both
+;; read this list; nothing else hard-codes a rule pair.
+{:overrides
+ [{:winner "D-EASY" :loser "D-ORDINARY"}
+  {:winner "D-UNFAVORABLE" :loser "D-ORDINARY"}
+  {:winner "D-OWN-EASY" :loser "D-OWN"}
+  {:winner "D-OWN-UNFAVORABLE" :loser "D-OWN"}]
+ :comparison ["band" "group" "primary" "urgency" "unlocks" "own" "incomplete" "created" "number" "target" "kind"]
  :rules
  [
  [(selected ?t ?r) [?t "matched" ?r] (not [?t "overridden" ?r])]
