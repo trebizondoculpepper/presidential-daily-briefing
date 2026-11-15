@@ -795,70 +795,95 @@ export function ticketStatusText(r: TicketStatus, maxChars = 10_000): string {
     `${r.state} (${r.closure}) · delivery ${d.verdict} (records ${d.records}) · ${r.completeness.complete ? "evidence complete" : "EVIDENCE INCOMPLETE"}`,
     `Next: ${first.kind} — ${first.why}${first.command ? ` (${first.command})` : ""}`,
   ];
-  const body: string[] = [];
+  // Actionable rows first (PRs, follow-ups, blockers, gaps), then optional detail.
+  const actionable: string[] = [];
+  const optional: string[] = [];
+  const read = r.pullRequests.filter((p) => p.detail === "read").length;
+  if (r.pullRequests.length) {
+    actionable.push(
+      `Pull requests (${read} of ${r.pullRequests.length} read, required first; limit ${r.coverage.limitPullRequests}):`,
+    );
+    actionable.push(...r.pullRequests.map(prLine));
+  } else
+    actionable.push(
+      `Pull requests: none found within the inspected sources (${r.coverage.linkage.complete ? "delivery records and closing references" : "closing references incomplete"}); not proof that none exists — ${r.links.intake}`,
+    );
+  for (const m of d.deliverables.filter((x) => !memberLabel.test(x.deliverable)))
+    actionable.push(
+      `  deliverable ${m.deliverable} → ${m.target}: ${m.state}; follow-up ${m.followUp}`,
+    );
+  for (const s of r.nextSteps.slice(1))
+    actionable.push(`  then ${s.kind}: ${s.why}${s.command ? ` (${s.command})` : ""}`);
+  if (!r.dependencies.known) actionable.push("Dependencies: unknown (native edges not read)");
+  else {
+    const open = r.dependencies.blockedBy.filter((b) => b.state === "OPEN");
+    if (open.length)
+      actionable.push(
+        `Blocked by: ${open.map((b) => `${b.repository}#${b.number} ${b.title}`).join("; ")}`,
+      );
+  }
+  for (const w of r.completeness.warnings.slice(0, 5)) actionable.push(`INCOMPLETE: ${w}`);
+  if (r.completeness.warnings.length > 5)
+    actionable.push(`INCOMPLETE: ${r.completeness.warnings.length - 5} more; use --json`);
+
   const o = r.ownership;
-  body.push(
+  optional.push(
     `Owner: ${o.answer}; ticket responsible ${o.responsibilityKnown ? (o.ticketResponsible ?? "nobody") : "unknown"}`,
   );
   const a = r.assessments;
   if (a.impact.state !== "unassessed" || a.complexity.state !== "unassessed")
-    body.push(`${metric("Impact", a.impact)} · ${metric("complexity", a.complexity)}`);
-  for (const b of d.because.slice(0, 2)) body.push(`  delivery: ${b}`);
-  for (const m of d.deliverables.filter((x) => !memberLabel.test(x.deliverable)))
-    body.push(`  deliverable ${m.deliverable} → ${m.target}: ${m.state}; follow-up ${m.followUp}`);
-  const read = r.pullRequests.filter((p) => p.detail === "read").length;
-  if (r.pullRequests.length) {
-    body.push(
-      `Pull requests (${read} of ${r.pullRequests.length} read, required first; limit ${r.coverage.limitPullRequests}):`,
-    );
-    body.push(...r.pullRequests.map(prLine));
-  } else
-    body.push(
-      `Pull requests: none found within the inspected sources (${r.coverage.linkage.complete ? "delivery records and closing references" : "closing references incomplete"}); not proof that none exists — ${r.links.intake}`,
-    );
-  for (const s of r.nextSteps.slice(1))
-    body.push(`  then ${s.kind}: ${s.why}${s.command ? ` (${s.command})` : ""}`);
-  if (!r.dependencies.known) body.push("Dependencies: unknown (native edges not read)");
-  else {
-    const open = r.dependencies.blockedBy.filter((b) => b.state === "OPEN");
-    if (open.length)
-      body.push(
-        `Blocked by: ${open.map((b) => `${b.repository}#${b.number} ${b.title}`).join("; ")}`,
-      );
+    optional.push(`${metric("Impact", a.impact)} · ${metric("complexity", a.complexity)}`);
+  for (const b of d.because.slice(0, 2)) optional.push(`  delivery: ${b}`);
+  if (r.dependencies.known) {
     const deps = r.dependencies.blocking.filter((b) => b.state === "OPEN");
-    if (deps.length) body.push(`Blocking: ${deps.map((b) => `#${b.number}`).join(", ")}`);
+    if (deps.length) optional.push(`Blocking: ${deps.map((b) => `#${b.number}`).join(", ")}`);
   }
   if (r.discussion.records.length)
-    body.push(
+    optional.push(
       `Records: ${r.discussion.records.map((x) => `${x.kind} ${x.at ?? "?"} ${x.url}`).join("; ")}`,
     );
   if (r.discussion.excerpts.length) {
-    body.push(
+    optional.push(
       `Latest discussion (excerpts, ${r.discussion.excerpts.length} of ${r.discussion.totalComments} comments, authors unverified):`,
     );
     for (const x of r.discussion.excerpts)
-      body.push(`  ${x.author} ${x.at ?? "?"}: ${x.excerpt.slice(0, 160)} ${x.url}`);
+      optional.push(`  ${x.author} ${x.at ?? "?"}: ${x.excerpt.slice(0, 160)} ${x.url}`);
   }
-  for (const w of r.completeness.warnings.slice(0, 5)) body.push(`INCOMPLETE: ${w}`);
-  if (r.completeness.warnings.length > 5)
-    body.push(`INCOMPLETE: ${r.completeness.warnings.length - 5} more; use --json`);
   const t = r.collection.telemetry;
-  body.push(
+  optional.push(
     `Observed live at ${r.freshness.requestedAt} · ${t.requests} requests, cost ${t.cost ?? `≥${t.knownCost} (some unknown)`} · full intake: ${r.links.intake}`,
   );
+  return fitText(
+    [...head, ...actionable, ...optional],
+    maxChars,
+    `pdb ticket ${r.number} --json --repo ${r.repository}`,
+  );
+}
 
-  const cut = `Truncated due to maximum size; full detail: pdb ticket ${r.number} --json --repo ${r.repository}`;
-  const out = [...head];
-  let size = out.join("\n").length + 1;
-  let truncated = false;
-  for (const line of body) {
-    if (size + line.length + 1 + cut.length + 1 > maxChars) {
-      truncated = true;
-      break;
-    }
+/**
+ * Whole lines in priority order within `maxChars`, counting every character including the
+ * header, newlines and the notice (#379): never more than the limit, never a refusal. A cut
+ * ends with the longest notice that fits: "Truncated due to maximum size." with the detail
+ * command, then without it, then "[truncated]", then "…".
+ */
+export function fitText(lines: string[], maxChars: number, detail: string): string {
+  const all = `${lines.join("\n")}\n`;
+  if (all.length <= maxChars) return all;
+  const notices = [
+    `Truncated due to maximum size. Full detail: ${detail}`,
+    "Truncated due to maximum size.",
+    "[truncated]",
+    "…",
+  ];
+  const notice = notices.find((n) => n.length + 1 <= maxChars);
+  if (!notice) return "…".slice(0, maxChars);
+  const out: string[] = [];
+  let size = notice.length + 1;
+  for (const line of lines) {
+    // Whole lines in priority order: stop at the first that does not fit.
+    if (size + line.length + 1 > maxChars) break;
     out.push(line);
     size += line.length + 1;
   }
-  if (truncated) out.push(cut);
-  return `${out.join("\n")}\n`;
+  return `${[...out, notice].join("\n")}\n`;
 }
