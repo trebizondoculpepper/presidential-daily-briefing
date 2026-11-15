@@ -75,19 +75,39 @@ export function clauseText(c: Clause): string {
         throw new Error(`cannot render ${c.fn} with ${c.args.length} operand(s)`);
       return `${c.result} = ${c.args.map(termText).join(` ${c.fn} `)}`;
     case "not":
-      return `no match${joinText(c.join)} for: ${conjunctionText(c.body)}`;
+      return `no match${joinText(c.join)} for: ${groupText(c.body)}`;
     case "or":
-      if (c.alternatives.length === 1) return `(${conjunctionText(c.alternatives[0])})`;
+      // Only a plain single-alternative `or` collapses; an or-join keeps its join variables.
+      if (c.alternatives.length === 1 && !c.join) return `(${conjunctionText(c.alternatives[0])})`;
       return `at least one of${joinText(c.join)}: ${c.alternatives
         .map((alt, i) => `(${i + 1}) ${conjunctionText(alt)}`)
         .join("; ")}`;
+    case "and":
+      return `(${conjunctionText(c.body)})`;
   }
 }
 
+/** Nested logical groups are parenthesised inside a conjunction, so their scope is explicit. */
+const isGroup = (c: Clause) => c.type === "not" || c.type === "or" || c.type === "and";
+/** A body that is more than one clause, or one nested group, is parenthesised. */
+const groupText = (clauses: Clause[]): string =>
+  clauses.length === 1 && !isGroup(clauses[0])
+    ? clauseText(clauses[0])
+    : `(${conjunctionText(clauses)})`;
+
 const joinText = (join: string[] | null) => (join ? ` (joined on ${join.join(", ")})` : "");
 
-export const conjunctionText = (clauses: Clause[]): string =>
-  clauses.length ? clauses.map(clauseText).join(" and ") : "always";
+export const conjunctionText = (clauses: Clause[]): string => {
+  if (!clauses.length) return "always";
+  if (clauses.length === 1) return clauseText(clauses[0]);
+  return clauses
+    .map((c) => {
+      const text = clauseText(c);
+      // "and"/plain one-alternative "or" already carry their own parentheses.
+      return isGroup(c) && !text.startsWith("(") ? `(${text})` : text;
+    })
+    .join(" and ");
+};
 
 /**
  * Clauses as indented lines, one clause per line; `not` and multi-alternative `or` groups put
@@ -99,7 +119,10 @@ export function clauseLines(clauses: Clause[], indent = "  "): string[] {
     if (c.type === "not" && c.body.length > 1) {
       lines.push(`${indent}- no match${joinText(c.join)} for all of:`);
       lines.push(...clauseLines(c.body, `${indent}    `));
-    } else if (c.type === "or" && c.alternatives.length > 1) {
+    } else if (c.type === "and" && c.body.length > 1) {
+      lines.push(`${indent}- all of:`);
+      lines.push(...clauseLines(c.body, `${indent}    `));
+    } else if (c.type === "or" && (c.alternatives.length > 1 || c.join)) {
       lines.push(`${indent}- at least one of${joinText(c.join)}:`);
       c.alternatives.forEach((alt, i) => {
         lines.push(`${indent}    (${i + 1}) all of:`);

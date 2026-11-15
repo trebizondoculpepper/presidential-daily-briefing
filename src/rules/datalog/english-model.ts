@@ -35,6 +35,8 @@ export type Clause =
   | { type: "call"; predicate: string; args: Term[] }
   | { type: "not"; join: string[] | null; body: Clause[] }
   | { type: "or"; join: string[] | null; alternatives: Clause[][] }
+  /** A bare `(and ...)` outside an `or`: a parenthesised conjunction. */
+  | { type: "and"; body: Clause[] }
   | { type: "compare"; op: string; args: Term[] }
   | { type: "bind"; fn: string; args: Term[]; result: string };
 
@@ -75,7 +77,13 @@ export interface CompiledDecision {
   codes: string[];
   /** Roles named by a top-level `[1 "role" "..."]` fact, or null when the rule names none. */
   roles: string[] | null;
+  /**
+   * Every where-clause the engine runs for this rule, in order: the shared match template
+   * (queries.edn :match, e.g. foreground(?t)) followed by the rule's own :when clauses.
+   */
   clauses: Clause[];
+  /** How many leading `clauses` come from the shared match template rather than :when. */
+  templateClauses: number;
   /** Predicates the condition calls directly. */
   calls: string[];
   /** The rule's own evidence bindings; EnglishPolicy.evidence lists those shared by all rules. */
