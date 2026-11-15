@@ -380,6 +380,11 @@ export const roleRegistry = new Map<string, RolePolicy>([
   ],
 ]);
 export const roleNames = (): string[] => [...roleRegistry.keys()];
+/**
+ * Every role a briefing request may name: the registered agent roles plus `human`
+ * (doc/design/human-briefing.md, #457), which is rule-derived and has no TypeScript sections.
+ */
+export const briefingRoleNames = (): string[] => [...roleNames(), "human"];
 
 export interface RoleView {
   name: string;

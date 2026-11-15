@@ -111,8 +111,11 @@ export function evaluatePolicy(input: PolicyFacts, options: PolicyOptions = {}):
   } = policy;
   // Bundle queries are canonical EDN printed by the build, so ":in $ %" has exactly this spelling.
   const query = (db: Db, q: string) => (q.includes(":in $ %") ? ds.q(q, db, clauses) : ds.q(q, db));
-  if (!["implementer", "designer"].includes(input.viewer.role))
-    throw new DatalogError("unsupported-role", "use --role implementer or --role designer");
+  if (!["implementer", "designer", "human"].includes(input.viewer.role))
+    throw new DatalogError(
+      "unsupported-role",
+      "use --role implementer, --role designer or --role human",
+    );
   for (const [entity, attribute, value] of input.datoms) {
     if (entity !== 1 && entity < firstSubjectId)
       throw new DatalogError("invalid-facts", `entity ${entity} is reserved for the policy`);
