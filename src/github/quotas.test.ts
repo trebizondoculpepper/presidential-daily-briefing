@@ -491,6 +491,102 @@ describe("QuotaService freshness, isolation and cancellation", () => {
   });
 });
 
+const refused = (
+  category: "access" | "secondary-rate-limit" | "rate-limited",
+  o: { retryAfterSeconds?: number; resetAt?: string; remaining?: number } = {},
+): RestAnswer => ({
+  status: category === "access" ? 403 : 429,
+  body: null,
+  evidence: {
+    category,
+    quotaEvidence: null,
+    errorTypes: [],
+    httpStatus: category === "access" ? 403 : 429,
+    observation: {
+      source: "response-header",
+      resource: null,
+      limit: null,
+      remaining: o.remaining ?? null,
+      used: null,
+      resetAt: o.resetAt ?? null,
+      retryAfterSeconds: o.retryAfterSeconds ?? null,
+      retryAt: null,
+      requestId: null,
+    },
+  },
+});
+
+describe("Codex review fixes (#551)", () => {
+  it("keeps reporting a failed refresh on later reads inside the TTL", async () => {
+    const h = harness((call) => (call === 1 ? ok() : refused("access")));
+    const service = new QuotaService({ rest: h.rest, now: h.clock });
+    await service.view(ctxA);
+    h.advance(5_000);
+    const refreshed = await service.view(ctxA, { refresh: true });
+    expect(refreshed).toMatchObject({ freshness: "stale", failure: { category: "access" } });
+    h.advance(20_000); // past the failure cooldown, still inside the 60 s TTL
+    const later = await service.view(ctxA);
+    expect(h.calls).toHaveLength(2);
+    expect(later).toMatchObject({ freshness: "stale", failure: { category: "access" } });
+    expect(later.resources).toHaveLength(5);
+    expect(quotaExitCode(later)).toBe(2);
+  });
+
+  it("clears the reported failure once a later lookup succeeds", async () => {
+    const h = harness((call) => (call === 2 ? refused("access") : ok()));
+    const service = new QuotaService({ rest: h.rest, now: h.clock });
+    await service.view(ctxA);
+    await service.view(ctxA, { refresh: true });
+    h.advance(11_000);
+    await service.view(ctxA, { refresh: true });
+    const view = await service.view(ctxA);
+    expect(view).toMatchObject({ freshness: "cached", failure: null });
+    expect(quotaExitCode(view)).toBe(0);
+  });
+
+  const exitFor = async (body: unknown, advanceMs = 0) => {
+    const h = harness(() => ok(body));
+    const service = new QuotaService({ rest: h.rest, now: h.clock });
+    await service.view(ctxA);
+    h.advance(advanceMs);
+    return quotaExitCode(await service.view(ctxA));
+  };
+
+  it("exits 2 for an HTTP 200 with no usable or incomplete primary evidence", async () => {
+    expect(await exitFor({ resources: {} })).toBe(2);
+    expect(await exitFor({ resources: { core: bucket(5000, 1), search: bucket(30, 0) } })).toBe(2);
+    const contradictory = families();
+    contradictory.resources.core = { limit: 5000, used: 10, remaining: 6000, reset: epoch(T0) };
+    expect(await exitFor(contradictory)).toBe(2);
+    const unknown = { resources: { ...families().resources, graphql: { remaining: 3 } } };
+    expect(await exitFor(unknown)).toBe(2);
+    // Past its reset inside the TTL: no claim to current capacity.
+    const passed = families();
+    passed.resources.core = bucket(5000, 1, T0 + 10_000);
+    expect(await exitFor(passed, 20_000)).toBe(2);
+    expect(await exitFor(families())).toBe(0);
+  });
+
+  it("never shortens GitHub's Retry-After or reset, even beyond ten minutes", async () => {
+    const h = harness(() => refused("secondary-rate-limit", { retryAfterSeconds: 3600 }));
+    const service = new QuotaService({ rest: h.rest, now: h.clock });
+    const first = await service.view(ctxA);
+    expect(first.embargo).toEqual({
+      retryAt: new Date(T0 + 3_600_000).toISOString(),
+      retryAfterSeconds: 3600,
+    });
+    h.advance(30 * 60_000);
+    const held = await service.view(ctxA, { refresh: true });
+    expect(h.calls).toHaveLength(1);
+    expect(held.embargo?.retryAt).toBe(first.embargo!.retryAt);
+
+    const resetAt = new Date(T0 + 2 * 3_600_000).toISOString();
+    const r = harness(() => refused("rate-limited", { remaining: 0, resetAt }));
+    const exhausted = new QuotaService({ rest: r.rest, now: r.clock });
+    expect((await exhausted.view(ctxA)).embargo?.retryAt).toBe(resetAt);
+  });
+});
+
 describe("pdb quotas", () => {
   const run = async (args: string[], rest: QuotaRest, login = true) => {
     let out = "";
