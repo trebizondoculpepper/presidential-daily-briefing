@@ -540,6 +540,99 @@ describe("PDB-owned identity store (#319)", () => {
     });
   });
 
+  describe("pdb.toml stays canonical when the legacy file is not needed (#528 review)", () => {
+    const unusable: [string, (dir: string) => Promise<ConfigFileSystem | undefined>][] = [
+      [
+        "malformed",
+        async (dir) => {
+          await writeFile(join(dir, LEGACY_IDENTITY_FILE), "[agents\nbroken");
+          return undefined;
+        },
+      ],
+      [
+        "unreadable",
+        async (dir) => {
+          await writeFile(join(dir, LEGACY_IDENTITY_FILE), LEGACY);
+          return {
+            ...nodeFileSystem,
+            readText: async (path) => {
+              if (path.endsWith(LEGACY_IDENTITY_FILE))
+                throw Object.assign(new Error("denied"), { code: "EACCES" });
+              return nodeFileSystem.readText(path);
+            },
+          };
+        },
+      ],
+    ];
+    for (const [kind, prepare] of unusable)
+      it(`detects the harness entry in pdb.toml despite a ${kind} legacy file`, async () => {
+        await withRepo(async (dir) => {
+          await writeFile(join(dir, IDENTITY_FILE), '[agents.codex]\nname = "pdb_codex"\n');
+          const fs = await prepare(dir);
+          const env = { CODEX_THREAD_ID: "t" };
+          expect(await listEntryKeys(dir, fs, "codex")).toEqual(["codex"]);
+          expect(await resolveReadIdentity({ project: dir, env, fs })).toMatchObject({
+            agent: "pdb_codex",
+            store: "pdb",
+          });
+          await git(dir, "remote", "add", "origin", "https://github.com/owner/name.git");
+          const report = await localDoctor({}, { cwd: dir, fs, env, probe, nodeVersion: "26.0.0" });
+          expect(report).toMatchObject({ agent: "pdb_codex", entry: "codex" });
+          expect(report.checks.find((c) => c.id === "identity.entry")?.status).toBe("ok");
+          const target = await resolveIdentityTarget(dir, undefined);
+          const write = await setIdentity(target, "codex", "identity.triage_role", "designer", {
+            fs,
+          });
+          expect(write.record).toMatchObject({ name: "pdb_codex", triageRole: "designer" });
+          // Still unknown, not absent, when pdb.toml lacks the entry the legacy file could hold.
+          await expect(listEntryKeys(dir, fs, "claude")).rejects.toBeInstanceOf(Error);
+          expect(
+            (await resolveReadIdentity({ project: dir, env: { CLAUDECODE: "1" }, fs })).agent,
+          ).toBeNull();
+        });
+      });
+
+    it("keeps working through config get with a broken legacy file after import", async () => {
+      await withRepo(async (dir) => {
+        await writeFile(join(dir, LEGACY_IDENTITY_FILE), LEGACY);
+        const env = { CODEX_THREAD_ID: "t" };
+        await config(dir, env, "set", "identity.triage_role", "designer");
+        await writeFile(join(dir, LEGACY_IDENTITY_FILE), "[agents\nbroken");
+        const got = await config(dir, env, "get", "identity.name", "--json");
+        expect(got.json()).toMatchObject({ value: "legacy_codex", store: "pdb" });
+      });
+    });
+  });
+
+  describe("replaced legacy entries no longer hold their names (#528 review)", () => {
+    it("lets another agent take a name whose legacy entry was imported and renamed", async () => {
+      await withRepo(async (dir) => {
+        await writeFile(join(dir, LEGACY_IDENTITY_FILE), LEGACY);
+        const target = await resolveIdentityTarget(dir, undefined);
+        await setIdentity(target, "codex", "identity.triage_role", "designer");
+        await setIdentity(target, "codex", "identity.name", "renamed_codex");
+        const taken = await setIdentity(target, "gemini", "identity.name", "legacy_codex");
+        expect(taken.record.name).toBe("legacy_codex");
+        // A legacy-only entry still holds its name.
+        await expect(
+          setIdentity(target, "other", "identity.name", "legacy_claude"),
+        ).rejects.toMatchObject({ code: "conflict" });
+      });
+    });
+
+    it("counts a legacy entry replaced in pdb.toml (renamed without import) as replaced", async () => {
+      await withRepo(async (dir) => {
+        await writeFile(join(dir, LEGACY_IDENTITY_FILE), '[agents.other]\nname = "amara_abara"\n');
+        await writeFile(join(dir, IDENTITY_FILE), '[agents.other]\nname = "someone_else"\n');
+        const target = await resolveIdentityTarget(dir, undefined);
+        const write = await setIdentity(target, "codex", "identity.triage_role", "designer", {
+          random: () => 0,
+        });
+        expect(write.generatedName).toBe("amara_abara");
+      });
+    });
+  });
+
   it("distinguishes ignored from tracked files and refuses tracked identity on either side", async () => {
     await withRepo(async (dir) => {
       const target = await resolveIdentityTarget(dir, undefined);

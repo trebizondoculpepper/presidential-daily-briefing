@@ -359,21 +359,26 @@ const agentKeys = (document: Table | null): string[] =>
  * values, so harness resolution (#38) can tell whether several logical entries share one
  * harness without seeing other agents' data. Both stores count because a legacy-only entry is
  * still a distinct logical agent that may be imported. A legacy file that cannot be read or
- * parsed throws (unknown is not absent); explicit `--entry` does not need this list.
+ * parsed throws (unknown is not absent) unless `canonical` (the entry key the caller would
+ * select) is already in pdb.toml; explicit `--entry` does not need this list.
  */
 export async function listEntryKeys(
   root: string,
   fs: ConfigFileSystem = nodeFileSystem,
+  canonical?: string,
 ): Promise<string[]> {
   const raw = await fs.readText(join(root, IDENTITY_FILE));
   const keys = agentKeys(raw === null ? null : parseIdentityDocument(raw));
-  let legacyRaw: string | null;
+  let legacy: string[];
   try {
-    legacyRaw = await fs.readText(join(root, LEGACY_IDENTITY_FILE));
+    const legacyRaw = await fs.readText(join(root, LEGACY_IDENTITY_FILE));
+    legacy = agentKeys(legacyRaw === null ? null : parseLegacyIdentityDocument(legacyRaw));
   } catch (error) {
-    throw unreadable(LEGACY_IDENTITY_FILE, error);
+    // pdb.toml is canonical: once it holds the entry the caller would select, an unusable
+    // legacy file is not needed to answer and must not block the lookup (#528 review).
+    if (canonical !== undefined && keys.includes(canonical)) return keys;
+    throw error instanceof ConfigError ? error : unreadable(LEGACY_IDENTITY_FILE, error);
   }
-  const legacy = agentKeys(legacyRaw === null ? null : parseLegacyIdentityDocument(legacyRaw));
   return [...keys, ...legacy.filter((key) => !keys.includes(key))];
 }
 
@@ -469,6 +474,22 @@ export function generateName(taken: ReadonlySet<string>, random: () => number): 
     "Could not generate an unused agent name.",
     "Choose one explicitly with pdb config set identity.name NAME --entry KEY.",
   );
+}
+
+/**
+ * Names of legacy entries that are still legacy-only: an entry whose key is already in pdb.toml
+ * (imported or renamed there) has been replaced and no longer holds its legacy name.
+ */
+function legacyOnlyNames(legacy: Table | null, current: Table, except: string): Set<string> {
+  const replaced = new Set(agentKeys(current));
+  const taken = new Set<string>();
+  const agents = legacy !== null && isTable(legacy.agents) ? legacy.agents : {};
+  for (const [key, table] of Object.entries(agents)) {
+    if (key !== except && !replaced.has(key) && isTable(table) && typeof table.name === "string") {
+      taken.add(table.name.toLowerCase());
+    }
+  }
+  return taken;
 }
 
 function namesInUse(document: Table | null, except: string, taken = new Set<string>()) {
@@ -929,8 +950,7 @@ export async function setIdentity(
     // Names of agents that exist only in the legacy file must not be duplicated (#528 review).
     const legacyNames = await readLegacyNames(target.root, fs);
     const legacyTaken = (name: string) =>
-      legacyNames.document !== null &&
-      namesInUse(legacyNames.document, entry).has(name.toLowerCase());
+      legacyOnlyNames(legacyNames.document, document, entry).has(name.toLowerCase());
     let legacyNamesUnchecked: string | null = null;
     if (field === "name") {
       if (legacyTaken(value)) throw legacyNameTaken(value, "");
@@ -971,7 +991,10 @@ export async function setIdentity(
         }
       } else if (field === "triage_role") {
         generatedName = generateName(
-          namesInUse(legacy.document, entry, namesInUse(document, entry)),
+          new Set([
+            ...namesInUse(document, entry),
+            ...legacyOnlyNames(legacy.document, document, entry),
+          ]),
           options.random ?? Math.random,
         );
         table.name = generatedName;
