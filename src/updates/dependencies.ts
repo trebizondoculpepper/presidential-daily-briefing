@@ -73,9 +73,11 @@ type Lock = Map<
 
 /**
  * The entry file a package's own manifest names for `import`: `exports` ("." or a bare
- * conditions object, choosing import, then node, then default) or else `main`, else index.js.
+ * conditions object, taking the first of import, node or default in the package's key order) or else `main`, else index.js.
  * Returns null when `exports` exists but names no file this check can follow.
  */
+const supportedConditions = new Set(["import", "node", "default"]);
+
 export function entryPoint(manifest: Record<string, unknown>): string[] | null {
   const pick = (target: unknown): string | null => {
     if (typeof target === "string") return target;
@@ -88,7 +90,9 @@ export function entryPoint(manifest: Record<string, unknown>): string[] | null {
     }
     if (typeof target !== "object" || target === null) return null;
     const conditions = target as Record<string, unknown>;
-    for (const c of ["import", "node", "default"]) if (c in conditions) return pick(conditions[c]);
+    // As Node does: the package's own key order decides, taking the first key in our set.
+    for (const [condition, value] of Object.entries(conditions))
+      if (supportedConditions.has(condition)) return pick(value);
     return null;
   };
   const exports = manifest.exports;
@@ -113,7 +117,7 @@ export function entryPoint(manifest: Record<string, unknown>): string[] | null {
 
 class Unknown extends Error {}
 
-function parseLock(text: string, what: string): Lock {
+function parseLock(text: string, what: string, requireRoot = false): Lock {
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
@@ -129,9 +133,20 @@ function parseLock(text: string, what: string): Lock {
     record.packages === null
   )
     throw new Unknown(`${what} has an unsupported lockfileVersion (supported: 2, 3)`);
+  const plain = (v: unknown): v is Record<string, unknown> =>
+    typeof v === "object" && v !== null && !Array.isArray(v);
+  const packages = record.packages;
+  // A malformed lock is unknown, never compared: packages must be a plain object of plain
+  // objects, and package-lock.json itself must carry its root ("") entry.
+  if (
+    !plain(packages) ||
+    (requireRoot && !plain(packages[""])) ||
+    Object.values(packages).some((entry) => !plain(entry))
+  )
+    throw new Unknown(`${what} is malformed`);
   const lock: Lock = new Map();
   for (const [key, value] of Object.entries(record.packages as Record<string, unknown>)) {
-    if (!key.startsWith("node_modules/") || typeof value !== "object" || value === null) continue;
+    if (!key.startsWith("node_modules/")) continue;
     const entry = value as Record<string, unknown>;
     lock.set(key, {
       version: typeof entry.version === "string" ? entry.version : null,
@@ -215,7 +230,7 @@ async function check({
   const lockText = await readText(join(root, "package-lock.json"));
   if (lockText === null)
     return unknown("package-lock.json", "This source checkout has no package-lock.json.");
-  const expected = parseLock(lockText, "package-lock.json");
+  const expected = parseLock(lockText, "package-lock.json", true);
 
   const fix = {
     next: [

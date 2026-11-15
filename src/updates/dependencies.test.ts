@@ -123,6 +123,55 @@ describe("dependency readiness (#346)", () => {
     expect(odd.status).toBe("unknown");
   });
 
+  it("resolves conditional exports in the package's own key order, as Node does", async () => {
+    const base = {
+      "package.json": manifest,
+      "package-lock.json": lock(expected),
+      "node_modules/.package-lock.json": lock(expected),
+      ...installedModules,
+    };
+    const nodeFirst = JSON.stringify({ exports: { node: "./node.cjs", import: "./esm.mjs" } });
+    const present = await run({
+      ...base,
+      "node_modules/zod/package.json": nodeFirst,
+      "node_modules/zod/node.cjs": "",
+    });
+    expect(present.status).toBe("ok");
+    // Only the import target exists: node came first, so the entry Node would load is missing.
+    const absent = await run({
+      ...base,
+      "node_modules/zod/package.json": nodeFirst,
+      "node_modules/zod/esm.mjs": "",
+    });
+    expect(absent.status).toBe("missing");
+  });
+
+  it("reports a malformed lockfile as unknown before comparing", async () => {
+    const malformed = [
+      JSON.stringify({ lockfileVersion: 3, packages: [] }),
+      JSON.stringify({ lockfileVersion: 3, packages: { "node_modules/zod": id("zod", "4.6.7") } }),
+      JSON.stringify({ lockfileVersion: 3, packages: { "": {}, "node_modules/zod": "4.6.7" } }),
+      JSON.stringify({ lockfileVersion: 3, packages: { "": [] } }),
+    ];
+    for (const text of malformed) {
+      const check = await run({
+        "package.json": manifest,
+        "package-lock.json": text,
+        "node_modules/.package-lock.json": lock(expected),
+        ...installedModules,
+      });
+      expect(check.status).toBe("unknown");
+      expect(check.detail).toMatch(/package-lock\.json is malformed/);
+    }
+    const hidden = await run({
+      "package.json": manifest,
+      "package-lock.json": lock(expected),
+      "node_modules/.package-lock.json": JSON.stringify({ lockfileVersion: 3, packages: [1] }),
+      ...installedModules,
+    });
+    expect(hidden.status).toBe("unknown");
+  });
+
   it("reports a changed integrity or source at the same version as out of date", async () => {
     for (const change of [
       { integrity: "sha512-other" },

@@ -266,6 +266,11 @@ it("carries a missing engine module's safe cause into the MCP error envelope (#3
     { repo: snapshot.repository, project: SYNTHETIC_ROOT },
     {
       collect: async () => snapshot,
+      // Injected local configuration readers: nothing reads the real checkout's config.
+      guide: local(),
+      estimation: local(),
+      fs: local().fs,
+      git: local().git,
       loadEngine: async () => {
         throw Object.assign(
           new Error("Cannot find package 'datascript' imported from /private/home/x/dist/d.mjs"),
