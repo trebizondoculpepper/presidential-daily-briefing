@@ -307,6 +307,16 @@ describe("project policy enablement and briefing integration (#516)", () => {
       presented.report as { rankedActions?: { items: { kind: string; target: string }[] } }
     ).rankedActions!.items;
     expect(targets(ranked)[0]).toBe(3);
+    // The text banner names the same effective revision as the JSON.
+    const text = (
+      await present({
+        projectRules: enabled,
+        projectRuntime: { loadPolicy: loadFixture },
+        context: true,
+      })
+    ).text;
+    expect(text).toContain(`${policy.effectiveRulesHash.slice(0, 12)}; project preferences`);
+    expect(text).not.toContain(rulesHash.slice(0, 12));
   });
 
   it("marks the briefing incomplete when an enabled policy fails, or the TS rollback is in use", async () => {
