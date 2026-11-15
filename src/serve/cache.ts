@@ -107,6 +107,8 @@ interface Entry {
 
 interface Inflight {
   id: string;
+  /** The login this collection runs under; diagnostics show only the current one's (#459). */
+  auth: AuthContext;
   repository: string;
   collector: string;
   coverage: Record<string, unknown>;
@@ -307,16 +309,20 @@ export class ServeCache {
         hits: e.hits,
       };
     });
-    const inflight = [...this.flights].map((f): InflightDiagnostic => ({
-      id: f.id,
-      repository: f.repository,
-      collector: f.collector,
-      subject: subjectOf(f.coverage),
-      startedAt: new Date(f.startedAt).toISOString(),
-      elapsedMs: now - f.startedAt,
-      waiters: f.waiters,
-      cancelled: f.controller.signal.aborted,
-    }));
+    // A collection still running for a retired login stays with its own waiters, but is never
+    // shown under the new one: auth contexts stay isolated in diagnostics too.
+    const inflight = [...this.flights]
+      .filter((f) => f.auth === this.auth)
+      .map((f): InflightDiagnostic => ({
+        id: f.id,
+        repository: f.repository,
+        collector: f.collector,
+        subject: subjectOf(f.coverage),
+        startedAt: new Date(f.startedAt).toISOString(),
+        elapsedMs: now - f.startedAt,
+        waiters: f.waiters,
+        cancelled: f.controller.signal.aborted,
+      }));
     return { entries, inflight };
   }
 
@@ -554,6 +560,7 @@ export class ServeCache {
     const epoch = this.epochOf(repository);
     const flight = {
       id: `f${++this.nextId}`,
+      auth: this.auth,
       repository: repository.toLowerCase(),
       collector,
       coverage: cacheKey.coverage,
@@ -583,6 +590,7 @@ export class ServeCache {
         // to this flight's own waiters, whose key names the old login, but never stored where
         // the new login's reads would find it.
         const collectedAs = this.auth;
+        flight.auth = collectedAs;
         const storeKey = this.keyOf(cacheKey);
         const value = await produce(controller.signal);
         const entry: Entry = {

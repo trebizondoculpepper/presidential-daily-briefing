@@ -45,9 +45,10 @@ class ManualClock implements Clock {
 async function setup(repos = ["example/one"], gate?: Promise<void>) {
   const clock = new ManualClock();
   const collects: string[] = [];
+  const login = { current: "octo-secret-login" };
   const serve: ServeRuntime = {
     currentRepository: async () => repos[0]!,
-    authContext: async () => ({ host: "github.com", login: "octo-secret-login" }),
+    authContext: async () => ({ host: "github.com", login: login.current }),
     clock,
     stdout: () => undefined,
     stderr: () => undefined,
@@ -84,7 +85,7 @@ async function setup(repos = ["example/one"], gate?: Promise<void>) {
     return { status: response.status, text: await response.text() };
   };
   const json = async (path: string) => JSON.parse((await get(path)).text);
-  return { running, clock, collects, get, json };
+  return { running, clock, collects, get, json, login };
 }
 
 describe("serve diagnostics (#459)", () => {
@@ -261,6 +262,29 @@ describe("serve diagnostics (#459)", () => {
       release();
       await pending;
       expect((await s.json("api/v1/diagnostics/inflight")).data.items).toEqual([]);
+    } finally {
+      await s.running.close();
+    }
+  });
+
+  it("never shows a collection still running for a retired gh login", async () => {
+    let release = () => undefined as void;
+    const s = await setup(["example/one"], new Promise<void>((done) => (release = done)));
+    try {
+      const first = s.get("api/v1/briefing");
+      for (let i = 0; i < 50 && s.collects.length === 0; i++)
+        await new Promise((r) => setTimeout(r, 10));
+      expect((await s.json("api/v1/diagnostics/inflight")).data.total).toBe(1);
+      // gh auth switch: the next live collection (after the TTL) notices and clears the cache.
+      s.login.current = "someone-else";
+      s.clock.time += 6 * 60_000;
+      const second = s.get("api/v1/issues/1");
+      for (let i = 0; i < 50 && s.collects.length < 2; i++)
+        await new Promise((r) => setTimeout(r, 10));
+      const items = (await s.json("api/v1/diagnostics/inflight")).data.items;
+      expect(items.map((f: { subject: number | null }) => f.subject)).toEqual([1]);
+      release();
+      await Promise.all([first, second]);
     } finally {
       await s.running.close();
     }
