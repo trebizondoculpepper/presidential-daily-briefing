@@ -581,6 +581,7 @@ async function runIdentity(
     generatedName: write.generatedName,
     importedFrom: write.importedFrom,
     legacyIgnored: write.legacyIgnored,
+    legacyNamesUnchecked: write.legacyNamesUnchecked,
     excludeRuleAdded: write.excluded,
     ...setting,
   };
@@ -592,6 +593,9 @@ async function runIdentity(
       : "",
     write.legacyIgnored
       ? `ignored the legacy identity file (nothing imported; it was not changed): ${write.legacyIgnored}`
+      : "",
+    write.legacyNamesUnchecked && !write.legacyIgnored
+      ? `could not check the name against agent-inbox.toml names: ${write.legacyNamesUnchecked}`
       : "",
     write.excluded ? `added /${IDENTITY_FILE} to this repository's local Git exclude file` : "",
   ].filter(Boolean);

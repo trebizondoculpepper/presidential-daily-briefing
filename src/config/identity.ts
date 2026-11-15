@@ -656,6 +656,12 @@ export interface IdentityWriteResult {
    * the entry (nothing imported, the legacy file unchanged); null otherwise.
    */
   readonly legacyIgnored: string | null;
+  /**
+   * Why an explicit name could not be checked against names in agent-inbox.toml (the file
+   * exists but is unreadable or malformed, so its names are unknown); null when it was checked
+   * or there is no legacy file.
+   */
+  readonly legacyNamesUnchecked: string | null;
   /** Whether a repository-local exclude rule was added before writing. */
   readonly excluded: boolean;
   readonly record: IdentityRecord;
@@ -701,6 +707,42 @@ const conflict = (): ConfigError =>
     "conflict",
     `${IDENTITY_FILE} changed while this update was being prepared.`,
     "Retry the command; nothing was overwritten.",
+  );
+
+/**
+ * Names held in a legacy agent-inbox.toml, for collision checks only (read only). `raw` is the
+ * text the names came from (null when absent); `unknown` says why they cannot be known.
+ */
+type LegacyNames =
+  | { readonly raw: string | null; readonly document: Table | null; readonly unknown: null }
+  | { readonly raw: null; readonly document: null; readonly unknown: string };
+
+async function readLegacyNames(root: string, fs: ConfigFileSystem): Promise<LegacyNames> {
+  let raw: string | null;
+  try {
+    raw = await fs.readText(join(root, LEGACY_IDENTITY_FILE));
+  } catch (error) {
+    const code = String((error as NodeJS.ErrnoException).code ?? "error");
+    return {
+      raw: null,
+      document: null,
+      unknown: `${LEGACY_IDENTITY_FILE} could not be read (${code})`,
+    };
+  }
+  if (raw === null) return { raw: null, document: null, unknown: null };
+  try {
+    return { raw, document: parseLegacyIdentityDocument(raw), unknown: null };
+  } catch (error) {
+    if (!(error instanceof ConfigError)) throw error;
+    return { raw: null, document: null, unknown: error.message };
+  }
+}
+
+const legacyNameTaken = (name: string, holder: string): ConfigError =>
+  new ConfigError(
+    "conflict",
+    `The name ${JSON.stringify(name)} is already held by another agent entry in ${LEGACY_IDENTITY_FILE}${holder}; nothing was changed.`,
+    "Choose a different name; names identify one logical agent each, including agents not yet imported from the legacy file.",
   );
 
 /** A legacy entry to import into a new pdb.toml entry, with the bytes it was read from. */
@@ -866,6 +908,7 @@ export async function setIdentity(
       );
     }
     if (before.entryExists && identityValue(before, key) === value) {
+      // An unchanged value needs no collision check against the legacy file.
       // An unchanged value still refused a tracked file and established missing exclusion
       // above; the identity contents are left untouched.
       return {
@@ -875,6 +918,7 @@ export async function setIdentity(
         generatedName: null,
         importedFrom: null,
         legacyIgnored: null,
+        legacyNamesUnchecked: null,
         excluded,
         record: before,
       };
@@ -882,6 +926,16 @@ export async function setIdentity(
 
     let imported: LegacyImport | null = null;
     let legacyIgnored: string | null = null;
+    // Names of agents that exist only in the legacy file must not be duplicated (#528 review).
+    const legacyNames = await readLegacyNames(target.root, fs);
+    const legacyTaken = (name: string) =>
+      legacyNames.document !== null &&
+      namesInUse(legacyNames.document, entry).has(name.toLowerCase());
+    let legacyNamesUnchecked: string | null = null;
+    if (field === "name") {
+      if (legacyTaken(value)) throw legacyNameTaken(value, "");
+      legacyNamesUnchecked = legacyNames.unknown;
+    }
     let generatedName: string | null = null;
     if (!document.agents || !isTable(document.agents)) document.agents = Object.create(null);
     const agents = document.agents as Table;
@@ -906,6 +960,9 @@ export async function setIdentity(
               `The name ${JSON.stringify(imported.name)} of [agents.${entry}] in ${LEGACY_IDENTITY_FILE} is already used by another entry in ${IDENTITY_FILE}; nothing was imported.`,
               `Resolve it explicitly: choose a different name with pdb config set identity.name NAME --entry ${entry}, or correct the other entry, then retry.`,
             );
+          }
+          if (legacyTaken(imported.name)) {
+            throw legacyNameTaken(imported.name, ` besides [agents.${entry}]`);
           }
           table.name = imported.name;
         }
@@ -942,13 +999,22 @@ export async function setIdentity(
     }
     try {
       if ((await fs.readText(path)) !== raw) throw conflict();
+      // Collision checks and imports relied on the legacy bytes: they must be unchanged.
+      // Unknown legacy names were never relied on, so there is nothing to recheck then.
+      const checkedLegacy =
+        imported !== null ||
+        (legacyNames.unknown === null && (generatedName !== null || field === "name"));
+      const legacyNow = checkedLegacy
+        ? await fs.readText(join(target.root, LEGACY_IDENTITY_FILE))
+        : null;
       if (
-        imported !== null &&
-        (await fs.readText(join(target.root, LEGACY_IDENTITY_FILE))) !== imported.raw
+        checkedLegacy &&
+        ((legacyNames.unknown === null && legacyNow !== legacyNames.raw) ||
+          (imported !== null && legacyNow !== imported.raw))
       ) {
         throw new ConfigError(
           "conflict",
-          `${LEGACY_IDENTITY_FILE} changed while its identity was being imported; nothing was written.`,
+          `${LEGACY_IDENTITY_FILE} changed while this update was checking or importing its identities; nothing was written.`,
           "Retry the command to import the current legacy identity.",
         );
       }
@@ -965,6 +1031,7 @@ export async function setIdentity(
       generatedName,
       importedFrom: imported === null ? null : LEGACY_IDENTITY_FILE,
       legacyIgnored,
+      legacyNamesUnchecked,
       excluded,
       record: recordFor(parseIdentityDocument(text), entry),
     };
