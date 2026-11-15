@@ -1,6 +1,6 @@
 # Codex natural completion and interruption (#636)
 
-2026-11-15, priya_xu. Research performed inside this native Codex task; the running client exposes `CODEX_VERSION=0.169.0`. Separately inspected local `codex-cli 0.169.0`; matching version strings do not prove identical orchestration. Host: macOS 27.2.1 build 26B131, arm64; Node 26.10.0. Desktop bundle version unavailable at the conventional `/Applications/Codex.app` location. No new model trial, trust change, hook installation or private transcript inspection was performed.
+2026-11-15, priya_xu. Research performed inside this native Codex task; the running client exposes `CODEX_VERSION=0.169.0`. Separately inspected local `codex-cli 0.169.0`; matching version strings do not prove identical orchestration. Host: macOS 27.2.1 build 26B131, arm64; Node 26.10.0. Desktop bundle version unavailable at the conventional `/Applications/Codex.app` location. Researcher model/provider identity is not reliably exposed; no identity is inferred from a display name. Inspected PDB source revision: `62f2b18f6835ac3a2a8d888b53dcac6862a3a5bd`. No new model trial, trust change, hook installation or private transcript inspection was performed.
 
 This is a focused follow-up to [#387's protocol findings](codex-stop-hooks.md), [#398's observed native prototype](codex-stop-hook-prototype.md), and the shipped [shared rebrief interface](../../rebrief.md). It does not repeat the platform survey. It does not gate #581/#582's attended installers.
 
