@@ -3,6 +3,7 @@
  * "Implementation decisions"). Each builder selects fields from the existing versioned report,
  * names its prunable lists in pruning order and renders minimal text from returned rows only.
  */
+import { legacyTreeText, treeIncompleteText, type TreeBounds } from "../github/dependencies.js";
 import { leanRow } from "../briefing/leanrows.js";
 import { catchUpLimits, catchUpText } from "../briefing/catchup.js";
 import { dependencyFacts } from "../github/dependencies.js";
@@ -580,7 +581,17 @@ export function dependenciesView(
       (ref) => `Dependency ${ref} is in a repository this server does not serve; not read.`,
     ),
   ];
-  const incomplete = unknown.length > 0 || unfollowed.length > 0;
+  // An explicit tree stopped by its node limit, a quota refusal or unserved repositories is a
+  // partial graph (#196); the warning text is the CLI's own.
+  const bounds = obj(report.treeBounds);
+  const truncated = report.tree === true && bounds.complete !== true;
+  if (truncated)
+    warnings.push(
+      typeof bounds.nodesRead === "number"
+        ? treeIncompleteText(bounds as unknown as TreeBounds)
+        : legacyTreeText,
+    );
+  const incomplete = unknown.length > 0 || unfollowed.length > 0 || truncated;
   return {
     ...base,
     status: incomplete ? "incomplete" : base.status,
