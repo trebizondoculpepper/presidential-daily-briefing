@@ -8,3 +8,4 @@ agent-*.toml
 .ori/
 coverage/
 *.tsbuildinfo
+reports/
