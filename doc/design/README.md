@@ -13,6 +13,7 @@ The tool reduces GitHub searching and encodes agreed lifecycle prerequisites and
 | [Workflow guide and help](workflow-guide.md) | #71                                 |
 | [Identity compatibility](identity.md)        | #3, #38; MCP #25                    |
 | [Local `pdb serve` server](serve.md)         | #373, #390; dashboard #374          |
+| [Human briefing](human-briefing.md)          | #457; dashboard #458                |
 
 ## Handoff and sequencing
 
