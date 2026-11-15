@@ -144,6 +144,42 @@ describe("--label (#312)", () => {
     expect(run("designer", ["sfx"]).impactEstimation?.conflicts).toBe(1);
   });
 
+  it("the estimation summary describes the filtered pool, never repository-wide work", () => {
+    const data = snapshot(
+      [issue(1, ["status:ready", "sfx"]), issue(2, ["status:ready"]), issue(3, ["status:ready"])],
+      [],
+    );
+    const expanded = briefing(data, { limit: 1000, agent: "me" }, new Date(time));
+    const entry = (n: number, state: string) => ({
+      url: data.issues[n - 1]!.url,
+      number: n,
+      state,
+      createdAt: time,
+    });
+    const queued = [entry(1, "unestimated"), entry(2, "unestimated")];
+    const estimation = {
+      ...expanded.estimation,
+      status: "available",
+      detail:
+        "2 ticket(s) to estimate (unestimated or stale, blocked included); 1 unknown (unreadable), not queued.",
+      queue: { total: 2, omitted: 0, items: queued },
+      unknown: 1,
+      conflicts: [],
+      entries: [...queued, entry(3, "unknown")],
+    };
+    const r = compactBriefing(
+      data,
+      { limit: 10, agent: "me", role: "implementer", labels: ["sfx"] },
+      { ...expanded, estimation } as never,
+    );
+    expect(r.estimation).toMatchObject({
+      unknown: 0,
+      detail:
+        "1 ticket(s) to estimate within the label filter (unestimated or stale, blocked included).",
+    });
+    expect(r.estimation.queue?.total).toBe(1);
+  });
+
   it("truncated labels leave membership unknown and the result incomplete, never a known nonmatch", () => {
     const truncated = issue(1, ["status:ready"]);
     truncated.labels = { ...truncated.labels, pageInfo: { hasNextPage: true, endCursor: "c" } };

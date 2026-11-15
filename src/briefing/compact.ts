@@ -527,8 +527,24 @@ export function compactBriefing(
   const conflicts = unscopedConflicts.filter((e) => inScope(e.url));
   const shownQueue = queue?.items.slice(0, options.limit) ?? [];
   const shownConflicts = conflicts.slice(0, options.limit);
+  // #312: under a label filter the summary line and unknown count describe the scoped pool,
+  // so a view with nothing to estimate never claims repository-wide work.
+  const scopedSummary = wanted.length
+    ? (() => {
+        const unknown = facts.estimation.entries.filter(
+          (e) => e.state === "unknown" && inScope(e.url),
+        ).length;
+        return estimationFacts.status === "available"
+          ? {
+              unknown,
+              detail: `${queue?.total ?? 0} ticket(s) to estimate within the label filter (unestimated or stale, blocked included)${conflicts.length ? `; ${conflicts.length} with conflicting size evidence to inspect, not queued` : ""}${unknown ? `; ${unknown} unknown, not queued` : ""}.`,
+            }
+          : { unknown };
+      })()
+    : {};
   const estimation = {
     ...estimationFacts,
+    ...scopedSummary,
     conflicts: {
       total: conflicts.length,
       omitted: conflicts.length - shownConflicts.length,
