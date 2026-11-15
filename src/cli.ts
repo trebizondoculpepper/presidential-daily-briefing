@@ -137,7 +137,15 @@ export type DepsArguments =
       repo?: string;
       json?: boolean;
     }
-  | { help?: undefined; top: true; limit: number; repo?: string; json?: boolean }
+  | {
+      help?: undefined;
+      top: true;
+      limit: number;
+      repo?: string;
+      json?: boolean;
+      /** Fills the suggested claim command (NAME otherwise). */
+      agent?: string;
+    }
   | {
       help?: undefined;
       number: number;
@@ -493,7 +501,13 @@ export function depsArgumentsFor(args: string[]): DepsArguments {
       throw new Error("Usage: deps --top [--limit K] [--json] [--repo owner/name]");
     const limit = values.limit === undefined ? 10 : number(values.limit);
     if (limit === null || limit > 50) throw new Error("--limit must be 1–50.");
-    return { top: true, limit, repo: values.repo, json: values.json };
+    return {
+      top: true,
+      limit,
+      repo: values.repo,
+      json: values.json,
+      ...(values.agent ? { agent: values.agent } : {}),
+    };
   }
   if (values.limit) throw new Error("--limit applies only to deps --top.");
   if (
@@ -1553,7 +1567,7 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
     }
     if ("top" in values) {
       const inventory = await (runtime.dependencyInventory ?? readDependencyInventory)(repository);
-      const ranked = repositoryImpact(inventory, values.limit);
+      const ranked = repositoryImpact(inventory, values.limit, { prs: [] }, values.agent);
       await output(
         values.json ? JSON.stringify(ranked, null, 2) + "\n" : repositoryImpactText(ranked),
       );
