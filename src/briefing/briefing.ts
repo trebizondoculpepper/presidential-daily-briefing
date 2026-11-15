@@ -424,7 +424,8 @@ analysisRules.set("pull-requests", ({ snapshot, prs }) =>
     const verified = checks.some(
       (check) => check.name === workflow.verify && workflow.verifySuccess.includes(check.outcome),
     );
-    const complete = !snapshot.warnings.some((warning) => warning.startsWith(pr.url));
+    // Warnings are `${url}: …`; the separator stops /pull/1 matching /pull/12 (#448).
+    const complete = !snapshot.warnings.some((warning) => warning.startsWith(`${pr.url}:`));
     const clean =
       workflow.mergeable.includes(pr.mergeable) &&
       verified &&
