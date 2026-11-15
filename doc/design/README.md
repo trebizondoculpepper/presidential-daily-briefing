@@ -4,16 +4,17 @@ Status: owner-confirmed direction consolidated on 2026-11-13; implementation con
 
 The tool reduces GitHub searching and encodes agreed lifecycle prerequisites and mechanical updates in code. Agents retain semantic judgment and existing authority. One human objective should normally require one tool operation, even when several bounded API requests happen internally. Help and errors explain the process and provide valid next commands; they must not require a documentation hunt.
 
-| Contract                                     | Delivery tickets                    |
-| -------------------------------------------- | ----------------------------------- |
-| [Briefings and ranking](briefings.md)        | #1, #40, #43, #45; team context #41 |
-| [Claims and handoff](workflow.md)            | #2, #3, #62                         |
-| [Diagnosis and doctors](diagnostics.md)      | #41, #59–#61, #64, #66–#67          |
-| [Update notifications](updates.md)           | #51 then #65                        |
-| [Workflow guide and help](workflow-guide.md) | #71                                 |
-| [Identity compatibility](identity.md)        | #3, #38; MCP #25                    |
-| [Local `pdb serve` server](serve.md)         | #373, #390; dashboard #374          |
-| [Human briefing](human-briefing.md)          | #457; dashboard #458                |
+| Contract                                                                   | Delivery tickets                    |
+| -------------------------------------------------------------------------- | ----------------------------------- |
+| [Briefings and ranking](briefings.md)                                      | #1, #40, #43, #45; team context #41 |
+| [Claims and handoff](workflow.md)                                          | #2, #3, #62                         |
+| [Diagnosis and doctors](diagnostics.md)                                    | #41, #59–#61, #64, #66–#67          |
+| [Update notifications](updates.md)                                         | #51 then #65                        |
+| [Workflow guide and help](workflow-guide.md)                               | #71                                 |
+| [Identity compatibility](identity.md)                                      | #3, #38; MCP #25                    |
+| [Local `pdb serve` server](serve.md)                                       | #373, #390; dashboard #374          |
+| [Human briefing](human-briefing.md)                                        | #457; dashboard #458                |
+| [Dashboard navigation and pipeline metrics](dashboard-pipeline-metrics.md) | #573; pages #574–#576, #456, #605   |
 
 ## Handoff and sequencing
 
