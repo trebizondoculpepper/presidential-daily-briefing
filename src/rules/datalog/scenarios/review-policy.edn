@@ -1,0 +1,120 @@
+;; Declared review policy scenarios (#301, doc/design/declared-review-policy.md). Entity 1's
+;; review-coverage is the host-resolved policy mode; provider-review entities are host-normalized
+;; (authenticated, head-bound) provider states. Absent review-coverage is legacy, as every older
+;; scenario shows. Expectations are exhaustive, as in policy-cases.edn.
+{:suite "review-policy"
+ :scenarios
+ [
+ {:id "either-provider-codex-accepted"
+  :doc "Declared either-provider coverage: a clean current-head Codex receipt accepts the PR although CodeRabbit is pending (#301)."
+  :viewer {:role "implementer"}
+  :facts [{:e 1 "forward-complete" true "review-coverage" "any"}
+          {:e 100 "kind" "pr" "state" "OPEN" "number" 2 "target" "https://github.com/o/r/pull/2" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "head2" "draft" false "pr-complete" true "review-decision" "" "mergeable" "MERGEABLE" "merge-state" "BEHIND" "check" 101 "provider-review" [102 103]}
+          {:e 101 "name" "verify" "outcome" "SUCCESS"}
+          {:e 102 "provider" "codex" "provider-state" "accepted" "provider-commit" "head2"}
+          {:e 103 "provider" "coderabbit" "provider-state" "pending" "provider-commit" "head2"}]
+  :expect {:actions [{:subject 100 :rule "D-PR-INTEGRATE" :kind "pr-follow-up" :band 2
+              :why "Accepted at head head2 (verify passed, head reviewed, no fetched findings) but merge state is BEHIND, mergeable MERGEABLE; refresh mergeability or update the branch, then recheck before considering merge."
+              :facts {"impact" "unknown" "complexity" "unknown" "impactState" "unknown" "complexityState" "unknown" "head" "head2" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "mergeable" "MERGEABLE" "mergeState" "BEHIND" "verify" "SUCCESS"}
+              :overridden [] :unlocks 0 :unknown [] :other-claims []}]
+           :denials #{}}}
+
+ {:id "either-provider-coderabbit-accepted"
+  :doc "Declared either-provider coverage: a CodeRabbit approval of the current head accepts the PR although Codex is stale (#301)."
+  :viewer {:role "implementer"}
+  :facts [{:e 1 "forward-complete" true "review-coverage" "any"}
+          {:e 100 "kind" "pr" "state" "OPEN" "number" 2 "target" "https://github.com/o/r/pull/2" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "head2" "draft" false "pr-complete" true "review-decision" "" "mergeable" "MERGEABLE" "merge-state" "BEHIND" "check" 101 "provider-review" [102 103]}
+          {:e 101 "name" "verify" "outcome" "SUCCESS"}
+          {:e 102 "provider" "codex" "provider-state" "stale" "provider-commit" "head1"}
+          {:e 103 "provider" "coderabbit" "provider-state" "accepted" "provider-commit" "head2"}]
+  :expect {:actions [{:subject 100 :rule "D-PR-INTEGRATE" :kind "pr-follow-up" :band 2
+              :why "Accepted at head head2 (verify passed, head reviewed, no fetched findings) but merge state is BEHIND, mergeable MERGEABLE; refresh mergeability or update the branch, then recheck before considering merge."
+              :facts {"impact" "unknown" "complexity" "unknown" "impactState" "unknown" "complexityState" "unknown" "head" "head2" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "mergeable" "MERGEABLE" "mergeState" "BEHIND" "verify" "SUCCESS"}
+              :overridden [] :unlocks 0 :unknown [] :other-claims []}]
+           :denials #{}}}
+
+ {:id "either-provider-ignores-legacy-receipt-findings"
+  :doc "Declared either-provider coverage: raw login-only receipt findings do not veto; only host-authenticated provider findings do (#301, #556 review)."
+  :viewer {:role "implementer"}
+  :facts [{:e 1 "forward-complete" true "review-coverage" "any"}
+          {:e 100 "kind" "pr" "state" "OPEN" "number" 2 "target" "https://github.com/o/r/pull/2" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "head2" "draft" false "pr-complete" true "review-decision" "" "mergeable" "MERGEABLE" "merge-state" "BEHIND" "check" 101 "provider-review" 102 "receipt" 103}
+          {:e 101 "name" "verify" "outcome" "SUCCESS"}
+          {:e 102 "provider" "coderabbit" "provider-state" "accepted" "provider-commit" "head2"}
+          {:e 103 "receipt-commit" "head2" "receipt-status" "completed" "receipt-findings" true}]
+  :expect {:actions [{:subject 100 :rule "D-PR-INTEGRATE" :kind "pr-follow-up" :band 2
+              :why "Accepted at head head2 (verify passed, head reviewed, no fetched findings) but merge state is BEHIND, mergeable MERGEABLE; refresh mergeability or update the branch, then recheck before considering merge."
+              :facts {"impact" "unknown" "complexity" "unknown" "impactState" "unknown" "complexityState" "unknown" "head" "head2" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "mergeable" "MERGEABLE" "mergeState" "BEHIND" "verify" "SUCCESS"}
+              :overridden [] :unlocks 0 :unknown [] :other-claims []}]
+           :denials #{}}}
+
+ {:id "either-provider-both-accepted"
+  :doc "Declared either-provider coverage: both providers accepted (#301)."
+  :viewer {:role "implementer"}
+  :facts [{:e 1 "forward-complete" true "review-coverage" "any"}
+          {:e 100 "kind" "pr" "state" "OPEN" "number" 2 "target" "https://github.com/o/r/pull/2" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "head2" "draft" false "pr-complete" true "review-decision" "" "mergeable" "MERGEABLE" "merge-state" "BEHIND" "check" 101 "provider-review" [102 103]}
+          {:e 101 "name" "verify" "outcome" "SUCCESS"}
+          {:e 102 "provider" "codex" "provider-state" "accepted" "provider-commit" "head2"}
+          {:e 103 "provider" "coderabbit" "provider-state" "accepted" "provider-commit" "head2"}]
+  :expect {:actions [{:subject 100 :rule "D-PR-INTEGRATE" :kind "pr-follow-up" :band 2
+              :why "Accepted at head head2 (verify passed, head reviewed, no fetched findings) but merge state is BEHIND, mergeable MERGEABLE; refresh mergeability or update the branch, then recheck before considering merge."
+              :facts {"impact" "unknown" "complexity" "unknown" "impactState" "unknown" "complexityState" "unknown" "head" "head2" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "mergeable" "MERGEABLE" "mergeState" "BEHIND" "verify" "SUCCESS"}
+              :overridden [] :unlocks 0 :unknown [] :other-claims []}]
+           :denials #{}}}
+
+ {:id "either-provider-neither-is-not-accepted"
+  :doc "Declared either-provider coverage: a human approval is not provider coverage, and skipped/error providers never satisfy it (#301)."
+  :viewer {:role "implementer"}
+  :facts [{:e 1 "forward-complete" true "review-coverage" "any"}
+          {:e 100 "kind" "pr" "state" "OPEN" "number" 2 "target" "https://github.com/o/r/pull/2" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "head2" "draft" false "pr-complete" true "review-decision" "" "mergeable" "MERGEABLE" "merge-state" "BEHIND" "check" 101 "review" 104 "provider-review" [102 103]}
+          {:e 101 "name" "verify" "outcome" "SUCCESS"}
+          {:e 102 "provider" "codex" "provider-state" "error" "provider-commit" "head2"}
+          {:e 103 "provider" "coderabbit" "provider-state" "skipped" "provider-commit" "head2"}
+          {:e 104 "review-state" "APPROVED" "review-commit" "head2"}]
+  :expect {:actions []
+           :denials #{}}}
+
+ {:id "either-provider-stale-acceptance-is-not-current"
+  :doc "Declared either-provider coverage: acceptance of an older head does not cover a new head (#301)."
+  :viewer {:role "implementer"}
+  :facts [{:e 1 "forward-complete" true "review-coverage" "any"}
+          {:e 100 "kind" "pr" "state" "OPEN" "number" 2 "target" "https://github.com/o/r/pull/2" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "head2" "draft" false "pr-complete" true "review-decision" "" "mergeable" "MERGEABLE" "merge-state" "BEHIND" "check" 101 "provider-review" 102}
+          {:e 101 "name" "verify" "outcome" "SUCCESS"}
+          {:e 102 "provider" "codex" "provider-state" "accepted" "provider-commit" "head1"}]
+  :expect {:actions []
+           :denials #{}}}
+
+ {:id "either-provider-cross-provider-finding-vetoes"
+  :doc "Declared either-provider coverage: a CodeRabbit finding on the head blocks despite clean Codex coverage (#301)."
+  :viewer {:role "implementer"}
+  :facts [{:e 1 "forward-complete" true "review-coverage" "any"}
+          {:e 100 "kind" "pr" "state" "OPEN" "number" 2 "target" "https://github.com/o/r/pull/2" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "head2" "draft" false "pr-complete" true "review-decision" "" "mergeable" "MERGEABLE" "merge-state" "BEHIND" "check" 101 "provider-review" [102 103]}
+          {:e 101 "name" "verify" "outcome" "SUCCESS"}
+          {:e 102 "provider" "codex" "provider-state" "accepted" "provider-commit" "head2"}
+          {:e 103 "provider" "coderabbit" "provider-state" "findings" "provider-commit" "head2"}]
+  :expect {:actions []
+           :denials #{}}}
+
+ {:id "unknown-review-policy-accepts-nothing"
+  :doc "Unknown review policy: neither a legacy approval nor provider acceptance is coverage (#301)."
+  :viewer {:role "implementer"}
+  :facts [{:e 1 "forward-complete" true "review-coverage" "unknown"}
+          {:e 100 "kind" "pr" "state" "OPEN" "number" 2 "target" "https://github.com/o/r/pull/2" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "head2" "draft" false "pr-complete" true "review-decision" "" "mergeable" "MERGEABLE" "merge-state" "BEHIND" "check" 101 "review" 104 "provider-review" 102}
+          {:e 101 "name" "verify" "outcome" "SUCCESS"}
+          {:e 102 "provider" "codex" "provider-state" "accepted" "provider-commit" "head2"}
+          {:e 104 "review-state" "APPROVED" "review-commit" "head2"}]
+  :expect {:actions []
+           :denials #{}}}
+
+ {:id "explicit-legacy-coverage-keeps-approval"
+  :doc "Explicit legacy review coverage keeps the pre-#301 rule: a current-head approval is acceptance (#301)."
+  :viewer {:role "implementer"}
+  :facts [{:e 1 "forward-complete" true "review-coverage" "legacy"}
+          {:e 100 "kind" "pr" "state" "OPEN" "number" 2 "target" "https://github.com/o/r/pull/2" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "head2" "draft" false "pr-complete" true "review-decision" "" "mergeable" "MERGEABLE" "merge-state" "BEHIND" "check" 101 "review" 104}
+          {:e 101 "name" "verify" "outcome" "SUCCESS"}
+          {:e 104 "review-state" "APPROVED" "review-commit" "head2"}]
+  :expect {:actions [{:subject 100 :rule "D-PR-INTEGRATE" :kind "pr-follow-up" :band 2
+              :why "Accepted at head head2 (verify passed, head reviewed, no fetched findings) but merge state is BEHIND, mergeable MERGEABLE; refresh mergeability or update the branch, then recheck before considering merge."
+              :facts {"impact" "unknown" "complexity" "unknown" "impactState" "unknown" "complexityState" "unknown" "head" "head2" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "mergeable" "MERGEABLE" "mergeState" "BEHIND" "verify" "SUCCESS"}
+              :overridden [] :unlocks 0 :unknown [] :other-claims []}]
+           :denials #{}}}
+]}

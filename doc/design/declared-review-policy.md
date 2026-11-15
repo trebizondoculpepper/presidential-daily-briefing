@@ -29,6 +29,8 @@ ambiguous effective config is unknown, not an excuse to adopt either-provider or
 quietly guess legacy. Remote reads without verified local config report that scope.
 
 Use the existing repository config service and `pdb config` help/get/set/list.
+Implemented in #301: `src/workflow/reviewpolicy.ts` (registry, adapters, coverage),
+`src/config/review-setting.ts` (resolution) and `rules.edn` `review-coverage`/`provider-review`.
 Document the setting as planned until implemented. In the implementation PR, this
 project may explicitly select the registered OR policy to match its already agreed
 process; do not add an unsupported config key before that runtime registry ships.

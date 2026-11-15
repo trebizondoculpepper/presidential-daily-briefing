@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { resolveEngineSetting } from "./config/engine-setting.js";
+import { resolveReviewPolicy } from "./config/review-setting.js";
 /** One read-only intake command. Contract: doc/pdb-cli.md. */
 import { realpathSync } from "node:fs";
 import { readFile, writeFile, rename, mkdir } from "node:fs/promises";
@@ -236,6 +237,9 @@ Rollback: pdb config set briefing.engine typescript.
                         as a complexity:S label with provenance (estimate --help);
                         --metric impact records a benefit estimate as impact:S
   pr N                  Why is pull request N not progressing? Every blocker at once
+                        under the declared review.policy (pdb config help): with
+                        codex-or-coderabbit either provider's current-head acceptance
+                        covers review; a finding from either still blocks
   pr N --history        Why does PR N keep failing review? Rounds, findings, recurring files
   claim N --agent NAME [--branch B] [--platform P] [--rework] [--dry-run]  Claim an eligible ticket;
                         --rework reclaims your own awaiting-review issue to fix review feedback;
@@ -919,14 +923,18 @@ export async function checkpointSince(
   }
 }
 /** #192: per-run delivery boundaries; offline, or without injected ones, nothing is read. */
-const deliveryBoundaries = (runtime: Runtime, repository: string, offline: boolean) =>
-  !offline && runtime.rest && runtime.query
+const deliveryBoundaries = async (runtime: Runtime, repository: string, offline: boolean) => ({
+  ...(!offline && runtime.rest && runtime.query
     ? {
         trust: markerTrust(permissionLookup(repository, runtime.rest)),
         trustWith: (rest: Rest) => markerTrust(permissionLookup(repository, rest)),
         live: { query: runtime.query, rest: runtime.rest },
       }
-    : {};
+    : {}),
+  // #301: the declared review policy of this verified checkout (another repository's is never
+  // read: a mismatched checkout is reported as undeclared, no-matching-project).
+  reviewPolicy: await resolveReviewPolicy(repository, runtime.guide ?? {}),
+});
 
 export async function main(
   args: string[],
@@ -1175,6 +1183,8 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
       ? await cachedSnapshot(values.cache ?? "", values.repo)
       : await runtime.collect(values.repo ?? (await runtime.currentRepository()), {});
     if (!values.offline && values.cache) await atomicJson(values.cache, snapshot);
+    // #301: the declared review policy, after caching (configuration is never cached).
+    snapshot.reviewPolicy = await resolveReviewPolicy(snapshot.repository, runtime.guide ?? {});
     const impact = await metricStatus(impactMetric, snapshot.repository, runtime.estimation).catch(
       () => "unknown" as const,
     );
@@ -1497,10 +1507,12 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
       ? await cachedSnapshot(values.cache ?? "", values.repo)
       : await runtime.collect(values.repo ?? (await runtime.currentRepository()), {});
     if (!values.offline && values.cache) await atomicJson(values.cache, snapshot);
+    // #301: the declared review policy, after caching (configuration is never cached).
+    snapshot.reviewPolicy = await resolveReviewPolicy(snapshot.repository, runtime.guide ?? {});
     const { report, text } = await readTeam(
       snapshot,
       { staleHours, now: runtime.now?.() ?? new Date(), offline: !!values.offline },
-      deliveryBoundaries(runtime, snapshot.repository, !!values.offline),
+      await deliveryBoundaries(runtime, snapshot.repository, !!values.offline),
     );
     await output(values.json ? JSON.stringify(report, null, 2) + "\n" : text);
     return report.completeness.complete ? 0 : 2;
@@ -1526,7 +1538,7 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
           ...(values.agent ? { agent: values.agent } : {}),
           ...(values.platform ? { platform: values.platform } : {}),
         },
-        deliveryBoundaries(runtime, repository, false),
+        await deliveryBoundaries(runtime, repository, false),
         runtime.query ?? ghQuery,
         runtime.now,
         runtime.collectIssueFocus,
@@ -1575,7 +1587,7 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
         repository,
         number,
         { staleHours, now: runtime.now?.() ?? new Date() },
-        deliveryBoundaries(runtime, repository, false),
+        await deliveryBoundaries(runtime, repository, false),
         runtime.query ?? ghQuery,
         runtime.now,
         runtime.collectIssueFocus,
@@ -1591,11 +1603,13 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
           issue: number,
         });
     if (!values.offline && values.cache) await atomicJson(values.cache, snapshot);
+    // #301: the declared review policy, after caching (configuration is never cached).
+    snapshot.reviewPolicy = await resolveReviewPolicy(snapshot.repository, runtime.guide ?? {});
     const { report, text } = await readWho(
       snapshot,
       number,
       { staleHours, now: runtime.now?.() ?? new Date(), offline: !!values.offline },
-      deliveryBoundaries(runtime, snapshot.repository, !!values.offline),
+      await deliveryBoundaries(runtime, snapshot.repository, !!values.offline),
     );
     await output(values.json ? JSON.stringify(report, null, 2) + "\n" : text);
     return report.completeness.complete ? 0 : 2;
@@ -1655,7 +1669,7 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
           Number(positionals[0]),
           query,
           // #192: delivery and responsibility for the issues this PR is linked to close.
-          deliveryBoundaries(runtime, repository, false),
+          await deliveryBoundaries(runtime, repository, false),
         );
     await output(values.json ? JSON.stringify(report, null, 2) + "\n" : text);
     return report.completeness.complete ? 0 : 2;
@@ -1801,6 +1815,8 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
         options.full || options.issue
           ? undefined
           : await resolveEngineSetting(snapshot.repository, runtime.guide ?? {}),
+      // #301: declared review policy from local configuration (legacy when undeclared).
+      reviewPolicy: await resolveReviewPolicy(snapshot.repository, runtime.guide ?? {}),
     },
     runtime.estimation,
     runtime.now?.(),

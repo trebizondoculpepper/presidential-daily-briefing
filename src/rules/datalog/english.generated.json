@@ -1,7 +1,7 @@
 {
   "modelVersion": 2,
   "policyVersion": 1,
-  "rulesHash": "811a2953071e3e54c081245f1b3b15f661cc7cb7a883e1b2c4f893d613195ba0",
+  "rulesHash": "483a676c3bf29c12754ab5fcaca6e0ae9bc104cced8e7184e299837522ef0782",
   "sources": [
     "policy/schema.edn",
     "policy/rules.edn",
@@ -49,6 +49,9 @@
       "platform": "required platform",
       "pr-complete": "completeness of pull request evidence",
       "preference": "preference",
+      "provider-commit": "provider-reviewed commit",
+      "provider-review": "configured review provider evidence",
+      "provider-state": "provider review state",
       "question-record": "question record",
       "receipt": "review receipt",
       "receipt-commit": "reviewed commit",
@@ -58,6 +61,7 @@
       "record-trust": "trust level",
       "resolved": "resolved flag",
       "responsible": "responsible agent",
+      "review-coverage": "declared review coverage",
       "reverse-complete": "completeness of reverse closing-PR evidence",
       "review": "review",
       "review-commit": "reviewed commit",
@@ -5513,12 +5517,89 @@
       "set": "rules"
     },
     {
+      "name": "legacy-coverage",
+      "params": ["?t"],
+      "alternatives": [
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "head",
+              "value": {
+                "wild": true
+              },
+              "phrase": "head commit",
+              "many": false
+            },
+            {
+              "type": "not",
+              "join": ["?t"],
+              "body": [
+                {
+                  "type": "fact",
+                  "scope": "context",
+                  "entity": {
+                    "lit": 1
+                  },
+                  "attribute": "review-coverage",
+                  "value": {
+                    "lit": "any"
+                  },
+                  "phrase": "declared review coverage",
+                  "many": false
+                }
+              ]
+            },
+            {
+              "type": "not",
+              "join": ["?t"],
+              "body": [
+                {
+                  "type": "fact",
+                  "scope": "context",
+                  "entity": {
+                    "lit": 1
+                  },
+                  "attribute": "review-coverage",
+                  "value": {
+                    "lit": "unknown"
+                  },
+                  "phrase": "declared review coverage",
+                  "many": false
+                }
+              ]
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 62
+          }
+        }
+      ],
+      "calls": [],
+      "set": "rules"
+    },
+    {
       "name": "head-reviewed",
       "params": ["?t"],
       "alternatives": [
         {
           "params": ["?t"],
           "clauses": [
+            {
+              "type": "call",
+              "predicate": "legacy-coverage",
+              "args": [
+                {
+                  "var": "?t"
+                }
+              ]
+            },
             {
               "type": "fact",
               "scope": "entity",
@@ -5574,12 +5655,21 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 62
+            "index": 63
           }
         },
         {
           "params": ["?t"],
           "clauses": [
+            {
+              "type": "call",
+              "predicate": "legacy-coverage",
+              "args": [
+                {
+                  "var": "?t"
+                }
+              ]
+            },
             {
               "type": "fact",
               "scope": "entity",
@@ -5648,11 +5738,85 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 63
+            "index": 64
+          }
+        },
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "context",
+              "entity": {
+                "lit": 1
+              },
+              "attribute": "review-coverage",
+              "value": {
+                "lit": "any"
+              },
+              "phrase": "declared review coverage",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "head",
+              "value": {
+                "var": "?h"
+              },
+              "phrase": "head commit",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "provider-review",
+              "value": {
+                "var": "?p"
+              },
+              "phrase": "configured review provider evidence",
+              "many": true
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?p"
+              },
+              "attribute": "provider-state",
+              "value": {
+                "lit": "accepted"
+              },
+              "phrase": "provider review state",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?p"
+              },
+              "attribute": "provider-commit",
+              "value": {
+                "var": "?h"
+              },
+              "phrase": "provider-reviewed commit",
+              "many": false
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 65
           }
         }
       ],
-      "calls": [],
+      "calls": ["legacy-coverage"],
       "set": "rules"
     },
     {
@@ -5662,6 +5826,15 @@
         {
           "params": ["?t"],
           "clauses": [
+            {
+              "type": "call",
+              "predicate": "legacy-coverage",
+              "args": [
+                {
+                  "var": "?t"
+                }
+              ]
+            },
             {
               "type": "fact",
               "scope": "entity",
@@ -5717,11 +5890,72 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 64
+            "index": 66
+          }
+        },
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "head",
+              "value": {
+                "var": "?h"
+              },
+              "phrase": "head commit",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "provider-review",
+              "value": {
+                "var": "?p"
+              },
+              "phrase": "configured review provider evidence",
+              "many": true
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?p"
+              },
+              "attribute": "provider-state",
+              "value": {
+                "lit": "findings"
+              },
+              "phrase": "provider review state",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?p"
+              },
+              "attribute": "provider-commit",
+              "value": {
+                "var": "?h"
+              },
+              "phrase": "provider-reviewed commit",
+              "many": false
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 67
           }
         }
       ],
-      "calls": [],
+      "calls": ["legacy-coverage"],
       "set": "rules"
     },
     {
@@ -5872,7 +6106,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 65
+            "index": 68
           }
         }
       ],
@@ -5923,7 +6157,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 66
+            "index": 69
           }
         },
         {
@@ -5958,7 +6192,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 67
+            "index": 70
           }
         }
       ],
@@ -5993,7 +6227,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 68
+            "index": 71
           }
         }
       ],
@@ -6019,7 +6253,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 69
+            "index": 72
           }
         },
         {
@@ -6037,7 +6271,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 70
+            "index": 73
           }
         },
         {
@@ -6068,7 +6302,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 71
+            "index": 74
           }
         },
         {
@@ -6086,7 +6320,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 72
+            "index": 75
           }
         },
         {
@@ -6104,7 +6338,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 73
+            "index": 76
           }
         }
       ],
@@ -6139,7 +6373,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 74
+            "index": 77
           }
         }
       ],
@@ -6178,7 +6412,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 75
+            "index": 78
           }
         },
         {
@@ -6218,7 +6452,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 76
+            "index": 79
           }
         }
       ],
@@ -6261,7 +6495,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 77
+            "index": 80
           }
         }
       ],
@@ -6304,7 +6538,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 78
+            "index": 81
           }
         }
       ],
@@ -6333,7 +6567,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 79
+            "index": 82
           }
         }
       ],
@@ -6376,7 +6610,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 80
+            "index": 83
           }
         }
       ],
@@ -6429,7 +6663,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 81
+            "index": 84
           }
         }
       ],
@@ -6488,7 +6722,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 82
+            "index": 85
           }
         }
       ],
@@ -6543,7 +6777,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 83
+            "index": 86
           }
         }
       ],
@@ -9190,15 +9424,15 @@
   ],
   "coverage": {
     "decisions": 28,
-    "predicates": 59,
-    "alternatives": 93,
+    "predicates": 60,
+    "alternatives": 96,
     "denials": 8,
     "queries": 15,
     "keyQueries": 4,
     "evidence": 31,
     "overrides": 4,
     "constants": 14,
-    "attributes": 60,
-    "clauses": 529
+    "attributes": 64,
+    "clauses": 546
   }
 }
