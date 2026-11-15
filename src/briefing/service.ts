@@ -25,6 +25,7 @@ import { markerTrust } from "../workflow/delivery.js";
 import { readSnapshotResponsibility } from "../workflow/responsibility.js";
 import type { TrustDecision } from "../workflow/delivery.js";
 import { ReadMeter } from "../github/readplan.js";
+import { collectShortlist } from "../github/shortlist.js";
 import { impactMetric } from "../estimation/metrics.js";
 import { dependencyReport, dependencyText } from "../github/dependencies.js";
 import type { DependencyReport } from "../github/dependencies.js";
@@ -403,6 +404,11 @@ async function presentHuman(
 /** GitHub-facing boundaries of a live read; tests inject credential-free fakes. */
 export interface ReadRuntime {
   collect: typeof collect;
+  /**
+   * Routine shortlist collection (#368, briefing-shortlist-v1). Absent: the routine briefing
+   * reads the full snapshot, as before.
+   */
+  collectShortlist?: typeof collectShortlist;
   /** Test seam for the lazily loaded Datalog engine; defaults to importing it (#346). */
   loadEngine?: () => Promise<Pick<typeof import("../rules/datalog/datalog.js"), "evaluateDatalog">>;
   dependencyReport: typeof dependencyReport;
@@ -495,21 +501,26 @@ export async function readBriefing(
   runtime: ReadRuntime,
   request: BriefingRequest,
 ): Promise<BriefingRead> {
-  let snapshot: Snapshot;
-  try {
-    snapshot = await runtime.collect(request.repository, {
-      issue: request.issue,
-      since: request.since,
-      signal: request.signal,
-    });
-  } catch (error) {
-    if (!(error instanceof IssueUnavailable)) throw error;
-    return {
-      kind: "unavailable",
-      diagnosis: error.diagnosis,
-      text: unavailableText(error.diagnosis),
-    };
-  }
+  // #368: the routine briefing discovers, ranks, then hydrates only its shortlist. An issue
+  // intake, a history window and the human briefing keep the full snapshot.
+  const shortlisted =
+    !!runtime.collectShortlist && !request.issue && !request.since && request.role !== humanRole;
+  let snapshot: Snapshot | undefined;
+  if (!shortlisted)
+    try {
+      snapshot = await runtime.collect(request.repository, {
+        issue: request.issue,
+        since: request.since,
+        signal: request.signal,
+      });
+    } catch (error) {
+      if (!(error instanceof IssueUnavailable)) throw error;
+      return {
+        kind: "unavailable",
+        diagnosis: error.diagnosis,
+        text: unavailableText(error.diagnosis),
+      };
+    }
   // #312: resolve the label filter once, through the same read boundary, before projecting.
   const labels = request.labels?.length
     ? await resolveLabelFilter(
@@ -528,44 +539,163 @@ export async function readBriefing(
   const process = briefingProcess(
     redact ? { ...setting, diagnostics: setting.diagnostics.map(redact) } : setting,
   );
-  const presented = await presentBriefing(
-    snapshot,
-    {
-      limit: request.limit,
-      maxChars: request.maxChars,
-      context: request.context,
-      agent: request.agent,
-      platform: request.platform,
-      issue: request.issue,
-      ...(request.role ? { role: request.role } : {}),
-      ...(request.section !== undefined ? { section: request.section } : {}),
-      ...(labels ? { labels } : {}),
-      ...(request.order ? { order: request.order } : {}),
-      process,
-      engineSetting,
-      reviewPolicy,
-      ...(runtime.engineClock ? { engineClock: runtime.engineClock } : {}),
-    },
-    runtime.estimation,
-    runtime.now?.(),
-    runtime.redactDiagnostic,
-    runtime.rest
-      ? markerTrust(permissionLookup(request.repository, runtime.rest, request.signal))
-      : undefined,
-    request.signal,
-    runtime.loadEngine,
-    // Delivery requests are bound to the request's cancellation signal, like collection.
-    runtime.rest && (runtime.queryWith || runtime.query)
-      ? {
-          query: runtime.queryWith ? runtime.queryWith(request.signal) : runtime.query!,
-          rest: (path, options) =>
-            runtime.rest!(path, { ...options, signal: options?.signal ?? request.signal }),
-          trustWith: (rest: Rest) =>
-            markerTrust(permissionLookup(request.repository, rest, request.signal)),
-        }
-      : undefined,
-  );
-  return { kind: "report", ...presented };
+  const options: PresentOptions = {
+    limit: request.limit,
+    maxChars: request.maxChars,
+    context: request.context,
+    agent: request.agent,
+    platform: request.platform,
+    issue: request.issue,
+    ...(request.role ? { role: request.role } : {}),
+    ...(request.section !== undefined ? { section: request.section } : {}),
+    ...(labels ? { labels } : {}),
+    ...(request.order ? { order: request.order } : {}),
+    process,
+    engineSetting,
+    reviewPolicy,
+    ...(runtime.engineClock ? { engineClock: runtime.engineClock } : {}),
+  };
+  // #368: one meter for the shortlist read, its permission lookups and delivery evidence, so a
+  // quota refusal anywhere stops every later send and the telemetry is the whole command's.
+  const meter = snapshot
+    ? undefined
+    : new ReadMeter("briefing-shortlist-v1", "briefing", runtime.now, undefined, request.signal);
+  const rest =
+    meter && runtime.rest
+      ? meter.rest(runtime.rest, "permissions", request.repository)
+      : runtime.rest;
+  const baseQuery = runtime.queryWith ? runtime.queryWith(request.signal) : runtime.query;
+  const liveQuery =
+    meter && baseQuery ? meter.query(baseQuery, "delivery-records", request.repository) : baseQuery;
+  // One permission cache for every ranking pass and the final presentation.
+  const trust = rest
+    ? markerTrust(permissionLookup(request.repository, rest, request.signal))
+    : undefined;
+  const present = (collected: Snapshot, live: boolean, reserve = 0) =>
+    presentBriefing(
+      collected,
+      { ...options, maxChars: Math.max(0, options.maxChars - reserve) },
+      runtime.estimation,
+      runtime.now?.(),
+      runtime.redactDiagnostic,
+      trust,
+      request.signal,
+      runtime.loadEngine,
+      // Delivery requests are bound to the request's cancellation signal, like collection.
+      live && rest && liveQuery
+        ? {
+            query: liveQuery,
+            rest: (path, options) =>
+              rest(path, { ...options, signal: options?.signal ?? request.signal }),
+            trustWith: (other: Rest) =>
+              markerTrust(permissionLookup(request.repository, other, request.signal)),
+          }
+        : undefined,
+    );
+  if (!snapshot)
+    snapshot = await runtime.collectShortlist!(
+      request.repository,
+      {
+        select: async (candidates) => shownSubjects((await present(candidates, false)).report),
+        signal: request.signal,
+        ...(runtime.rest ? { rest: runtime.rest } : {}),
+        ...(meter ? { meter } : {}),
+      },
+      runtime.queryWith?.(request.signal) ?? runtime.query,
+      runtime.now,
+    );
+  const line = shortlistLine(snapshot, request.maxChars);
+  return {
+    kind: "report",
+    ...withShortlist(await present(snapshot, true, line.length), snapshot, meter, line),
+  };
+}
+
+/**
+ * The PROVISIONAL notice line of a shortlist snapshot, clipped to `maxChars`; empty when every
+ * item was hydrated. Callers reserve its length from the presentation's text budget.
+ */
+export function shortlistLine(snapshot: Snapshot, maxChars: number): string {
+  const notice = snapshot.shortlist?.notice;
+  if (!notice) return "";
+  const line = `PROVISIONAL: ${notice}\n`;
+  return line.length <= maxChars ? line : `${line.slice(0, Math.max(0, maxChars - 2))}…\n`;
+}
+
+/** The URLs a presented briefing shows (its subjects), in order; the shortlist to hydrate. */
+export function shownSubjects(report: PresentedBriefing["report"]): string[] {
+  const subjects = (report as { subjects?: { url: string }[] }).subjects;
+  return (subjects ?? []).map((subject) => subject.url);
+}
+
+/**
+ * Attach the routine shortlist record (#368) and the collection telemetry to a presented
+ * briefing. A shown subject that was not hydrated would be unread evidence presented as empty:
+ * the collector withdraws such stubs, and this check makes any that remain an explicit
+ * incompleteness rather than a clean row.
+ */
+export function withShortlist(
+  presented: PresentedBriefing,
+  snapshot: Snapshot,
+  /** The read's shared meter: its record then includes the presentation's lookups. */
+  meter?: ReadMeter,
+  /** The notice line from `shortlistLine`, whose length the presentation reserved. */
+  line = "",
+): PresentedBriefing {
+  const shortlist = snapshot.shortlist;
+  if (!shortlist) return presented;
+  const collection =
+    meter && snapshot.collection
+      ? { ...meter.collection(), bounds: snapshot.collection.bounds }
+      : snapshot.collection;
+  const unread = new Set(shortlist.notHydrated.map((item) => item.url));
+  const shownUnread = shownSubjects(presented.report).filter((url) => unread.has(url));
+  // Delivery records on an item that was not hydrated were not read: the delivery view covers
+  // the hydrated tickets only, and says so rather than reading as "no other delivery".
+  const unreadIssues = shortlist.notHydrated.filter((item) => item.kind === "issue").length;
+  const priorDelivery = presented.report.delivery;
+  // An absent delivery view means "none in scope", so it is present whenever records went unread.
+  const delivery = unreadIssues
+    ? {
+        tickets: priorDelivery?.tickets ?? [],
+        guidance:
+          priorDelivery?.guidance ??
+          "Read-only. Unknown or not-evaluated is never 'not delivered' or 'nobody responsible'.",
+        // Unread records are disclosed; the view is complete only for the hydrated tickets.
+        complete: false,
+        omissions: [
+          ...(priorDelivery?.omissions ?? []),
+          `delivery records on ${unreadIssues} open issue(s) that were not hydrated are unknown; inspect one with pdb --issue N`,
+        ],
+      }
+    : priorDelivery;
+  const completeness = shownUnread.length
+    ? {
+        ...presented.report.completeness,
+        complete: false,
+        warnings: [
+          ...presented.report.completeness.warnings,
+          `Shown but not hydrated (evidence unknown): ${shownUnread.join(", ")}.`,
+        ],
+      }
+    : presented.report.completeness;
+  return {
+    ...presented,
+    // The notice leads, inside the text budget the presentation reserved for it.
+    text:
+      line +
+      presented.text +
+      (shownUnread.length
+        ? `INCOMPLETE: shown but not hydrated (evidence unknown): ${shownUnread.join(", ")}\n`
+        : ""),
+    report: Object.assign({}, presented.report, {
+      completeness,
+      ...(delivery ? { delivery } : {}),
+      shortlist,
+      ...(collection ? { collection } : {}),
+    }),
+    complete: completeness.complete,
+  };
 }
 
 /** Read native dependencies of one issue, with its text rendering. */
