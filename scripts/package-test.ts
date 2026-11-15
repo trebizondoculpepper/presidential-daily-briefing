@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+// All ordinary child processes are credential-free; fatal checks explicitly override this.
+process.env.SENTRY_DISABLED = "1";
 /**
  * Installed-archive test (doc/npm-releases.md, "Verification and publication").
  *
@@ -8,6 +10,7 @@
  * working directories: help, invalid arguments, and the credential-free offline smoke checks.
  * Direct source or dist execution alone is not enough (#11).
  */
+import { defaultCrashDsn } from "../src/telemetry/crashes.js";
 import { execFile, spawn } from "node:child_process";
 import { chmod, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -919,6 +922,7 @@ try {
     const outside = join(work, "rules-outside");
     await mkdir(outside);
     const bare: NodeJS.ProcessEnv = {
+      SENTRY_DISABLED: "1",
       PATH: dirname(process.execPath),
       PDB_NO_UPDATE_CHECK: "1",
       PDB_NO_FIRST_USE_HINT: "1",
@@ -1032,6 +1036,23 @@ try {
       console.log(
         `ok   installed ${kind} unhandled fault reports mapped public frames only: ${await packagedCrash(kind, packageDir, env, checkout, work)}`,
       );
+    console.log(
+      `ok   installed default-on reporting uses only the intercepted transport: ${await packagedCrash(
+        "serve",
+        packageDir,
+        env,
+        checkout,
+        work,
+        {
+          SENTRY_DSN: undefined,
+          PDB_CRASH_INGEST_HOST: new URL(defaultCrashDsn).hostname,
+          HOME: work,
+          USERPROFILE: work,
+          APPDATA: join(work, "appdata"),
+          XDG_CONFIG_HOME: join(work, "config"),
+        },
+      )}`,
+    );
     // Node's own source-map support must not rewrite installed frames to unpackaged src/ paths.
     console.log(
       `ok   installed serve fault with NODE_OPTIONS=--enable-source-maps keeps the same frames: ${await packagedCrash("serve", packageDir, env, checkout, work, { NODE_OPTIONS: "--enable-source-maps" })}`,
