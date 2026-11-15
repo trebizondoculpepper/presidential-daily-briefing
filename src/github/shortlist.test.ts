@@ -10,7 +10,7 @@ import { main } from "../cli.js";
 import type { ReadRuntime } from "../briefing/service.js";
 import { by, clock, issue, page, pr, repo, time } from "../testing/snapshots.js";
 import { RateLimitError } from "./dependencies.js";
-import { collect } from "./github.js";
+import { collect, prop } from "./github.js";
 import type { Query } from "./github.js";
 import { collectShortlist } from "./shortlist.js";
 import { deliveryMarker } from "../workflow/delivery.js";
@@ -19,7 +19,12 @@ import type { Snapshot } from "./types.js";
 import type { Issue, PullRequest } from "./types.js";
 
 /** A fake repository served through the gh query boundary, counting every read by kind. */
-function fakeGitHub(issues: Issue[], prs: PullRequest[]) {
+function fakeGitHub(
+  issues: Issue[],
+  prs: PullRequest[],
+  /** Replace the hydration answer for an issue or PR number (null, malformed, closed). */
+  answers: { issue?: Record<number, unknown>; pr?: Record<number, unknown> } = {},
+) {
   const calls = {
     discoveryPages: 0,
     fullPages: 0,
@@ -73,6 +78,8 @@ function fakeGitHub(issues: Issue[], prs: PullRequest[]) {
     if (/pullRequest\(number:/.test(source)) {
       const number = Number(variables.number);
       calls.pullRequests.push(number);
+      if (answers.pr && number in answers.pr)
+        return { repository: { pullRequest: clone(answers.pr[number]) } };
       return { repository: { pullRequest: clone(prs.find((p) => p.number === number) ?? null) } };
     }
     if (/i0:issue\(/.test(source)) {
@@ -83,7 +90,12 @@ function fakeGitHub(issues: Issue[], prs: PullRequest[]) {
       calls.issueBatches.push(numbers);
       return {
         repository: Object.fromEntries(
-          numbers.map((n, i) => [`i${i}`, clone(issues.find((x) => x.number === n) ?? null)]),
+          numbers.map((n, i) => [
+            `i${i}`,
+            answers.issue && n in answers.issue
+              ? clone(answers.issue[n])
+              : clone(issues.find((x) => x.number === n) ?? null),
+          ]),
         ),
       };
     }
@@ -626,6 +638,125 @@ describe("routine briefing: discover all, rank, hydrate only the shortlist (#368
     });
   });
 
+  describe("an unknown answer is never closed or absent (#368)", () => {
+    const collectAll = (fake: ReturnType<typeof fakeGitHub>) =>
+      collectShortlist(
+        repo,
+        { select: async (c) => [...c.issues, ...c.pullRequests].map((i) => i.url) },
+        fake.query,
+        clock,
+      );
+    const issues = () => [ready(1), ready(2), ready(3)];
+
+    it("a null, malformed or explicitly closed issue", async () => {
+      const malformed = { ...ready(2), comments: null };
+      const closed = { ...ready(3), state: "CLOSED" };
+      const snapshot = await collectAll(
+        fakeGitHub(issues(), [], { issue: { 1: null, 2: malformed, 3: closed } }),
+      );
+      expect(snapshot.issues).toEqual([]);
+      const unread = snapshot.shortlist!.notHydrated;
+      // Null and malformed are unavailable and disclosed; only the explicit CLOSED is gone.
+      expect(unread.map((i) => [i.number, i.reason])).toEqual([
+        [1, "unavailable"],
+        [2, "unavailable"],
+      ]);
+      expect(snapshot.warnings.at(-1)).toContain("unavailable for 2 item(s) (#1, #2)");
+      const failed = snapshot.collection!.coverage.filter((c) => c.state === "failed");
+      expect(failed.map((c) => [c.subject, c.failure])).toEqual([
+        [`${repo}#1`, "unavailable"],
+        [`${repo}#2`, "unavailable"],
+      ]);
+    });
+
+    it("a null or stateless PR is a failed read, not a closed one", async () => {
+      const prs = [7, 8].map((n): PullRequest => ({
+        ...pr(),
+        number: n,
+        url: `https://github.com/${repo}/pull/${n}`,
+        closingIssuesReferences: page([]),
+      }));
+      const stateless = { ...prs[1], state: undefined };
+      const snapshot = await collectAll(fakeGitHub([], prs, { pr: { 7: null, 8: stateless } }));
+      expect(snapshot.pullRequests).toEqual([]);
+      expect(snapshot.shortlist!.notHydrated.map((i) => [i.number, i.reason])).toEqual([
+        [7, "failed"],
+        [8, "failed"],
+      ]);
+      expect(snapshot.warnings.some((w) => w.includes("#7, #8"))).toBe(true);
+    });
+
+    it("a comment page cut short fails the item rather than shortening its history", async () => {
+      const long = { ...ready(1), comments: page([], true, "c1") };
+      const fake = fakeGitHub(issues(), [], { issue: { 1: long } });
+      // The continuation page comes back without its connection.
+      const query: Query = async (source, variables) =>
+        /comments\(first:100,after/.test(source)
+          ? { repository: { issue: { comments: null } } }
+          : fake.query(source, variables);
+      const snapshot = await collectShortlist(
+        repo,
+        { select: async (c) => c.issues.map((i) => i.url) },
+        query,
+        clock,
+      );
+      expect(snapshot.issues.map((i) => i.number)).toEqual([2, 3]);
+      expect(snapshot.shortlist!.notHydrated).toEqual([
+        expect.objectContaining({ number: 1, reason: "failed" }),
+      ]);
+      expect(snapshot.warnings.at(-1)).toContain("(#1)");
+    });
+
+    it("a discovery node without identity or labels, and an unreadable mention", async () => {
+      const member: PullRequest = {
+        ...pr(),
+        number: 9,
+        url: `https://github.com/${repo}/pull/9`,
+        closingIssuesReferences: page([]),
+      };
+      const fake = fakeGitHub(issues(), [member]);
+      const query: Query = async (source, variables) => {
+        const answer = await fake.query(source, variables);
+        const issuesPage = prop(answer, "repository", "issues", "nodes");
+        if (Array.isArray(issuesPage) && !source.includes("comments(first:100"))
+          (issuesPage[1] as { labels?: unknown }).labels = null;
+        const prPage = prop(answer, "repository", "pullRequests", "nodes");
+        if (Array.isArray(prPage))
+          (prPage[0] as { timelineItems: unknown }).timelineItems = page([{ source: null }]);
+        return answer;
+      };
+      const snapshot = await collectShortlist(
+        repo,
+        { select: async (c) => [...c.issues, ...c.pullRequests].map((i) => i.url) },
+        query,
+        clock,
+      );
+      expect(snapshot.shortlist!.discovered).toMatchObject({ issues: 2, complete: false });
+      expect(snapshot.shortlist!.provisional).toBe(true);
+      expect(snapshot.warnings.some((w) => w.includes("without their identity, labels"))).toBe(
+        true,
+      );
+      expect(snapshot.warnings.some((w) => w.includes("could not be read"))).toBe(true);
+    });
+
+    it("an unavailable shown item makes the briefing incomplete", async () => {
+      const fake = fakeGitHub(
+        Array.from({ length: 6 }, (_, i) => ready(i + 1)),
+        [],
+        { issue: { 1: null } },
+      );
+      const { report } = await reportOf(runtimeFor(fake, "typescript", true));
+      expect(report.completeness.complete).toBe(false);
+      expect(report.completeness.warnings.join(" ")).toContain("(#1)");
+      expect(report.subjects.map((s) => s.url)).not.toContain(
+        `https://github.com/${repo}/issues/1`,
+      );
+      expect(report.shortlist!.notHydrated).toEqual(
+        expect.arrayContaining([expect.objectContaining({ number: 1, reason: "unavailable" })]),
+      );
+    });
+  });
+
   it("stops hydrating after a quota refusal and reports the rest not attempted", async () => {
     const issues = Array.from({ length: 25 }, (_, i) => ready(i + 1));
     const fake = fakeGitHub(issues, []);
@@ -653,7 +784,7 @@ describe("routine briefing: discover all, rank, hydrate only the shortlist (#368
     );
     expect(snapshot.collection!.quota).not.toBeNull();
     // A quota stop is real incompleteness.
-    expect(snapshot.warnings.some((w) => w.includes("failed or were stopped for 15"))).toBe(true);
+    expect(snapshot.warnings.some((w) => w.includes("unavailable for 15 item(s)"))).toBe(true);
     // One refused batch was sent; nothing was sent after it.
     expect(batches).toBe(2);
   });

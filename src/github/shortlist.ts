@@ -32,7 +32,16 @@ export type ShortlistBounds = { -readonly [K in keyof Profile["bounds"]]: number
 type Profile = (typeof readProfiles)["briefing-shortlist-v1"];
 
 /** Why a discovered item was not hydrated. */
-export type NotHydratedReason = "not-shortlisted" | "hydration-cap" | "failed" | "not-attempted";
+/**
+ * `unavailable`: the read answered without the item (null, malformed or partial), which may be a
+ * deletion, a transfer, a permission change or a transient error; unknown, never closed.
+ */
+export type NotHydratedReason =
+  | "not-shortlisted"
+  | "hydration-cap"
+  | "failed"
+  | "not-attempted"
+  | "unavailable";
 /** The shortlist record a routine snapshot carries (additive; snapshot schema unchanged). */
 export interface ShortlistRecord {
   schemaVersion: 1;
@@ -165,6 +174,31 @@ export async function collectShortlist(
   ]);
   const stubs = new Map<string, Issue | PullRequest>();
   const kinds = new Map<string, "issue" | "pull-request">();
+  /** A discovery node without its identity or label page cannot be a candidate: unknown. */
+  const unreadable = (node: unknown): boolean =>
+    typeof prop(node, "number") !== "number" ||
+    typeof prop(node, "url") !== "string" ||
+    typeof prop(node, "labels", "pageInfo", "hasNextPage") !== "boolean";
+  let unreadableNodes = 0;
+  const readable = <T>(nodes: T[]): T[] =>
+    nodes.filter((node) => {
+      if (!unreadable(node)) return true;
+      unreadableNodes++;
+      return false;
+    });
+  issueInventory.nodes = readable(issueInventory.nodes);
+  prInventory.nodes = readable(prInventory.nodes).filter((node) => {
+    if (typeof prop(node, "closingIssuesReferences", "pageInfo", "hasNextPage") === "boolean")
+      return true;
+    unreadableNodes++;
+    return false;
+  });
+  if (unreadableNodes) {
+    issueInventory.complete = false;
+    warnings.push(
+      `Discovery returned ${unreadableNodes} open item(s) without their identity, labels or closing links; they are unknown, not absent.`,
+    );
+  }
   for (const node of issueInventory.nodes) {
     stubs.set(node.url, issueStub(node));
     kinds.set(node.url, "issue");
@@ -177,6 +211,11 @@ export async function collectShortlist(
     stubs.set(node.url, pullRequestStub(node));
     kinds.set(node.url, "pull-request");
     const sources = (prop(timeline, "nodes") as unknown[] | undefined) ?? [];
+    // A mention whose source could not be read (null: no access, deleted) may hold a record.
+    if (sources.some((event) => !prop(event, "source")))
+      warnings.push(
+        `${node.url}: an item that mentions it could not be read; delivery and responsibility records there are unknown.`,
+      );
     referencedBy.set(
       node.url,
       sources
@@ -317,8 +356,20 @@ export async function collectShortlist(
           continue;
         }
         const issue = outcome.value[i];
-        if (!issue || issue.state !== "OPEN") {
-          // Closed since discovery: no longer open work.
+        // A null or malformed answer is unknown (deleted, transferred, no access, transient),
+        // never "closed": not shown, disclosed, and a completeness warning.
+        if (
+          !issue ||
+          typeof issue.state !== "string" ||
+          typeof prop(issue, "comments", "pageInfo", "hasNextPage") !== "boolean" ||
+          typeof prop(issue, "labels", "pageInfo", "hasNextPage") !== "boolean"
+        ) {
+          unhydratable.set(url, "unavailable");
+          meter.cover("issue", subject, "failed", { failure: "unavailable" });
+          continue;
+        }
+        if (issue.state !== "OPEN") {
+          // Explicitly closed since discovery: no longer open work.
           gone.add(url);
           meter.cover("issue", subject, "complete");
           continue;
@@ -488,10 +539,12 @@ export async function collectShortlist(
   // Interim default (#368 owner question): unread shortlist items alone leave the briefing
   // complete for what it shows, but provisional. A failed or quota-stopped read of an item the
   // briefing wanted is real incompleteness.
-  const failed = notHydrated.filter((i) => i.reason === "failed" || i.reason === "not-attempted");
+  const failed = notHydrated.filter(
+    (i) => i.reason === "failed" || i.reason === "not-attempted" || i.reason === "unavailable",
+  );
   if (failed.length)
     snapshot.warnings.push(
-      `Shortlist reads failed or were stopped for ${failed.length} item(s) (${failed
+      `Shortlist reads failed, were stopped or found the item unavailable for ${failed.length} item(s) (${failed
         .slice(0, 5)
         .map((i) => `#${i.number}`)
         .join(
