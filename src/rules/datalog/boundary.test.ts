@@ -184,7 +184,7 @@ describe("host facts reaching the engine (#339)", () => {
     expect(facts(["https://github.com/o/r/pull/1: reviews exceed 100; incomplete."])).toBe(false);
   });
 
-  it.fails("does not let a warning about PR 12 mark PR 1 incomplete (URL prefix match)", () => {
+  it("does not let a warning about PR 12 mark PR 1 incomplete (URL prefix match, #448)", () => {
     handed.length = 0;
     run(snap([], [pr(1)], ["https://github.com/o/r/pull/12: reviews exceed 100; incomplete."]));
     expect(handed[0].find(([e, a]) => e === firstSubjectId && a === "pr-complete")?.[2]).toBe(true);
