@@ -6,6 +6,7 @@ import {
   planDeliverables,
   readDeliveryComments,
   resetPlanPending,
+  resetTarget,
   reworkAuthority,
   reworkMembershipRequest,
   submitArguments,
@@ -753,7 +754,7 @@ describe("deliverables maintainer overrides", () => {
     expect(result.exitCode).toBe(0);
     expect(state.writes.map((w) => w[1])).toEqual(["comment", "edit"]);
     expect(posted(state)[0]?.plan).toEqual({
-      remove: ["status:awaiting-review"],
+      remove: ["status:awaiting-review", "status:incomplete"],
       add: ["status:ready"],
     });
     expect(state.labels).toEqual(["status:ready"]);
@@ -986,7 +987,7 @@ describe("deliverables maintainer overrides", () => {
     expect((await applyDeliverables(repo, req, rt)).exitCode).toBe(0);
     expect(state.writes).toHaveLength(writes);
   });
-  it("a completed reset from status:incomplete whose readiness was later removed is refused on retry", async () => {
+  it("a completed reset from status:incomplete whose readiness was later changed is refused on retry", async () => {
     const closed = fakePr(5, { state: "CLOSED" });
     const { rt, state } = github({
       comments: [submitted()],
@@ -995,11 +996,13 @@ describe("deliverables maintainer overrides", () => {
     });
     const req = request("reset", { agent: "maint", as: "ready" });
     expect((await applyDeliverables(repo, req, rt)).exitCode).toBe(0);
-    state.labels = ["status:awaiting-review"];
+    expect(state.labels).toEqual(["status:ready"]);
+    // Neither the recorded start nor a partial application of it: changed after the reset.
+    state.labels = ["status:awaiting-review", "status:ready"];
     const writes = state.writes.length;
     expect((await applyDeliverables(repo, req, rt)).exitCode).not.toBe(0);
     refused(await planDeliverables(repo, req, rt), "DELIVERY_DIVERGED");
-    expect(state.labels).toEqual(["status:awaiting-review"]);
+    expect(state.labels).toEqual(["status:awaiting-review", "status:ready"]);
     expect(state.writes).toHaveLength(writes);
   });
   it("an unapplied reset record without observedLabels is refused conservatively on resume", async () => {
@@ -1043,6 +1046,141 @@ describe("deliverables maintainer overrides", () => {
       ),
       "DELIVERY_DIVERGED",
     );
+  });
+  describe("reset readiness (#276, doc/design/reset-readiness.md)", () => {
+    const closed = fakePr(5, { state: "CLOSED" });
+    const legacy = (as: "ready" | "incomplete", observedLabels?: string[]) =>
+      rec("reset", {
+        agent: "maint",
+        plan: {
+          remove: ["status:awaiting-review"],
+          add: [as === "ready" ? "status:ready" : "status:incomplete"],
+        },
+        ...(observedLabels ? { observedLabels } : {}),
+      });
+    const edits = (state: { writes: string[][] }) => state.writes.filter((w) => w[1] === "edit");
+
+    it("a fresh reset removes the opposite readiness label, keeps unrelated labels and records the plan in stable order", async () => {
+      for (const [as, start, plan] of [
+        [
+          "ready",
+          ["bug", "status:awaiting-review", "status:incomplete"],
+          { remove: ["status:awaiting-review", "status:incomplete"], add: ["status:ready"] },
+        ],
+        [
+          "incomplete",
+          ["status:ready", "bug", "status:incomplete", "status:awaiting-review"],
+          { remove: ["status:awaiting-review", "status:ready"], add: ["status:incomplete"] },
+        ],
+      ] as const) {
+        const { rt, state } = github({
+          comments: [submitted()],
+          prs: [closed],
+          labels: [...start],
+        });
+        const result = await applyDeliverables(repo, request("reset", { agent: "maint", as }), rt);
+        expect(result.exitCode).toBe(0);
+        expect(posted(state)[0]?.plan).toEqual(plan);
+        expect(posted(state)[0]?.observedLabels).toEqual(
+          [...new Set(start.filter((l) => l.startsWith("status:")))].sort(),
+        );
+        expect([...state.labels].sort()).toEqual(
+          ["bug", as === "ready" ? "status:ready" : "status:incomplete"].sort(),
+        );
+      }
+    });
+
+    it("recognises both plan generations as the same request, and nothing else", () => {
+      const ready = {
+        remove: ["status:awaiting-review", "status:incomplete"],
+        add: ["status:ready"],
+      };
+      expect(resetTarget(ready)).toBe("ready");
+      expect(resetTarget({ remove: ["status:awaiting-review"], add: ["status:ready"] })).toBe(
+        "ready",
+      );
+      expect(
+        resetTarget({
+          remove: ["status:awaiting-review", "status:ready"],
+          add: ["status:incomplete"],
+        }),
+      ).toBe("incomplete");
+      expect(resetTarget({ remove: [], add: ["status:ready"] })).toBeNull();
+      expect(resetTarget(undefined)).toBeNull();
+    });
+
+    it("a pending legacy record is retried with its own plan, never the expanded one, and posts no second record", async () => {
+      const { rt, state } = github({
+        comments: [submitted(), post(legacy("ready", ["status:awaiting-review"]))],
+        prs: [closed],
+        labels: ["status:awaiting-review"],
+      });
+      const result = await applyDeliverables(
+        repo,
+        request("reset", { agent: "maint", as: "ready" }),
+        rt,
+      );
+      expect(result.exitCode).toBe(0);
+      expect(posted(state)).toHaveLength(0);
+      expect(edits(state)).toHaveLength(1);
+      expect(edits(state)[0]).not.toContain("status:incomplete");
+      expect(state.labels).toEqual(["status:ready"]);
+    });
+
+    it("a pending legacy plan that leaves both readiness labels is applied as recorded, then reported, not extended", async () => {
+      const { rt, state } = github({
+        comments: [
+          submitted(),
+          post(legacy("ready", ["status:awaiting-review", "status:incomplete"])),
+        ],
+        prs: [closed],
+        labels: ["status:awaiting-review", "status:incomplete"],
+      });
+      const result = await applyDeliverables(
+        repo,
+        request("reset", { agent: "maint", as: "ready" }),
+        rt,
+      );
+      expect(result.exitCode).toBe(2);
+      expect(posted(state)).toHaveLength(0);
+      expect([...state.labels].sort()).toEqual(["status:incomplete", "status:ready"]);
+      expect(result.ok ? null : result.error).toBe("DELIVERY_DIVERGED");
+    });
+
+    it("a completed legacy reset that left both readiness labels is reported with the manual correction and changes nothing", async () => {
+      for (const observed of [["status:awaiting-review", "status:incomplete"], undefined]) {
+        const { rt, state } = github({
+          comments: [submitted(), post(legacy("ready", observed))],
+          prs: [closed],
+          labels: ["status:incomplete", "status:ready"],
+        });
+        const req = request("reset", { agent: "maint", as: "ready" });
+        const refusal = refused(await planDeliverables(repo, req, rt), "DELIVERY_DIVERGED");
+        expect(refusal.recovery).toContain(
+          `gh issue edit ${N} --repo ${repo} --remove-label status:incomplete --add-label status:ready`,
+        );
+        if (observed) expect(refusal.prerequisite).toMatch(/written before reset removed/);
+        expect((await applyDeliverables(repo, req, rt)).exitCode).toBe(1);
+        expect(state.writes).toHaveLength(0);
+        expect([...state.labels].sort()).toEqual(["status:incomplete", "status:ready"]);
+      }
+    });
+
+    it("a legacy record is complete without observedLabels only when the labels are exactly its target", async () => {
+      const { rt, state } = github({
+        comments: [submitted(), post(legacy("incomplete"))],
+        prs: [closed],
+        labels: ["status:incomplete", "bug"],
+      });
+      const result = await applyDeliverables(
+        repo,
+        request("reset", { agent: "maint", as: "incomplete" }),
+        rt,
+      );
+      expect(result.exitCode).toBe(0);
+      expect(result.ok && result.noop).toBe(true);
+      expect(state.writes).toHaveLength(0);
+    });
   });
   it("VOID_NOT_APPLICABLE: void of a parsable record is refused; a malformed one is voided", async () => {
     const good = submitted();
