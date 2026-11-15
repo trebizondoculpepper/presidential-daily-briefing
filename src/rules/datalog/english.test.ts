@@ -14,6 +14,7 @@ import {
   PolicyBuildError,
   serialize,
 } from "./build.js";
+import ds from "datascript";
 import { readOne } from "./edn.js";
 import { clauseEdn, compileEnglish, EnglishCompileError } from "./english.js";
 import { clauseLines, clauseText, conjunctionText, predicateHead } from "./english-render.js";
@@ -166,6 +167,44 @@ describe("English policy compiler (#416)", () => {
     ]);
   });
 
+  it("preserves native dynamic attributes without assigning a viewer scope or guessed lexicon", () => {
+    const query = "[:find ?a ?v :in $ :where [1 ?a ?v]]";
+    const wildcard = '[:find ?t :in $ :where [?t _ "OPEN"]]';
+    const queries = { ...bundle.queries, dynamic: query, wildcard };
+    const synthetic = compileEnglish({ ...bundle, queries });
+    const clause = synthetic.queries.find((q) => q.name === "dynamic")!.clauses[0];
+    expect(clause).toEqual({
+      type: "dynamic-fact",
+      entity: { lit: 1 },
+      attribute: { var: "?a" },
+      value: { var: "?v" },
+    });
+    expect(clauseEdn(clause)).toBe("[1 ?a ?v]");
+    expect(clauseText(clause)).toBe("a fact has entity 1, attribute ?a and value ?v");
+    expect(clauseText(synthetic.queries.find((q) => q.name === "wildcard")!.clauses[0])).toBe(
+      'a fact has entity ?t, attribute anything and value "OPEN"',
+    );
+    const db = ds.init_db([
+      [1, "role", "implementer"],
+      [1, "state", "OPEN"],
+    ]);
+    expect(ds.q(query, db).sort()).toEqual([
+      ["role", "implementer"],
+      ["state", "OPEN"],
+    ]);
+    expect(ds.q(wildcard, db)).toEqual([[1]]);
+    expect(
+      problemsOf(() =>
+        compileEnglish({
+          ...bundle,
+          queries: { ...bundle.queries, q3: '[:find ?v :where [1 "?a" ?v]]' },
+        }),
+      ),
+    ).toContain(
+      'policy/queries.edn :q3 where[0]: attribute "?a" has no phrase in schema.edn :lexicon',
+    );
+  });
+
   it("fails on unsupported constructs instead of omitting them", () => {
     const withClauses = (extra: string) =>
       problemsOf(() =>
@@ -174,8 +213,8 @@ describe("English policy compiler (#416)", () => {
     expect(withClauses('[(odd ?t) [?t "number" ?n] [(odd? ?n)]]')).toEqual([
       "policy/rules.edn[84] odd[1]: unsupported function clause (odd?)",
     ]);
-    expect(withClauses("[(any ?t) [?t ?a ?v]]")).toEqual([
-      "policy/rules.edn[84] any[0]: only literal string attributes are supported",
+    expect(withClauses("[(any ?t) [?t 42 ?v]]")).toEqual([
+      "policy/rules.edn[84] any[0]: a dynamic attribute must be a variable or wildcard",
     ]);
     expect(withClauses('[(first ?t) [?t "label" ?l] [(count ?l) ?n]]')).toEqual([
       "policy/rules.edn[84] first[1]: unsupported function clause (count)",
