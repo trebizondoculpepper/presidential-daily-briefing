@@ -33,7 +33,8 @@ describe("rules build (#348)", () => {
   it("builds the EDN sources and the committed artifact is current", () => {
     const artifact = buildPolicy();
     expect(JSON.parse(readFileSync(artifactPath, "utf8"))).toEqual(JSON.parse(serialize(artifact)));
-    expect(artifact.definitions).toHaveLength(23);
+    // 23 agent decisions plus five human briefing decisions (#457).
+    expect(artifact.definitions).toHaveLength(28);
   });
 
   it("rejects a second top-level form that DataScript would silently ignore", () => {

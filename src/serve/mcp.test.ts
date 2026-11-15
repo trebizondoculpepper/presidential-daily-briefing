@@ -240,6 +240,17 @@ describe("pdb serve HTTP MCP (#373)", () => {
       );
       expect(deps.tool).toBe("triage_dependencies");
       expect(deps.freshness).toMatchObject({ cache: { source: "live" } });
+      // The human briefing (#457) shares the cached snapshot and the shared service.
+      const human = envelopeOf(
+        await client.callTool({
+          name: "triage_briefing",
+          arguments: { agent: "me", role: "human" },
+        }),
+      );
+      expect(human.data).toMatchObject({
+        human: { schemaVersion: 1, human: "me", routing: "named" },
+      });
+      expect(s.collects).toEqual(["example/one", "example/one#1"]);
       const events = await client.callTool({ name: "triage_events", arguments: {} });
       expect(events.structuredContent).toMatchObject({ kind: "events" });
       // The JSON API sees the same cache: the briefing snapshot is already there.

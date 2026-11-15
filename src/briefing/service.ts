@@ -32,6 +32,8 @@ import type { LabelEstimationRuntime } from "../estimation/complexitylabels.js";
 import type { Snapshot } from "../github/types.js";
 import type { PickupOrder } from "./ranking.js";
 import { briefingProcess, resolveGuideSetting } from "./process.js";
+import { humanBriefing, humanText, readHumanEvidence } from "./human.js";
+import type { HumanBriefing } from "./human.js";
 import type { BriefingProcess, GuideRuntime } from "./process.js";
 
 /** Presentation options for a collected snapshot, as the CLI's briefing flags express them. */
@@ -81,6 +83,8 @@ export async function presentBriefing(
   /** #192: live PR and compare reads for delivery; absent (offline) means not evaluated. */
   live?: { query: Query; rest: Rest },
 ): Promise<PresentedBriefing> {
+  if (options.role === humanRole && !options.full && !options.issue)
+    return presentHuman(snapshot, options, now, trust, signal, loadEngine);
   // Sizes come from the snapshot's labels (#152); only configuration is read here.
   const collected = await collectLabelEstimationInput(snapshot.repository, estimationRuntime);
   // Locally generated configuration diagnostics may name local directories; a remote front end
@@ -228,6 +232,86 @@ export async function presentBriefing(
           )
         : textReport({ ...expanded, completeness: report.completeness })),
     complete: report.completeness.complete,
+  };
+}
+
+/** The human briefing role (doc/design/human-briefing.md, #457). */
+export const humanRole = "human";
+
+/**
+ * The human briefing for a collected snapshot: rule-derived from the Datalog policy whatever the
+ * agent-queue engine setting, with no TypeScript twin and no fallback. Reads only the comments
+ * already collected, plus #212 permission lookups for question record authors.
+ */
+async function presentHuman(
+  snapshot: Snapshot,
+  options: PresentOptions,
+  now: Date,
+  trust: TrustDecision | undefined,
+  signal: AbortSignal | undefined,
+  loadEngine: () => Promise<Pick<typeof import("../rules/datalog/datalog.js"), "evaluateDatalog">>,
+): Promise<PresentedBriefing> {
+  const evidence = await readHumanEvidence(snapshot, trust, signal);
+  const human = options.agent ?? null;
+  let result: Awaited<
+    ReturnType<(typeof import("../rules/datalog/datalog.js"))["evaluateDatalog"]>
+  >;
+  try {
+    const { evaluateDatalog } = await loadEngine();
+    result = evaluateDatalog(snapshot, new Map(), {
+      role: humanRole,
+      agent: human ?? undefined,
+      questionRecords: evidence.records,
+      limit: Number.MAX_SAFE_INTEGER,
+      signal,
+      now: options.engineClock,
+    });
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    throw new BriefingEngineError(
+      "decision-engine-failed",
+      error instanceof Error
+        ? error.message
+        : "Human briefing evaluator failed; no fallback was run.",
+    );
+  }
+  // Freshness and snapshot completeness come from the shared facts, as in every briefing.
+  const facts = briefing(
+    snapshot,
+    { limit: 1, agent: options.agent, offline: options.offline },
+    now,
+  );
+  const labelWarnings = snapshot.issues
+    .filter((i) => i.state === "OPEN" && i.labels.pageInfo.hasNextPage)
+    .map((i) => `${i.url}: labels truncated; a question or decision label may be unseen.`);
+  const view: HumanBriefing = humanBriefing(snapshot, result.items, evidence, {
+    human,
+    limit: options.limit,
+    complete: facts.completeness.complete,
+    warnings: [...evidence.warnings, ...labelWarnings],
+  });
+  const completeness = {
+    ...facts.completeness,
+    complete: facts.completeness.complete && view.coverage.complete,
+    warnings: [...facts.completeness.warnings, ...view.coverage.warnings],
+  };
+  const report = {
+    schemaVersion: 2 as const,
+    repository: snapshot.repository,
+    freshness: facts.freshness,
+    completeness,
+    rateLimit: facts.rateLimit,
+    human: view,
+    decisionEngine: {
+      ...result.decisionEngine,
+      source: "role" as const,
+      role: { used: humanRole, source: "request" as const },
+    },
+  };
+  return {
+    report: report as unknown as PresentedBriefing["report"],
+    text: humanText(report, view, options.maxChars),
+    complete: completeness.complete,
   };
 }
 
