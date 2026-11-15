@@ -229,7 +229,8 @@ export async function dependencyReport(
   let stoppedBy: TreeBounds["stoppedBy"] = null;
   for (let next = pending.shift(); next; next = pending.shift()) {
     const [repo, n] = next;
-    const key = `${repo}#${n}`;
+    // GitHub owner/name are case-insensitive: one issue is one node however an edge spells it.
+    const key = `${repo.toLowerCase()}#${n}`;
     if (nodes.has(key) || unfollowed.has(key)) continue;
     if (follow && !follow(repo)) {
       unfollowed.set(key, { repository: repo, number: n });
@@ -295,7 +296,7 @@ export async function dependencyReport(
   if (tree) {
     const notRead = new Map<string, { repository: string; number: number }>();
     for (const [repo, n] of pending) {
-      const key = `${repo}#${n}`;
+      const key = `${repo.toLowerCase()}#${n}`;
       if (nodes.has(key) || unfollowed.has(key) || notRead.has(key)) continue;
       notRead.set(key, { repository: repo, number: n });
       meter.cover("issue", key, "not-requested", {
@@ -358,15 +359,19 @@ export function treeIncompleteText(b: TreeBounds): string {
   ].join("; ");
   return `TREE INCOMPLETE (${why || "unknown bound"}): read ${b.nodesRead} issue(s); ${b.notRead + (b.notServed ?? 0)} known issue(s) not read, and more not read beyond them. This is not a complete graph; cycles are only those among the issues read.`;
 }
+/** The reason given for a tree report that carries no bounds (an older schema or cache). */
+export const legacyTreeText =
+  "TREE COMPLETENESS UNKNOWN: this tree report records no bounds (older schema); treat it as incomplete and rerun deps N --tree.";
 /** The listed identities a stopped tree did not read. */
 export function notReadText(b: TreeBounds): string {
   const listed = b.notReadSample.map((r) => `${r.repository}#${r.number}`);
   return `  Not read: ${listed.join(", ")}${b.notRead > listed.length ? `, … ${b.notRead - listed.length} more` : ""}`;
 }
 /** The truncation notice of a stopped tree; empty for a complete tree or a direct read. */
-export function treeNotice(report: Pick<DependencyReport, "treeBounds">): string[] {
+export function treeNotice(report: Pick<DependencyReport, "treeBounds" | "tree">): string[] {
   const b = report.treeBounds;
-  if (!b) return [];
+  // A tree report without bounds (an older schema) is incomplete, and says why.
+  if (!b) return report.tree ? [legacyTreeText] : [];
   if (b.complete)
     return [`Tree complete: ${b.nodesRead} issue(s) read (node limit ${b.nodeLimit}).`];
   return [treeIncompleteText(b), ...(b.notRead ? [notReadText(b)] : [])];
@@ -379,7 +384,7 @@ export function dependencyText(report: DependencyReport): string {
       report.guidance,
       ...(report.tree
         ? [
-            "--tree is an explicit, expensive diagnosis: one request per issue read. Routine questions use deps N.",
+            "--tree is an explicit, expensive diagnosis: at least one request per issue read, plus a request per further page of 100 edges. Routine questions use deps N.",
           ]
         : []),
       ...treeNotice(report),

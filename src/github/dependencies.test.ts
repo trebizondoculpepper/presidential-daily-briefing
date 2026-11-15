@@ -13,6 +13,7 @@ import {
 import { type Query } from "./github.js";
 import { dependenciesView, type ViewBase } from "../mcp/views.js";
 import type { Issue } from "./types.js";
+import type { DependencyReport } from "./dependencies.js";
 import { clock, issue, page, repo, time } from "../testing/snapshots.js";
 import { graphQuery } from "../testing/fakegh.js";
 
@@ -248,6 +249,60 @@ describe("bounded --tree diagnosis (#196)", () => {
           dependencyReport(r, n, o, refusing, clock),
       }),
     ).toBe(2);
+  });
+  it("refuses --max-nodes on every subcommand that does not use it", () => {
+    for (const args of [
+      ["add", "1", "--on", "2", "--note", "x", "--max-nodes", "0"],
+      ["add", "1", "--on", "2", "--note", "x", "--max-nodes", "5"],
+      ["remove", "1", "--on", "2", "--note", "x", "--max-nodes", "5"],
+      ["migrate", "--plan", "p.json", "--max-nodes", "5"],
+      ["7", "--max-nodes", "5"],
+      ["7", "--tree", "--max-nodes", "0"],
+    ])
+      expect(() => depsArgumentsFor(args), args.join(" ")).toThrow("--max-nodes");
+  });
+  it("counts one issue once however its repository is cased", async () => {
+    const { query: base, calls } = graphQuery({ edges: [[2, 1]] });
+    // Edges name the repository in upper case; the walk starts in lower case.
+    const query: Query = async (source, variables) =>
+      JSON.parse(
+        JSON.stringify(await base(source, variables)).replaceAll(
+          `"${repo}"`,
+          `"${repo.toUpperCase()}"`,
+        ),
+      );
+    const report = await dependencyReport(repo, 1, { tree: true }, query, clock);
+    expect(calls.map((c) => c.number)).toEqual([1, 2]);
+    expect(report.treeBounds).toMatchObject({ complete: true, nodesRead: 2 });
+  });
+  it("gives a visible reason for a legacy tree report without bounds", () => {
+    const legacy = {
+      schemaVersion: 1,
+      repository: repo,
+      startedAt: time,
+      fetchedAt: time,
+      tree: true,
+      nodes: [],
+      cycles: [],
+      guidance: "",
+    } as unknown as DependencyReport;
+    expect(dependencyReportIncomplete(legacy)).toBe(true);
+    expect(dependencyText(legacy)).toContain("TREE COMPLETENESS UNKNOWN");
+  });
+  it("describes tree cost as a lower bound and reports continuation pages in the metered cost", async () => {
+    const { query } = graphQuery({
+      edges: [
+        [2, 1],
+        [3, 1],
+        [4, 1],
+      ],
+      pageSize: 2,
+    });
+    const report = await dependencyReport(repo, 1, { tree: true, maxNodes: 1 }, query, clock);
+    const text = dependencyText(report);
+    expect(text).toContain("at least one request per issue read");
+    // One issue read plus one continuation page of its dependants.
+    expect(text).toContain("Read cost: 2 request(s)");
   });
   it("rejects a node limit outside its bounds", async () => {
     const { query } = graphQuery({ edges: [[1, 2]] });

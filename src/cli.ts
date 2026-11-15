@@ -336,7 +336,8 @@ refuses self-dependencies, pull requests, missing issues and cycles; an edge tha
 exists (add) or is absent (remove) is a no-op. Posts one comment on N with the note.
 Changes no labels.
   --tree                Explicit, expensive diagnosis: follow blockers and dependants
-                        transitively (one request per issue), breadth first; report cycles.
+                        transitively (at least one request per issue, more for issues
+                        with over 100 edges), breadth first; report cycles.
                         A walk stopped by its node limit says so and lists what it did not
                         read; it is never reported as a complete graph
   --max-nodes K         Tree node limit (default ${treeNodeLimit}, at most ${treeNodeMaximum}; --tree only)
@@ -374,6 +375,14 @@ export function depsArgumentsFor(args: string[]): DepsArguments {
     throw new Error("--repo must be owner/name.");
   const number = (text: string | undefined): number | null =>
     /^[1-9]\d*$/.test(text ?? "") && Number.isSafeInteger(Number(text)) ? Number(text) : null;
+  // --max-nodes belongs to deps N --tree alone: refuse it everywhere else, before any branch.
+  if (values["max-nodes"] !== undefined) {
+    if (["migrate", "add", "remove"].includes(positionals[0] ?? "") || !values.tree)
+      throw new Error("--max-nodes applies only to deps N --tree.");
+    const parsed = number(values["max-nodes"]);
+    if (parsed === null || parsed > treeNodeMaximum)
+      throw new Error(`--max-nodes must be 1–${treeNodeMaximum}.`);
+  }
   if (positionals[0] === "migrate") {
     const usage =
       "Usage: deps migrate --plan FILE [--repo owner/name] [--json] (read-only; automatic apply is deferred, #48)";
