@@ -8,6 +8,7 @@
  *
  *   npm run rules:test                       run every scenario
  *   npm run rules:test -- --junit PATH       also write JUnit XML for CI (#394)
+ *   npm run rules:test -- --scenarios DIR    run the scenarios of another directory instead
  *
  * Two outcomes are kept apart, following #336's recommendation:
  *   RuleDecisionFailure     the scenario ran, but an action, order, denial or explanation differs
@@ -289,8 +290,12 @@ export function runAll(
     readPolicy?: (file: string) => string;
     readScenario?: (file: string) => string;
     listScenarios?: () => string[];
+    /** Another scenario directory (`--scenarios DIR`), reported by that path. */
+    dir?: string;
   } = {},
 ): Outcome[] {
+  const dir = options.dir ?? scenarioDir;
+  const label = options.dir ?? "src/rules/datalog/scenarios";
   const outcomes: Outcome[] = [];
   const infrastructure = (name: string, file: string, error: unknown) =>
     outcomes.push({
@@ -311,16 +316,16 @@ export function runAll(
   }
   let files: string[] = [];
   try {
-    files = (options.listScenarios ?? (() => readdirSync(scenarioDir)))()
+    files = (options.listScenarios ?? (() => readdirSync(dir)))()
       .filter((f) => f.endsWith(".edn"))
       .sort();
-    if (!files.length) throw new Error(`no scenario files in ${scenarioDir}`);
+    if (!files.length) throw new Error(`no scenario files in ${dir}`);
   } catch (error) {
-    infrastructure("scenario discovery", "src/rules/datalog/scenarios", error);
+    infrastructure("scenario discovery", label, error);
   }
-  const read = options.readScenario ?? ((f: string) => readFileSync(join(scenarioDir, f), "utf8"));
+  const read = options.readScenario ?? ((f: string) => readFileSync(join(dir, f), "utf8"));
   for (const f of files) {
-    const file = `src/rules/datalog/scenarios/${f}`;
+    const file = `${label}/${f}`;
     let scenarios: Scenario[];
     try {
       scenarios = readScenarios(read(f), file);
@@ -385,6 +390,8 @@ export const exitCode = (outcomes: Outcome[]): number =>
 
 export interface MainDeps {
   run: () => Outcome[];
+  /** Runs another scenario directory (`--scenarios DIR`); default: the real runner there. */
+  runIn?: (dir: string) => Outcome[];
   out: (text: string) => void;
   err: (text: string) => void;
   writeFile: (path: string, text: string) => void;
@@ -403,7 +410,14 @@ export function main(argv: string[], deps: MainDeps = defaultDeps): number {
     deps.err("--junit needs a file path.\n");
     return 2;
   }
-  const outcomes = deps.run();
+  const scenariosAt = argv.indexOf("--scenarios");
+  if (scenariosAt >= 0 && !argv[scenariosAt + 1]) {
+    deps.err("--scenarios needs a directory.\n");
+    return 2;
+  }
+  const dir = scenariosAt >= 0 ? argv[scenariosAt + 1] : undefined;
+  const outcomes =
+    dir === undefined ? deps.run() : (deps.runIn ?? ((d) => runAll({ dir: d })))(dir);
   for (const o of outcomes)
     deps.out(
       o.status === "passed"

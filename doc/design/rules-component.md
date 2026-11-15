@@ -227,7 +227,7 @@ Each step is one focused PR. Each must pass `npm run check`, `npm test`, `npm ru
 4. **Packaging proof.** Confirm the single lazy chunk, the unchanged allowlist, installed CLI and MCP outside the checkout, and no runtime file reads. This may fold into step 3 if that PR stays small.
 5. **Typed boundary.** Split `datalog.ts` into `engine.ts` (`evaluatePolicy`) and `adapter.ts` (normalization, the `RankedActions` projection and command templates). Add the import-boundary test. Golden unchanged.
 6. **Native tests.** Add `runner.ts`, `rules:test`, `--junit` and `rules.test.ts`. Convert the policy cases from `datalog.test.ts` and `assessment-priority.test.ts` to `tests/*.edn`. The remaining TypeScript cases become `adapter.test.ts`.
-7. **Contributor docs.** Add the edit → `rules:build` → `rules:test` workflow with a short example to `AGENTS.md` and the README, and point `source-layout.md` at this contract. CI publishing is #394.
+7. **Contributor docs.** Add the edit → `rules:build` → `rules:test` workflow with a short example to `AGENTS.md` and the README, and point `source-layout.md` at this contract. CI publishing is #394: `reports/junit-rules.xml` goes through #393's summary and artifact, and the `rule outcome categories` step demonstrates on every platform that a wrong decision, malformed EDN and runner faults land in their categories (doc/design/test-reporting.md). `rules:test -- --scenarios DIR` runs another scenario directory.
 
 The golden suite stays after the extraction as a regression net. Intentional policy changes later regenerate it alongside the EDN change that causes them.
 

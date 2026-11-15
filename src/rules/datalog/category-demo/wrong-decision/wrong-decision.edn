@@ -1,0 +1,14 @@
+;; Category demonstration (#394): a VALID scenario whose expectation is deliberately WRONG.
+;; The facts are guard-negatives.edn's first scenario, which yields D-PR-FAIL; this expects no
+;; action, so the runner must report a RuleDecisionFailure (exit 1), never an infrastructure
+;; error. Not a production fixture: only scripts/rules-categories.ts runs it.
+{:suite "category-demo-wrong-decision"
+ :scenarios
+ [{:id "intentional-wrong-decision"
+   :doc "Deliberately wrong: expects no action where the policy offers PR follow-up."
+   :viewer {:role "designer" :agent "me"}
+   :facts [{:e 1 "forward-complete" true}
+           {:e 100 "kind" "pr" "state" "OPEN" "number" 2 "target" "https://github.com/o/r/pull/2" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "head2" "draft" false "pr-complete" true "review-decision" "" "mergeable" "MERGEABLE" "merge-state" "CLEAN" "label" "documentation" "responsible" "me" "check" 101}
+           {:e 101 "name" "verify" "outcome" "FAILURE"}]
+   :expect {:actions []
+            :denials #{}}}]}
