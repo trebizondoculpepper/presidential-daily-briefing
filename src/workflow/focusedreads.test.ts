@@ -258,6 +258,66 @@ describe("who N reads only the ticket and its linked open PRs (#367)", () => {
     expect(notAttempted.length + read.report.pullRequests.length).toBe(2);
   });
 
+  it("after a quota refusal, no delivery, permission or release read is sent", async () => {
+    const w = world();
+    const one = w.issues.get(1)!;
+    // A delivery record that would otherwise trigger permission and delivery reads.
+    w.issues.set(1, {
+      ...one,
+      comments: page([
+        note(
+          issueUrl(1),
+          1,
+          deliveryMarker({
+            v: 1,
+            op: "submit",
+            opId: "op-1",
+            repository: repo,
+            issue: 1,
+            agent: "ana",
+            deliverables: [],
+            issuedAt: time,
+          } as unknown as DeliveryRecord),
+          1,
+        ),
+      ]),
+    });
+    w.rateLimitPr = new Set([10]);
+    const { query } = fake(w);
+    const later: string[] = [];
+    const rest: Rest = async (path) => {
+      later.push(path);
+      return { status: 200, body: { user: { login: "ana" }, role_name: "write" } };
+    };
+    const liveQuery: Query = async (source, variables) => {
+      later.push(source);
+      return query(source, variables);
+    };
+    const read = await readWhoLive(
+      repo,
+      1,
+      options,
+      {
+        trust: markerTrust(permissionLookup(repo, rest)),
+        trustWith: (r) => markerTrust(permissionLookup(repo, r)),
+        live: { query: liveQuery, rest },
+      },
+      query,
+      clock,
+    );
+    expect(later).toEqual([]);
+    const { coverage, telemetry } = read.report.collection;
+    expect(telemetry.failures).toMatchObject({ "rate-limited": 1 });
+    for (const source of ["delivery-records", "permissions"])
+      expect(coverage.find((c) => c.source === source)).toMatchObject({
+        state: "not-requested",
+        omission: expect.stringContaining("quota"),
+      });
+    expect(read.complete).toBe(false);
+    expect(read.report.completeness.complete).toBe(false);
+    expect(read.text).toMatch(/INCOMPLETE: Delivery and permission evidence for #1 was not read/);
+  });
+
   it("incomplete labels make ownership unknown on the focused path too", async () => {
     const w = world();
     const one = w.issues.get(1)!;

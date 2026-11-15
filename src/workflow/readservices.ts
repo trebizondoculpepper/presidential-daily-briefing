@@ -189,13 +189,34 @@ export async function readWhoLive(
     clock,
   );
   const subject = `${repository}#${number}`;
-  const metered = meteredBoundaries(boundaries, meter, subject);
+  // A definitive quota refusal while hydrating linked PRs stops the read: no delivery, permission
+  // or legacy-release request is sent after it. Those sources are reported not read, and the
+  // answer is incomplete rather than evaluated from a partial read.
+  const refused =
+    meter.notAttempted.length > 0 || meter.calls.some((c) => c.outcome === "rate-limited");
+  const metered = refused ? {} : meteredBoundaries(boundaries, meter, subject);
   const read = await readWho(
     snapshot,
     number,
     { staleHours: options.staleHours, now: options.now, offline: false },
     metered,
   );
+  if (refused) {
+    const omission = "not read: GitHub refused a request for quota earlier in this read";
+    meter.cover("delivery-records", subject, "not-requested", { omission });
+    meter.cover("permissions", subject, "not-requested", { omission });
+    const warning = `Delivery and permission evidence for #${number} was not read after a rate-limit refusal; delivery is unknown.`;
+    const report = {
+      ...read.report,
+      completeness: {
+        ...read.report.completeness,
+        complete: false,
+        warnings: [...read.report.completeness.warnings, warning],
+      },
+      collection: meter.collection(),
+    };
+    return { report, text: appendLines(read.text, [`INCOMPLETE: ${warning}`]), complete: false };
+  }
   coverDelivery(meter, subject, metered, metered.trust && metered.live ? read.delivery : null);
   const report = { ...read.report, collection: meter.collection() };
   return { report, text: read.text, complete: read.complete };
