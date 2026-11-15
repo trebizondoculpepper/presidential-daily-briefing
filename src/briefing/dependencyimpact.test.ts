@@ -380,12 +380,49 @@ describe("deps --top: repository direct impact (#196)", () => {
     expect(ranked.completionUnlocks[1].notPickable.join()).toContain("claimed by agent:ana");
     // Never claim or suggest a claimed ticket as new pickup.
     expect(ranked.startNow.map((r) => r.number)).not.toContain(2);
-    expect(ranked.nextAction).toMatch(/^Start #1: claim it \(pdb claim 1\)/);
+    expect(ranked.nextAction).toMatch(
+      /^Start #1: claim it \(pdb claim 1 --repo example\/project\)/,
+    );
     const text = repositoryImpactText(ranked);
     expect(text).toContain("Can start now (2 of 2;");
     expect(text).toContain("Finish-first (#182)");
     expect(text.length).toBeLessThan(5_000);
     expect(JSON.stringify(ranked).length).toBeLessThan(20_000);
+  });
+
+  it("never offers pickup past a not-planned blocker or a truncated label page", async () => {
+    const { query } = graphQuery({
+      states: {
+        1: { labels: ["status:ready"] },
+        5: { labels: ["status:ready"] },
+        9: { state: "CLOSED", stateReason: "NOT_PLANNED" },
+        6: { labels: ["status:ready"] },
+      },
+      // 1 has only a not-planned blocker; 6 waits only on 1; 5 is plainly ready.
+      edges: [
+        [1, 9],
+        [6, 1],
+      ],
+    });
+    const ranked = repositoryImpact(await readDependencyInventory(repo, {}, query, clock), 10);
+    expect(ranked.startNow.map((r) => r.number)).toEqual([5]);
+    expect(ranked.undecided).toMatchObject([{ number: 1 }]);
+    expect(ranked.undecided[0].reason).toContain("closed as not planned");
+    expect(ranked.completionUnlocks[0]).toMatchObject({ number: 1, unlocks: [6] });
+    expect(ranked.completionUnlocks[0].notPickable.join()).toContain("not planned");
+    expect(repositoryImpactText(ranked)).toContain("Undecided (inspect before pickup):");
+    // Truncated labels: undecided, and as a dependant it is unknown impact, never a proven unlock.
+    const truncated = { ...(await readDependencyInventory(repo, {}, query, clock)) };
+    truncated.issues = truncated.issues.map((issue) =>
+      issue.number === 6
+        ? { ...issue, labels: { ...issue.labels, pageInfo: { hasNextPage: true, endCursor: "c" } } }
+        : issue,
+    );
+    const again = repositoryImpact(truncated, 10);
+    expect(again.undecided.map((r) => r.number).sort((a, b) => a - b)).toEqual([1, 6]);
+    const one = again.completionUnlocks.find((r) => r.number === 1)!;
+    expect(one.unlocks).toEqual([]);
+    expect(one.unknown.join()).toContain("pickup unknown (labels beyond the first 100");
   });
 
   it("labels a capped inventory provisional and unread dependants unknown, never zero", async () => {
