@@ -164,7 +164,12 @@ const reportSchema = z.object({
   freshness: z.object({ offline: z.literal(false), startedAt: z.string(), fetchedAt: z.string() }),
   completeness: z.object({ complete: z.literal(true), warnings: z.array(z.string()) }),
   ranking: z.object({ platform: z.string() }),
-  role: z.object({ name: z.string() }),
+  role: z.object({
+    name: z.string(),
+    sections: z.array(
+      z.object({ items: z.array(z.object({ url: z.string(), reason: z.string() })) }),
+    ),
+  }),
   decisionEngine: z.object({
     used: z.enum(["datalog", "typescript"]),
     policyVersion: z.union([z.string(), z.number()]).nullable(),
@@ -182,7 +187,14 @@ const reportSchema = z.object({
         url: z.string(),
         labels: z.array(z.string()),
         owners: z.array(z.string()),
-        pullRequest: z.object({ head: z.string() }).passthrough().optional(),
+        pullRequest: z
+          .object({
+            head: z.string(),
+            checks: z.array(z.object({ name: z.string(), outcome: z.string(), url: z.string() })),
+            unresolvedThreads: z.number().int().nonnegative(),
+            linkedIssues: z.array(z.object({ number: z.number().int(), url: z.string() })),
+          })
+          .optional(),
         source: z
           .object({
             body: z.object({ at: z.string().nullable() }).passthrough(),
@@ -327,10 +339,16 @@ export class RebriefSession {
         return stop("briefing-budget");
       const policyRevision = `${report.decisionEngine.used}:${report.decisionEngine.policyVersion ?? queue.policyVersion}:${report.decisionEngine.rulesHash ?? "typescript"}`;
       const targets = new Set(queue.items.map((a) => a.target));
+      const roleReasons = new Map(
+        report.role.sections.flatMap((s) => s.items.map((row) => [row.url, row.reason] as const)),
+      );
       const fingerprint = hash({
         selection: read.selection,
         policyRevision,
-        actions: queue.items,
+        actions: queue.items.map((a) => ({
+          ...a,
+          effectiveReason: a.why?.text ?? roleReasons.get(a.target) ?? null,
+        })),
         evidence: report.subjects
           .filter((s) => targets.has(s.url))
           .map((s) => ({
@@ -338,6 +356,17 @@ export class RebriefSession {
             labels: [...s.labels].sort(),
             owners: [...s.owners].sort(),
             head: s.pullRequest?.head ?? null,
+            checks:
+              s.pullRequest?.checks.toSorted((a, b) => {
+                const left = hash(a),
+                  right = hash(b);
+                return left < right ? -1 : left > right ? 1 : 0;
+              }) ?? null,
+            unresolvedThreads: s.pullRequest?.unresolvedThreads ?? null,
+            linkedIssues:
+              s.pullRequest?.linkedIssues.toSorted((a, b) =>
+                a.url < b.url ? -1 : a.url > b.url ? 1 : 0,
+              ) ?? null,
             bodyRevision: s.source?.body.at ?? null,
             commentRevision: s.source?.latestComment?.at ?? null,
           }))
