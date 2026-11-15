@@ -152,7 +152,18 @@ interface Entry {
   issue: Issue;
   comments: Comment[];
   next: string | null;
+  /**
+   * While a changed issue's history is reread, the comments known before the reread. Questions
+   * on them stay visible (with an unknown outcome) until the reread completes (Codex, #609).
+   */
+  earlier?: Comment[];
 }
+/** The comments to fold: those reread so far, plus earlier ones not yet reread. */
+const known = (e: Entry): Comment[] => {
+  if (!e.earlier) return e.comments;
+  const reread = new Set(e.comments.map((c) => c.databaseId ?? c.url));
+  return [...e.comments, ...e.earlier.filter((c) => !reread.has(c.databaseId ?? c.url))];
+};
 /** One scan's progress. Nothing here is a GitHub snapshot: pages are observed over time. */
 export interface ClosedScanState {
   startedAt: string;
@@ -328,10 +339,15 @@ async function scan(
   const observe = (node: Issue) => {
     if (node.state !== "CLOSED") return;
     s.seen.add(node.url);
+    const before = s.entries.get(node.url);
+    const next = node.comments.pageInfo.hasNextPage
+      ? (node.comments.pageInfo.endCursor ?? "")
+      : null;
     s.entries.set(node.url, {
       issue: node,
       comments: [...node.comments.nodes],
-      next: node.comments.pageInfo.hasNextPage ? (node.comments.pageInfo.endCursor ?? "") : null,
+      next,
+      ...(before && next !== null ? { earlier: known(before) } : {}),
     });
   };
 
@@ -422,7 +438,10 @@ async function scan(
       if (page.more && page.cursor) {
         entry.next = page.cursor;
         queue.push(url);
-      } else entry.next = null;
+      } else {
+        entry.next = null;
+        delete entry.earlier;
+      }
     }
   } catch (error) {
     signal?.throwIfAborted();
@@ -472,11 +491,12 @@ async function scan(
   for (const [url, entry] of s.entries) {
     signal?.throwIfAborted();
     if (exclude.has(url)) continue;
-    if (!entry.comments.some((c) => (c.body ?? "").includes(questionMarkerPrefix))) continue;
+    const comments = known(entry);
+    if (!comments.some((c) => (c.body ?? "").includes(questionMarkerPrefix))) continue;
     const folded = await foldSourceQuestions(
       repository,
       entry.issue,
-      entry.comments,
+      comments,
       entry.next === null,
       trust,
       counts,
@@ -485,7 +505,7 @@ async function scan(
     );
     if (folded.questions.length)
       sources.push({
-        issue: { ...entry.issue, comments: { ...entry.issue.comments, nodes: entry.comments } },
+        issue: { ...entry.issue, comments: { ...entry.issue.comments, nodes: comments } },
         facts: folded.questions.map((q) => q.fact),
         records: folded.open,
       });
