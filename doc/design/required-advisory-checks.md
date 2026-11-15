@@ -130,6 +130,25 @@ Report measured collection cost. Keep `verify` and review gates independent.
 Completing #343 requires delivered runtime and these tests; merging this document
 only makes that implementation ready.
 
+## Implementation note (#343)
+
+`src/github/requiredchecks.ts` holds the shared model. `hydrateRequiredChecks` runs in `collect`
+for open, non-draft PRs with an unfinished check only. It makes one effective-rules REST read
+and one legacy `ref.branchProtectionRule` GraphQL read per distinct base, shared across PRs, plus
+one `isRequired(pullRequestNumber:)` read per candidate PR, bound to its head and base. Discovery
+rows and PRs without unfinished checks make no new request. Any unreadable source, page limit,
+or a head/base that moved during the read is a named gap. It becomes a `${pr.url}:` warning,
+which both engines already treat as incomplete PR evidence (inspection, never acceptance), and
+the expected set is then `null`, not empty. `classifyChecks` is the pure classifier: required,
+advisory and unknown pending checks, and expected required checks not yet reported (matched by
+context and app). TypeScript `pr-pending` and Datalog `pr-pending` exclude only checks known to be
+advisory and add missing required checks; the Datalog host passes the classification in
+(`checkRequiredness`) so the lazy engine chunk imports nothing new. A PR without evidence (old
+snapshots, an injected collector without a REST boundary) keeps every pending check unknown,
+which waits as before. Measured on this repository with two candidate PRs: 6 GraphQL requests
+in total, of which the hydration added 3 (one per PR plus one shared legacy read), plus 1 REST
+rules read.
+
 ## Verified sources and bounded probe
 
 On 2026-11-15, read-only schema introspection confirmed both GraphQL types expose

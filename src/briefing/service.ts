@@ -15,6 +15,7 @@ import type { DeclaredReviewPolicy } from "../workflow/reviewpolicy.js";
  * in their own modules and are never reachable through this service.
  */
 import { collect, ghQuery, IssueUnavailable, permissionLookup } from "../github/github.js";
+import { classifyChecks } from "../github/requiredchecks.js";
 import type { IssueDiagnosis, Query, Rest } from "../github/github.js";
 import { diagnoseDelivery } from "../workflow/deliverydoctor.js";
 import { deliveryRead } from "../workflow/deliveryread.js";
@@ -96,6 +97,13 @@ export interface PresentedBriefing {
   text: string;
   complete: boolean;
 }
+
+/**
+ * Required-check classification per PR (#343) for the Datalog engine, from the same shared
+ * classifier the TypeScript rules use, so both engines decide waiting from one model.
+ */
+export const datalogCheckFacts = (snapshot: Snapshot) =>
+  new Map(snapshot.pullRequests.map((pr) => [pr.url, classifyChecks(pr)] as const));
 
 /** Build the briefing (compact unless `full`) for an already collected snapshot. */
 export async function presentBriefing(
@@ -208,6 +216,7 @@ export async function presentBriefing(
         responsible: responsibility.responsible,
         responsibilityUnknown: responsibility.unknown.map((u) => u.issue),
         ...datalogReviewFacts(snapshot),
+        checkRequiredness: datalogCheckFacts(snapshot),
         limit: Number.MAX_SAFE_INTEGER,
         signal,
         now: options.engineClock,
@@ -340,6 +349,7 @@ async function presentHuman(
       agent: human ?? undefined,
       questionRecords: evidence.records,
       ...datalogReviewFacts(snapshot),
+      checkRequiredness: datalogCheckFacts(snapshot),
       limit: Number.MAX_SAFE_INTEGER,
       signal,
       now: options.engineClock,

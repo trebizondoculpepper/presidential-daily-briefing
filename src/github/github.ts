@@ -19,6 +19,7 @@ import type {
 } from "./changes.js";
 import type { Comment, Issue, Page, PullRequest, Reference, Snapshot } from "./types.js";
 import { hydrate, QuotaStopped, quotaRefusal, ReadMeter, readProfiles } from "./readplan.js";
+import { hydrateRequiredChecks } from "./requiredchecks.js";
 import type { Hydrated } from "./readplan.js";
 import {
   classifyGhFailure,
@@ -647,6 +648,11 @@ export interface CollectOptions {
   changeWindow?: ComparisonWindow;
   /** Page cap per all-state source in change-evidence mode (default DEFAULT_CHANGE_PAGES). */
   maxChangePages?: number;
+  /**
+   * REST boundary for required-check evidence (#343). Production uses the gh boundary; an
+   * injected GraphQL query without this leaves requiredness unknown (never advisory).
+   */
+  rest?: Rest;
 }
 export async function collect(
   repository: string,
@@ -957,6 +963,16 @@ export async function collect(
     });
     historySources = [summary("issues", issueHistory), summary("pull-requests", prHistory)];
   }
+  // #343: required-check evidence for the PRs where it decides waiting (open, non-draft, with an
+  // unfinished check); bounded to one shared base-policy read per base and one read per PR.
+  const restBoundary = options.rest ?? (injected ? undefined : ghRestWith(options.signal));
+  if (restBoundary)
+    warnings.push(
+      ...(await hydrateRequiredChecks(repository, pullRequests, {
+        query: (q, v) => query(q, v),
+        rest: (path) => restBoundary(path, { signal: options.signal }),
+      })),
+    );
   meter.cover("open-issues", repository, "complete");
   meter.cover("open-pull-requests", repository, "complete");
   // History is a separate source (doc/design/read-degradation.md): its failure keeps the

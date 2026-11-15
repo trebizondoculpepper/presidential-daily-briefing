@@ -83,6 +83,11 @@ export type PullRequest = Issue & {
   commits: {
     nodes: { commit: { statusCheckRollup: { state: string; contexts: Page<Check> } | null } }[];
   };
+  /**
+   * Required-check evidence (#343), hydrated only for open non-draft PRs with an unfinished
+   * check; absent means requiredness unknown (never advisory).
+   */
+  requiredChecks?: import("./requiredchecks.js").RequiredChecks;
 };
 export type Reference = { repository: string; number: number; url: string };
 export type Dependency = Reference & {
