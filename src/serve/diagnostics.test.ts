@@ -47,10 +47,13 @@ class ManualClock implements Clock {
 async function setup(repos = ["example/one"], gate?: Promise<void>, fail?: () => Error) {
   const clock = new ManualClock();
   const collects: string[] = [];
-  const login = { current: "octo-secret-login" };
+  const login = { current: "octo-secret-login", fail: null as Error | null };
   const serve: ServeRuntime = {
     currentRepository: async () => repos[0]!,
-    authContext: async () => ({ host: "github.com", login: login.current }),
+    authContext: async () => {
+      if (login.fail) throw login.fail;
+      return { host: "github.com", login: login.current };
+    },
     clock,
     stdout: () => undefined,
     stderr: () => undefined,
@@ -460,6 +463,25 @@ describe("serve diagnostics (#459)", () => {
       await Promise.all([first, second]);
       const items = (await s.json("api/v1/diagnostics/errors")).data.items;
       expect(items.map((e: { subject: number | null }) => e.subject)).toEqual([1]);
+    } finally {
+      await s.running.close();
+    }
+  });
+
+  it("records a rate-limited auth re-check that starts the cooldown", async () => {
+    const s = await setup();
+    try {
+      await s.get("api/v1/briefing");
+      // The next live read after the TTL re-checks the login, and that check is rate limited.
+      s.login.fail = new RateLimitError("limited", { resetAt: null });
+      s.clock.time += 6 * 60_000;
+      expect((await s.get("api/v1/issues/1")).status).toBe(502);
+      const errors = (await s.json("api/v1/diagnostics/errors")).data;
+      expect(errors.total).toBe(1);
+      expect(errors.items[0]).toMatchObject({ code: "GITHUB_RATE_LIMITED", subject: 1 });
+      // Refused by that cooldown afterwards: nothing ran, nothing more is recorded.
+      expect((await s.get("api/v1/issues/1")).status).toBe(502);
+      expect((await s.json("api/v1/diagnostics/errors")).data.total).toBe(1);
     } finally {
       await s.running.close();
     }

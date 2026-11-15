@@ -702,11 +702,13 @@ export class ServeCache {
         // Start a rate-limit cooldown before this slot is released, so a read queued behind
         // this one sees it (the waiters' own handling runs only after the release).
         if (!isSubjectAnswer(error)) {
+          // Decided before the cooldown is updated: a refusal by an existing cooldown ran
+          // nothing, while a failure that starts a cooldown is the one to record (#459).
+          const refusedByCooldown = this.cooldownError !== null && error === this.cooldownError;
           const failure = classifyFailure(error, this.now());
           this.noteRateLimit(failure);
-          // Once per shared collection (not per waiter), under the login it ran as; a refusal
-          // during a cooldown or at shutdown ran nothing and is not a new failure (#459).
-          if (error !== this.cooldownError && !this.closed)
+          // Once per shared collection (not per waiter), under the login it ran as.
+          if (!refusedByCooldown && !this.closed)
             this.recordError(cacheKey, failure, error, flight.auth);
         }
         throw error;
