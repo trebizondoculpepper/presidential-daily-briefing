@@ -105,7 +105,14 @@ type SettingsResult =
       fields: Record<string, string>;
       view: SettingsView | null;
     }
-  | { status: "committed-with-error"; code: "READ_BACK_FAILED"; message: string; next: string[] };
+  | {
+      status: "committed-with-error";
+      code: "DURABILITY_UNCONFIRMED" | "CLEANUP_FAILED" | "READ_BACK_FAILED";
+      message: string;
+      view: SettingsView | null; // the re-read view when the re-read succeeded
+      diagnostics: string[]; // redacted writer diagnostics, e.g. directory fsync or temp-file cleanup
+      next: string[];
+    };
 
 type SettingsErrorCode =
   | "INVALID_VALUE" // per-field validation, nothing written
@@ -124,7 +131,7 @@ Rules:
 1. Validation of every changed field runs before any write; any invalid field refuses the whole change with per-field messages.
 2. **Prerequisite (slice 0):** every config writer, including the existing CLI `updateConfig`, takes the same per-file lock (`acquireFileLock`, through `updateTextFile` with `checkUnchanged`) around its re-read and rename. Locking only the new service would leave the CLI race. The write is then `updateConfig` with `expectedRaw` matching `expectedRevision` under that lock. A mismatch is `CONFLICT` with the fresh view; nothing is merged automatically.
 3. Unknown keys and values already present in the file are preserved byte-for-byte where the format allows (the existing TOML writer behaviour), and other scopes are never touched.
-4. After writing, the service re-reads the file and returns the new view; if re-read fails it returns `committed-with-error` and the page says the save may have succeeded and asks for reload.
+4. After writing, the service re-reads the file. It returns `applied` only when the writer reported a clean commit and the re-read succeeded. A writer outcome of `committed-with-error` from `updateTextFile` (`src/config/safejson.ts`; for example the rename succeeded but directory fsync or temp-file cleanup failed) is preserved as `committed-with-error` with `DURABILITY_UNCONFIRMED` or `CLEANUP_FAILED`, carrying the re-read view when available, as [safe-shared-file-writes.md](safe-shared-file-writes.md) requires; it is never reported as a confirmed save or as a refusal. A failed re-read is `READ_BACK_FAILED`. The page then says the value was written but durability or confirmation is uncertain, shows the diagnostics, and offers Reload.
 5. Global writes go to the #452 global file through the same locked writer; repository writes need a registered project with a verified local root, otherwise `NO_LOCAL_ROOT`. No write ever targets the server's cwd, a guessed clone or an unregistered path.
 6. Values are never secrets today; any future secret-typed key is shown as "set" or "not set", never echoed, and is not writable here.
 
@@ -155,7 +162,7 @@ Under the #455 write session; no separate token scheme.
 1. **Descriptor fields and read service.** Add `scopes` and `applies` to `CONFIG_KEYS`; `settingsView` for repository scope; `pdb config list --json` parity. Checks: every registered key appears exactly once; source explicit/default/unknown; unreadable, future and both-formats files produce warnings and no rows marked editable; no GitHub access.
 2. **Read-only page and GET API** (repository scope; Global shows "not available until #452"). Checks: `/settings` without `repo` labelled Global; unserved repo refused without reads; project without a local root shows `NO_LOCAL_ROOT`; escaping; keyboard and narrow layout.
 3. **Global scope read** after #452 merges. Checks: global keys listed with restart/live state; no identity at Global; `serve.projects` read-only.
-4. **Write service and POST** after #455's write session ships. Checks: invalid fields refuse with nothing written; `CONFLICT` on concurrent CLI edit; unknown keys preserved; reset removes only the scoped override; lock held gives `LOCKED`; re-read failure gives `committed-with-error`; CSRF, Origin and edits-disabled refusals; cross-project and global/project race tests with injected filesystem.
+4. **Write service and POST** after #455's write session ships. Checks: invalid fields refuse with nothing written; `CONFLICT` on concurrent CLI edit; unknown keys preserved; reset removes only the scoped override; lock held gives `LOCKED`; writer `committed-with-error` (fsync or cleanup failure) and re-read failure each give `committed-with-error` with their code, never `applied` or a refusal; CSRF, Origin and edits-disabled refusals; cross-project and global/project race tests with injected filesystem.
 5. **Editing UI.** Checks: pending summary, Save, Cancel, Reset, discard prompt on scope change, conflict reconciliation, restart banner, no automatic restart, packaged-install smoke test.
 
 Slices 0–2 can start after this document merges, and slice 4 needs slice 0; slice 3 needs #452; slices 4–5 need #452 and #455's write session.
