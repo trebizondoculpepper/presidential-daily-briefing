@@ -242,7 +242,7 @@ describe("dashboard page and script (#374)", () => {
         getElementById: (id: string) => elements.get(id),
         createElement: () => ({ value: "", textContent: "" }),
       },
-      location: { search },
+      location: { search, assign: (to: string) => void (shown.assigned = to) },
       history: { replaceState: (_s: unknown, _t: string, to: string) => void (shown.url = to) },
       URLSearchParams,
       fetch: async (path: string) => {
@@ -251,7 +251,7 @@ describe("dashboard page and script (#374)", () => {
         return { json: async () => body };
       },
     };
-    const shown = { url: "" };
+    const shown = { url: "", assigned: "" };
     return { sandbox, elements, fetched, shown, listeners };
   }
   const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -300,5 +300,15 @@ describe("dashboard page and script (#374)", () => {
     await settle();
     expect(browser.fetched).toEqual(["/api/v1/status"]);
     expect(browser.elements.get("state")!.innerHTML).toContain("Select a project.");
+  });
+
+  it("opens the human attention page (#458) for the human role, without fetching a briefing", async () => {
+    const browser = fakeBrowser("?role=human&agent=me", {
+      "/api/v1/status": { repositories: [{ repository: "o/r", default: true }] },
+    });
+    runInNewContext(dashboardScript(), browser.sandbox);
+    await settle();
+    expect(browser.shown.assigned).toBe("/human?repo=o%2Fr");
+    expect(browser.fetched).toEqual(["/api/v1/status"]);
   });
 });
