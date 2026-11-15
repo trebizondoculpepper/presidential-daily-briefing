@@ -2056,7 +2056,15 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
    * The briefing presentation for `repository`, resolved once: configuration, label filter and
    * one per-run permission cache shared by the shortlist's ranking passes and the final report.
    */
-  let presentation: { repository: string; present: PresentFn; meter?: ReadMeter } | undefined;
+  let presentation:
+    | {
+        repository: string;
+        present: PresentFn;
+        meter?: ReadMeter;
+        /** The label filter as resolved once for this presentation (#312); null when none. */
+        labels: string[] | null;
+      }
+    | undefined;
   type PresentFn = (
     collected: Snapshot,
     live: boolean,
@@ -2075,8 +2083,15 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
       ? undefined
       : briefingProcess(await resolveGuideSetting(repository, options.guide, runtime.guide));
     // #312: resolve the label filter live against the repository before projecting.
+    // Through the read's meter when there is one (#368): counted, and stopped after a refusal.
     const labels = options.label?.length
-      ? await resolveLabelFilter(repository, options.label, runtime.query ?? ghQuery)
+      ? await resolveLabelFilter(
+          repository,
+          options.label,
+          meter
+            ? meter.query(runtime.query ?? ghQuery, "labels", repository)
+            : (runtime.query ?? ghQuery),
+        )
       : undefined;
     const presentOptions = {
       ...options,
@@ -2112,7 +2127,7 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
             }
           : undefined,
       );
-    presentation = { repository, present, meter };
+    presentation = { repository, present, meter, labels: labels ?? null };
     return presentation;
   };
   let snapshot: Snapshot;
@@ -2157,9 +2172,10 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
         options.since,
       ));
       options.offline = true;
-      return briefingFrom(snapshot, stale);
+      // The filter resolved before collection is reused: no second lookup (#368).
+      return briefingFrom(snapshot, stale, shared.labels);
     }
-    return briefingFrom(snapshot, undefined);
+    return briefingFrom(snapshot, undefined, shared.labels);
   } else if (options.offline) snapshot = await cachedSnapshot(options.cache ?? "", options.repo);
   else {
     const repository = options.repo ?? (await runtime.currentRepository());
@@ -2229,6 +2245,11 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
   async function briefingFrom(
     snapshot: Snapshot,
     stale: StaleFallback | undefined,
+    /**
+     * The label filter already resolved by the shortlist's shared presentation (#368); null
+     * when no filter was requested. Undefined: resolve here, as before.
+     */
+    resolved?: string[] | null,
   ): Promise<number> {
     if (options.issue && !snapshot.issues.some((issue) => issue.number === options.issue))
       throw new Error(`Issue #${options.issue} not in this cache. Refresh live with --issue.`);
@@ -2238,8 +2259,10 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
           await resolveGuideSetting(snapshot.repository, options.guide, runtime.guide),
         );
     // #312: resolve the label filter live against the repository before projecting.
-    let labels: string[] | undefined;
-    if (options.label?.length && options.offline) {
+    let labels: string[] | undefined = resolved ?? undefined;
+    if (resolved !== undefined) {
+      // Already resolved once before collection; no second lookup.
+    } else if (options.label?.length && options.offline) {
       // #371: only a stale quota fallback gets here (--offline --label is refused as usage). It
       // must make no further request, so the filter resolves against the snapshot's own labels.
       const normalized = normalizeLabelRequest(options.label);
