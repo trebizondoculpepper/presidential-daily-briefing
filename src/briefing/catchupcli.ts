@@ -12,6 +12,7 @@ import { abbreviate, catchUp, catchUpJson, catchUpLimits, catchUpText } from "./
 import type { CatchUpReport } from "./catchup.js";
 import { parseDuration, parseSince, resolveWindow } from "../github/changes.js";
 import type { ComparisonWindow, WindowRequest } from "../github/changes.js";
+import { historyComplete } from "../github/github.js";
 import type { collect } from "../github/github.js";
 import type { Snapshot } from "../github/types.js";
 
@@ -355,7 +356,16 @@ async function deliver(
       { last: options.last, since: options.since, checkpoint },
       now,
     ));
-    if (options.cache) {
+    if (options.cache && !historyComplete(snapshot))
+      // An incomplete history read never replaces the last successful explicit snapshot.
+      snapshot = {
+        ...snapshot,
+        warnings: [
+          ...snapshot.warnings,
+          `${options.cache} was not overwritten: this read's history window is incomplete.`,
+        ],
+      };
+    else if (options.cache) {
       try {
         await files.atomicJson(options.cache, snapshot);
       } catch (error) {
