@@ -89,6 +89,8 @@ describe("estimate N records a size label with provenance (#152)", () => {
        */
       commentOutcomes?: ("throttled" | "lost" | "ok")[];
       retryAfterSeconds?: number;
+      /** #345: after a lost-reply comment lands, another writer relabels the ticket. */
+      relabelAfterComment?: string[];
       /** Comment bodies written by an untrusted author (#269). */
       untrusted?: string[];
       /** Comment bodies whose author's permission cannot be verified (#269). */
@@ -258,6 +260,8 @@ describe("estimate N records a size label with provenance (#152)", () => {
                     : {}),
                 };
               remote.comments.push(vars.body!);
+              if (options.relabelAfterComment)
+                remote.labels = options.relabelAfterComment.map(define);
               if (outcome === "lost") throw new Error("connection reset");
               return ok({ addComment: { commentEdge: { node: { url: "https://c/1" } } } });
             },
@@ -790,6 +794,16 @@ describe("estimate N records a size label with provenance (#152)", () => {
       });
       expect(t.kinds().filter((k) => k === "addComment")).toHaveLength(1);
       expect(count(t)).toBe(1);
+    });
+    it("reports a conflict, not success, when a lost-reply receipt's labels changed", async () => {
+      const t = harness({ commentOutcomes: ["lost"], relabelAfterComment: ["complexity:L"] });
+      expect(await t.call(...base)).toBe(2);
+      expect(t.json()).toMatchObject({
+        status: "conflict",
+        provenanceWritten: true,
+        commentRecovery: { status: "conflict", acceptance: "confirmed", matchedReceipt: true },
+      });
+      expect(t.kinds().filter((k) => k === "addComment")).toHaveLength(1);
     });
     it("does not retry when the required wait exceeds the recovery deadline", async () => {
       const t = harness({ commentOutcomes: ["throttled", "ok"], retryAfterSeconds: 600 });

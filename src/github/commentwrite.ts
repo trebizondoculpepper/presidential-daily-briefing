@@ -13,6 +13,7 @@
  * Pure: no gh, no clock and no timer of its own; everything is injected. It imports nothing from
  * the gh transport modules, so it joins no import cycle.
  */
+import { randomUUID } from "node:crypto";
 import { classifyGhFailure } from "./evidence.js";
 import type { FailureClassification, GhResponse } from "./evidence.js";
 
@@ -42,6 +43,8 @@ export type CommentReceipt =
   | { status: "absent" }
   /** More than one matching receipt: stop for inspection, never choose one. */
   | { status: "duplicate"; count: number }
+  /** This write's receipt exists, but the state it records was changed by another writer. */
+  | { status: "conflict"; url: string | null; why: string }
   /** History missing, truncated or denied: absence is not proven. */
   | { status: "unreadable" };
 
@@ -171,6 +174,12 @@ export async function postCommentWithRecovery(
         url: receipt.url,
         matchedReceipt: true,
       });
+    if (receipt.status === "conflict")
+      return done(
+        "conflict",
+        `The comment was posted, but ${receipt.why}; nothing was posted again. Inspect the ticket.`,
+        { acceptance: "confirmed", url: receipt.url, matchedReceipt: true },
+      );
     if (receipt.status === "duplicate")
       return done(
         "unknown",
@@ -206,6 +215,16 @@ export async function postCommentWithRecovery(
     }
   };
 
+  // Guard baseline before the first dispatch (#345 review): an unreadable baseline means no retry.
+  let before: string | null = null;
+  if (b.guard) {
+    try {
+      const read = await within(b.guard);
+      before = read === TIMED_OUT ? null : read;
+    } catch {
+      before = null;
+    }
+  }
   for (;;) {
     if (b.signal?.aborted)
       return done("cancelled", "Cancelled before the comment was sent; nothing was posted.", {
@@ -272,16 +291,9 @@ export async function postCommentWithRecovery(
       return throttled(" (the required wait exceeds the recovery deadline)");
     // No way to re-check this command's guards after a wait: never retry it blind.
     if (!b.guard && !b.stillApplicable) return throttled("");
-    let before: string | null = null;
-    if (b.guard) {
-      try {
-        const read = await within(b.guard);
-        if (read === TIMED_OUT) throw new Error("deadline");
-        before = read;
-      } catch {
-        return throttled(" (its state could not be read before waiting)");
-      }
-    }
+    // The baseline was read before the first POST, so a change made while it was pending counts.
+    if (b.guard && before === null)
+      return throttled(" (its state could not be read before the first attempt)");
 
     try {
       const ms = Math.max(0, earliest - now());
@@ -394,6 +406,8 @@ export function commentCommand(
 export interface CommentCallOptions {
   /** Fresh read of the command's guarded state; without it a throttled comment is not retried. */
   guard?: () => Promise<string>;
+  /** The command's own prerequisite re-check after a wait: null when still applicable. */
+  stillApplicable?: () => Promise<string | null>;
 }
 
 export interface CommentRunOptions {
@@ -413,6 +427,8 @@ export interface CommentRunOptions {
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
   signal?: AbortSignal;
   policy?: Partial<CommentRecoveryPolicy>;
+  /** Per-write receipt nonce (production: a random UUID). */
+  nonce?: () => string;
 }
 
 /**
@@ -429,7 +445,13 @@ export function withCommentRecovery(
       await options.dispatch(args);
       return undefined;
     }
+    // A per-run receipt nonce in a hidden HTML comment ties the read-back to this write only:
+    // an identical comment from an earlier run (a reclaim) never matches.
+    const nonce = (options.nonce ?? randomUUID)();
+    const body = `${target.body}\n\n<!-- github-triage:write:${nonce} -->`;
     const frozen = [...args];
+    frozen[frozen.indexOf("--body") + 1] = body;
+    const bound = { ...target, body };
     const since = new Date((options.now ?? Date.now)());
     const result = await postCommentWithRecovery({
       post: async () => {
@@ -444,8 +466,9 @@ export function withCommentRecovery(
           return attemptFromError(error);
         }
       },
-      ...(options.readBack ? { readBack: () => options.readBack!(target, since) } : {}),
+      ...(options.readBack ? { readBack: () => options.readBack!(bound, since) } : {}),
       ...(call?.guard ? { guard: call.guard } : {}),
+      ...(call?.stillApplicable ? { stillApplicable: call.stillApplicable } : {}),
       ...(options.now ? { now: options.now } : {}),
       ...(options.sleep ? { sleep: options.sleep } : {}),
       ...(options.signal ? { signal: options.signal } : {}),

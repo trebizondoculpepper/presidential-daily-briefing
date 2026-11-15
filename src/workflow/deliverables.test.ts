@@ -15,6 +15,8 @@ import type { DeliverablesPlan, DeliverablesRequest, DeliverablesRuntime } from 
 import { deliveryMarker, markerTrust, parseDeliveryComment } from "./delivery.js";
 import type { DeliveryComment, DeliveryRecord } from "./delivery.js";
 import type { RepositoryPermission } from "../github/github.js";
+import { withCommentRecovery } from "../github/commentwrite.js";
+import { RateLimitError } from "../github/dependencies.js";
 
 const repo = "example/project";
 const other = "example/library";
@@ -1750,5 +1752,93 @@ describe("claim --rework authority and membership record (#190)", () => {
       await planDeliverables(repo, reworkMembershipRequest(N, "bob"), other.rt),
       "NOT_RESPONSIBLE",
     );
+  });
+});
+
+describe("a throttled reset record re-checks the reset prerequisites (#345)", () => {
+  /** rt.run through the shared comment boundary: the first record POST is throttled. */
+  function throttledReset(onWait: (pr: ReturnType<typeof fakePr>) => void) {
+    const closed = fakePr(5, { state: "CLOSED" });
+    const gh = github({
+      comments: [submitted()],
+      prs: [closed],
+      labels: ["status:awaiting-review"],
+    });
+    const plain = gh.rt.run;
+    let throttled = false;
+    const run = withCommentRecovery({
+      dispatch: async (args) => {
+        if (!throttled) {
+          throttled = true;
+          throw new RateLimitError(
+            "limited",
+            { retryAfterSeconds: 1 },
+            {
+              category: "secondary-rate-limit",
+              quotaEvidence: null,
+              errorTypes: [],
+              httpStatus: 403,
+              observation: {
+                source: "response-header",
+                resource: null,
+                limit: null,
+                remaining: null,
+                used: null,
+                resetAt: null,
+                retryAfterSeconds: 1,
+                retryAt: null,
+                requestId: null,
+              },
+            },
+          );
+        }
+        return plain(args);
+      },
+      readBack: async () => ({ status: "absent" }),
+      sleep: async () => onWait(closed),
+    });
+    const query = gh.rt.query;
+    const rt: DeliverablesRuntime = {
+      ...gh.rt,
+      run: (args, call) => run(args, call),
+      // ticketGuard's read: a stable ticket, so only the reset prerequisites can change.
+      query: async (q, v) =>
+        q.includes("assignees(first:20)")
+          ? {
+              repository: {
+                issue: {
+                  state: "OPEN",
+                  labels: { totalCount: 0, nodes: [] },
+                  assignees: { nodes: [] },
+                  comments: { totalCount: 1 },
+                },
+              },
+            }
+          : query(q, v),
+    };
+    return { rt, state: gh.state };
+  }
+  it("retries the record when the prerequisites still hold", async () => {
+    const t = throttledReset(() => {});
+    const result = await applyDeliverables(
+      repo,
+      request("reset", { agent: "maint", as: "ready" }),
+      t.rt,
+    );
+    expect(result.exitCode).toBe(0);
+    expect(t.state.writes.map((w) => w[1])).toEqual(["comment", "edit"]);
+  });
+  it("does not post when a required PR reopened during the wait", async () => {
+    const t = throttledReset((pr) => void (pr.state = "OPEN"));
+    const result = await applyDeliverables(
+      repo,
+      request("reset", { agent: "maint", as: "ready" }),
+      t.rt,
+    );
+    expect(result.exitCode).toBe(1);
+    const steps = "steps" in result ? (result.steps ?? []) : [];
+    expect(steps[0]?.recovery).toMatchObject({ status: "conflict", attempts: 1 });
+    expect(steps[0]?.reason).toContain("delivery prerequisites changed");
+    expect(t.state.writes).toEqual([]);
   });
 });
