@@ -12,6 +12,7 @@ import { isParked, owners } from "./briefing.js";
 import type { Bounded, Briefing } from "./briefing.js";
 import {
   closingPrEvidence,
+  compareCreatedAt,
   compareImpact,
   immediateUnlocks,
   impactText,
@@ -277,7 +278,7 @@ sectionSelectors.set("design-pickup", (context) => {
     .sort(
       (a, b) =>
         compareImpact(a.impact, b.impact) ||
-        Date.parse(a.item.createdAt) - Date.parse(b.item.createdAt) ||
+        compareCreatedAt(a.item.createdAt, b.item.createdAt) ||
         byNumber(a.item, b.item),
     )
     .map(({ item, impact }) => ({

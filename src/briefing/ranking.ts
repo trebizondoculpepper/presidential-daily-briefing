@@ -284,7 +284,22 @@ export interface RankedPickup {
 }
 
 type Key = (a: RankedPickup, b: RankedPickup) => number;
-const created: Key = (a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt);
+/**
+ * Compare two creation timestamps in one direction (1 oldest first, -1 newest first). An
+ * unparseable timestamp has no age: it sorts after every valid one in both directions, so the
+ * comparison stays a total order and one bad timestamp never reorders valid tickets (#450).
+ */
+export function compareCreatedAt(a: string, b: string, direction: 1 | -1 = 1): number {
+  const [x, y] = [Date.parse(a), Date.parse(b)];
+  const [badX, badY] = [Number.isNaN(x), Number.isNaN(y)];
+  if (badX || badY) return Number(badX) - Number(badY);
+  return direction * (x - y);
+}
+const createdIn =
+  (direction: 1 | -1): Key =>
+  (a, b) =>
+    compareCreatedAt(a.createdAt, b.createdAt, direction);
+const created = createdIn(1);
 const numeric: Key = (a, b) => a.issue.number - b.issue.number;
 /** Ordered comparison keys per mode. Explicit age modes use creation time alone. */
 export const orderingPolicy: Record<PickupOrder, Key[]> = {
@@ -297,7 +312,7 @@ export const orderingPolicy: Record<PickupOrder, Key[]> = {
     numeric,
   ],
   oldest: [created, numeric],
-  newest: [(a, b) => created(b, a), numeric],
+  newest: [createdIn(-1), numeric],
 };
 const orderText: Record<PickupOrder, string> = {
   impact: "impact order: urgency, immediate unlocks, incomplete first, then oldest",

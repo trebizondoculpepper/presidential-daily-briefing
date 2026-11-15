@@ -120,8 +120,6 @@ const run = (s: Snapshot, agent?: string, order?: "oldest") =>
     ...(agent !== undefined ? { agent } : {}),
     ...(order ? { order } : {}),
   });
-const numbers = (r: ReturnType<typeof run>) =>
-  r.items.map((x) => Number(x.target.split("/").pop()));
 
 describe("host facts reaching the engine (#339)", () => {
   it("declares every attribute the adapter can repeat on one entity as cardinality-many", () => {
@@ -195,14 +193,18 @@ describe("host facts reaching the engine (#339)", () => {
     expect(r.items.map((x) => x.kind)).not.toContain("continue-implementation");
   });
 
-  it.fails("one unparseable createdAt does not reorder the valid tickets", () => {
+  it("refuses an unparseable createdAt instead of letting it reorder valid tickets (#450)", () => {
     const bad = issue(1, ["status:ready"], "not a date");
-    // Two valid tickets created at the same time: normally ordered by number.
-    const [two, three] = [issue(2), issue(3)];
-    const valid = (r: ReturnType<typeof run>) => numbers(r).filter((n) => n !== 1);
-    expect(valid(run(snap([bad, two, three]), "me", "oldest"))).toEqual(
-      valid(run(snap([two, bad, three]), "me", "oldest")),
+    expect(() => run(snap([issue(2), bad]), "me", "oldest")).toThrow(
+      /invalid-facts: https:\/\/github.com\/o\/r\/issues\/1 has createdAt "not a date"/,
     );
+    // The engine guards every numeric fact, whoever builds the datoms.
+    expect(() =>
+      evaluatePolicy({
+        viewer: { role: "implementer", agent: "me", platform: "", order: "oldest" },
+        datoms: [[firstSubjectId, "created", Number.NaN]],
+      }),
+    ).toThrow(/invalid-facts: entity 100 created is NaN/);
   });
 });
 
