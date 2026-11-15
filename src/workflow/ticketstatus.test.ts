@@ -157,6 +157,8 @@ interface World {
   linksMore?: boolean;
   failPr?: Set<number>;
   rateLimitPr?: Set<number>;
+  /** Refuse a native-dependency continuation page for quota. */
+  refuseNative?: boolean;
 }
 
 /** One GraphQL boundary for the focused issue read, closing references, PR status and delivery. */
@@ -173,6 +175,8 @@ function fake(w: World) {
     const n = Number(v.number);
     if (q.includes("issues(first:") || q.includes("pullRequests(first:"))
       throw new Error("repository inventory must not be read");
+    if (w.refuseNative && q.includes("blockedBy(first:100,after"))
+      throw new RateLimitError("API rate limit exceeded");
     if (q.includes("includeClosedPrs:true"))
       return {
         repository: {
@@ -458,6 +462,40 @@ describe("pdb ticket N (#197)", () => {
     expect(r.complete).toBe(false);
     expect(r.report.collection.quota).not.toBeNull();
     expect(r.report.collection.notAttempted.length).toBeGreaterThan(0);
+  });
+
+  it("after a quota refusal on a native-edge page, no further page of any list is requested", async () => {
+    const blocker = (n: number) => ({
+      number: n,
+      title: `B${n}`,
+      url: issueLink(n),
+      state: "OPEN",
+      repository: { nameWithOwner: repo },
+      issueDependenciesSummary: { blockedBy: 0, totalBlockedBy: 0, blocking: 1, totalBlocking: 1 },
+    });
+    const issue = ticket(1, [], {
+      issueDependenciesSummary: { blockedBy: 2, totalBlockedBy: 2, blocking: 0, totalBlocking: 0 },
+      blockedBy: page([blocker(8)], true),
+      // An open-PR closing-reference list with a continuation the read must not request.
+      closedByPullRequestsReferences: page([{ number: 60, url: prLink(60), state: "OPEN" }], true),
+    });
+    const r = await read({
+      issue,
+      prs: { 60: { state: "OPEN" } },
+      links: [{ number: 60, url: prLink(60), state: "OPEN" }],
+      refuseNative: true,
+    });
+    const after = r.log.slice(r.log.findIndex((q) => q.includes("blockedBy(first:100,after")) + 1);
+    expect(after).toEqual([]);
+    const linked = r.report.collection.coverage.filter((c) => c.source === "linked-pull-requests");
+    expect(linked.find((c) => c.subject === `${repo}#1`)).toMatchObject({
+      state: "partial",
+      omission: expect.stringContaining("quota"),
+    });
+    expect(r.report.dependencies.known).toBe(false);
+    expect(row(r.report, 60).detail).toBe("not-attempted");
+    expect(r.complete).toBe(false);
+    expect(r.report.collection.quota).not.toBeNull();
   });
 
   it("never exceeds --max-chars, counting header and notice, at any limit (#379)", async () => {
