@@ -6,6 +6,7 @@
 import { describe, expect, it } from "vite-plus/test";
 import { emptyFileSystem, fakeGit, SYNTHETIC_ROOT } from "../../scripts/benchmark-isolation.js";
 import { readBriefing } from "../briefing/service.js";
+import { main } from "../cli.js";
 import type { ReadRuntime } from "../briefing/service.js";
 import { by, clock, issue, page, pr, repo, time } from "../testing/snapshots.js";
 import { RateLimitError } from "./dependencies.js";
@@ -24,6 +25,7 @@ function fakeGitHub(issues: Issue[], prs: PullRequest[]) {
     fullPages: 0,
     issueBatches: [] as number[][],
     pullRequests: [] as number[],
+    labels: 0,
     other: [] as string[],
   };
   const clone = <T>(value: T): T => structuredClone(value);
@@ -61,6 +63,13 @@ function fakeGitHub(issues: Issue[], prs: PullRequest[]) {
   };
   const query: Query = async (source, variables) => {
     const cursor = variables.cursor as string | undefined;
+    if (/l0:label\(/.test(source)) {
+      calls.labels++;
+      const name = String(variables.l0);
+      return {
+        repository: { l0: { name }, s0: { nodes: [{ name }], pageInfo: { hasNextPage: false } } },
+      };
+    }
     if (/pullRequest\(number:/.test(source)) {
       const number = Number(variables.number);
       calls.pullRequests.push(number);
@@ -478,6 +487,73 @@ describe("routine briefing: discover all, rank, hydrate only the shortlist (#368
     const collection = report.collection as unknown as { notAttempted: string[]; quota: unknown };
     expect(collection.quota).not.toBeNull();
     expect(collection.notAttempted.length).toBeGreaterThan(0);
+  });
+
+  describe("CLI --label resolves the filter once (#368)", () => {
+    const labelled = () =>
+      Array.from({ length: 25 }, (_, i) => ready(i + 1, ["status:ready", "bug"]));
+    const cli = async (query: Query) => {
+      let out = "";
+      const code = await main(
+        ["--repo", repo, "--agent", "kavya", "--label", "bug", "--json", "--no-update-check"],
+        async (text) => {
+          out = text;
+        },
+        {
+          collect: async () => {
+            throw new Error("full read not expected");
+          },
+          collectShortlist,
+          currentRepository: async () => repo,
+          query,
+          now: clock,
+          guide: config("typescript"),
+          estimation: config("typescript"),
+        },
+      );
+      return { code, report: out ? (JSON.parse(out) as Report) : null };
+    };
+
+    it("after a successful shortlist read", async () => {
+      const fake = fakeGitHub(labelled(), []);
+      const { code, report } = await cli(fake.query);
+      expect(code).toBe(0);
+      expect(fake.calls.labels).toBe(1);
+      expect(report?.collection?.telemetry.requests).toBe(
+        1 + fake.calls.discoveryPages + fake.calls.issueBatches.length,
+      );
+    });
+
+    it("after a quota refusal during hydration, sending nothing more", async () => {
+      const fake = fakeGitHub(labelled(), []);
+      const sent: string[] = [];
+      let refused = false;
+      const query: Query = async (source, variables) => {
+        if (refused) sent.push(source.slice(0, 40));
+        if (/i0:issue\(/.test(source)) {
+          refused = true;
+          throw new RateLimitError("API rate limit exceeded");
+        }
+        return fake.query(source, variables);
+      };
+      const { code, report } = await cli(query);
+      // The partial briefing is presented (incomplete), not lost to a second lookup.
+      expect(code).toBe(2);
+      expect(report?.shortlist?.hydrated).toEqual([]);
+      expect(fake.calls.labels).toBe(1);
+      expect(sent).toEqual([]);
+    });
+
+    it("when discovery itself is refused, without a second lookup", async () => {
+      const fake = fakeGitHub(labelled(), []);
+      const query: Query = async (source, variables) => {
+        if (/\bissues\(first:/.test(source)) throw new RateLimitError("API rate limit exceeded");
+        return fake.query(source, variables);
+      };
+      // No --cache with a routine briefing: the stale fallback refuses, as for a full read.
+      await expect(cli(query)).rejects.toThrow("No stale fallback");
+      expect(fake.calls.labels).toBe(1);
+    });
   });
 
   it("stops hydrating after a quota refusal and reports the rest not attempted", async () => {
