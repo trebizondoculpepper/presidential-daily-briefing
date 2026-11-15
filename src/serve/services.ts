@@ -60,9 +60,15 @@ export function readServices(
         now: () => serve.clock.now(),
         telemetry: () => cache.quotaTelemetry(),
       }),
-      async (refresh) => {
+      async (mode) => {
+        // Offline makes no request, not even an identity read: the held login only.
+        if (mode === "offline")
+          return {
+            context: { host: facts.auth.host, login: facts.auth.login },
+            contextRequests: 0,
+          };
         // A refresh re-reads the gh login first; an unreadable login is unverified (not reused).
-        const { auth, read: identityRead } = await cache.verifiedAuth(refresh);
+        const { auth, read: identityRead } = await cache.verifiedAuth(mode === "refresh");
         return {
           context: auth
             ? { host: auth.host, login: auth.login }
