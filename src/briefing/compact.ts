@@ -160,7 +160,7 @@ export class LabelFilterUnresolved extends Error {
 
 export function compactBriefing(
   snapshot: Snapshot,
-  options: Pick<BriefingOptions, "limit" | "agent" | "estimate" | "responsible"> & {
+  options: Pick<BriefingOptions, "limit" | "agent" | "estimate" | "responsible" | "retained"> & {
     role?: string;
     /** One registered section, every row (#311, doc/design/briefing-focus-controls.md). */
     section?: string;
@@ -436,6 +436,7 @@ export function compactBriefing(
             isParked: (url) => isParked(defined(byUrl.get(url))),
             urgency: (url) => urgencyBand(defined(byUrl.get(url))),
             ownedByViewer: (url) => isMine(defined(byUrl.get(url))),
+            ...(options.retained ? { retained: options.retained } : {}),
           }),
           // Rank everything once; the display limit is applied below, so counts see it all.
           { order: facts.ranking.order, limit: Number.MAX_SAFE_INTEGER },

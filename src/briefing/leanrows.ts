@@ -18,6 +18,9 @@ const labels: Record<string, string> = {
   "inspect-assessment": "Inspect assessment",
   inspect: "Inspect",
   design: "Design",
+  "resume-claim": "Resume",
+  "review-owned-work": "Review your claims",
+  "wait-claim": "Waiting",
 };
 export const actionLabel = (kind: string): string => labels[kind] ?? kind;
 

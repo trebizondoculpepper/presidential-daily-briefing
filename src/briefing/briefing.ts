@@ -533,6 +533,14 @@ export interface BriefingOptions {
    * Why an explicit snapshot is shown instead of the refused live read (#371). Set together with
    * `offline`; freshness then says `stale` rather than `offline`.
    */
+  /** Retained claims (#413) for the rollback ranking; the Datalog engine reads the same facts. */
+  retained?: {
+    ownedClaims: { urls: readonly string[]; complete: boolean };
+    claimActivity?: ReadonlyMap<
+      string,
+      { state: "active" | "waiting" | "resume-required" | "unknown"; reason: string }
+    >;
+  };
   stale?: {
     reason: string;
     cache: string;
