@@ -29,9 +29,13 @@ and threads; do not duplicate their pagination checks in each renderer.
 
 For an open required PR:
 
-1. Incomplete required evidence yields `unknown` and a read-only inspection route.
-   Preserve positively observed failures/requests as supporting evidence; do not
-   infer completion, acceptance or a safe waiting state from a truncated page.
+1. A positively observed failed check on the current head of a non-draft PR is
+   actionable even when other evidence is incomplete (#502). Say both facts: the
+   check failed and other evidence is incomplete. This is negative evidence to
+   investigate, never acceptance, merge permission or completion. Preserve the
+   incomplete coverage metadata and unknown acceptance. In all other cases,
+   incomplete required evidence yields `unknown` and a read-only inspection route.
+   Do not infer absence of findings or a safe waiting state from a truncated page.
 2. A draft is progress evidence. Draft status alone yields `waiting` with a reason
    such as “draft work in progress”, not “finish it” as a newly generated obligation.
    An explicit independent review request, addressed feedback, requested changes or
@@ -95,7 +99,8 @@ presentation-only policy or per-agent special cases.
 
 ## Verification and delivery
 
-Implement as focused #377 work after #497 (now merged), using the existing
+Implement #502 as the focused failed-check parity correction, then #377 as the
+draft/waiting alignment after #497 (now merged), using the existing
 responsibility/coverage services. Test shared read classifier, native decision and
 rollback, CLI/MCP role projections, team/who/pr and Ticket Doctor consistently.
 
@@ -108,7 +113,10 @@ Required fixtures:
 - Draft attachment/submission cannot close the issue or satisfy required delivery.
 - Non-draft unaccepted BEHIND waits for review; accepted BEHIND retains S9 action.
 - Old-head approval is not acceptance after a branch update.
-- Truncated comments/reviews/checks/threads yield unknown and cannot hide a finding.
+- Truncated comments/reviews/checks/threads cannot establish acceptance or hide a
+  finding. A current-head observed failed check on a non-draft remains actionable
+  with incomplete coverage; otherwise incomplete evidence is unknown. Native EDN
+  and TypeScript agree (#502); stale-head failure does not trigger this exception.
 - Waiting review/check responsibilities stay in the shared bounded to-do model;
   actionable sibling wins, no duplicate waiting row, other agents not borrowed.
 - More than ten rows expose waiting omissions and a useful full-view route; no
