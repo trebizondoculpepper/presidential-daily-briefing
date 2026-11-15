@@ -129,6 +129,8 @@ export async function presentBriefing(
     trustWith?: (rest: Rest) => TrustDecision;
     /** `pdb serve`: the closed-ticket scan continued between requests (#414). */
     closedQuestions?: ClosedScanSlot;
+    /** Its uncached GraphQL boundary; absent: `query`. */
+    closedQuery?: Query;
   },
 ): Promise<PresentedBriefing> {
   // #301: every engine and projection below reads the declared policy from the snapshot.
@@ -342,6 +344,7 @@ async function presentHuman(
     rest: Rest;
     trustWith?: (rest: Rest) => TrustDecision;
     closedQuestions?: ClosedScanSlot;
+    closedQuery?: Query;
   },
 ): Promise<PresentedBriefing> {
   const evidence = await readHumanEvidence(snapshot, trust, signal);
@@ -351,7 +354,7 @@ async function presentHuman(
     ? await discoverClosedQuestions(
         snapshot.repository,
         {
-          query: live.query,
+          query: live.closedQuery ?? live.query,
           rest: live.rest,
           ...(live.trustWith ? { trustWith: live.trustWith } : {}),
           ...(live.closedQuestions ? { slot: live.closedQuestions } : {}),
@@ -472,6 +475,11 @@ export interface ReadRuntime {
    * requests. Absent: each human briefing starts the bounded closed-ticket read afresh.
    */
   closedQuestions?: ClosedScanSlot;
+  /**
+   * `pdb serve`: an uncached (still confined) GraphQL boundary for that scan. Memoised pages
+   * could be older than the watermark the scan advances, so its reads bypass the cache (#414).
+   */
+  closedQueryWith?: (signal?: AbortSignal) => Query;
   /** Monotonic timer for the Datalog soft-budget diagnostic; defaults to `performance.now`. */
   engineClock?: () => number;
   /** Rewrites locally generated diagnostics (not GitHub evidence) for remote consumers. */
@@ -638,6 +646,9 @@ export async function readBriefing(
             trustWith: (other: Rest) =>
               markerTrust(permissionLookup(request.repository, other, request.signal)),
             ...(runtime.closedQuestions ? { closedQuestions: runtime.closedQuestions } : {}),
+            ...(runtime.closedQueryWith
+              ? { closedQuery: runtime.closedQueryWith(request.signal) }
+              : {}),
           }
         : undefined,
     );
