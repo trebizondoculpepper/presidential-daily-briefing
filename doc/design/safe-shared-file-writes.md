@@ -111,6 +111,20 @@ Do not retrofit age-based recovery through another timer, heartbeat or stale fil
 If automatic liveness recovery is later desired, design it separately. The first
 version deliberately trades automatic recovery for safe refusal.
 
+## Implementation note (#382)
+
+`src/config/filelock.ts` no longer breaks locks by age (`staleMs` is ignored), exposes
+`owned()` for a pre-commit recheck, and returns a typed release outcome
+(`released`/`missing`/`replaced`/`failed`); identity writes report a failed release as
+`lockCleanup` beside their result. `src/config/safejson.ts` implements the locked sequence
+(read absent/value/unreadable, store decision, private exclusive synced temp, verify, ownership
+recheck, rename, directory sync, release) with typed outcomes `written`, `kept`,
+`not-written` and `committed-with-error` plus additive cleanup notes. Stores: `overwriteJson`
+(plan files, `atomicJson`), `writeSnapshotCache` (never replaces a newer same-repository snapshot
+or an unreadable file), `advanceCheckpoint` (same schema and repository, monotonic). The CLI and
+`pdb briefing` report unwritten caches on stderr and a checkpoint that was not advanced with exit 2. The update cache syncs its temporary file and directory on the real filesystem. Windows
+directory sync is the named limitation; transient Windows rename refusals retry three times.
+
 ## Acceptance
 
 Keep the real-filesystem experiment as prior evidence, not production acceptance.

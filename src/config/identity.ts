@@ -36,7 +36,7 @@ import {
   parseTomlTable,
 } from "./config.js";
 import type { ConfigFileSystem, GitRunner } from "./config.js";
-import { acquireFileLock, type LockFs, type LockTiming } from "./filelock.js";
+import { acquireFileLock, releaseProblem, type LockFs, type LockTiming } from "./filelock.js";
 
 /** Root-relative canonical identity file name, owned by pdb (#319). */
 export const IDENTITY_FILE = "pdb.toml";
@@ -670,6 +670,8 @@ export interface IdentityWriteOptions {
 }
 
 export interface IdentityWriteResult {
+  /** #382: the write succeeded but its lock could not be removed (with the recovery step). */
+  readonly lockCleanup?: string;
   readonly changed: boolean;
   readonly createdFile: boolean;
   readonly createdEntry: boolean;
@@ -912,11 +914,17 @@ export async function setIdentity(
     (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   );
   if (release === null) throw busy();
+  let result: IdentityWriteResult;
   try {
-    return await writeLocked();
-  } finally {
+    result = await writeLocked();
+  } catch (error) {
+    // The primary failure stands; a cleanup problem never replaces it.
     await release();
+    throw error;
   }
+  // #382: a lock that could not be removed is reported with the successful write, not hidden.
+  const cleanup = releaseProblem(IDENTITY_LOCK_FILE, await release());
+  return cleanup ? { ...result, lockCleanup: cleanup } : result;
 
   async function writeLocked(): Promise<IdentityWriteResult> {
     const raw = await fs.readText(path);

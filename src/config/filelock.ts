@@ -1,42 +1,58 @@
 /**
- * Short-lived cross-process exclusive file lock with bounded waiting and stale-lock recovery.
- * Shared by the daily update cache (#65) and identity writes (#70).
+ * Short-lived cross-process exclusive file lock with bounded waiting (#382,
+ * doc/design/safe-shared-file-writes.md). Shared by the daily update cache (#65), identity
+ * writes (#70) and safe JSON writes.
  *
- * The lock file is created with the exclusive `wx` flag (portable, including Windows) and
- * holds a random token. A contender breaks a stale lock only if the token it judged stale is
- * still there immediately before unlinking, proceeds only if the lock it created still holds
- * its own token, and releases only a lock holding its token. The deadline is checked on every
- * iteration, and any unexpected filesystem error (for example a directory at the lock path)
- * gives up at once instead of retrying.
- *
- * Remaining race, accepted: between the final token re-read and the unlink of a stale lock,
- * another contender can break the same lock and create its own, which this unlink then removes.
- * Both may then believe they hold the lock. Each verifies its token after creating, and release
- * only removes its own token. Callers keep a second guard (atomic replacement, and for identity
- * writes an unchanged-since-read check) so the worst case is never a corrupt file.
+ * The lock file is created with the exclusive `wx` flag (portable, including Windows) and holds
+ * a fresh random token. A lock is **never** removed or taken over because it looks old, its PID
+ * is absent or a clock moved: an old-looking holder may be slow, paused or on another machine.
+ * A crashed holder therefore leaves a stuck lock, which waiters report (`stuckLockMessage`) and
+ * an operator removes deliberately. A writer proceeds only if the lock it created still holds
+ * its own token, and releases only a lock holding its token; release reports what happened
+ * instead of swallowing failures.
  */
 import { randomBytes } from "node:crypto";
+import { basename } from "node:path";
 
 /** The filesystem operations the lock needs; `node:fs/promises` satisfies it. */
 export interface LockFs {
   readFile(path: string, encoding: "utf8"): Promise<string>;
   writeFile(path: string, data: string, options: { flag?: string }): Promise<void>;
   unlink(path: string): Promise<void>;
-  stat(path: string): Promise<{ mtimeMs: number }>;
+  /** Unused since #382 (locks are never judged by age); kept so existing adapters compile. */
+  stat?(path: string): Promise<{ mtimeMs: number }>;
 }
 
 export interface LockTiming {
   /** How long to wait for another holder before giving up. */
   readonly waitMs: number;
-  /** A lock older than this is from a crashed or stuck process and may be broken. */
-  readonly staleMs: number;
+  /** Ignored since #382: a lock is never broken by age. Kept for compatible call sites. */
+  readonly staleMs?: number;
   /** Delay between attempts. */
   readonly pollMs: number;
 }
 
 /**
- * Take the lock. Returns a release function, or null when the lock could not be taken safely
- * within `waitMs`.
+ * What releasing found: `released` (ours, removed), `missing` (already gone), `replaced` (the
+ * lock now holds another token: left alone), or `failed` (reading or removing it failed; the
+ * lock may still be present, and later writers will report it as stuck).
+ */
+export type ReleaseOutcome =
+  | { status: "released" }
+  | { status: "missing" }
+  | { status: "replaced" }
+  | { status: "failed"; code: string };
+
+/** A held lock: call it to release; `owned()` rechecks that it still holds this writer's token. */
+export type HeldLock = (() => Promise<ReleaseOutcome>) & { owned(): Promise<boolean> };
+
+/** The operator message for a lock that was not released within the wait. */
+export const stuckLockMessage = (lock: string): string =>
+  `${basename(lock)} is held by another writer, or was left behind by one that stopped; it is never removed automatically. Make sure no pdb process is writing this file, then delete ${lock} yourself and retry.`;
+
+/**
+ * Take the lock. Returns a release function, or null when the lock could not be taken within
+ * `waitMs` (busy, or stuck: see `stuckLockMessage`) or an unexpected filesystem error occurred.
  */
 export async function acquireFileLock(
   fs: LockFs,
@@ -44,7 +60,7 @@ export async function acquireFileLock(
   timing: LockTiming,
   now: () => number,
   sleep: (ms: number) => Promise<void>,
-): Promise<(() => Promise<void>) | null> {
+): Promise<HeldLock | null> {
   const token = randomBytes(16).toString("hex");
   const deadline = now() + timing.waitMs;
   const holder = async (): Promise<string | undefined> => {
@@ -56,11 +72,24 @@ export async function acquireFileLock(
       return text; // a torn or foreign lock is identified by its content
     }
   };
-  const release = async () => {
+  const release = async (): Promise<ReleaseOutcome> => {
+    let current: string | undefined;
     try {
-      if ((await holder()) === token) await fs.unlink(lock);
-    } catch {
-      // Already gone or replaced: nothing of ours to remove.
+      current = await holder();
+    } catch (error) {
+      return code(error) === "ENOENT"
+        ? { status: "missing" }
+        : { status: "failed", code: codeText(error) };
+    }
+    // Never unlink a replacement lock.
+    if (current !== token) return { status: "replaced" };
+    try {
+      await fs.unlink(lock);
+      return { status: "released" };
+    } catch (error) {
+      return code(error) === "ENOENT"
+        ? { status: "missing" }
+        : { status: "failed", code: codeText(error) };
     }
   };
   for (;;) {
@@ -68,34 +97,41 @@ export async function acquireFileLock(
       await fs.writeFile(lock, JSON.stringify({ token, pid: process.pid, at: now() }), {
         flag: "wx",
       });
-      // Proceed only if the lock still holds our token (see the race note above).
+      // Proceed only if the lock still holds our token.
       try {
-        return (await holder()) === token ? release : null;
+        if ((await holder()) !== token) return null;
+        // `owned` lets a writer recheck, just before its commit point, that the lock is still its.
+        const owned = async () => {
+          try {
+            return (await holder()) === token;
+          } catch {
+            return false;
+          }
+        };
+        return Object.assign(release, { owned });
       } catch {
         return null;
       }
     } catch (error) {
       if (code(error) !== "EEXIST") return null;
     }
-    try {
-      if (now() - (await fs.stat(lock)).mtimeMs > timing.staleMs) {
-        const stale = await holder();
-        // Confirm staleness, then re-read immediately before unlinking: another contender may
-        // have broken it and taken the lock already, and that fresh lock must survive.
-        if (now() - (await fs.stat(lock)).mtimeMs > timing.staleMs && (await holder()) === stale)
-          await fs.unlink(lock);
-      } else if (now() < deadline) {
-        await sleep(timing.pollMs);
-      }
-    } catch (error) {
-      // Released between our attempt and the stat: try again. Anything else: give up.
-      if (code(error) !== "ENOENT") return null;
-    }
     if (now() >= deadline) return null;
+    await sleep(timing.pollMs);
   }
 }
 
+/** Whether a release left something for an operator to look at. */
+export const releaseProblem = (lock: string, outcome: ReleaseOutcome): string | null =>
+  outcome.status === "failed"
+    ? `${basename(lock)} could not be removed after the write (${outcome.code}); ${stuckLockMessage(lock)}`
+    : null;
+
 const code = (error: unknown) => (isRecord(error) ? error.code : undefined);
+/** A filesystem error code as text, for reports; never an object's default string. */
+const codeText = (error: unknown): string => {
+  const c = code(error);
+  return typeof c === "string" || typeof c === "number" ? String(c) : "unknown";
+};
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
