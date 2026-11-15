@@ -37,6 +37,12 @@ import {
   SHUTDOWN_GRACE_MS,
 } from "./serve/options.js";
 import type { ServeOptions } from "./serve/options.js";
+import {
+  dashboardCss,
+  dashboardPage,
+  dashboardScript,
+  dashboardSecurityPolicy,
+} from "./serve/dashboard.js";
 
 export { serveHelp } from "./serve/options.js";
 
@@ -223,19 +229,13 @@ async function servedSet(
 
 const urlHost = (host: string): string => (isIP(host) === 6 ? `[${host}]` : host);
 
-const placeholder = (facts: ServerFacts): string => `<!doctype html>
-<html lang="en">
-<head><meta charset="utf-8"><title>pdb serve</title></head>
-<body>
-<h1>pdb serve</h1>
-<p>The dashboard arrives in #374. This server answers the JSON API and HTTP MCP.</p>
-<ul>
-<li><a href="/api/v1/status">/api/v1/status</a></li>
-<li>MCP endpoint: <code>${facts.url}mcp</code></li>
-</ul>
-</body>
-</html>
-`;
+/** The dashboard (#374): three same-origin static responses, built once per server. */
+const dashboardFiles = (): Map<string, { type: string; body: string }> =>
+  new Map([
+    ["/", { type: "text/html; charset=utf-8", body: dashboardPage() }],
+    ["/dashboard.css", { type: "text/css; charset=utf-8", body: dashboardCss }],
+    ["/dashboard.js", { type: "text/javascript; charset=utf-8", body: dashboardScript() }],
+  ]);
 
 /**
  * Start the server: resolve selection and authentication, bind, and return the running
@@ -277,6 +277,7 @@ export async function startServe(
     auth,
   };
 
+  const dashboard = dashboardFiles();
   const statusDocument = () => ({
     schemaVersion: 1,
     kind: "serve-status",
@@ -361,15 +362,17 @@ export async function startServe(
         sendJson(response, 200, statusDocument());
         return;
       }
-      if (path === "/") {
+      const file = dashboard.get(path);
+      if (file) {
         getOnly();
         response.writeHead(200, {
-          "content-type": "text/html; charset=utf-8",
+          "content-type": file.type,
           "cache-control": "no-store",
           "x-content-type-options": "nosniff",
-          "content-security-policy": "default-src 'none'",
+          "referrer-policy": "no-referrer",
+          "content-security-policy": dashboardSecurityPolicy,
         });
-        response.end(placeholder(facts));
+        response.end(request.method === "HEAD" ? undefined : file.body);
         return;
       }
       if (await routes(context)) return;
