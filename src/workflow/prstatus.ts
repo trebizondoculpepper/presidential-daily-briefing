@@ -16,7 +16,7 @@ import { ghQuery, prop, selected, SubjectUnavailable } from "../github/github.js
 import type { Query } from "../github/github.js";
 import type { ReadMeter } from "../github/readplan.js";
 
-type Login = { login: string } | null;
+type Login = { __typename?: string; login: string } | null;
 type PageInfo = { hasNextPage?: boolean; hasPreviousPage?: boolean };
 type CheckContext = {
   __typename?: string;
@@ -174,9 +174,9 @@ export type PrStatusReport = {
 
 const query = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){number title url state isDraft merged mergeable mergeStateStatus reviewDecision headRefOid headRefName baseRefName updatedAt
 commits(last:1){nodes{commit{oid committedDate statusCheckRollup{state contexts(first:100){nodes{__typename ... on CheckRun{name status conclusion detailsUrl startedAt completedAt} ... on StatusContext{context state targetUrl}} pageInfo{hasNextPage}}}}}}
-reviews(last:50){nodes{author{login} state submittedAt url commit{oid}} pageInfo{hasPreviousPage}}
-reviewThreads(first:100){nodes{isResolved isOutdated path line first:comments(first:1){totalCount nodes{author{login} body createdAt url}} latest:comments(last:1){nodes{author{login} createdAt url}}} pageInfo{hasNextPage}}
-comments(last:100){nodes{author{login} body createdAt url} pageInfo{hasPreviousPage}}
+reviews(last:50){nodes{author{__typename login} state submittedAt url commit{oid}} pageInfo{hasPreviousPage}}
+reviewThreads(first:100){nodes{isResolved isOutdated path line first:comments(first:1){totalCount nodes{author{__typename login} body createdAt url}} latest:comments(last:1){nodes{author{login} createdAt url}}} pageInfo{hasNextPage}}
+comments(last:100){nodes{author{__typename login} body createdAt url} pageInfo{hasPreviousPage}}
 closingIssuesReferences(first:10){nodes{number url title state labels(first:50){nodes{name}}} pageInfo{hasNextPage}}}}}`;
 
 /** Bounds keep the report small; omitted counts are always reported. */

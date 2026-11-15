@@ -387,3 +387,57 @@ describe("review findings (#556 review)", () => {
     ).toBe(true);
   });
 });
+
+describe("real-shaped snapshot reads authenticate providers (#556 review)", () => {
+  it("collect requests author types, so a Bot reviewer and Codex receipt authenticate", async () => {
+    const { collect } = await import("../github/github.js");
+    const { pr, page, repo, time } = await import("../testing/snapshots.js");
+    const pull = pr();
+    pull.headRefOid = head;
+    // GitHub returns only what a query selects: author types appear only when requested.
+    const author = (source: string, field: RegExp, login: string) =>
+      field.test(source) ? { __typename: "Bot", login } : { login };
+    const query = async (source: string) => {
+      if (source.includes("pullRequests(first")) {
+        const reviews = author(
+          source,
+          /reviews\(first:100\)\{nodes\{[^}]*author\{__typename login\}/,
+          "coderabbitai",
+        );
+        const comments = author(
+          source,
+          /comments\(first:100\)\{nodes\{[^}]*author\{__typename login\}/,
+          "chatgpt-codex-connector",
+        );
+        return {
+          repository: {
+            pullRequests: page([
+              {
+                ...pull,
+                reviews: page([
+                  {
+                    body: "",
+                    url: "r",
+                    author: reviews,
+                    state: "APPROVED",
+                    submittedAt: time,
+                    commit: { oid: head },
+                  },
+                ]),
+                comments: page([{ body: marker(head), url: "c", author: comments }]),
+              },
+            ]),
+          },
+        };
+      }
+      return { repository: { issues: page([]) } };
+    };
+    const snap = await collect(repo, {}, query as never, () => new Date(time));
+    const [collected] = snap.pullRequests;
+    expect(collected.reviews.nodes[0].author).toEqual({ __typename: "Bot", login: "coderabbitai" });
+    const { snapshotReviewEvidence } = await import("./reviewpolicy.js");
+    const r = run(snapshotReviewEvidence(collected, true));
+    expect(r.detail.providers.map((o) => o.state)).toEqual(["accepted", "accepted"]);
+    expect(r.headReviewed).toBe(true);
+  });
+});
