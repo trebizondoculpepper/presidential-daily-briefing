@@ -132,7 +132,7 @@ async function serveSmoke(bin: string, env: NodeJS.ProcessEnv, cwd: string): Pro
     if (status.kind !== "serve-status" || status.auth?.login !== "package-test")
       throw new Error(`Installed pdb serve status is wrong: ${JSON.stringify(status)}`);
     // Read-only diagnostics (#459) answer on an empty installed server without collecting.
-    for (const view of ["projects", "cache", "inflight"]) {
+    for (const view of ["projects", "config", "cache", "inflight", "errors", "rules"]) {
       const diag = (await (await fetch(`${url}api/v1/diagnostics/${view}`)).json()) as {
         kind?: string;
         data?: { total?: number };
@@ -141,7 +141,7 @@ async function serveSmoke(bin: string, env: NodeJS.ProcessEnv, cwd: string): Pro
         throw new Error(
           `Installed diagnostics ${view} answered ${JSON.stringify(diag).slice(0, 200)}`,
         );
-      if (view !== "projects" && diag.data?.total !== 0)
+      if (["cache", "inflight", "errors"].includes(view) && diag.data?.total !== 0)
         throw new Error(`Installed diagnostics ${view} is not empty before any read.`);
     }
     // HTTP MCP from the installed artifact (#390): initialize, list the read tools and read one

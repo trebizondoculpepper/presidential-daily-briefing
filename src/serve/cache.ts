@@ -9,7 +9,11 @@
  * fails (interim rule pending #369). Nothing is persisted and nothing is collected in the
  * background: an idle server makes no GitHub requests.
  */
-import type { CacheEntryDiagnostic, InflightDiagnostic } from "./diagnostics.js";
+import type {
+  CacheEntryDiagnostic,
+  ErrorEventDiagnostic,
+  InflightDiagnostic,
+} from "./diagnostics.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { getEventListeners } from "node:events";
 import { AuthenticationError, IssueUnavailable, SubjectUnavailable } from "../github/github.js";
@@ -32,6 +36,14 @@ import { STALE_WINDOW_MS } from "./options.js";
 
 /** Most entries kept. */
 export const MAX_ENTRIES = 256;
+/** Recent failures kept for diagnostics (doc/design/serve-diagnostics-api.md "Errors"). */
+export const MAX_ERROR_EVENTS = 100;
+const errorHints: Record<CollectionCode, string> = {
+  GITHUB_RATE_LIMITED:
+    "GitHub refused for quota; wait for the reported reset or read cached results. Nothing retries automatically.",
+  GITHUB_AUTH: "Run gh auth status on the host running pdb serve.",
+  GITHUB_UNAVAILABLE: "Retry the read later; check gh and repository access if it persists.",
+};
 /** Most approximate bytes kept (JSON size of results measured on insert). */
 export const MAX_BYTES = 64 * 1024 * 1024;
 /** Most distinct collections running at once; further distinct keys queue in FIFO order. */
@@ -232,6 +244,51 @@ export class ServeCache {
   >();
   readonly counters = { hits: 0, misses: 0, coalesced: 0, evictions: 0 };
   private nextId = 0;
+  /** Bounded recent failures for diagnostics (#459): newest last, at most MAX_ERROR_EVENTS. */
+  private readonly errors: ErrorEventDiagnostic[] = [];
+  private discardedErrors = 0;
+  private readonly errorsSince = new Date().toISOString();
+
+  /**
+   * Remember one collection failure, built field by field: the safe code, the same-response
+   * category and quota numbers the #293 evidence proved, and a fixed hint. Never GitHub's
+   * message, stderr, a body or a key.
+   */
+  private recordError(
+    key: CacheKey,
+    failure: CollectionError,
+    error: unknown,
+    auth: AuthContext,
+  ): void {
+    const evidence = (error as { evidence?: unknown } | null)?.evidence as
+      | { category?: unknown; observation?: Record<string, unknown> }
+      | undefined;
+    const o = evidence?.observation;
+    const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+    this.errors.push({
+      id: `e${++this.nextId}`,
+      repository: key.repository.toLowerCase(),
+      auth: `${auth.host}/${auth.login}`,
+      at: new Date(this.now()).toISOString(),
+      operation: key.collector,
+      code: failure.code,
+      category: typeof evidence?.category === "string" ? evidence.category : null,
+      subject: subjectOf(key.coverage),
+      hint: errorHints[failure.code],
+      quota: o
+        ? {
+            resource: typeof o.resource === "string" ? o.resource : null,
+            limit: num(o.limit),
+            remaining: num(o.remaining),
+            resetAt: typeof o.resetAt === "string" ? o.resetAt : null,
+          }
+        : null,
+    });
+    if (this.errors.length > MAX_ERROR_EVENTS) {
+      this.errors.shift();
+      this.discardedErrors++;
+    }
+  }
 
   /** Abort listeners currently registered on the cache-lifetime signal (leak tests). */
   lifetimeListeners(): number {
@@ -286,7 +343,13 @@ export class ServeCache {
    * only: it never collects, refreshes, renews or sweeps. Values, keys, auth and raw coverage
    * strings stay inside; only the typed fields below leave.
    */
-  diagnostics(): { entries: CacheEntryDiagnostic[]; inflight: InflightDiagnostic[] } {
+  diagnostics(): {
+    entries: CacheEntryDiagnostic[];
+    inflight: InflightDiagnostic[];
+    errors: Omit<ErrorEventDiagnostic, "auth">[];
+    discardedErrors: number;
+    errorsSince: string;
+  } {
     const now = this.now();
     const entries = [...this.entries.values()].map((e): CacheEntryDiagnostic => {
       const age = now - e.observedAt;
@@ -323,7 +386,15 @@ export class ServeCache {
         waiters: f.waiters,
         cancelled: f.controller.signal.aborted,
       }));
-    return { entries, inflight };
+    const auth = `${this.auth.host}/${this.auth.login}`;
+    return {
+      entries,
+      inflight,
+      // Only the current login's failures, without the internal auth tag.
+      errors: this.errors.filter((e) => e.auth === auth).map(({ auth: _auth, ...event }) => event),
+      discardedErrors: this.discardedErrors,
+      errorsSince: this.errorsSince,
+    };
   }
 
   /**
@@ -626,11 +697,23 @@ export class ServeCache {
         });
         return entry;
       } catch (error) {
+        // Already aborted here means every waiter cancelled (or shutdown began): no GitHub
+        // failure happened, so it is not recorded (#459). Decided before aborting siblings.
+        const cancelled = controller.signal.aborted;
         // A failed collection aborts sibling requests still paginating.
         controller.abort();
         // Start a rate-limit cooldown before this slot is released, so a read queued behind
         // this one sees it (the waiters' own handling runs only after the release).
-        if (!isSubjectAnswer(error)) this.noteRateLimit(classifyFailure(error, this.now()));
+        if (!isSubjectAnswer(error)) {
+          // Decided before the cooldown is updated: a refusal by an existing cooldown ran
+          // nothing, while a failure that starts a cooldown is the one to record (#459).
+          const refusedByCooldown = this.cooldownError !== null && error === this.cooldownError;
+          const failure = classifyFailure(error, this.now());
+          this.noteRateLimit(failure);
+          // Once per shared collection (not per waiter), under the login it ran as.
+          if (!refusedByCooldown && !cancelled && !this.closed)
+            this.recordError(cacheKey, failure, error, flight.auth);
+        }
         throw error;
       } finally {
         this.release();

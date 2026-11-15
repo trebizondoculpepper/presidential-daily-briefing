@@ -7,6 +7,7 @@ export {
   evaluateDatalog,
   DatalogError,
   rulesHash,
+  policyVersion,
   compareKeys,
   type DatalogOptions,
   type QuestionRecordFact,

@@ -26,7 +26,7 @@ import {
   firstSubjectId,
 } from "./engine.js";
 
-export { DatalogError, rulesHash, compareKeys } from "./engine.js";
+export { DatalogError, rulesHash, policyVersion, compareKeys } from "./engine.js";
 
 /**
  * One needs-human question record as a fact (doc/design/human-briefing.md, #457): its trust and
