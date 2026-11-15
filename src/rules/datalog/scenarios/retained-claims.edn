@@ -83,6 +83,15 @@
                      {:subject 110 :rule "D-ORDINARY" :kind "implement" :band 6}]
            :denials #{[100 "D-DENY-CLAIM"]}}}
 
+ {:id "one-observed-claim-in-an-incomplete-inventory-is-inspected"
+  :doc "An incomplete inventory showing one claim cannot prove it is the only one: inspect ownership ahead of new work, and continuation stays."
+  :viewer {:role "implementer" :agent "me"}
+  :facts [{:e 1 "forward-complete" true "owned-claims" 1 "owned-claims-complete" false "owned-review-subject" 100}
+          {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "t1" "created" 1 "label" "status:ready" "labels-complete" true "native-complete" true "reverse-complete" true "blocking-complete" true "open-blockers" 0 "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "owner" "me" "claim-activity" "active"}]
+  :expect {:actions [{:subject 100 :rule "D-OWNED-INCOMPLETE" :kind "inspect" :band 3}
+                     {:subject 100 :rule "D-OWN" :kind "continue-implementation" :band 6}]
+           :denials #{[100 "D-DENY-CLAIM"]}}}
+
  {:id "a-claim-released-since-the-snapshot-is-not-continued"
   :doc "The live read found the claim released after the snapshot: no continuation and no release-first step for new work, although the stale label still denies pickup."
   :viewer {:role "implementer" :agent "me"}

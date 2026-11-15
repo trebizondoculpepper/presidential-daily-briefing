@@ -193,6 +193,7 @@ describe("both engines rank retained claims alike (#413)", () => {
     },
     "offline: inventory only": { ownedClaims: { urls: [url(1), url(2)], complete: true } },
     "incomplete inventory": { ownedClaims: { urls: [url(1), url(2)], complete: false } },
+    "one claim, incomplete inventory": { ownedClaims: { urls: [url(1)], complete: false } },
     "released since the snapshot": {
       ownedClaims: { urls: [url(2)], complete: true },
       claimActivity: new Map([
@@ -222,6 +223,14 @@ describe("both engines rank retained claims alike (#413)", () => {
     const order = (await ranked(s, "datalog", cases["waiting, resume-required and unknown"])).map(
       (r) => r.split(" | ")[0]!,
     );
+    for (const row of [
+      "resume-claim #2",
+      "review-owned-work #1",
+      "inspect #3",
+      "implement #4",
+      "wait-claim #1",
+    ])
+      expect(order).toContain(row);
     const at = (row: string) => order.indexOf(row);
     expect(at("resume-claim #2")).toBeLessThan(at("implement #4"));
     expect(at("review-owned-work #1")).toBeLessThan(at("implement #4"));

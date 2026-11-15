@@ -93,6 +93,7 @@ const audience: Record<
   "D-REVIEW-OWNED": { role: "implementer", kind: "issue" },
   "D-REVIEW-OWNED-PARTIAL": { role: "implementer", kind: "issue" },
   "D-OWN-UNKNOWN": { role: "implementer", kind: "issue" },
+  "D-OWNED-INCOMPLETE": { role: "implementer", kind: "issue" },
   "D-OWN-WAIT": { role: "implementer", kind: "issue" },
   "D-HUMAN-ASK-YOU": { role: "human", kind: "issue" },
   "D-HUMAN-ASK": { role: "human", kind: "issue" },

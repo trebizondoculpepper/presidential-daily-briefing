@@ -1,7 +1,7 @@
 {
   "modelVersion": 2,
   "policyVersion": 1,
-  "rulesHash": "c6563add3e63a298cd27775bac7c5269ce572bda497080e25284833f02b1ff04",
+  "rulesHash": "9e6fb71a4aa31c45e06d0495b19ea5e6443c9f8e58e4a1d08f0c4597a4f10e17",
   "sources": [
     "policy/schema.edn",
     "policy/rules.edn",
@@ -2396,6 +2396,93 @@
       }
     },
     {
+      "id": "D-OWNED-INCOMPLETE",
+      "kind": "inspect",
+      "band": 3,
+      "preference": 3,
+      "codes": ["own-claim", "inspection"],
+      "roles": ["implementer"],
+      "clauses": [
+        {
+          "type": "call",
+          "predicate": "foreground",
+          "args": [
+            {
+              "var": "?t"
+            }
+          ]
+        },
+        {
+          "type": "fact",
+          "scope": "viewer",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "role",
+          "value": {
+            "lit": "implementer"
+          },
+          "phrase": "role",
+          "many": false
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "owned-review-subject",
+          "value": {
+            "var": "?t"
+          },
+          "phrase": "the claim the owned-work review is attached to",
+          "many": false
+        },
+        {
+          "type": "call",
+          "predicate": "own-issue",
+          "args": [
+            {
+              "var": "?t"
+            }
+          ]
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "owned-claims",
+          "value": {
+            "lit": 1
+          },
+          "phrase": "number of implementation claims you retain",
+          "many": false
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "owned-claims-complete",
+          "value": {
+            "lit": false
+          },
+          "phrase": "completeness of your claim inventory",
+          "many": false
+        }
+      ],
+      "templateClauses": 1,
+      "calls": ["foreground", "own-issue"],
+      "evidence": [],
+      "source": {
+        "file": "policy/decisions.edn",
+        "index": 25
+      }
+    },
+    {
       "id": "D-OWN-UNKNOWN",
       "kind": "inspect",
       "band": 3,
@@ -2473,7 +2560,7 @@
       ],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 25
+        "index": 26
       }
     },
     {
@@ -2554,7 +2641,7 @@
       ],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 26
+        "index": 27
       }
     },
     {
@@ -2743,7 +2830,7 @@
       ],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 27
+        "index": 28
       }
     },
     {
@@ -2832,7 +2919,7 @@
       ],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 28
+        "index": 29
       }
     },
     {
@@ -2927,7 +3014,7 @@
       ],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 29
+        "index": 30
       }
     },
     {
@@ -3017,7 +3104,7 @@
       ],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 30
+        "index": 31
       }
     },
     {
@@ -3098,7 +3185,7 @@
       ],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 31
+        "index": 32
       }
     },
     {
@@ -3164,7 +3251,7 @@
       "evidence": [],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 32
+        "index": 33
       }
     }
   ],
@@ -10066,7 +10153,7 @@
     }
   ],
   "coverage": {
-    "decisions": 33,
+    "decisions": 34,
     "predicates": 61,
     "alternatives": 99,
     "denials": 8,
@@ -10076,6 +10163,6 @@
     "overrides": 4,
     "constants": 14,
     "attributes": 71,
-    "clauses": 584
+    "clauses": 590
   }
 }
