@@ -62,7 +62,7 @@ These extend `npm run pdb` ([contract](pdb-cli.md)). The read command keeps that
 ### `deps <N>`: show a ticket's dependencies (read-only)
 
 ```sh
-npm run pdb -- deps 675 [--tree] [--json]
+npm run pdb -- deps 675 [--tree [--max-nodes K]] [--json]
 ```
 
 - **Upstream:** each blocker with its state (open, closed as completed, closed as not planned), plus a verdict:
@@ -71,7 +71,7 @@ npm run pdb -- deps 675 [--tree] [--json]
   - _a blocker was closed as not planned_: a person should check whether the dependency still makes sense, since GitHub counts the blocker as closed.
 - **Downstream:** the tickets this one blocks, and which of them it is the **last** open blocker for. Those become pickable when it closes.
 - **Drift:** `#N` references in `Depends on` text that aren't recorded as native blockers.
-- `--tree` follows the chain transitively, prints each ticket once and reports any cycle.
+- `--tree` is an explicit, expensive diagnosis for occasional project-wide questions, never the routine path (#196). It follows the chain transitively, breadth first, with one request per issue, prints each ticket once and reports any cycle among the issues it read. It stops after `--max-nodes` issues (default 50, at most 500, profile `dependency-tree-v1`) or at a GitHub quota refusal. A stopped walk is reported as **incomplete**: `treeBounds` in the JSON gives the node limit, issues read, why it stopped and the identities known from an edge but not read ("more not read" beyond them), and the text prints `TREE INCOMPLETE`. A truncated tree is never reported as complete, and its cycle list covers only the issues read. `deps N` exits 2 whenever its evidence is incomplete (a tree stopped by its node limit, a quota refusal or unserved repositories, or unknown native evidence), like every other read command. Every read prints its cost (requests, bytes, GraphQL cost, duration) from the shared read meter; an unknown cost is shown as unknown, never zero.
 
 ### `deps add` and `deps remove`: change dependencies
 

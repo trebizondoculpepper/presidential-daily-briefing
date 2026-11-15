@@ -102,6 +102,16 @@ export const readProfiles = {
       reviewThreads: 100,
     },
   },
+  /**
+   * The explicit `deps N --tree` diagnosis (#196): a breadth-first walk of native edges that
+   * stops after `treeNodes` issues and reports every known identity it did not read. Never
+   * implicit in a routine read; routine dependency questions use direct edges only.
+   */
+  "dependency-tree-v1": {
+    version: 1,
+    sources: ["issue", "labels", "native-blocked-by", "native-blocking"],
+    bounds: { treeNodes: 50, nativeEdgesPerPage: 100, notReadListed: 50 },
+  },
   /** The explicit `pr N --history` diagnosis; never implicit in a routine read. */
   "review-history-v1": { version: 1, sources: ["review-history"], bounds: {} },
   /** The full open-inventory snapshot that `--issue N` intake promises (unchanged). */

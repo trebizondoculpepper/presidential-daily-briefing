@@ -234,6 +234,9 @@ describe("read-only MCP adapter (#25)", async () => {
       flattenRelationships(cliDeps, 1),
     );
     expect(deps.data).toMatchObject({ tree: true, cycles: cliDeps.cycles });
+    // A walk that read everything reachable is complete (#196).
+    expect(cliDeps.treeBounds).toMatchObject({ complete: true });
+    expect(deps.status).toBe("complete");
     await client.close();
   });
 

@@ -33,6 +33,7 @@ import type {
   RestAnswer,
 } from "../github/github.js";
 import type { dependencyReport as DependencyReportFn } from "../github/dependencies.js";
+import { legacyTreeText, notReadText, treeIncompleteText } from "../github/dependencies.js";
 import type { Snapshot } from "../github/types.js";
 import { localPaths, redactLocalText, redactPaths } from "../mcp/redact.js";
 import { markerTrust } from "../workflow/delivery.js";
@@ -328,13 +329,23 @@ export function cachedBoundaries(
     const { signal, ...coverage } = depOptions ?? {};
     return cache.read(
       { repository, collector: "deps", coverage: { n: number, ...coverage } },
-      (inner) =>
-        runtime.dependencyReport(repository, number, {
+      async (inner) => {
+        const report = await runtime.dependencyReport(repository, number, {
           ...coverage,
           signal: inner,
           follow: isServed,
-        }),
+        });
+        // A tree walk that stopped on a quota refusal returns a partial report rather than
+        // throwing: start the shared cooldown before this collection slot is released, exactly
+        // as the who and ticket routes do (#196).
+        const quota = report.collection?.quota;
+        if (quota) cache.noteQuotaRefusal(quota);
+        return report;
+      },
       signal,
+      // Never store a partial tree or a quota-stopped read as the answer (#196).
+      (report) =>
+        !report.collection?.quota && (!report.tree || report.treeBounds?.complete === true),
     );
   };
   const memoRest: Rest | undefined = guardedRest
@@ -807,8 +818,8 @@ export function readApi(
                 collector: history ? "pr-history" : "pr",
                 coverage: { n: number },
               },
-              (inner): Promise<{ report: unknown; complete: boolean }> =>
-                history
+              async (inner): Promise<{ report: unknown; complete: boolean }> => {
+                const result = await (history
                   ? readReviewHistory(
                       served.repository,
                       number,
@@ -834,7 +845,17 @@ export function readApi(
                           }
                         : {},
                       runtime.now,
-                    ),
+                    ));
+                // A quota refusal inside a PR read that still answered (delivery or permission
+                // evidence left unknown) starts the shared cooldown too (#196 review).
+                const quota = (
+                  result.report as {
+                    collection?: { quota?: Parameters<typeof cache.noteQuotaRefusal>[0] | null };
+                  }
+                ).collection?.quota;
+                if (quota) cache.noteQuotaRefusal(quota);
+                return result;
+              },
               context.signal,
               // Its delivery evidence is read inside this whole result: an incomplete report
               // may only reflect a transient failure, so only a complete one is stored.
@@ -852,14 +873,26 @@ export function readApi(
               signal: context.signal,
             });
             const skipped = report.unfollowed ?? [];
-            return skipped.length
-              ? {
-                  status: "incomplete",
-                  result: report,
-                  warnings: [
+            // A capped, quota-stopped or unserved tree is partial (#196): same verdict as the CLI.
+            const bounds = report.treeBounds;
+            const truncated = report.tree && bounds?.complete !== true;
+            const warnings = [
+              ...(skipped.length
+                ? [
                     `${skipped.length} dependency node(s) in repositories this server does not serve were not read: ${skipped.map((n) => `${n.repository}#${n.number}`).join(", ")}.`,
-                  ],
-                }
+                  ]
+                : []),
+              ...(truncated
+                ? bounds
+                  ? [
+                      treeIncompleteText(bounds),
+                      ...(bounds.notRead ? [notReadText(bounds).trim()] : []),
+                    ]
+                  : [legacyTreeText]
+                : []),
+            ];
+            return skipped.length || truncated
+              ? { status: "incomplete", result: report, warnings }
               : { status: "complete", result: report };
           });
           return true;

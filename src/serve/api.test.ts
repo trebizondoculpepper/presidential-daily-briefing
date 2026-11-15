@@ -10,7 +10,9 @@ import { main } from "../cli.js";
 import { TOML_CONFIG_PATH } from "../config/config.js";
 import type { ConfigFileSystem, GitRunner } from "../config/config.js";
 import { collect, collectIssueFocus, ghQueryFailure, IssueUnavailable } from "../github/github.js";
-import { dependencyReport } from "../github/dependencies.js";
+import { dependencyReport, dependencyText } from "../github/dependencies.js";
+import { graphQuery } from "../testing/fakegh.js";
+import { repo as fakeRepo } from "../testing/snapshots.js";
 import type { Query } from "../github/github.js";
 import { RateLimitError } from "../github/dependencies.js";
 import type { Issue, Page, Snapshot } from "../github/types.js";
@@ -155,6 +157,20 @@ async function setup(
         repository,
         number,
         tree: !!options?.tree,
+        ...(options?.tree
+          ? {
+              treeBounds: {
+                complete: true,
+                nodeLimit: 50,
+                nodesRead: 1,
+                stoppedBy: null,
+                notRead: 0,
+                notServed: 0,
+                notReadSample: [],
+                cyclesComplete: true,
+              },
+            }
+          : {}),
       } as never;
     },
     queryWith: overrides.queryWith,
@@ -513,6 +529,43 @@ describe("pdb serve never reads an unserved repository (#373 review)", () => {
     }
   });
 
+  it("reports a capped tree as incomplete with what was not read, and never caches it (#196)", async () => {
+    const { query, calls } = graphQuery({
+      edges: Array.from({ length: 6 }, (_, i): [number, number] => [10 + i, 1]),
+    });
+    const s = await setup(["--repo", fakeRepo], {
+      dependencyReport: (repository, number, options) =>
+        dependencyReport(repository, number, { ...options, maxNodes: 3 }, query),
+    });
+    try {
+      const reply = await call(s.running.port, "/api/v1/issues/1/deps?tree=true");
+      expect(reply.status).toBe(200);
+      expect(reply.json.status).toBe("incomplete");
+      expect(reply.json.result.treeBounds).toMatchObject({
+        complete: false,
+        stoppedBy: "node-limit",
+        nodesRead: 3,
+        notRead: 4,
+      });
+      const warnings = reply.json.warnings.join("\n");
+      expect(warnings).toContain("TREE INCOMPLETE (node limit 3)");
+      expect(warnings).toContain("Not read:");
+      // CLI text gives the same verdict for the same report.
+      expect(dependencyText(reply.json.result)).toContain("TREE INCOMPLETE (node limit 3)");
+      // Not stored: a second request reads live again.
+      const before = calls.length;
+      await call(s.running.port, "/api/v1/issues/1/deps?tree=true");
+      expect(calls.length).toBe(before + 3);
+      // A complete direct read is cached as before.
+      await call(s.running.port, "/api/v1/issues/1/deps");
+      const direct = calls.length;
+      await call(s.running.port, "/api/v1/issues/1/deps");
+      expect(calls.length).toBe(direct);
+    } finally {
+      await s.close();
+    }
+  });
+
   it("does not walk dependency edges into unserved repositories, and says so", async () => {
     const asked: string[] = [];
     const node = (owner: string, number: number, blockedBy: unknown[]) => ({
@@ -563,6 +616,9 @@ describe("pdb serve never reads an unserved repository (#373 review)", () => {
       expect(reply.json.status).toBe("incomplete");
       expect(reply.json.result.unfollowed).toEqual([{ repository: "someone/else", number: 9 }]);
       expect(reply.json.warnings[0]).toContain("someone/else#9");
+      // An unfollowed node makes the tree itself incomplete, as the CLI says (#196).
+      expect(reply.json.result.treeBounds).toMatchObject({ complete: false, notServed: 1 });
+      expect(reply.json.warnings.join()).toContain("TREE INCOMPLETE");
       expect(asked).toEqual([repo]);
     } finally {
       await s.close();
@@ -1320,6 +1376,44 @@ describe("pdb serve failure behaviour (#373)", () => {
       const after = await call(s.running.port, "/api/v1/issues/1/who");
       expect(after.json.freshness.source).not.toBe("cached");
       expect(focused).toBe(2);
+    } finally {
+      await s.close();
+    }
+  });
+
+  it("a deps tree stopped by a quota refusal starts the cooldown and is not cached (#196)", async () => {
+    const { query: base, calls } = graphQuery({
+      edges: Array.from({ length: 6 }, (_, i): [number, number] => [10 + i, 1]),
+    });
+    let sent = 0;
+    const refusing: Query = async (source, variables) => {
+      if (++sent === 3) throw new RateLimitError("rate limited", { retryAfterSeconds: 90 });
+      return base(source, variables);
+    };
+    const s = await setup(["--repo", fakeRepo], {
+      dependencyReport: (repository, number, options) =>
+        dependencyReport(repository, number, options, refusing),
+    });
+    try {
+      const first = await call(s.running.port, "/api/v1/issues/1/deps?tree=true");
+      expect(first.status).toBe(200);
+      expect(first.json.status).toBe("incomplete");
+      expect(first.json.result.treeBounds).toMatchObject({ complete: false, stoppedBy: "quota" });
+      expect(first.json.result.collection.quota).toEqual({
+        retryAfterSeconds: 90,
+        resetAt: null,
+      });
+      // The shared cooldown is in force for every live read.
+      const during = await call(s.running.port, "/api/v1/briefing");
+      expect(during.json.error.code).toBe("GITHUB_RATE_LIMITED");
+      expect(during.headers["retry-after"]).toBe("90");
+      expect(s.calls.collect).toHaveLength(0);
+      s.clock.advance(91_000);
+      // Not cached: the next tree read runs live again.
+      const before = calls.length;
+      const after = await call(s.running.port, "/api/v1/issues/1/deps?tree=true");
+      expect(after.json.freshness.source).not.toBe("cached");
+      expect(calls.length).toBeGreaterThan(before);
     } finally {
       await s.close();
     }
