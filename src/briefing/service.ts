@@ -384,7 +384,8 @@ export async function presentBriefing(
   // The engine banner is evaluator metadata: context only, or the expanded --full report (#355).
   const engineHeader =
     experimental && (options.context || !compact)
-      ? `Decision engine: Datalog (policy ${experimental.decisionEngine.policyVersion}; ${experimental.decisionEngine.rulesHash.slice(0, 12)})\n`
+      ? // #516: the same resolved identity as the JSON, the composite hash when a project policy ranks.
+        `Decision engine: Datalog (policy ${experimental.decisionEngine.policyVersion}; ${(decisionEngine.rulesHash ?? "").slice(0, 12)}${effective?.manifest.state === "active" ? `; project preferences from ${effective.manifest.source}` : effective?.manifest.state === "error" ? "; project policy error, default order" : ""})\n`
       : "";
   // Delivery omissions reach the text through the renderers' own bounded INCOMPLETE warnings
   // (a few lines plus "N more warning(s) omitted; use --json"), inside the same budget as the
