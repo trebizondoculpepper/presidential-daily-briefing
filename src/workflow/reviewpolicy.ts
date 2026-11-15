@@ -359,8 +359,8 @@ export function snapshotReviewEvidence(pr: PullRequest, complete: boolean): Revi
     unresolvedThreads: (pr.reviewThreads?.nodes ?? [])
       .filter((t) => !t.isResolved)
       .map((t) => ({
-        author: t.comments.nodes[0]?.author,
-        url: t.comments.nodes[0]?.url ?? pr.url,
+        author: t.comments?.nodes?.[0]?.author,
+        url: t.comments?.nodes?.[0]?.url ?? pr.url,
       })),
     complete,
   };
