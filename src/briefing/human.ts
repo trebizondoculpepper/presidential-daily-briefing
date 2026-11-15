@@ -289,8 +289,14 @@ export function humanBriefing(
       warnings.push(
         `${questions.length - humanPolicy.maxQuestions} more question(s) on the record`,
       );
-    if (record && !questions.length)
-      evidenceGaps.push(`${target}: the record's questions could not be read.`);
+    // Each record is checked on its own: one readable record must not hide another's gap.
+    for (const r of orphaned.length ? orphaned : record ? [record] : [])
+      if (!r.questions.length)
+        evidenceGaps.push(
+          orphaned.length
+            ? `${target}: the questions of record ${r.url} could not be read.`
+            : `${target}: the record's questions could not be read.`,
+        );
     const requested = [
       ...questions.slice(0, humanPolicy.maxQuestions).map(shorten),
       ...kinds.flatMap((kind) => requestedFor(kind, subject, options.human)),
