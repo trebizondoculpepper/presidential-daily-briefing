@@ -590,6 +590,7 @@ async function runIdentity(
     legacyIgnored: write.legacyIgnored,
     legacyNamesUnchecked: write.legacyNamesUnchecked,
     excludeRuleAdded: write.excluded,
+    ...(write.lockCleanup ? { lockCleanup: write.lockCleanup } : {}),
     ...setting,
   };
   if (parsed.json) return JSON.stringify(result, null, 2) + "\n";
@@ -605,6 +606,7 @@ async function runIdentity(
       ? `could not check the name against agent-inbox.toml names: ${write.legacyNamesUnchecked}`
       : "",
     write.excluded ? `added /${IDENTITY_FILE} to this repository's local Git exclude file` : "",
+    write.lockCleanup ?? "",
   ].filter(Boolean);
   return `${parsed.key} = ${setting.value} (entry ${entry}, ${selectionText(where)}) — ${write.changed ? `written to ${IDENTITY_FILE} (local, not committed)` : "unchanged"}${extra.map((line) => `\n  ${line}`).join("")}\n`;
 }
@@ -818,6 +820,7 @@ export async function runSetup(
       changed: write ? write.changed : !unchanged,
       createdEntry: write?.createdEntry ?? false,
       excludeRuleAdded: write?.excluded ?? false,
+      ...(write?.lockCleanup ? { lockCleanup: write.lockCleanup } : {}),
       next,
     };
     if (json) {
@@ -835,7 +838,7 @@ export async function runSetup(
         ? "Set up"
         : "Already set up";
     await output(
-      `${lead} identity ${who} for entry ${entry} in ${IDENTITY_FILE} (${selectionText(selectionJson(resolution))}), triage role ${role}${roleNote}.${write?.excluded ? `\n  added /${IDENTITY_FILE} to this repository's local Git exclude file` : ""}${next.length ? `\nNext:\n${next.map((c) => `  ${c}`).join("\n")}` : "\nRun without --dry-run to write it, then use the reported name with --agent."}\n`,
+      `${lead} identity ${who} for entry ${entry} in ${IDENTITY_FILE} (${selectionText(selectionJson(resolution))}), triage role ${role}${roleNote}.${write?.excluded ? `\n  added /${IDENTITY_FILE} to this repository's local Git exclude file` : ""}${write?.lockCleanup ? `\n  ${write.lockCleanup}` : ""}${next.length ? `\nNext:\n${next.map((c) => `  ${c}`).join("\n")}` : "\nRun without --dry-run to write it, then use the reported name with --agent."}\n`,
     );
     return 0;
   } catch (caught) {

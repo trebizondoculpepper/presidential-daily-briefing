@@ -5,8 +5,8 @@ import { resolveEngineSetting } from "./config/engine-setting.js";
 import { resolveReviewPolicy } from "./config/review-setting.js";
 /** One read-only intake command. Contract: doc/pdb-cli.md. */
 import { realpathSync } from "node:fs";
-import { readFile, writeFile, rename, mkdir } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import {
@@ -87,6 +87,8 @@ import { complexityGuidanceJson, complexityGuidanceText } from "./estimation/com
 import { impactGuidanceJson, impactGuidanceText } from "./estimation/impact.js";
 import { declaredRulesContext } from "./rules/declared-context.js";
 import { runConfig, runSetup } from "./config/configcli.js";
+import { advanceCheckpoint, overwriteJson, writeSnapshotCache } from "./config/safejson.js";
+import type { WriteOutcome } from "./config/safejson.js";
 import type { ConfigRuntime } from "./config/configcli.js";
 import { estimateUsage, runEstimate } from "./estimation/estimate.js";
 import {
@@ -913,11 +915,32 @@ export function argumentsFor(args: string[]) {
 }
 const isPickupOrder = (text: string): text is PickupOrder =>
   (pickupOrders as readonly string[]).includes(text);
-export async function atomicJson(path: string, value: unknown): Promise<void> {
-  await mkdir(dirname(resolve(path)), { recursive: true });
-  const temporary = `${path}.${process.pid}.tmp`;
-  await writeFile(temporary, JSON.stringify(value, null, 2) + "\n", { mode: 0o600 });
-  await rename(temporary, path);
+/**
+ * A locked, durable plain overwrite (#382, src/config/safejson.ts): explicit files such as
+ * plans keep their overwrite semantics. Throws when nothing was written.
+ */
+export async function atomicJson(path: string, value: unknown): Promise<WriteOutcome> {
+  const outcome = await overwriteJson(path, value);
+  if (outcome.status === "not-written") throw new Error(outcome.reason);
+  return outcome;
+}
+
+/** Say what a committed write left unconfirmed or uncleaned, never discarding it (#382). */
+const reportWrite = (runtime: Runtime, path: string, outcome: WriteOutcome): void => {
+  const say = runtime.stderr ?? ((text: string) => void process.stderr.write(text));
+  if (outcome.status === "committed-with-error") say(`pdb: ${path}: ${outcome.reason}\n`);
+  for (const note of outcome.cleanup) say(`pdb: ${note}\n`);
+};
+
+/**
+ * Write an explicit `--cache` snapshot (#382): locked, never replacing a newer snapshot of the
+ * same repository or an unreadable file. Anything other than a clean write is said on stderr.
+ */
+async function cacheSnapshot(runtime: Runtime, path: string, snapshot: Snapshot): Promise<void> {
+  const say = runtime.stderr ?? ((text: string) => void process.stderr.write(text));
+  const outcome = await writeSnapshotCache(path, snapshot);
+  if (outcome.status !== "written") say(`pdb: --cache ${path}: ${outcome.reason}\n`);
+  for (const note of outcome.cleanup) say(`pdb: ${note}\n`);
 }
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
@@ -1059,6 +1082,9 @@ export async function main(
       (await pending) ?? { status: "unknown", reason: "", installed: null, channel: "" },
     );
     if (advisory) (runtime.stderr ?? ((t) => process.stderr.write(t)))(`${advisory}\n`);
+    // #382: a lock this check could not remove blocks later checks; say how to recover.
+    const lockProblem = (await pending)?.lockProblem;
+    if (lockProblem) (runtime.stderr ?? ((t) => process.stderr.write(t)))(`pdb: ${lockProblem}\n`);
     const checkout = await checkoutPending;
     const stale = checkout && checkoutAdvisory(checkout);
     if (stale) (runtime.stderr ?? ((t) => process.stderr.write(t)))(`${stale}\n`);
@@ -1186,7 +1212,13 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
   if (args[0] === "briefing")
     return runBriefing(args.slice(1), output, {
       ...runtime,
-      files: runtime.briefingFiles ?? { atomicJson, cachedSnapshot, checkpointSince },
+      files: runtime.briefingFiles ?? {
+        atomicJson,
+        cachedSnapshot,
+        checkpointSince,
+        advanceCheckpoint,
+        writeSnapshotCache,
+      },
     });
   if (args[0] === "serve") return runServe(args.slice(1), runtime.serve);
   if (args[0] === "rebrief")
@@ -1274,7 +1306,7 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
     const snapshot = values.offline
       ? await cachedSnapshot(values.cache ?? "", values.repo)
       : await runtime.collect(values.repo ?? (await runtime.currentRepository()), {});
-    if (!values.offline && values.cache) await atomicJson(values.cache, snapshot);
+    if (!values.offline && values.cache) await cacheSnapshot(runtime, values.cache, snapshot);
     // #301: the declared review policy, after caching (configuration is never cached).
     snapshot.reviewPolicy = await resolveReviewPolicy(snapshot.repository, runtime.guide ?? {});
     const impact = await metricStatus(impactMetric, snapshot.repository, runtime.estimation).catch(
@@ -1598,7 +1630,7 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
     const snapshot = values.offline
       ? await cachedSnapshot(values.cache ?? "", values.repo)
       : await runtime.collect(values.repo ?? (await runtime.currentRepository()), {});
-    if (!values.offline && values.cache) await atomicJson(values.cache, snapshot);
+    if (!values.offline && values.cache) await cacheSnapshot(runtime, values.cache, snapshot);
     // #301: the declared review policy, after caching (configuration is never cached).
     snapshot.reviewPolicy = await resolveReviewPolicy(snapshot.repository, runtime.guide ?? {});
     const { report, text } = await readTeam(
@@ -1694,7 +1726,7 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
       : await runtime.collect(values.repo ?? (await runtime.currentRepository()), {
           issue: number,
         });
-    if (!values.offline && values.cache) await atomicJson(values.cache, snapshot);
+    if (!values.offline && values.cache) await cacheSnapshot(runtime, values.cache, snapshot);
     // #301: the declared review policy, after caching (configuration is never cached).
     snapshot.reviewPolicy = await resolveReviewPolicy(snapshot.repository, runtime.guide ?? {});
     const { report, text } = await readWho(
@@ -1779,7 +1811,7 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
         repository,
         runtime.migrationRuntime,
       );
-      await atomicJson(values.file, plan);
+      reportWrite(runtime, values.file, await atomicJson(values.file, plan));
       await output(values.json ? JSON.stringify(plan, null, 2) + "\n" : migrationPlanText(plan));
       return 0;
     }
@@ -1883,7 +1915,8 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
       return 2;
     }
     // An incomplete history read never replaces the last successful explicit snapshot.
-    if (options.cache && historyComplete(snapshot)) await atomicJson(options.cache, snapshot);
+    if (options.cache && historyComplete(snapshot))
+      await cacheSnapshot(runtime, options.cache, snapshot);
     else if (options.cache)
       snapshot = {
         ...snapshot,
@@ -1952,13 +1985,22 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
       ? JSON.stringify({ ...report, checkpoint }, null, 2) + "\n"
       : text + checkpointText,
   );
-  if (!options.offline && options.checkpoint && report.completeness.complete)
+  if (!options.offline && options.checkpoint && report.completeness.complete) {
     // Start time deliberately overlaps windows: updates arriving during collection are not lost.
-    await atomicJson(options.checkpoint, {
+    // #382: under the checkpoint's own lock, for the same repository, never moving it back.
+    const advanced = await advanceCheckpoint(options.checkpoint, {
       schemaVersion: 1,
       repository: snapshot.repository,
       through: snapshot.startedAt,
     });
+    const say = runtime.stderr ?? ((text: string) => void process.stderr.write(text));
+    for (const note of advanced.cleanup) say(`pdb: ${note}\n`);
+    if (advanced.status === "not-written" || advanced.status === "committed-with-error") {
+      // The report is already on stdout; the cursor's state is said on stderr, never as success.
+      say(`pdb: checkpoint ${options.checkpoint}: ${advanced.reason}\n`);
+      return 2;
+    }
+  }
   return report.completeness.complete ? 0 : 2;
 }
 /**

@@ -30,7 +30,7 @@ export interface InstalledInfo {
   root?: string;
 }
 
-export type UpdateCheckResult =
+export type UpdateCheckResult = (
   | { status: "skipped"; reason: string }
   | { status: "unknown"; reason: string; installed: string | null; channel: string }
   | {
@@ -41,7 +41,14 @@ export type UpdateCheckResult =
       command: string;
       /** false when the cached check already showed this notice within the last 24 hours (#65). */
       notify?: boolean;
-    };
+    }
+) & {
+  /**
+   * #382: the update cache's lock could not be removed after this check; later checks skip
+   * until it is deleted. Says which file and how to recover.
+   */
+  lockProblem?: string;
+};
 
 export interface CheckOptions {
   installed?: InstalledInfo;
