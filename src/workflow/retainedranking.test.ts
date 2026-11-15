@@ -246,3 +246,54 @@ describe("both engines rank retained claims alike (#413)", () => {
     expect(shown.filter((r) => r.startsWith("estimate-complexity"))).toHaveLength(9);
   });
 });
+
+describe("shortlist selection sees retained-claim activity (#413)", () => {
+  it("reads activity once, before the first selection pass, so hydration covers its rows", async () => {
+    const { readBriefing } = await import("../briefing/service.js");
+    const claim = ticket(1, [`agent:${me}`, "impact:M", "complexity:M"]);
+    // An easy win outranks a plain continuation: the claim leads only as a resume row.
+    const other = ticket(2, ["impact:L", "complexity:S"]);
+    const full = snapshot([claim, other], []);
+    let reads = 0;
+    const selected: string[][] = [];
+    const presented = await readBriefing(
+      {
+        collect: async () => {
+          throw new Error("not used");
+        },
+        collectShortlist: async (
+          _repository: string,
+          options: { select: (s: Snapshot) => Promise<string[]> },
+        ) => {
+          selected.push(await options.select(full));
+          return full;
+        },
+        claimActivityReader: async () => {
+          reads++;
+          return read({
+            state: "resume-required",
+            blocker: { kind: "dependency", repository: "o/r", issue: 9 },
+            reason: "parser",
+            lastActivity: "1",
+            cleared: "o/r#9 no longer blocks #1",
+          });
+        },
+        dependencyReport: async () => {
+          throw new Error("not used");
+        },
+        rest: async () => ({ status: 200, body: { permission: "write" } }),
+        query: async () => ({ repository: {} }),
+        now: () => new Date(Date.UTC(2026, 5, 1)),
+        guide: local(),
+        estimation: local(),
+        env: {},
+      } as never,
+      { repository: full.repository, agent: me, role: "implementer", limit: 10, maxChars: 100_000 },
+    );
+    expect(reads).toBe(1);
+    expect(selected[0]?.[0]).toBe(claim.url);
+    const report = (presented as { report: { rankedActions: { items: { kind: string }[] } } })
+      .report;
+    expect(report.rankedActions.items[0]?.kind).toBe("resume-claim");
+  });
+});
