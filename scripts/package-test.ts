@@ -9,7 +9,7 @@
  * Direct source or dist execution alone is not enough (#11).
  */
 import { execFile, spawn } from "node:child_process";
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -660,6 +660,7 @@ try {
     const bare: NodeJS.ProcessEnv = {
       PATH: dirname(process.execPath),
       PDB_NO_UPDATE_CHECK: "1",
+      PDB_NO_FIRST_USE_HINT: "1",
       ...(windows ? { SystemRoot: process.env.SystemRoot, ComSpec: process.env.ComSpec } : {}),
     };
     const rules = (rulesArgs: string[]) =>
@@ -707,6 +708,38 @@ try {
     console.log(
       `ok   installed pdb rules outside a checkout, no gh or credentials: ${lines.length} lines; --json --role filter labelled; unknown --rule exits 2 on stderr`,
     );
+    // pdb onboard (#351): read-only instructions outside a checkout, with no gh or credentials.
+    const onboard = (args: string[]) =>
+      run(windows ? `"${bin}"` : bin, ["onboard", ...args], {
+        cwd: outside,
+        env: bare,
+        shell: windows,
+      });
+    const onboarding = JSON.parse((await onboard(["--repo", "owner/name", "--json"])).stdout) as {
+      kind?: string;
+      repository?: string;
+      persistentSection?: string;
+    };
+    if (
+      onboarding.kind !== "onboarding" ||
+      onboarding.repository !== "owner/name" ||
+      !onboarding.persistentSection?.startsWith("<!-- pdb:coordination:start -->") ||
+      (await readdir(outside)).length !== 0
+    )
+      throw new Error(
+        "Installed pdb onboard --json printed no read-only document outside a checkout.",
+      );
+    const refused = await onboard(["--install"]).then(
+      () => null,
+      (error: { code?: unknown }) => error,
+    );
+    if (refused?.code !== 2 || (await readdir(outside)).length !== 0)
+      throw new Error(
+        "Installed pdb onboard --install outside a checkout must exit 2 and write nothing.",
+      );
+    console.log(
+      "ok   installed pdb onboard outside a checkout: read-only document; --install exits 2",
+    );
   }
   if (windows)
     // execFile("gh") resolves only gh.exe on Windows, so a script stand-in cannot be found.
@@ -729,6 +762,7 @@ try {
       ...process.env,
       PATH: `${fakeDir}${delimiter}${process.env.PATH ?? ""}`,
       PDB_NO_UPDATE_CHECK: "1",
+      PDB_NO_FIRST_USE_HINT: "1",
     };
     await nativeStopSmoke(join(packageDir, "dist", "cli.mjs"), work, env);
     console.log("ok   installed native Codex offer and duplicate guard with fake gh");
@@ -809,7 +843,7 @@ try {
       await run(windows ? `"${bin}"` : bin, ["version", "--no-update-check"], { shell: windows })
     ).stdout.split("\n")[0];
     console.log(`live source revision ${revision}; executable ${bin} (${version})`);
-    const env = { ...process.env, PDB_NO_UPDATE_CHECK: "1" };
+    const env = { ...process.env, PDB_NO_UPDATE_CHECK: "1", PDB_NO_FIRST_USE_HINT: "1" };
     const selected = await resolveEngineSetting(live, { cwd: root });
     for (const role of ["implementer", "designer"]) {
       const kinds = await blendedParity(

@@ -61,7 +61,7 @@ const run = (args: string[], env: NodeJS.ProcessEnv = process.env): Promise<RunR
     execFile(
       process.execPath,
       [...nodeArgs, ...args],
-      { env, timeout: 30_000 },
+      { env: { PDB_NO_FIRST_USE_HINT: "1", ...env }, timeout: 30_000 },
       (error, stdout, stderr) =>
         done({
           code: error ? (typeof error.code === "number" ? error.code : -1) : 0,
