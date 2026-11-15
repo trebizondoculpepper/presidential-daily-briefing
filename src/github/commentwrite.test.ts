@@ -8,6 +8,7 @@ import {
   classifyCommentResponse,
   CommentWriteError,
   postCommentWithRecovery,
+  retryWait,
   withCommentRecovery,
 } from "./commentwrite.js";
 import type { CommentAttempt, CommentReceipt } from "./commentwrite.js";
@@ -61,6 +62,43 @@ function scripted(outcomes: (CommentAttempt | "lost")[], receipts?: CommentRecei
     },
   };
 }
+
+describe("retryWait: the single wait formula (#345)", () => {
+  const iso = (offsetMs: number) => new Date(T0 + offsetMs).toISOString();
+  const s = 1000;
+  // [case, Retry-After seconds, Retry-After date, exhausted reset, expected wait, default used]
+  const table: [string, number | null, string | null, string | null, number, boolean][] = [
+    ["nothing", null, null, null, 60 * s, true],
+    ["seconds only", 10, null, null, 10 * s, false],
+    ["seconds beyond the default", 120, null, null, 120 * s, false],
+    ["date only", null, iso(15 * s), null, 15 * s, false],
+    ["seconds and a later date", 5, iso(20 * s), null, 20 * s, false],
+    ["seconds and an earlier date", 30, iso(20 * s), null, 30 * s, false],
+    ["zero seconds", 0, null, null, 60 * s, true],
+    ["past date", null, iso(-5 * s), null, 60 * s, true],
+    ["unparsable date", null, "not a date", null, 60 * s, true],
+    ["reset sooner than the default, no Retry-After", null, null, iso(10 * s), 60 * s, true],
+    ["reset later than the default, no Retry-After", null, null, iso(90 * s), 90 * s, true],
+    ["reset with an invalid Retry-After", 0, iso(-1 * s), iso(10 * s), 60 * s, true],
+    ["reset later than seconds", 10, null, iso(45 * s), 45 * s, false],
+    ["reset earlier than seconds", 50, null, iso(45 * s), 50 * s, false],
+    ["reset later than a date", null, iso(12 * s), iso(40 * s), 40 * s, false],
+    ["past reset with seconds", 10, null, iso(-1 * s), 10 * s, false],
+    ["past reset alone", null, null, iso(-1 * s), 60 * s, true],
+    ["all three", 10, iso(25 * s), iso(35 * s), 35 * s, false],
+  ];
+  it.each(table)("%s", (_, retryAfterSeconds, retryAt, resetAt, wait, defaultDelay) => {
+    expect(retryWait({ retryAfterSeconds, retryAt, resetAt }, T0, 60 * s)).toEqual({
+      earliest: T0 + wait,
+      defaultDelay,
+    });
+  });
+  it("is what recovery waits for: a sooner reset never shortens the 60s default", async () => {
+    const t = scripted([secondary({ resetAt: iso(10 * s) })]);
+    await postCommentWithRecovery(t.boundaries);
+    expect(t.sleeps).toEqual([60 * s]);
+  });
+});
 
 describe("postCommentWithRecovery (#345)", () => {
   it("retries a secondary refusal once after Retry-After and posts", async () => {
