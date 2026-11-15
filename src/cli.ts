@@ -57,6 +57,12 @@ import {
   verifyTransition,
 } from "./workflow/retained.js";
 import { cachedCheckForUpdate } from "./updates/updatecache.js";
+import {
+  checkoutAdvisory,
+  checkoutFreshness,
+  checkoutOptOutEnv,
+  describeCheckout,
+} from "./updates/checkout.js";
 import { installedVersion, optOutEnv, legacyOptOutEnv, updateAdvisory } from "./updates/updates.js";
 import { defaultStaleHours } from "./workflow/team.js";
 import { migrationPlanText, planMigration } from "./github/migration.js";
@@ -199,6 +205,8 @@ export interface Runtime {
   rest?: Rest;
   now?: () => Date;
   updateCheck?: typeof cachedCheckForUpdate;
+  /** Local-Git freshness of a source checkout (#309). */
+  checkoutCheck?: typeof checkoutFreshness;
   stderr?: (text: string) => void;
   /** Filesystem, git and working directory for `config`; tests never touch the real checkout. */
   config?: ConfigRuntime;
@@ -975,14 +983,31 @@ export async function main(
     !!process.env[legacyOptOutEnv];
   const rest = args.filter((a) => a !== "--no-update-check");
   const check = runtime.updateCheck ?? cachedCheckForUpdate;
+  // An injected probe always runs; the real one honours its own opt-out too.
+  const checkoutCheck: typeof checkoutFreshness =
+    runtime.checkoutCheck ??
+    ((o) => checkoutFreshness({ ...o, optOut: o.optOut || !!process.env[checkoutOptOutEnv] }));
   if (rest[0] === "version") {
     const installed = await installedVersion();
-    const result = await check({ offline: rest.includes("--offline"), optOut, installed });
+    const [result, checkout] = await Promise.all([
+      check({ offline: rest.includes("--offline"), optOut, installed }),
+      checkoutCheck({ root: installed.root ?? null, installed: installed.installed, optOut }),
+    ]);
     await output(
       rest.includes("--json")
-        ? JSON.stringify({ schemaVersion: 1, version: installed.version, check: result }, null, 2) +
-            "\n"
-        : `pdb ${installed.version ?? "(unknown version)"}\nUpdate check: ${result.status}${"reason" in result && result.reason ? ` — ${result.reason}` : ""}${"available" in result && result.available ? ` (npm ${result.channel}: ${result.available})` : ""}\n`,
+        ? JSON.stringify(
+            {
+              schemaVersion: 1,
+              version: installed.version,
+              // The local source root, as the text output shows it; null for an npm install.
+              installation: installed.installed ? null : (installed.root ?? null),
+              check: result,
+              checkout,
+            },
+            null,
+            2,
+          ) + "\n"
+        : `pdb ${installed.version ?? "(unknown version)"}\nUpdate check: ${result.status}${"reason" in result && result.reason ? ` — ${result.reason}` : ""}${"available" in result && result.available ? ` (npm ${result.channel}: ${result.available})` : ""}\n${installed.installed ? "" : `Installation: ${installed.root ?? "unknown"}\n${describeCheckout(checkout).join("\n")}\n`}`,
     );
     return 0;
   }
@@ -1000,6 +1025,12 @@ export async function main(
         .then(() => check({ offline: rest.includes("--offline"), optOut }))
         .catch(() => null)
     : Promise.resolve(null);
+  // Source-checkout freshness (#309): local Git only, so it runs offline too; never fatal.
+  const checkoutPending = eligible
+    ? installedVersion()
+        .then((i) => checkoutCheck({ root: i.root ?? null, installed: i.installed, optOut }))
+        .catch(() => null)
+    : Promise.resolve(null);
   try {
     return await run(rest, output, runtime);
   } finally {
@@ -1007,6 +1038,9 @@ export async function main(
       (await pending) ?? { status: "unknown", reason: "", installed: null, channel: "" },
     );
     if (advisory) (runtime.stderr ?? ((t) => process.stderr.write(t)))(`${advisory}\n`);
+    const checkout = await checkoutPending;
+    const stale = checkout && checkoutAdvisory(checkout);
+    if (stale) (runtime.stderr ?? ((t) => process.stderr.write(t)))(`${stale}\n`);
   }
 }
 

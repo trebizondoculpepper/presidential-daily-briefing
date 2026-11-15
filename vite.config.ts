@@ -15,5 +15,8 @@ export default defineConfig({
     // the 5s default failed required CI on unrelated PRs. 20s gives every test at least 3x
     // headroom on Windows while still catching real hangs.
     testTimeout: 20_000,
+    // #309: the real source-checkout probe reads the developer's or CI's own Git state, so
+    // tests run without it; a test that wants it injects Runtime.checkoutCheck.
+    env: { PDB_NO_CHECKOUT_CHECK: "1" },
   },
 });
