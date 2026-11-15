@@ -497,6 +497,46 @@ describe("human briefing role (#457)", () => {
       expect(view.coverage.warnings.join(" ")).toMatch(/bound to example\/project#99; ignored/);
     });
 
+    it("never lets an untrusted copy of a genuine marker hide the original (Codex, #607)", async () => {
+      const asked = record("owner", ["Original?"], { v2: 27, marker: "bbbbbbbbbbbbbbbb" });
+      const copy = record("owner", ["Original?"], {
+        v2: 27,
+        marker: "bbbbbbbbbbbbbbbb",
+        author: "stranger",
+      });
+      const { view } = await human([], [], {
+        closed: [closedIssue(27, [], [asked, copy])],
+        trust: trustAll({ stranger: "read" }),
+      });
+      expect(rows(view)).toEqual(["orphaned-question#27:to-you"]);
+      expect(view.items[0].source).toBe(asked.url);
+    });
+
+    it("lists only questions still open: a label-resolved v1 beside a v2 is not shown (Codex, #607)", async () => {
+      const legacy = record("designer-a", ["Legacy, answered by labels?"]);
+      const current = record("owner", ["Current?"], { v2: 28 });
+      const { view } = await human([], [], { closed: [closedIssue(28, [], [legacy, current])] });
+      expect(rows(view)).toEqual(["orphaned-question#28:to-you"]);
+      expect(view.items[0]).toMatchObject({
+        requested: ["Current?"],
+        routedTo: ["owner"],
+        source: current.url,
+      });
+    });
+
+    it("reports truncated labels on a closed legacy source as incomplete (Codex, #607)", async () => {
+      const truncated = {
+        ...closedIssue(29, [], [record("owner", ["Truncated?"])]),
+        labels: page([{ name: "status:ready" }], true),
+      };
+      const { view, complete } = await human([], [], { closed: [truncated] });
+      expect(rows(view)).toEqual(["orphaned-question#29:explicit"]);
+      expect(view.items[0].resolution).toBe("unknown");
+      expect(complete).toBe(false);
+      expect(view.coverage.closedSources).toMatchObject({ complete: false });
+      expect(view.coverage.warnings.join(" ")).toMatch(/labels are truncated/);
+    });
+
     it("keeps legacy v1 label resolution: labelled stays, labels removed is answered", async () => {
       const labelled = closedIssue(25, ["question"], [record("designer-a", ["Legacy?"])]);
       const cleared = closedIssue(26, [], [record("designer-a", ["Cleared?"])]);
