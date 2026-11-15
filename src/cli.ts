@@ -112,6 +112,7 @@ import {
   readWho,
   readWhoLive,
 } from "./workflow/readservices.js";
+import { directImpact, directImpactText } from "./briefing/dependencyimpact.js";
 import { readTicketStatus, ticketLimits, ticketStatusText } from "./workflow/ticketstatus.js";
 import { runServe } from "./serve.js";
 import type { ServeRuntime } from "./serve.js";
@@ -138,6 +139,8 @@ export type DepsArguments =
       tree?: boolean;
       /** `--max-nodes`: the explicit tree walk's node limit (#196). */
       maxNodes?: number;
+      /** Fills the suggested claim command (NAME otherwise). */
+      agent?: string;
     };
 
 /** Injected services for `main`; tests replace the GitHub-facing ones. */
@@ -325,7 +328,7 @@ Exit 0: complete evidence. 2: useful but incomplete evidence. 1: invalid argumen
 read (including an unavailable issue). The full intake stays: pdb --issue N --json.
 `;
 
-export const depsHelp = `Usage: pdb deps N [--tree [--max-nodes K]] [--json] [--repo owner/name]
+export const depsHelp = `Usage: pdb deps N [--tree [--max-nodes K]] [--agent NAME] [--json] [--repo owner/name]
        pdb deps add N --on M [--on K] --note WHY [--dry-run] [--json]
        pdb deps remove N --on M [--on K] --note WHY [--dry-run] [--json]
        pdb deps migrate --plan FILE [--repo owner/name] [--json]
@@ -340,6 +343,7 @@ Changes no labels.
                         with over 100 edges), breadth first; report cycles.
                         A walk stopped by its node limit says so and lists what it did not
                         read; it is never reported as a complete graph
+  --agent NAME          Your agent name, filled into the suggested claim command (else NAME)
   --max-nodes K         Tree node limit (default ${treeNodeLimit}, at most ${treeNodeMaximum}; --tree only)
   --on M                Blocker issue number (repeatable; add/remove only)
   --note WHY            Reason recorded in the comment (required for add/remove)
@@ -354,6 +358,47 @@ refusal or unserved repositories, or native evidence unknown); 1 invalid argumen
 Exit (add/remove): 0 all done; 2 partly done (refused/skipped/failed items listed); 1 nothing
 done or invalid arguments/API failure.
 `;
+/** Parse and validate `pdb ticket` arguments (shared with suggested-command tests, #196). */
+export function ticketArgumentsFor(args: string[]) {
+  const { values, positionals } = parseArgs({
+    args,
+    allowPositionals: true,
+    options: {
+      repo: { type: "string" },
+      json: { type: "boolean" },
+      agent: { type: "string" },
+      platform: { type: "string" },
+      "limit-prs": { type: "string" },
+      "max-chars": { type: "string" },
+      help: { type: "boolean" },
+    },
+  });
+  if (values.help) return { help: true as const };
+  if (positionals.length !== 1 || !/^[1-9]\d*$/.test(positionals[0]))
+    throw new Error(
+      "Usage: pdb ticket N [--repo owner/name] [--agent NAME] [--platform NAME] [--json] [--limit-prs N] [--max-chars N]",
+    );
+  if (values.repo && !/^[\w.-]+\/[\w.-]+$/.test(values.repo))
+    throw new Error("--repo must be owner/name.");
+  if (values.agent !== undefined && !/^[A-Za-z0-9][\w.-]*$/.test(values.agent))
+    throw new Error("--agent must be an agent name such as kavya_sabbagh.");
+  if (values.platform !== undefined && !/^[\w.-]+$/.test(values.platform))
+    throw new Error("--platform must be a platform name such as claude-code.");
+  const bounded = (text: string | undefined, fallback: number, max: number, option: string) => {
+    const value = text ?? String(fallback);
+    if (!/^[1-9]\d*$/.test(value) || Number(value) > max)
+      throw new Error(`${option} must be an integer from 1 to ${max}.`);
+    return Number(value);
+  };
+  const limitPrs = bounded(
+    values["limit-prs"],
+    ticketLimits.defaultPullRequests,
+    ticketLimits.maxPullRequests,
+    "--limit-prs",
+  );
+  const maxChars = bounded(values["max-chars"], 10_000, Number.MAX_SAFE_INTEGER, "--max-chars");
+  return { help: false as const, values, positionals, limitPrs, maxChars };
+}
 export function depsArgumentsFor(args: string[]): DepsArguments {
   const { values, positionals } = parseArgs({
     args,
@@ -363,6 +408,7 @@ export function depsArgumentsFor(args: string[]): DepsArguments {
       json: { type: "boolean" },
       tree: { type: "boolean" },
       "max-nodes": { type: "string" },
+      agent: { type: "string" },
       help: { type: "boolean" },
       on: { type: "string", multiple: true },
       note: { type: "string" },
@@ -375,6 +421,12 @@ export function depsArgumentsFor(args: string[]): DepsArguments {
     throw new Error("--repo must be owner/name.");
   const number = (text: string | undefined): number | null =>
     /^[1-9]\d*$/.test(text ?? "") && Number.isSafeInteger(Number(text)) ? Number(text) : null;
+  if (values.agent !== undefined) {
+    if (["migrate", "add", "remove"].includes(positionals[0] ?? ""))
+      throw new Error("--agent applies only to deps N and deps --top.");
+    if (!/^[A-Za-z0-9][\w.-]*$/.test(values.agent))
+      throw new Error("--agent must be an agent name such as kavya_sabbagh.");
+  }
   // --max-nodes belongs to deps N --tree alone: refuse it everywhere else, before any branch.
   if (values["max-nodes"] !== undefined) {
     if (["migrate", "add", "remove"].includes(positionals[0] ?? "") || !values.tree)
@@ -437,6 +489,7 @@ export function depsArgumentsFor(args: string[]): DepsArguments {
     tree: values.tree,
     number: Number(positionals[0]),
     ...(limit !== undefined ? { maxNodes: Number(limit) } : {}),
+    ...(values.agent ? { agent: values.agent } : {}),
   };
 }
 /** Dry runs report the exit code the real run would give if every apply succeeded. */
@@ -1301,46 +1354,12 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
     return report.completeness.complete ? 0 : 2;
   }
   if (args[0] === "ticket") {
-    const { values, positionals } = parseArgs({
-      args: args.slice(1),
-      allowPositionals: true,
-      options: {
-        repo: { type: "string" },
-        json: { type: "boolean" },
-        agent: { type: "string" },
-        platform: { type: "string" },
-        "limit-prs": { type: "string" },
-        "max-chars": { type: "string" },
-        help: { type: "boolean" },
-      },
-    });
-    if (values.help) {
+    const parsed = ticketArgumentsFor(args.slice(1));
+    if (parsed.help) {
       await output(ticketHelp);
       return 0;
     }
-    if (positionals.length !== 1 || !/^[1-9]\d*$/.test(positionals[0]))
-      throw new Error(
-        "Usage: pdb ticket N [--repo owner/name] [--agent NAME] [--platform NAME] [--json] [--limit-prs N] [--max-chars N]",
-      );
-    if (values.repo && !/^[\w.-]+\/[\w.-]+$/.test(values.repo))
-      throw new Error("--repo must be owner/name.");
-    if (values.agent !== undefined && !/^[A-Za-z0-9][\w.-]*$/.test(values.agent))
-      throw new Error("--agent must be an agent name such as kavya_sabbagh.");
-    if (values.platform !== undefined && !/^[\w.-]+$/.test(values.platform))
-      throw new Error("--platform must be a platform name such as claude-code.");
-    const bounded = (text: string | undefined, fallback: number, max: number, option: string) => {
-      const value = text ?? String(fallback);
-      if (!/^[1-9]\d*$/.test(value) || Number(value) > max)
-        throw new Error(`${option} must be an integer from 1 to ${max}.`);
-      return Number(value);
-    };
-    const limitPrs = bounded(
-      values["limit-prs"],
-      ticketLimits.defaultPullRequests,
-      ticketLimits.maxPullRequests,
-      "--limit-prs",
-    );
-    const maxChars = bounded(values["max-chars"], 10_000, Number.MAX_SAFE_INTEGER, "--max-chars");
+    const { values, positionals, limitPrs, maxChars } = parsed;
     const number = Number(positionals[0]);
     const repository = values.repo ?? (await runtime.currentRepository());
     let read;
@@ -1529,8 +1548,18 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
     const report = await (runtime.dependencyReport ?? dependencyReport)(repository, values.number, {
       tree: !!values.tree,
       ...(values.maxNodes ? { maxNodes: values.maxNodes } : {}),
+      // Routine reads answer the direct-impact question; --tree stays a diagnosis (#196).
+      ...(values.tree ? {} : { impact: true }),
     });
-    await output(values.json ? JSON.stringify(report, null, 2) + "\n" : dependencyText(report));
+    const impact = directImpact(report, { prs: [] }, values.agent);
+    await output(
+      values.json
+        ? JSON.stringify(impact ? { ...report, impact } : report, null, 2) + "\n"
+        : dependencyText(report) +
+            directImpactText(impact)
+              .map((line) => `${line}\n`)
+              .join(""),
+    );
     return dependencyReportIncomplete(report) ? 2 : 0;
   }
   const options = argumentsFor(args);

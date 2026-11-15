@@ -11,7 +11,7 @@ import {
   SubjectUnavailable,
 } from "./github.js";
 import type { Query } from "./github.js";
-import type { Issue, NativeNode, Reference } from "./types.js";
+import type { Issue, NativeNode, Page, Reference } from "./types.js";
 import { QuotaStopped, quotaRefusal, ReadMeter, readProfiles } from "./readplan.js";
 import type { ReadCollection } from "./readplan.js";
 
@@ -31,7 +31,38 @@ export type DependencyIssue = Pick<
   Issue,
   "number" | "title" | "body" | "url" | "state" | "stateReason" | "updatedAt" | "labels"
 > &
+  Partial<Pick<Issue, "createdAt" | "closedByPullRequestsReferences">> &
   NativeFields;
+/**
+ * Eligibility facts of one direct dependant (#196): enough for the shared pickup gates, never
+ * its discussion. `blockedBy` lists at most `dependantBlockersListed` of its blockers; its own
+ * dependants were not read.
+ */
+export type DependantFacts = Pick<
+  Issue,
+  "number" | "title" | "url" | "state" | "stateReason" | "createdAt" | "labels"
+> &
+  Required<Pick<Issue, "issueDependenciesSummary" | "closedByPullRequestsReferences">> & {
+    repository: { nameWithOwner: string };
+    blockedBy: Page<Pick<NativeNode, "number" | "url" | "state" | "stateReason">>;
+  };
+/** Direct-impact evidence attached to a routine `deps N` read (#196). */
+export interface DirectEvidence {
+  /** The selected issue's eligibility facts; absent when they were not read. */
+  subject: {
+    state: string;
+    stateReason: string | null;
+    createdAt: string | null;
+    closedByPullRequestsReferences: Issue["closedByPullRequestsReferences"] | null;
+    labels: Issue["labels"];
+  };
+  /** Hydrated last-open-blocker dependants. */
+  dependants: DependantFacts[];
+  /** Last-open-blocker dependants not hydrated: beyond the bound, or after a quota refusal. */
+  notRead: { url: string; reason: string }[];
+  /** Read dependants whose own blocker list was truncated: their evidence is partial. */
+  partial?: { url: string; reason: string }[];
+}
 
 export async function completeNative<T extends NativeFields & Pick<Issue, "number" | "url">>(
   item: T,
@@ -125,14 +156,17 @@ export function dependencyFacts(
           : "No open native blockers; pickup still requires ready, unclaimed and acceptance verification.",
   };
 }
+/** Eligibility facts beyond native edges: creation time and open closing-PR identities. */
+const eligibilityFields = `createdAt closedByPullRequestsReferences(first:10,includeClosedPrs:false){nodes{number url state} ${pageInfo}}`;
 export async function readDependencyIssue(
   repository: string,
   number: number,
   query: Query = ghQuery,
+  eligibility = false,
 ): Promise<DependencyIssue & KnownNative> {
   const [owner, name] = repository.split("/");
   const data = await query(
-    `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){number title body url state stateReason updatedAt labels(first:100){nodes{name} ${pageInfo}} ${nativeFields}}}}`,
+    `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){number title body url state stateReason updatedAt ${eligibility ? `${eligibilityFields} ` : ""}labels(first:100){nodes{name} ${pageInfo}} ${nativeFields}}}}`,
     { owner, name, number },
   );
   const item = selected<DependencyIssue>(prop(data, "repository", "issue"));
@@ -167,6 +201,8 @@ export interface DependencyReport {
    * refusal is partial, and its cycles are only those among the issues read.
    */
   treeBounds?: TreeBounds;
+  /** Eligibility evidence for the selected issue's direct impact; only when requested. */
+  direct?: DirectEvidence;
 }
 /** The bound and outcome of one `deps --tree` walk. */
 export interface TreeBounds {
@@ -204,7 +240,10 @@ export async function dependencyReport(
     signal,
     follow,
     maxNodes = treeNodeLimit,
+    impact = false,
   }: {
+    /** Also read direct dependants' eligibility for a direct-impact answer (#196). */
+    impact?: boolean;
     tree?: boolean;
     signal?: AbortSignal;
     follow?: (repository: string) => boolean;
@@ -216,8 +255,10 @@ export async function dependencyReport(
   const startedAt = now().toISOString();
   if (!Number.isSafeInteger(maxNodes) || maxNodes < 1 || maxNodes > treeNodeMaximum)
     throw new Error(`The tree node limit must be 1–${treeNodeMaximum}.`);
+  if (impact && tree)
+    throw new Error("Direct impact is a routine read; it is not a --tree option.");
   const meter = new ReadMeter(
-    tree ? "dependency-tree-v1" : "issue-detail-v1",
+    tree ? "dependency-tree-v1" : impact ? "dependency-direct-v1" : "issue-detail-v1",
     tree ? "deps-tree" : "deps",
     now,
     undefined,
@@ -227,6 +268,7 @@ export async function dependencyReport(
   const pending: [string, number][] = [[repository, number]];
   const unfollowed = new Map<string, { repository: string; number: number }>();
   let stoppedBy: TreeBounds["stoppedBy"] = null;
+  let direct: DirectEvidence | undefined;
   for (let next = pending.shift(); next; next = pending.shift()) {
     const [repo, n] = next;
     // GitHub owner/name are case-insensitive: one issue is one node however an edge spells it.
@@ -246,7 +288,7 @@ export async function dependencyReport(
     signal?.throwIfAborted();
     let item: Awaited<ReturnType<typeof readDependencyIssue>>;
     try {
-      item = await readDependencyIssue(repo, n, meter.query(query, "issue", key));
+      item = await readDependencyIssue(repo, n, meter.query(query, "issue", key), impact);
     } catch (error) {
       // The selected ticket must be read; a later quota refusal stops the walk, keeping what
       // was read and reporting the rest as not read rather than failing the whole diagnosis.
@@ -266,10 +308,29 @@ export async function dependencyReport(
     );
     meter.cover("native-blocked-by", key, "complete");
     meter.cover("native-blocking", key, "complete");
-    for (const source of ["comments", "linked-pull-requests"])
+    for (const source of impact ? ["comments"] : ["comments", "linked-pull-requests"])
       meter.cover(source, key, "not-requested", {
         omission: "not read by a dependency report",
       });
+    if (impact) {
+      const linked = item.closedByPullRequestsReferences;
+      meter.cover(
+        "linked-pull-requests",
+        key,
+        !linked ? "failed" : linked.pageInfo.hasNextPage ? "partial" : "complete",
+        !linked
+          ? { failure: "missing" }
+          : linked.pageInfo.hasNextPage
+            ? { omission: "open closing PRs beyond the first 10" }
+            : {},
+      );
+      direct = await readDependants(item, meter, query, signal);
+      direct.subject = {
+        ...direct.subject,
+        createdAt: item.createdAt ?? null,
+        closedByPullRequestsReferences: linked ?? null,
+      };
+    }
     if (tree)
       for (const ref of [...item.blockedBy.nodes, ...item.blocking.nodes])
         pending.push([ref.repository.nameWithOwner, ref.number]);
@@ -332,6 +393,7 @@ export async function dependencyReport(
     ...(unfollowed.size ? { unfollowed: [...unfollowed.values()] } : {}),
     collection: meter.collection(),
     ...(treeBounds ? { treeBounds } : {}),
+    ...(direct ? { direct } : {}),
   };
 }
 /**
@@ -342,7 +404,110 @@ export function dependencyReportIncomplete(report: DependencyReport): boolean {
   if (report.tree && report.treeBounds?.complete !== true) return true;
   if (report.collection?.quota || report.collection?.notAttempted.length) return true;
   if (report.unfollowed?.length) return true;
+  if (report.direct?.notRead.length || report.direct?.partial?.length) return true;
   return report.nodes.some((node) => !node.known);
+}
+const dependantFields = (blockers: number) =>
+  `number title url state stateReason createdAt repository{nameWithOwner} labels(first:100){nodes{name} ${pageInfo}} closedByPullRequestsReferences(first:10,includeClosedPrs:false){nodes{number url state} ${pageInfo}} ${summaryFields} blockedBy(first:${blockers}){nodes{number url state stateReason} ${pageInfo}}`;
+/**
+ * Hydrate the eligibility facts of the open direct dependants for which `item` is the last open
+ * blocker, in `blocking` order, batched and bounded (dependency-direct-v1). Dependants with other
+ * open blockers need no hydration: their native summary already says they stay blocked. Those
+ * beyond the bound, or not attempted after a quota refusal, are listed as not read.
+ */
+async function readDependants(
+  item: DependencyIssue & KnownNative,
+  meter: ReadMeter,
+  query: Query,
+  signal?: AbortSignal,
+): Promise<DirectEvidence> {
+  const bounds = readProfiles["dependency-direct-v1"].bounds;
+  const evidence: DirectEvidence = {
+    subject: {
+      state: item.state,
+      stateReason: item.stateReason ?? null,
+      createdAt: null,
+      closedByPullRequestsReferences: null,
+      labels: item.labels,
+    },
+    dependants: [],
+    notRead: [],
+  };
+  const seen = new Set<string>();
+  const candidates = item.blocking.nodes.filter((node) => {
+    if (seen.has(node.url)) return false;
+    seen.add(node.url);
+    return (
+      item.state === "OPEN" &&
+      node.state === "OPEN" &&
+      node.issueDependenciesSummary?.blockedBy === 1
+    );
+  });
+  const reading = candidates.slice(0, bounds.dependantsHydrated);
+  for (const node of candidates.slice(bounds.dependantsHydrated))
+    evidence.notRead.push({
+      url: node.url,
+      reason: `beyond the ${bounds.dependantsHydrated}-dependant bound`,
+    });
+  for (let at = 0; at < reading.length; at += bounds.dependantsPerRequest) {
+    const batch = reading.slice(at, at + bounds.dependantsPerRequest);
+    const subject = `${item.url} dependants ${at + 1}-${at + batch.length}`;
+    const variables: Record<string, string | number> = {};
+    const declared: string[] = [];
+    const selections = batch.map((node, i) => {
+      const [owner, name] = node.repository.nameWithOwner.split("/");
+      Object.assign(variables, { [`o${i}`]: owner, [`r${i}`]: name, [`n${i}`]: node.number });
+      declared.push(`$o${i}:String!,$r${i}:String!,$n${i}:Int!`);
+      return `d${i}:repository(owner:$o${i},name:$r${i}){issue(number:$n${i}){${dependantFields(bounds.dependantBlockersListed)}}}`;
+    });
+    let data: unknown;
+    try {
+      signal?.throwIfAborted();
+      data = await meter.query(
+        query,
+        "dependant-eligibility",
+        subject,
+      )(`query(${declared.join(",")}){${selections.join(" ")}}`, variables);
+    } catch (error) {
+      if (!(error instanceof QuotaStopped || quotaRefusal(error))) throw error;
+      for (const node of reading.slice(at))
+        evidence.notRead.push({ url: node.url, reason: "not attempted: GitHub quota refusal" });
+      meter.cover("dependant-eligibility", item.url, "partial", {
+        omission: "stopped after a quota refusal",
+      });
+      return evidence;
+    }
+    batch.forEach((node, i) => {
+      const facts = selected<DependantFacts>(prop(data, `d${i}`, "issue"));
+      if (facts) {
+        evidence.dependants.push(facts);
+        if (facts.blockedBy.pageInfo.hasNextPage)
+          (evidence.partial ??= []).push({
+            url: facts.url,
+            reason: `blockers beyond the first ${bounds.dependantBlockersListed} not read`,
+          });
+      } else evidence.notRead.push({ url: node.url, reason: "unavailable" });
+    });
+  }
+  const gaps = evidence.notRead.length + (evidence.partial?.length ?? 0);
+  meter.cover(
+    "dependant-eligibility",
+    item.url,
+    gaps ? "partial" : "complete",
+    gaps
+      ? {
+          omission: [
+            ...(evidence.notRead.length
+              ? [`${evidence.notRead.length} dependant(s) not read`]
+              : []),
+            ...(evidence.partial?.length
+              ? [`${evidence.partial.length} dependant(s) with truncated blocker lists`]
+              : []),
+          ].join("; "),
+        }
+      : {},
+  );
+  return evidence;
 }
 /** One line of read cost, from the report's own telemetry; unknown cost is never zero. */
 export function readCostText(report: Pick<DependencyReport, "collection">): string {

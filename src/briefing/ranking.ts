@@ -128,7 +128,7 @@ export const openClosingPrs = (issue: Issue, prs: PullRequest[]): number[] =>
  * The eligibility gates other than native blockers. Shared by the ticket itself and by the
  * dependants whose immediate unlock it would cause.
  */
-function otherwiseEligible(issue: Issue, context: PickupContext): Eligibility {
+export function otherwiseEligible(issue: Issue, context: PickupContext): Eligibility {
   const tags = names(issue);
   const hard: string[] = [];
   if (!pickupPolicy.openStates.includes(issue.state)) hard.push(`state ${issue.state}`);
