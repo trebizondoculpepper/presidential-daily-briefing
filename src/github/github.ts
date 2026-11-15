@@ -1301,7 +1301,8 @@ export async function hydratePullRequests(
               "pullRequest",
             ),
           );
-          if (!pr) throw new Error("not readable");
+          // Null or without a state is unknown, never "closed": a failed read.
+          if (!pr || typeof pr.state !== "string") throw new Error("not readable");
           await completeComments(pr, q);
           return pr;
         },
