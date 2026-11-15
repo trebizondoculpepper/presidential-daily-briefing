@@ -18,6 +18,7 @@ import type {
   SourceCoverage,
 } from "./changes.js";
 import type { Comment, Issue, Page, PullRequest, Reference, Snapshot } from "./types.js";
+import type { MutationResponseMeta } from "./commentwrite.js";
 import { hydrate, QuotaStopped, quotaRefusal, ReadMeter, readProfiles } from "./readplan.js";
 import type { Hydrated } from "./readplan.js";
 import {
@@ -1366,6 +1367,8 @@ export async function concurrentMap<T, R>(
 export interface GraphqlAnswer {
   readonly data: unknown;
   readonly errors: readonly { type?: string; message?: string }[];
+  /** Mutations only (#345): the same response's status and allowlisted retry headers. */
+  readonly response?: MutationResponseMeta;
 }
 
 /** Injected authenticated GraphQL boundary. `query` is read-only; `mutate` changes GitHub. */
@@ -1374,8 +1377,12 @@ export interface GraphqlApi {
   mutate(query: string, variables: Record<string, string>): Promise<GraphqlAnswer>;
 }
 
-async function ghGraphql(query: string, variables: Record<string, string>): Promise<GraphqlAnswer> {
-  const args = ["api", "graphql", "-f", `query=${query}`];
+async function ghGraphql(
+  query: string,
+  variables: Record<string, string>,
+  include = false,
+): Promise<GraphqlAnswer> {
+  const args = ["api", "graphql", ...(include ? ["--include"] : []), "-f", `query=${query}`];
   for (const [key, value] of Object.entries(variables)) args.push("-f", `${key}=${value}`);
   let stdout: unknown;
   try {
@@ -1385,8 +1392,21 @@ async function ghGraphql(query: string, variables: Record<string, string>): Prom
     stdout = prop(error, "stdout");
   }
   let parsed: unknown;
+  let meta: MutationResponseMeta | undefined;
   try {
-    parsed = JSON.parse(typeof stdout === "string" ? stdout : "");
+    let body = typeof stdout === "string" ? stdout : "";
+    if (include) {
+      const response = parseGhResponse(body);
+      body = response.body;
+      const o = quotaObservation(response.headers);
+      meta = {
+        status: response.status,
+        retryAfterSeconds: o.retryAfterSeconds,
+        retryAt: o.retryAt,
+        requestId: o.requestId,
+      };
+    }
+    parsed = JSON.parse(body);
   } catch {
     // Never echo arguments, stderr or response bodies.
     throw new Error("GitHub query failed. Check gh auth status, network and API rate limits.");
@@ -1395,11 +1415,16 @@ async function ghGraphql(query: string, variables: Record<string, string>): Prom
   return {
     data: prop(parsed, "data"),
     errors: Array.isArray(errors) ? errors.filter(isRecord) : [],
+    ...(meta ? { response: meta } : {}),
   };
 }
 
 /** Production GraphQL boundary through the existing authenticated `gh` (no shell). */
-export const ghGraphqlApi: GraphqlApi = { query: ghGraphql, mutate: ghGraphql };
+export const ghGraphqlApi: GraphqlApi = {
+  query: (query, variables) => ghGraphql(query, variables),
+  // Mutations keep the same response's status and retry headers for write recovery (#345).
+  mutate: (query, variables) => ghGraphql(query, variables, true),
+};
 
 /**
  * A user's current permission on a repository (#212), as GitHub's REST collaborator-permission
