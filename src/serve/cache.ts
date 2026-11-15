@@ -433,14 +433,17 @@ export class ServeCache {
    * quota view's secondary-limit history (#548). Built from the same sanitized error ring the
    * diagnostics show; other logins' events never appear. In memory only: a restart loses them.
    */
-  quotaTelemetry(): QuotaTelemetrySnapshot {
-    const auth = `${this.auth.host}/${this.auth.login}`;
+  quotaTelemetry(context: { host: string; login: string | null }): QuotaTelemetrySnapshot | null {
+    // An unverified context gets no account-specific history at all.
+    if (!context.login) return null;
+    const auth = `${context.host}/${context.login}`;
     const kinds = new Set(["rate-limited", "secondary-rate-limit", "resource-limit"]);
+    const mine = this.errors.filter((e) => e.auth === auth);
     return {
       scope: "service",
       since: this.errorsSince,
-      events: this.errors
-        .filter((e) => e.auth === auth && e.category !== null && kinds.has(e.category))
+      events: mine
+        .filter((e) => e.category !== null && kinds.has(e.category))
         .map((e) => ({
           category: e.category as QuotaEvent["category"],
           observedAt: e.at,
@@ -452,6 +455,17 @@ export class ServeCache {
           remaining: e.quota?.remaining ?? null,
         })),
       discarded: this.discardedErrors,
+      // Same-response quota headers the failures proved, kept for the aggregate comparison.
+      observations: mine
+        .filter((e) => e.quota?.resource)
+        .map((e) => ({
+          resource: e.quota!.resource!,
+          observedAt: e.at,
+          operation: e.operation,
+          limit: e.quota!.limit,
+          remaining: e.quota!.remaining,
+          resetAt: e.quota!.resetAt,
+        })),
     };
   }
 
