@@ -108,6 +108,14 @@ export const CONFIG_KEYS: readonly ConfigKey[] = [
       "Declared automated-review policy for PR readiness advice (#301). Unset (default) keeps the legacy rule and reports it as undeclared; legacy selects it explicitly; codex-or-coderabbit accepts a clean current-head Codex receipt OR a CodeRabbit approval of the current head, while a finding from either still blocks. Advice only: CI, protections and authority are unchanged.",
   },
   {
+    key: "rules.project.enabled",
+    type: "boolean",
+    nullable: false,
+    defaultValue: false,
+    description:
+      "Whether this repository's committed pdb.rules.edn native project preferences (#516, doc/design/native-project-rules.md) rank the Datalog briefing. A file alone never enables them. When enabled, a missing, invalid, incompatible or timed-out file is reported as a policy error and the briefing is marked incomplete, never silently ranked by the defaults alone; disable with pdb config set rules.project.enabled false.",
+  },
+  {
     key: "processGuide",
     type: "boolean",
     nullable: false,

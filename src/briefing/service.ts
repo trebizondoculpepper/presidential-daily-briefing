@@ -6,6 +6,13 @@ import {
 } from "../config/engine-setting.js";
 import type { EngineSetting, DecisionEngineMetadata } from "../config/engine-setting.js";
 import { resolveReviewPolicy } from "../config/review-setting.js";
+import { resolveProjectRulesSetting } from "../config/project-rules-setting.js";
+import type { ProjectRulesSetting } from "../config/project-rules-setting.js";
+import { effectivePolicy } from "../rules/datalog/project/effective.js";
+import type {
+  EffectivePolicyManifest,
+  ProjectPolicyRuntime,
+} from "../rules/datalog/project/effective.js";
 import { datalogReviewFacts } from "../workflow/reviewpolicy.js";
 import type { DeclaredReviewPolicy } from "../workflow/reviewpolicy.js";
 /**
@@ -70,6 +77,13 @@ export interface PresentOptions extends Omit<BriefingOptions, "estimation" | "as
   context?: boolean;
   /** Registered role view (#1) shaping the compact briefing. */
   role?: string;
+  /**
+   * #516: whether the repository's native project preferences are enabled, and its verified
+   * checkout root. Absent: not read (front ends without a project), reported as disabled.
+   */
+  projectRules?: ProjectRulesSetting;
+  /** #516 test seam: the project policy loader and evaluator. */
+  projectRuntime?: ProjectPolicyRuntime;
   /** One registered section of the role view with its row cap lifted (#311). */
   section?: string;
   /** Canonical, already-resolved labels every candidate must carry (#312, AND). */
@@ -91,7 +105,7 @@ export interface PresentOptions extends Omit<BriefingOptions, "estimation" | "as
 /** The versioned briefing report and its text rendering. */
 export interface PresentedBriefing {
   report: (ReturnType<typeof compactBriefing> | ReturnType<typeof briefing>) & {
-    decisionEngine: DecisionEngineMetadata;
+    decisionEngine: DecisionEngineMetadata & { effectivePolicy?: EffectivePolicyManifest };
     /**
      * #192: delivery, responsibility and closure, present only when a collected ticket carries a
      * delivery or v1 release record (or its history is truncated). Absent means none in scope.
@@ -234,6 +248,60 @@ export async function presentBriefing(
       throw engineFailure(error, "Experimental evaluator failed; no fallback was run.");
     }
   }
+  // #516: the project's native preferences, applied to the default-admitted queue, or the
+  // explicit reason they are not in force. Never a silent fallback to the defaults.
+  let effective: { manifest: EffectivePolicyManifest; warnings: string[] } | undefined;
+  if (experimental) {
+    const applied = await effectivePolicy(
+      options.projectRules ?? { enabled: false, source: "not-read" },
+      experimental.items,
+      (await import("../rules/datalog/datalog.js")).projectionSubjects(snapshot),
+      {
+        base: {
+          policyVersion: experimental.decisionEngine.policyVersion,
+          rulesHash: experimental.decisionEngine.rulesHash,
+        },
+        role: options.role ?? defaultEngineRole,
+        order: options.order ?? "impact",
+        signal,
+        ...(options.projectRuntime ? { runtime: options.projectRuntime } : {}),
+      },
+    );
+    experimental = { ...experimental, items: applied.items as typeof experimental.items };
+    effective = applied;
+  } else if (
+    !options.full &&
+    !options.issue &&
+    options.projectRules &&
+    options.projectRules.enabled !== false
+  ) {
+    // Enabled project rules are native Datalog: the TypeScript rollback cannot honour them.
+    const reason =
+      "project preferences need briefing.engine datalog; the TypeScript rollback engine is in use";
+    effective = {
+      manifest: {
+        schemaVersion: 1,
+        state: "error",
+        formatVersion: null,
+        projectionVersion: null,
+        basePolicyVersion: null,
+        defaultRulesHash: "",
+        projectRulesHash: null,
+        effectiveRulesHash: null,
+        appliedOrderMode: "error",
+        source: "pdb.rules.edn",
+        matchedIds: [],
+        reason,
+        next: [
+          "pdb config set briefing.engine datalog",
+          "pdb config set rules.project.enabled false",
+        ],
+      },
+      warnings: [
+        `Project policy error: ${reason}. The briefing is not the project's effective policy. Run pdb config set briefing.engine datalog, or pdb config set rules.project.enabled false.`,
+      ],
+    };
+  }
   const expanded = briefing(
     snapshot,
     options.full
@@ -254,8 +322,13 @@ export async function presentBriefing(
   const decisionEngine = experimental
     ? {
         ...experimental.decisionEngine,
+        // #516: an active project policy reports the composite effective hash.
+        ...(effective?.manifest.state === "active"
+          ? { rulesHash: effective.manifest.effectiveRulesHash! }
+          : {}),
         source: selection.source,
         role: { used: options.role ?? defaultEngineRole, source: roleSource },
+        ...(effective ? { effectivePolicy: effective.manifest } : {}),
       }
     : {
         requested: selection.requested,
@@ -265,6 +338,7 @@ export async function presentBriefing(
         rulesHash: null,
         coverage: { scope: options.full || options.issue ? "intake" : "next-actions" },
         diagnostics: [],
+        ...(effective ? { effectivePolicy: effective.manifest } : {}),
       };
   // #192: one shared fold/evaluator read for CLI and MCP; an issue intake shows its own ticket.
   // An explicit intake evaluates only its own ticket, so the evaluation cap never skips it.
@@ -286,14 +360,20 @@ export async function presentBriefing(
   const base = compact ?? expanded;
   const report = {
     ...base,
-    // Delivery omissions (the evaluation cap) make the briefing incomplete, never silently clean.
-    completeness: delivery.complete
-      ? base.completeness
-      : {
-          ...base.completeness,
-          complete: false,
-          warnings: [...base.completeness.warnings, ...delivery.omissions],
-        },
+    // Delivery omissions (the evaluation cap) and a failed project policy (#516) make the
+    // briefing incomplete, never silently clean.
+    completeness:
+      delivery.complete && !effective?.warnings.length
+        ? base.completeness
+        : {
+            ...base.completeness,
+            complete: false,
+            warnings: [
+              ...base.completeness.warnings,
+              ...(effective?.warnings ?? []),
+              ...delivery.omissions,
+            ],
+          },
     decisionEngine,
     ...(delivery.tickets.length || !delivery.complete ? { delivery } : {}),
     // #367: an issue intake reports its compatibility-full-v1 profile, coverage and cost.
@@ -304,7 +384,8 @@ export async function presentBriefing(
   // The engine banner is evaluator metadata: context only, or the expanded --full report (#355).
   const engineHeader =
     experimental && (options.context || !compact)
-      ? `Decision engine: Datalog (policy ${experimental.decisionEngine.policyVersion}; ${experimental.decisionEngine.rulesHash.slice(0, 12)})\n`
+      ? // #516: the same resolved identity as the JSON, the composite hash when a project policy ranks.
+        `Decision engine: Datalog (policy ${experimental.decisionEngine.policyVersion}; ${(decisionEngine.rulesHash ?? "").slice(0, 12)}${effective?.manifest.state === "active" ? `; project preferences from ${effective.manifest.source}` : effective?.manifest.state === "error" ? "; project policy error, default order" : ""})\n`
       : "";
   // Delivery omissions reach the text through the renderers' own bounded INCOMPLETE warnings
   // (a few lines plus "N more warning(s) omitted; use --json"), inside the same budget as the
@@ -588,6 +669,10 @@ export async function readBriefing(
   const engineSetting = request.issue
     ? undefined
     : await resolveEngineSetting(request.repository, runtime.guide);
+  // #516: program-mediated enablement and the verified checkout the policy file is read from.
+  const projectRules = request.issue
+    ? undefined
+    : await resolveProjectRulesSetting(request.repository, runtime.guide);
   const reviewPolicy =
     runtime.reviewPolicy ?? (await resolveReviewPolicy(request.repository, runtime.guide));
   const setting = await resolveGuideSetting(request.repository, undefined, runtime.guide);
@@ -608,6 +693,7 @@ export async function readBriefing(
     ...(request.order ? { order: request.order } : {}),
     process,
     engineSetting,
+    ...(projectRules ? { projectRules } : {}),
     reviewPolicy,
     ...(runtime.engineClock ? { engineClock: runtime.engineClock } : {}),
   };

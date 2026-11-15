@@ -195,7 +195,18 @@ reporting to distinguish decision assertions from loader/worker failures.
 #514 supplies source/format/static validation and canonical identities; no activation.
 #515 supplies the worker, immutable admission and native preference/reason evaluation.
 #516 supplies program-mediated enablement, generation/caches, effective English and
-installed CLI/MCP/web parity. All three depend on this reviewed contract and their
+installed CLI/MCP/web parity.
+
+**#516 delivery status.** Part 1 (enablement and briefing integration) is implemented:
+
+- `rules.project.enabled` is registered in `CONFIG_KEYS` and resolved per briefing by `resolveProjectRulesSetting` (`src/config/project-rules-setting.ts`) from the matching verified checkout only.
+- `effectivePolicy` (`src/rules/datalog/project/effective.ts`) applies an enabled policy to the Datalog queue in `presentBriefing`.
+- `decisionEngine.effectivePolicy` carries the manifest above, plus `matchedIds`, `reason` and `next`. `rulesHash` is the composite hash only while the policy is active.
+- A failed or unknown policy, or the TypeScript rollback engine with the policy enabled, gives `state: error` and an incomplete briefing whose rows stay in the default order.
+- The human role and full issue intake carry no project ranking.
+- The EDN reader (`edn-data`) is now a runtime dependency, and the loader, projection and worker load with the evaluator chunk.
+
+Part 2 (effective English and `pdb rules init`) and part 3 (serve/MCP generation caches, isolation and installed surface parity) follow. All three depend on this reviewed contract and their
 native predecessors. #75 remains open until its full default/override/output/test
 requirements are verified; a schema or worker alone does not complete it.
 
