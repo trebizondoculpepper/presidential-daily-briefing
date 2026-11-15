@@ -68,14 +68,16 @@ The compact report for `--role human` carries a `human` object instead of the ag
       "source": "https://github.com/owner/repo/issues/12#issuecomment-1",
       "ruleIds": ["D-HUMAN-ASK-YOU"],
       "why": "Trusted question record routed to you: answer the recorded questions on the ticket.",
-      "warnings": []
+      "warnings": [],
+      "sourceState": "open"
     }
   ],
   "coverage": {
     "complete": true,
     "warnings": [],
     "records": { "current": 1, "superseded": 0, "resolved": 0, "untrusted": 0, "unverified": 0 },
-    "excluded": ["closed tickets (#414)", "GitHub review requests (not collected)"]
+    "excluded": ["GitHub review requests (not collected)"],
+    "closedSources": { "read": true, "complete": true, "requests": 1, "…": "see Closed sources" }
   }
 }
 ```
@@ -107,11 +109,21 @@ Explicit items therefore precede inferred ones, and addressed items precede ever
 
 `limit` (CLI `--limit`, MCP and API `limit`) applies after ranking, with `total` and `omitted`. The MCP version-2 envelope prunes `human.items` from the end within its byte budget and reports the omission. The text rendering lists the ranked items with their kind, explicit/inferred status, what is requested, what is blocked and the source, and says "No human input is waiting" only when the evidence is complete.
 
-`coverage.complete` is false, with a warning naming the subject, when any of these hold: a ticket's comment history is longer than the collected first page (an unseen newer record could change the questions); labels are truncated; `blocking` or a PR's closing references are truncated; a record's authority is unknown (a failed permission lookup or an unverifiable editor); a current record's questions cannot be read; permissions could not be read (offline, or no REST boundary), which makes every record `unverified`; or the snapshot itself is incomplete. Missing evidence is never read as "nothing needed", "answered" or "approved". Closed tickets are outside this slice and listed in `coverage.excluded`; #414 owns their unresolved questions.
+`coverage.complete` is false, with a warning naming the subject, when any of these hold: a ticket's comment history is longer than the collected first page (an unseen newer record could change the questions); labels are truncated; `blocking` or a PR's closing references are truncated; a record's authority is unknown (a failed permission lookup or an unverifiable editor); a current record's questions cannot be read; permissions could not be read (offline, or no REST boundary), which makes every record `unverified`; or the snapshot itself is incomplete. Missing evidence is never read as "nothing needed", "answered" or "approved". Closed tickets are read by the bounded closed-source pass below, whose gaps also make coverage incomplete.
+
+## Closed sources (#414)
+
+A ticket closing (by a merged PR, by hand, or as not planned) does not answer its questions. Contract: doc/reports/closed-question-discovery.md; implementation: `src/briefing/closedquestions.ts`, rules `D-HUMAN-ORPHANED-YOU` (band 1), `D-HUMAN-ORPHANED` (band 3, preference 0) and `D-HUMAN-ORPHANED-UNKNOWN` (band 3, preference 1), all of kind `orphaned-question`.
+
+- **Read.** On a live read, one bounded pass lists closed issues (GraphQL `issues`, which excludes PRs), newest update first, with their labels and first comment page, then hydrates longer comment histories one page per source in rotation, so one long history cannot take the budget. Defaults: at most 13 GitHub requests in all, of which at most 3 inventory pages and 10 comment pages of 100 rows; permission lookups for record authors spend the same budget, and a lookup refused by the bound leaves that record unverified. Issues already read as open in the snapshot keep the open-ticket contract. Nothing is reopened, cloned, labelled or written.
+- **Resolution.** Every trusted question record on a closed source is its own obligation (no supersession). A v2 question (#412) is settled only by a trusted explicit `pdb question resolve|withdraw` record bound to that exact question comment and operation; a reply, label removal, merge or the closure itself settles nothing. A legacy v1 question keeps its label meaning: it stays open while the closed ticket still carries `question` or `design:decision-needed`, and is resolved when those labels are gone. The outcome is `unknown`, never answered, when the source's comment history was not fully read, when a resolution record could not be verified, or (v1) when the labels were truncated.
+- **Items.** An unsettled or unknown question yields an `orphaned-question` item with `sourceState: "closed"` and `resolution: "unresolved"` or `"unknown"`; the text shows `ticket closed, unanswered` or `ticket closed, resolution unknown`. `requested` lists the questions of every unsettled record on the source, `source` links the newest such record, and `blocks` is the closed source alone (its dependents are not read). Open-ticket items carry `sourceState: "open"`.
+- **Coverage.** `coverage.closedSources` reports the bounds, requests spent, inventory pages/rows and whether the inventory finished, discovered and hydrated sources, the sources left with unread comment pages (`pending`), permission gaps, record counts (`noOutcome` (no explicit outcome; a v1 record may still be label-resolved), `unknown`, `resolved`, `withdrawn`, `untrusted`, `unverified`) and any failure. Closed tickets beyond the inventory bound, unread comment pages, unverifiable records, copied (foreign-bound) or malformed markers and failures each add a warning and make coverage incomplete: a truncated pass can still show the questions it verified, but never says nothing is waiting. Offline or cached reads, and front ends without a live GraphQL/REST boundary, report `closedSources.read: false` with a warning instead of showing none.
+- **Not yet delivered (#414 follow-up).** Each request starts the pass afresh. The memory-only continuation across requests in `pdb serve`, the overlapping `since` refresh after a finished baseline, and explicit resolution of v2 questions on _open_ tickets (#413) are not implemented; on a repository with more closed issues than the bound, coverage therefore stays incomplete.
 
 ## Interactions
 
-- **#414:** unresolved questions on closed tickets. This contract stops at open tickets and states the exclusion; #414 extends the same record reading and adds closed-history discovery without changing these items.
+- **#414:** unresolved questions on closed tickets, read by the bounded closed-source pass above with the same record reader; open-ticket items are unchanged.
 - **#262/#412:** today `needs-human` releases the caller's claim; #412 will retain it with waiting evidence. The human view does not depend on claim state, so both behaviours produce the same items. Durable question IDs from #412 later refine resolution.
 - **#416:** `pdb rules` renders the policy artifact; the new decisions carry IDs, `why` text and codes (`explicit`, `inferred`, `addressed`) so they appear there without a separate English description.
 - **#458 and #390:** the dashboard page and HTTP MCP consume this `human` object through the shared service; neither may add UI-specific inference or its own collector.
