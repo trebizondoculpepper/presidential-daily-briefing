@@ -6,6 +6,7 @@
  * versioned CLI JSON in the `serve-read` envelope with a `freshness` block. Nothing here
  * mutates GitHub; refresh changes only the server's own memory.
  */
+import { BriefingArgumentError } from "../briefing/compact.js";
 import { resolveReviewPolicy } from "../config/review-setting.js";
 import type { DeclaredReviewPolicy } from "../workflow/reviewpolicy.js";
 import { BriefingEngineError } from "../config/engine-setting.js";
@@ -15,7 +16,7 @@ import { validateEntryKey } from "../config/identity.js";
 import type { ConfigFileSystem, GitRunner } from "../config/config.js";
 import { resolveReadIdentity } from "../config/readidentity.js";
 import type { ReadIdentity } from "../config/readidentity.js";
-import { briefingRoleNames } from "../briefing/roles.js";
+import { briefingRoleNames, roleSectionIds } from "../briefing/roles.js";
 import { pickupOrders } from "../briefing/ranking.js";
 import type { PickupOrder } from "../briefing/ranking.js";
 import { readBriefing } from "../briefing/service.js";
@@ -642,6 +643,15 @@ export function readApi(
       const role = values.get("role");
       if (role !== undefined && !briefingRoleNames().includes(role))
         throw invalid(`role must be one of ${briefingRoleNames().join(", ")}.`);
+      // #311: one registered section, validated exactly as CLI --section and the MCP input.
+      const section = values.get("section");
+      if (section !== undefined) {
+        if (issue !== undefined || role === "human")
+          throw invalid("section applies to a role briefing, not a ticket or the human view.");
+        const ids = roleSectionIds(role ?? "implementer");
+        if (role !== undefined && !ids.includes(section))
+          throw invalid(`section for role ${role} must be one of: ${ids.join(", ")}.`);
+      }
       const order = values.get("order");
       if (order !== undefined && !isPickupOrder(order))
         throw invalid(`order must be one of ${pickupOrders.join(", ")}.`);
@@ -663,8 +673,13 @@ export function readApi(
         limit: integerParam(values, "limit", 1, 100, 10),
         maxChars: 10000,
         role,
+        ...(section !== undefined ? { section } : {}),
         order: (order as PickupOrder | undefined) ?? "impact",
         signal,
+      }).catch((error: unknown) => {
+        // An ID the resolved role does not register is the caller's argument, not a failure.
+        if (error instanceof BriefingArgumentError) throw invalid(error.message);
+        throw error;
       });
       return read;
     };
@@ -706,7 +721,7 @@ export function readApi(
         await dataRoute(
           context,
           "briefing",
-          ["agent", "entry", "harness", "role", "order", "since", "limit"],
+          ["agent", "entry", "harness", "role", "section", "order", "since", "limit"],
           undefined,
           async (values, served, setSelection) => {
             const read = await briefingResult(values, served, setSelection, context.signal);

@@ -59,6 +59,8 @@ export interface PresentOptions extends Omit<BriefingOptions, "estimation" | "as
   context?: boolean;
   /** Registered role view (#1) shaping the compact briefing. */
   role?: string;
+  /** One registered section of the role view with its row cap lifted (#311). */
+  section?: string;
   /** Workflow guide (#71) for the compact briefing; omitted means no `process` object. */
   process?: BriefingProcess;
   /**
@@ -423,6 +425,8 @@ export interface BriefingRequest {
   maxChars: number;
   /** Registered role view (#260): the same blended queue as CLI --role. */
   role?: string;
+  /** One registered section, every row (#311): the same as CLI --section. */
+  section?: string;
   /** Pickup order (#260), as CLI --order. */
   order?: PickupOrder;
   /** Expanded compact text (#355), as CLI --context; never changes the report. */
@@ -480,6 +484,7 @@ export async function readBriefing(
       agent: request.agent,
       issue: request.issue,
       ...(request.role ? { role: request.role } : {}),
+      ...(request.section !== undefined ? { section: request.section } : {}),
       ...(request.order ? { order: request.order } : {}),
       process,
       engineSetting,

@@ -30,7 +30,7 @@ import {
   ghRun,
   planDependencyChange,
 } from "./github/dependencies.js";
-import { briefingRoleNames } from "./briefing/roles.js";
+import { briefingRoleNames, roleSectionIds } from "./briefing/roles.js";
 import { doctorStaleHours, ticketDoctor, ticketDoctorText } from "./workflow/ticketdoctor.js";
 import { diagnoseClosedDrift, diagnoseDelivery } from "./workflow/deliverydoctor.js";
 import { deliveryRead, withDeliveryCompleteness } from "./workflow/deliveryread.js";
@@ -337,6 +337,9 @@ Rollback: pdb config set briefing.engine typescript.
   --context             Add background sections, totals and engine metadata to the text; by
                         default it holds only the next steps and material warnings (JSON is
                         always complete)
+  --section ID          One section of the role view with its row cap lifted (text budget still
+                        applies). implementer: ${roleSectionIds("implementer").join(", ")}.
+                        designer: ${roleSectionIds("designer").join(", ")}
   --limit N             Next steps (default 10)
   --no-update-check     Skip the npm version check (also ${optOutEnv}=1)
   version               Show the installed version and the update check result
@@ -807,6 +810,7 @@ export function argumentsFor(args: string[]) {
       "stale-hours": { type: "string" },
       estimate: { type: "boolean" },
       role: { type: "string" },
+      section: { type: "string" },
       guide: { type: "boolean" },
       "no-guide": { type: "boolean" },
       context: { type: "boolean" },
@@ -819,6 +823,20 @@ export function argumentsFor(args: string[]) {
     throw new Error(`--role must be one of ${briefingRoleNames().join(", ")}.`);
   if (values.role !== undefined && values.full)
     throw new Error("--role shapes the compact briefing; it cannot be combined with --full.");
+  // #311: one named section of the role view; contradictory requests are refused, not guessed.
+  if (values.section !== undefined) {
+    if (values.full || values.issue)
+      throw new Error(
+        "--section shows one section of the role view; run --full or --issue N as a separate request.",
+      );
+    if (values.role === "human")
+      throw new Error("--role human has no sections to select; omit --section.");
+    // Without --role the role is resolved later (configured triage role or engine default),
+    // and the projection validates the ID against that role's registry.
+    const ids = values.role === undefined ? null : roleSectionIds(values.role);
+    if (ids && !ids.includes(values.section))
+      throw new Error(`--section for role ${values.role} must be one of: ${ids.join(", ")}.`);
+  }
   if (values.role === "human" && (values.issue || values.estimate))
     throw new Error(
       "--role human is a repository view of human input; it cannot be combined with --issue or --estimate.",

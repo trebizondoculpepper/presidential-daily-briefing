@@ -381,6 +381,15 @@ export const roleRegistry = new Map<string, RolePolicy>([
 ]);
 export const roleNames = (): string[] => [...roleRegistry.keys()];
 /**
+ * The section IDs a request may name with `--section` for a role (#311): the registry's stable
+ * selector IDs in role order, then the catch-all other-context. Empty for a role without
+ * TypeScript sections (human).
+ */
+export const roleSectionIds = (role: string): string[] => {
+  const policy = roleRegistry.get(role);
+  return policy ? [...policy.sections.map((s) => s.section), "other-context"] : [];
+};
+/**
  * Every role a briefing request may name: the registered agent roles plus `human`
  * (doc/design/human-briefing.md, #457), which is rule-derived and has no TypeScript sections.
  */
@@ -419,7 +428,12 @@ export function roleSectionRows(
     return { section, rows };
   });
 }
-export function roleView(name: string, context: RoleContext): RoleView {
+export function roleView(
+  name: string,
+  context: RoleContext,
+  /** Lift this one section's fixed row cap (#311 `--section`); budgets are otherwise unchanged. */
+  { expand }: { expand?: string } = {},
+): RoleView {
   const policy = roleRegistry.get(name);
   if (!policy) throw new Error(`--role must be one of ${roleNames().join(", ")}.`);
   const seen = new Set<string>();
@@ -435,7 +449,7 @@ export function roleView(name: string, context: RoleContext): RoleView {
         name: section,
         title,
         background,
-        ...bounded(rows, unbounded ? rows.length : budget),
+        ...bounded(rows, unbounded || expand === section ? rows.length : budget),
       };
     },
   );
@@ -447,7 +461,7 @@ export function roleView(name: string, context: RoleContext): RoleView {
     name: otherContext.name,
     title: otherContext.title,
     background: true,
-    ...bounded(rest, otherContext.budget),
+    ...bounded(rest, expand === otherContext.name ? rest.length : otherContext.budget),
   });
   return {
     name,

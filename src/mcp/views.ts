@@ -62,6 +62,7 @@ const briefingFields = [
   "actions",
   "sections",
   "role",
+  "focus",
   "rankedActions",
   "estimation",
   "impactEstimation",
@@ -109,6 +110,13 @@ export function briefingView(
     data,
     // Completeness is carried once, in the envelope's bounded sourceCompleteness.
     protectedPaths: ["guidance"],
+    // #311: pruning may drop focus rows; `shown` is what this response actually returns.
+    fixup: (d) => {
+      if (d.focus) {
+        const focus = obj(d.focus);
+        focus.shown = list(focus.items).length;
+      }
+    },
     lists: (d) => {
       const role = obj(d.role);
       const lists: PrunableList[] = [{ path: ["subjects"] }];
@@ -130,6 +138,8 @@ export function briefingView(
         // Beyond the first few, warnings yield before the ranked shortlist; their count remains.
         { path: [warningsList] },
         { path: ["rankedActions", "items"] },
+        // A requested section (#311) is the content asked for: its rows yield last.
+        { path: ["focus", "items"] },
         // The human briefing (#457) keeps its ranked items longest, like rankedActions.
         { path: ["human", "coverage", "warnings"] },
         { path: ["human", "items"] },
@@ -147,6 +157,17 @@ export function briefingView(
       const lines = [
         `Presidential Daily Briefing: ${base.repository} — fetched ${str(freshness.fetchedAt)}${freshness.offline ? " (OFFLINE CACHE)" : ""}`,
       ];
+      // #311: an explicit section request renders only that section, as CLI --section does;
+      // completeness warnings travel as envelope notices. Other fields stay in structured data.
+      if (d.focus) {
+        const focus = obj(d.focus);
+        const rows = list(focus.items);
+        lines.push(
+          `Section ${str(focus.section)} of role ${str(focus.role)} (${rows.length} shown of ${Number(focus.total ?? 0)}):`,
+          ...(rows.length ? itemsLine("", rows) : [`No rows in section ${str(focus.section)}.`]),
+        );
+        return lines;
+      }
       if (d.rankedActions) {
         const titles = new Map(
           list(report.subjects).map((s) => [str(obj(s).url), obj(s)] as const),
