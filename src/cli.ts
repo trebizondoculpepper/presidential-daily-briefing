@@ -1595,19 +1595,18 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
         : undefined;
     // #413: claim activity, read live with the claim guard's own reader (bounded like team).
     const claimAgents = teamView(snapshot, {}).agents.map((a) => a.agent);
-    const claimActivity =
+    const teamActivity =
       rest && claimAgents.length
-        ? (
-            await readTeamActivity(snapshot, claimAgents, {
-              query: (runtime.query ?? ghQuery) as GraphQuery,
-              permission: permissionLookup(snapshot.repository, rest),
-            })
-          ).activity
+        ? await readTeamActivity(snapshot, claimAgents, {
+            query: (runtime.query ?? ghQuery) as GraphQuery,
+            permission: permissionLookup(snapshot.repository, rest),
+          })
         : undefined;
     const report = ticketDoctor(snapshot, {
       delivery,
       closedDrift,
-      ...(claimActivity ? { claimActivity } : {}),
+      ...(teamActivity?.activity.size ? { claimActivity: teamActivity.activity } : {}),
+      ...(teamActivity?.omitted.length ? { omittedAgents: teamActivity.omitted } : {}),
       staleHours,
       limit,
       now: runtime.now?.() ?? new Date(),

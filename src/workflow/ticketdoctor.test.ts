@@ -118,6 +118,15 @@ describe("Ticket Doctor v1 (#66, doc/design/diagnostics.md)", () => {
     const unknown = report({ claimActivity: activity("waiting", "unknown") });
     expect(kinds(unknown, 9)).toContain("definite:claim-activity-unknown");
   });
+  it("names agents whose claim activity was skipped, and marks the scan incomplete (#413)", () => {
+    const skipped = report({ omittedAgents: ["big_agent", "alpha"] });
+    expect(skipped.completeness.complete).toBe(false);
+    expect(skipped.completeness.warnings).toContain(
+      "Claim activity not read for big_agent, alpha: more than 30 claims in this view; read one with pdb who N.",
+    );
+    expect(ticketDoctorText(skipped)).toContain("big_agent, alpha");
+    expect(report({ omittedAgents: [] }).completeness.complete).toBe(true);
+  });
   it("uses its own 24h staleness default, configurable, and bounds output with omitted counts", () => {
     expect(kinds(report({ staleHours: 48 }), 9)).not.toContain("candidate:stale-agent-activity");
     const small = report({ limit: 2 });
