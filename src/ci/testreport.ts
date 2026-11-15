@@ -61,7 +61,17 @@ export function parseJunit(xml: string): ParsedReport {
     return { kind: "malformed", why: "the document is truncated (no closing element)" };
   const cases: TestCase[] = [];
   let declared = 0;
-  for (const suite of xml.matchAll(/<testsuite\b([^>]*)>([\s\S]*?)<\/testsuite>/g)) {
+  // Every element that opens must be consumed: an unclosed suite or case is corruption, and
+  // skipping it would silently drop its failures.
+  const opened = (name: string, text: string) =>
+    [...text.matchAll(new RegExp(`<${name}\\b`, "g"))].length;
+  const suites = [...xml.matchAll(/<testsuite\b([^>]*)>([\s\S]*?)<\/testsuite>/g)];
+  if (suites.length !== opened("testsuite", xml))
+    return {
+      kind: "malformed",
+      why: `${opened("testsuite", xml) - suites.length} test suite(s) are not closed`,
+    };
+  for (const suite of suites) {
     const sAttr = attributes(suite[1]!);
     const tests = Number(sAttr.tests ?? "NaN");
     if (!Number.isInteger(tests) || tests < 0)
@@ -69,6 +79,13 @@ export function parseJunit(xml: string): ParsedReport {
     declared += tests;
     const body = suite[2]!;
     const before = cases.length;
+    const caseCount = [...body.matchAll(/<testcase\b([^>]*?)(\/>|>([\s\S]*?)<\/testcase>)/g)]
+      .length;
+    if (caseCount !== opened("testcase", body))
+      return {
+        kind: "malformed",
+        why: `suite ${sAttr.name ?? "?"} has test cases that are not closed`,
+      };
     for (const c of body.matchAll(/<testcase\b([^>]*?)(\/>|>([\s\S]*?)<\/testcase>)/g)) {
       const a = attributes(c[1]!);
       const inner = c[3] ?? "";
@@ -102,6 +119,13 @@ export function parseJunit(xml: string): ParsedReport {
         };
     }
   }
+  const root = /<testsuites\b([^>]*)>/.exec(xml);
+  const rootTests = root ? attributes(root[1]!).tests : undefined;
+  if (rootTests !== undefined && Number(rootTests) !== declared)
+    return {
+      kind: "malformed",
+      why: `the report declares ${rootTests} tests but its suites declare ${declared}`,
+    };
   if (cases.length !== declared)
     return {
       kind: "malformed",

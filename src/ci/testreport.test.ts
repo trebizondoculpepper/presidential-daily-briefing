@@ -80,6 +80,23 @@ describe("JUnit parsing (#393)", () => {
         '<testsuites><testsuite tests="1"><testcase name="x"><failure message="boom"></testcase></testsuite></testsuites>',
       ).kind,
     ).toBe("malformed");
+    // An unclosed suite, or an unclosed case, never disappears from the report.
+    const unclosedSuite =
+      '<testsuites tests="2"><testsuite name="a" tests="1"><testcase name="ok"/></testsuite>' +
+      '<testsuite name="b" tests="1"><testcase name="bad"><failure message="boom">x</failure></testcase></testsuites>';
+    expect(parseJunit(unclosedSuite)).toMatchObject({
+      kind: "malformed",
+      why: expect.stringMatching(/not closed/),
+    });
+    expect(
+      parseJunit('<testsuites><testsuite tests="1"><testcase name="x"></testsuite></testsuites>')
+        .kind,
+    ).toBe("malformed");
+    expect(
+      parseJunit(
+        '<testsuites tests="5"><testsuite tests="1"><testcase name="x"/></testsuite></testsuites>',
+      ).kind,
+    ).toBe("malformed");
     // A suite declaring a failure the cases do not contain cannot read as passing.
     expect(parseJunit(vitest(passing, 1, 1)).kind).toBe("malformed");
     expect(parseJunit(vitest("", 0))).toMatchObject({ kind: "report", tests: 0 });
