@@ -697,6 +697,9 @@ export class ServeCache {
         });
         return entry;
       } catch (error) {
+        // Already aborted here means every waiter cancelled (or shutdown began): no GitHub
+        // failure happened, so it is not recorded (#459). Decided before aborting siblings.
+        const cancelled = controller.signal.aborted;
         // A failed collection aborts sibling requests still paginating.
         controller.abort();
         // Start a rate-limit cooldown before this slot is released, so a read queued behind
@@ -708,7 +711,7 @@ export class ServeCache {
           const failure = classifyFailure(error, this.now());
           this.noteRateLimit(failure);
           // Once per shared collection (not per waiter), under the login it ran as.
-          if (!refusedByCooldown && !this.closed)
+          if (!refusedByCooldown && !cancelled && !this.closed)
             this.recordError(cacheKey, failure, error, flight.auth);
         }
         throw error;

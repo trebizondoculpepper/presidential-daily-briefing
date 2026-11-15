@@ -495,4 +495,29 @@ describe("serve diagnostics (#459)", () => {
       await s.running.close();
     }
   });
+
+  it("a collection cancelled by its only waiter is not recorded as a GitHub failure", async () => {
+    let release = () => undefined as void;
+    const gate = new Promise<void>((done) => (release = done));
+    const s = await setup(["example/one"], gate, () => new Error("aborted by caller"));
+    try {
+      const controller = new AbortController();
+      const pending = fetch(`${s.running.facts.url}api/v1/briefing`, {
+        signal: controller.signal,
+      }).catch(() => undefined);
+      for (let i = 0; i < 50 && s.collects.length === 0; i++)
+        await new Promise((r) => setTimeout(r, 10));
+      controller.abort();
+      for (let i = 0; i < 50; i++) {
+        if ((await s.json("api/v1/diagnostics/inflight")).data.total === 0) break;
+        await new Promise((r) => setTimeout(r, 10));
+      }
+      release();
+      await pending;
+      await new Promise((r) => setTimeout(r, 20));
+      expect((await s.json("api/v1/diagnostics/errors")).data.total).toBe(0);
+    } finally {
+      await s.running.close();
+    }
+  });
 });
