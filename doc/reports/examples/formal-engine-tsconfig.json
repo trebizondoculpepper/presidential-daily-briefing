@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "skipLibCheck": true,
+    "types": ["node"],
+    "resolveJsonModule": true,
+    "esModuleInterop": true,
+    "removeComments": true,
+    "newLine": "lf",
+    "rootDir": "../../.."
+  },
+  "files": ["../../../src/rules/datalog/engine.ts", "../../../src/rules/datalog/datascript.d.ts"]
+}
