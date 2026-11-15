@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { afterAll, describe, expect, it } from "vite-plus/test";
 import {
   checkoutAdvisory,
@@ -139,7 +140,6 @@ describe("source checkout freshness (#309)", () => {
   it("treats a package under node_modules as an npm installation, not a checkout", async () => {
     const { installedVersion } = await import("./updates.js");
     const { mkdir } = await import("node:fs/promises");
-    const { pathToFileURL } = await import("node:url");
     const base = await mkdtemp(join(tmpdir(), "pdb-npm-"));
     dirs.push(base);
     const pkg = join(base, "node_modules", "@trebizondoculpepper", "presidential-daily-briefing");
@@ -158,6 +158,47 @@ describe("source checkout freshness (#309)", () => {
     ).toMatchObject({
       status: "skipped",
     });
+  });
+
+  it("reports an unborn HEAD as unknown", async () => {
+    const base = await mkdtemp(join(tmpdir(), "pdb-unborn-"));
+    dirs.push(base);
+    git(base, "init", "-q", "-b", "main");
+    const s = await probe(base);
+    expect(s).toMatchObject({ status: "checkout", commit: null, branch: "main", detached: false });
+    expect(s.reason).toMatch(/unborn/);
+    expect(s.comparison?.state).toBe("unknown");
+    expect(checkoutAdvisory(s)).toBeNull();
+  });
+
+  it("does not count commits in a shallow clone", async () => {
+    const { origin } = await cloned();
+    const base = await mkdtemp(join(tmpdir(), "pdb-shallow-"));
+    dirs.push(base);
+    const shallow = join(base, "s");
+    git(base, "clone", "-q", "--depth", "1", pathToFileURL(origin).href, shallow);
+    const s = await probe(shallow);
+    expect(s.comparison).toMatchObject({
+      state: "unknown",
+      reason: "shallow history",
+      behind: null,
+    });
+  });
+
+  it("works in a linked worktree whose .git is a file", async () => {
+    const { work } = await cloned();
+    const tree = join(work, "..", "tree");
+    git(work, "worktree", "add", "-q", "-b", "side", tree, "HEAD~1");
+    git(work, "fetch", "-q");
+    const s = await probe(tree);
+    expect(s).toMatchObject({ status: "checkout", branch: "side" });
+    expect(s.comparison).toMatchObject({
+      ref: "origin/main",
+      state: "behind",
+      behind: 1,
+      ahead: 0,
+    });
+    expect(s.lastFetch).not.toBeNull();
   });
 
   it("never probes an npm installation, and honours the opt-out", async () => {
@@ -193,5 +234,59 @@ describe("source checkout freshness (#309)", () => {
     expect(partial.status).toBe("checkout");
     expect(partial.comparison?.state ?? "unknown").toBe("unknown");
     expect(calls).toBeLessThanOrEqual(8);
+  });
+});
+
+describe("main() and the checkout probe (#309)", () => {
+  const behind = {
+    status: "checkout" as const,
+    branch: "main",
+    detached: false,
+    commit: "a".repeat(40),
+    comparison: {
+      ref: "origin/main",
+      source: "remote-default" as const,
+      state: "behind" as const,
+      behind: 4,
+      ahead: 0,
+    },
+    upstream: null,
+    lastFetch: null,
+    stale: null,
+    observedAt: "2026-11-15T00:00:00.000Z",
+    fetchCommand: "git fetch",
+  };
+  const run = async (runtime: Record<string, unknown>, args: string[]) => {
+    const { main } = await import("../cli.js");
+    let err = "";
+    // A failing command still reaches the advisory in main()'s finally block.
+    await main(args, async () => {}, {
+      collect: async () => {
+        throw new Error("no");
+      },
+      currentRepository: async () => "o/r",
+      updateCheck: async () => ({ status: "skipped", reason: "" }),
+      stderr: (t: string) => {
+        err += t;
+      },
+      ...runtime,
+    } as never).catch(() => undefined);
+    return err;
+  };
+
+  it("the suite disables the real probe", () => {
+    expect(process.env.PDB_NO_CHECKOUT_CHECK).toBe("1");
+  });
+
+  it("prints the warning only when a test injects a behind probe", async () => {
+    const args = ["config", "nonsense-subcommand"];
+    expect(await run({}, args)).not.toMatch(/source checkout/);
+    let seen: { optOut?: boolean } | undefined;
+    const injected = await run(
+      { checkoutCheck: async (o: { optOut?: boolean }) => ((seen = o), behind) },
+      args,
+    );
+    expect(injected).toMatch(/source checkout 4 commits behind origin\/main/);
+    expect(seen?.optOut).toBe(false);
   });
 });

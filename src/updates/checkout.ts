@@ -18,6 +18,8 @@ export const probeDeadlineMs = 3000;
 /** A remote-tracking ref whose last local fetch is older than this is reported as stale. */
 export const staleAfterMs = 24 * 60 * 60 * 1000;
 export const fetchCommand = "git fetch";
+/** Disables only the source-checkout probe (the npm opt-outs disable both). */
+export const checkoutOptOutEnv = "PDB_NO_CHECKOUT_CHECK";
 
 /** Result of one Git call: its trimmed stdout, or why it gave none. */
 export type GitResult =

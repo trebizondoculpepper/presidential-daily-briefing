@@ -54,7 +54,12 @@ import {
   verifyTransition,
 } from "./workflow/retained.js";
 import { cachedCheckForUpdate } from "./updates/updatecache.js";
-import { checkoutAdvisory, checkoutFreshness, describeCheckout } from "./updates/checkout.js";
+import {
+  checkoutAdvisory,
+  checkoutFreshness,
+  checkoutOptOutEnv,
+  describeCheckout,
+} from "./updates/checkout.js";
 import { installedVersion, optOutEnv, legacyOptOutEnv, updateAdvisory } from "./updates/updates.js";
 import { defaultStaleHours } from "./workflow/team.js";
 import { migrationPlanText, planMigration } from "./github/migration.js";
@@ -955,7 +960,10 @@ export async function main(
     !!process.env[legacyOptOutEnv];
   const rest = args.filter((a) => a !== "--no-update-check");
   const check = runtime.updateCheck ?? cachedCheckForUpdate;
-  const checkoutCheck = runtime.checkoutCheck ?? checkoutFreshness;
+  // An injected probe always runs; the real one honours its own opt-out too.
+  const checkoutCheck: typeof checkoutFreshness =
+    runtime.checkoutCheck ??
+    ((o) => checkoutFreshness({ ...o, optOut: o.optOut || !!process.env[checkoutOptOutEnv] }));
   if (rest[0] === "version") {
     const installed = await installedVersion();
     const [result, checkout] = await Promise.all([
