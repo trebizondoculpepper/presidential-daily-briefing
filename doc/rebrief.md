@@ -52,3 +52,39 @@ On PowerShell, create the directory with the same Node `mkdtempSync` expression 
 `--transport http-mcp` currently returns `stop`, `fresh-read-unsupported`, without network access. The existing HTTP MCP briefing tool has neither a force-refresh argument nor explicit platform selection; TTL hits cannot establish a fresh Codex queue. The shared-service transport is live and supplies both role and platform. HTTP MCP continuation requires a separately reviewed fresh-read/platform extension and retest; this implementation does not change the MCP tool schema or invalidate a server cache behind an unrelated request.
 
 Credential-free injected tests cover changed/empty/inspection/unchanged queues, relevant evidence/policy changes versus timestamp/format noise, incomplete/stale/malformed/wrong-selection results, unavailable transport, timeouts/cancellation, event deduplication/reentry, acknowledgement and caps. The CLI test uses the actual shared service with synthetic GitHub facts, preserving the same engine policy. Native event, nonce receipt and same-session model continuation still require their own bounded platform trial.
+
+## Experimental packaged Codex Stop adapter (#398)
+
+`pdb rebrief codex-stop --help` documents the native entry point. It reads a
+bounded Stop JSON object on stdin and emits only native `{}` or
+`{"decision":"block","reason":"…"}` JSON. The package owns parsing, binding,
+policy, state, deadlines and native framing. No checkout paths, tsx, copied helper
+or jq are needed. A shell/PowerShell wrapper, if desired, only invokes `pdb` and
+forwards literal arguments, stdin and status; it must contain no JSON/policy logic.
+
+For a controlled, explicitly authorized natural-stop trial, initialize private
+state for the **actual** client session using `rebrief init`, explicit `--repo`,
+agent/role and `--platform codex`. Configure the native command directly:
+
+```text
+pdb rebrief codex-stop --state-dir ABSOLUTE_PRIVATE_STATE_DIR --repo owner/name --agent your-agent --role implementer --natural-stop-confirmed --deadline-ms 4000
+```
+
+Quote paths according to the native command shell; set its timeout to five
+seconds. Review/trust that exact definition through normal Codex controls. Keep
+unrelated hooks. The command never initializes state or installs a hook. Missing
+state, wrong selection/session, invalid input, reentry, failure or cancellation
+allows normal stop. `--transport http-mcp` currently stops without a request,
+because fresh-read/platform support remains unavailable. Emitting feedback does
+not acknowledge receipt. Unknown Stop causes must not be called natural;
+`--natural-stop-confirmed` is restricted to controlled trial provenance.
+
+The successful macOS native nonce trial used experimental bundled scaffolding,
+not this packaged entry. See [the native report](reports/agent-platforms/codex-stop-hook-prototype.md)
+for observed and untested boundaries. Its original two-completion allowance was
+consumed; this command grants no new model trial or production rollout. The
+owner's existing trusted definition is preserved until deliberately replaced;
+replacement requires normal native review/trust again.
+
+After stopping your adapter, remove only its native definition and private state
+directory. Preserve unrelated hooks and sessions. No global hook was installed.

@@ -1,3 +1,5 @@
+import type { Readable } from "node:stream";
+import { codexResponse } from "./codex.js";
 /** Opt-in process-per-hook wrapper. No native hooks or repository configuration are written. */
 import { parseArgs } from "node:util";
 import { isAbsolute } from "node:path";
@@ -36,6 +38,7 @@ response: Codex/Claude/Ori adapters translate it and must establish model-visibl
 Remove YOUR disposable state directory after stopping its adapter; no other uninstall needed.
 Exit: 0 structured decision (including stop/defer); 1 invalid arguments/setup.\n`;
 export interface CliRuntime {
+  input?: Readable;
   currentRepository?: typeof currentRepository;
   git?: GitRunner;
   fs?: ConfigFileSystem;
@@ -50,6 +53,7 @@ export async function runRebrief(
   output: (text: string) => Promise<void>,
   runtime: CliRuntime = {},
 ): Promise<number> {
+  if (args[0] === "codex-stop") return runCodexStop(args.slice(1), output, runtime);
   let input: Input = {
     repository: "",
     agent: "",
@@ -270,4 +274,133 @@ export async function runRebrief(
       process.off("SIGTERM", abort);
     }
   }
+}
+
+const codexHelp = `Usage: pdb rebrief codex-stop --state-dir PATH --repo owner/name
+       --role implementer|designer [--agent NAME] [--project PATH]
+       [--entry KEY | --harness NAME] --natural-stop-confirmed
+       [--deadline-ms 1..10000] [--cap 1..3] [--transport service|http-mcp]
+Experimental native Codex adapter: one JSON Stop event on stdin, one native JSON
+response on stdout. Requires explicit rebrief init for the actual session, same
+selection and --platform codex, in a private temporary state directory.
+Without controlled natural-stop confirmation, missing/mismatched state, reentry,
+invalid input, cancellation or failure: {} and exit 0. No transcript access,
+implicit initialization, retries, update check or delivery acknowledgement.
+HTTP MCP lacks fresh-read capability and permits normal stop. Native timeout must
+exceed the package deadline. Exact hook definition requires normal native trust.
+No hook is installed. See doc/rebrief.md for setup/removal and trial limits.
+`;
+
+/** Native framing over the existing CLI/core; wrappers contain no JSON or policy logic. */
+async function runCodexStop(
+  args: string[],
+  output: (text: string) => Promise<void>,
+  runtime: CliRuntime,
+): Promise<number> {
+  if (args.includes("--help")) {
+    await output(codexHelp);
+    return 0;
+  }
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  const input = runtime.input ?? process.stdin;
+  const cancelInput = () => input.destroy(new Error("cancelled"));
+  // Destroying an unread stream needs an error listener as well as the async iterator.
+  const ignoreInputError = () => {};
+  input.setEncoding("utf8");
+  input.on("error", ignoreInputError);
+  controller.signal.addEventListener("abort", cancelInput, { once: true });
+  runtime.signal?.addEventListener("abort", abort, { once: true });
+  if (!runtime.signal) {
+    process.on("SIGINT", abort);
+    process.on("SIGTERM", abort);
+  }
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let response: ReturnType<typeof codexResponse> = {};
+  try {
+    const { values } = parseArgs({
+      args,
+      options: {
+        "state-dir": { type: "string" },
+        repo: { type: "string" },
+        project: { type: "string" },
+        agent: { type: "string" },
+        role: { type: "string" },
+        entry: { type: "string" },
+        harness: { type: "string" },
+        "natural-stop-confirmed": { type: "boolean" },
+        "deadline-ms": { type: "string" },
+        cap: { type: "string" },
+        transport: { type: "string" },
+      },
+    });
+    const deadline = Number(values["deadline-ms"] ?? defaults.deadlineMs);
+    if (!Number.isInteger(deadline) || deadline < 1 || deadline > defaults.deadlineMs)
+      throw new Error("invalid deadline");
+    if (!values["natural-stop-confirmed"] || runtime.signal?.aborted)
+      throw new Error("not natural");
+    // Repository selection must be explicit even when a local project supplies identity.
+    if (!values.repo) throw new Error("missing repository");
+    timer = setTimeout(abort, deadline);
+    let raw = "";
+    let bytes = 0;
+    for await (const chunk of input) {
+      bytes += Buffer.byteLength(chunk);
+      if (bytes > 8192) throw new Error("input bound");
+      raw += String(chunk);
+    }
+    controller.signal.throwIfAborted();
+    const event: unknown = JSON.parse(raw);
+    const id = (v: unknown): v is string =>
+      typeof v === "string" && v.length > 0 && v.length <= 256 && /^\S+$/.test(v);
+    if (
+      !event ||
+      typeof event !== "object" ||
+      !("hook_event_name" in event) ||
+      event.hook_event_name !== "Stop" ||
+      !("session_id" in event) ||
+      !id(event.session_id) ||
+      !("turn_id" in event) ||
+      !id(event.turn_id) ||
+      !("stop_hook_active" in event) ||
+      event.stop_hook_active !== false
+    )
+      throw new Error("ineligible event");
+    const check = [
+      "check",
+      "--json",
+      "--enabled",
+      "--reason",
+      "natural",
+      "--platform",
+      "codex",
+      "--session",
+      event.session_id,
+      "--event",
+      event.turn_id,
+    ];
+    for (const [key, value] of Object.entries(values))
+      if (typeof value === "string") check.push(`--${key}`, value);
+    await runRebrief(
+      check,
+      async (text) => {
+        const result = JSON.parse(text) as Result;
+        response = codexResponse(result);
+      },
+      { ...runtime, signal: controller.signal },
+    );
+  } catch {
+    response = {};
+  } finally {
+    if (timer) clearTimeout(timer);
+    runtime.signal?.removeEventListener("abort", abort);
+    controller.signal.removeEventListener("abort", cancelInput);
+    input.removeListener("error", ignoreInputError);
+    if (!runtime.signal) {
+      process.off("SIGINT", abort);
+      process.off("SIGTERM", abort);
+    }
+  }
+  await output(`${JSON.stringify(controller.signal.aborted ? {} : response)}\n`);
+  return 0;
 }
