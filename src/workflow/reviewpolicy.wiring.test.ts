@@ -271,6 +271,64 @@ describe("pr N under the declared policy", () => {
     expect(r.blockers.join("\n")).toMatch(/required check `verify` is failed/);
   });
 
+  it("a live pr N read requests author types and app slugs, so providers authenticate", async () => {
+    const { pullRequestStatus } = await import("./prstatus.js");
+    // GitHub returns only what the query selects.
+    const query = async (source: string) => {
+      const typed = (field: string, login: string) =>
+        source.includes(`${field}{nodes{author{__typename login}`) ? bot(login) : { login };
+      const pr = node({
+        reviews: [{ ...rabbit("APPROVED"), author: typed("reviews(last:50)", "coderabbitai") }],
+        comments: [
+          { ...codex(old), author: typed("comments(last:100)", "chatgpt-codex-connector") },
+        ],
+        checks: [
+          checkRun("verify"),
+          checkRun("Codex", {
+            conclusion: "NEUTRAL",
+            ...(source.includes("checkSuite{app{slug}}")
+              ? { checkSuite: { app: { slug: "chatgpt-codex-connector" } } }
+              : {}),
+          }),
+        ],
+      });
+      return { repository: { pullRequest: pr } };
+    };
+    const r = await pullRequestStatus(repository, 12, query as never, undefined, undefined, or);
+    expect(r.reviewPolicy.providers.map((o) => o.state)).toEqual(["skipped", "accepted"]);
+    expect(r.headReviewed).toBe(true);
+  });
+
+  it("an unresolved thread opened by a provider blocks declared coverage in pr N", () => {
+    const base = node({ comments: [codex(head)] }) as unknown as Record<string, unknown>;
+    const r = prStatus(
+      repository,
+      {
+        ...base,
+        reviewThreads: {
+          nodes: [
+            {
+              isResolved: false,
+              first: {
+                totalCount: 1,
+                nodes: [
+                  { author: bot("coderabbitai"), body: "bug", createdAt: null, url: "https://t/1" },
+                ],
+              },
+            },
+          ],
+          pageInfo: { hasNextPage: false },
+        },
+      } as never,
+      { reviewPolicy: or },
+    );
+    expect(r.headFindings).toBe(true);
+    expect(r.headReviewed).toBe(false);
+    expect(r.blockers).toContain(
+      "CodeRabbit reports unresolved findings on the current head https://t/1",
+    );
+  });
+
   it("an unknown policy is explicit and accepts nothing", () => {
     const r = prStatus(repository, node({ comments: [codex(head)] }), { reviewPolicy: unknown });
     expect(r.headReviewed).toBe(false);
