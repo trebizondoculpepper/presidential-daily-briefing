@@ -205,6 +205,54 @@ describe("rebrief CLI/private state", () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+  it("reports legacy-not-imported identity and recovery without importing or writing configuration", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "pdb-rebrief-"));
+    let text = "";
+    const git = async (args: readonly string[]) =>
+      args[0] === "rev-parse" ? "/project\n" : "origin\thttps://github.com/o/r.git (fetch)\n";
+    const args = common.filter((v, i, a) => v !== "--agent" && a[i - 1] !== "--agent");
+    const fs = {
+      readText: async (path: string) =>
+        path.endsWith("agent-inbox.toml")
+          ? '[agents.codex]\nname="tester"\ntriage_role="implementer"\n'
+          : null,
+      writeText: async () => {
+        throw new Error("no writes");
+      },
+      rename: async () => {
+        throw new Error("no writes");
+      },
+      remove: async () => {
+        throw new Error("no writes");
+      },
+      makeDirectory: async () => {
+        throw new Error("no writes");
+      },
+    };
+    try {
+      expect(
+        await runRebrief(
+          ["init", ...args, "--state-dir", dir, "--project", "/project", "--entry", "codex"],
+          async (s) => {
+            text = s;
+          },
+          { git, fs, env: {} },
+        ),
+      ).toBe(0);
+      expect(JSON.parse(text)).toMatchObject({
+        agent: "tester",
+        reason: "initialized",
+        identity: {
+          source: "entry",
+          store: "legacy-not-imported",
+          storeDiagnostic: expect.stringContaining("config set identity.triage_role"),
+        },
+      });
+      expect(text).not.toContain("/project");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
   it("exclusive file access refuses concurrent, malformed, public, symlinked or Git-tree storage", async () => {
     const dir = await mkdtemp(join(tmpdir(), "pdb-rebrief-"));
     try {
