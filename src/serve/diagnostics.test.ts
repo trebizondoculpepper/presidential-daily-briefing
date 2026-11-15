@@ -40,13 +40,50 @@ const issue = (repository: string, n: number): Issue => ({
 class ManualClock implements Clock {
   time = start;
   now = () => new Date(this.time);
-  setTimeout = () => ({});
-  clearTimeout = () => undefined;
+  /** Timers only fire when a test fires them (#534: so shutdown's grace can end). */
+  private timers = new Set<{ fn: () => void }>();
+  setTimeout = (fn: () => void) => {
+    const timer = { fn };
+    this.timers.add(timer);
+    return timer;
+  };
+  clearTimeout = (timer: unknown) => void this.timers.delete(timer as { fn: () => void });
+  fire() {
+    const due = [...this.timers];
+    this.timers.clear();
+    for (const t of due) t.fn();
+  }
 }
+
+/** Poll `ready` until true, or fail fast with what was awaited (#534: never a suite timeout). */
+async function until(
+  ready: () => boolean | Promise<boolean>,
+  what: string,
+  ms = 5000,
+): Promise<void> {
+  const deadline = Date.now() + ms;
+  while (!(await ready())) {
+    if (Date.now() > deadline) throw new Error(`timed out after ${ms} ms waiting for ${what}`);
+    await new Promise((r) => setTimeout(r, 10));
+  }
+}
+
+/** Resolve when `signal` aborts, or fail fast. */
+const aborted = (signal: AbortSignal | undefined, what: string, ms = 5000) =>
+  new Promise<void>((resolve, reject) => {
+    if (!signal) return reject(new Error(`no signal for ${what}`));
+    if (signal.aborted) return resolve();
+    const timer = setTimeout(
+      () => reject(new Error(`timed out after ${ms} ms waiting for ${what}`)),
+      ms,
+    );
+    signal.addEventListener("abort", () => (clearTimeout(timer), resolve()), { once: true });
+  });
 
 async function setup(repos = ["example/one"], gate?: Promise<void>, fail?: () => Error) {
   const clock = new ManualClock();
   const collects: string[] = [];
+  const signals: (AbortSignal | undefined)[] = [];
   const login = { current: "octo-secret-login", fail: null as Error | null };
   const serve: ServeRuntime = {
     currentRepository: async () => repos[0]!,
@@ -73,6 +110,7 @@ async function setup(repos = ["example/one"], gate?: Promise<void>, fail?: () =>
   const read: ServeReadRuntime = {
     collect: async (repository, options) => {
       collects.push(`${repository}${options?.issue ? `#${options.issue}` : ""}`);
+      signals.push(options?.signal);
       if (gate) await gate;
       if (fail) throw fail();
       return collect(repository, options, query(repository), () => clock.now());
@@ -91,7 +129,17 @@ async function setup(repos = ["example/one"], gate?: Promise<void>, fail?: () =>
     return { status: response.status, text: await response.text() };
   };
   const json = async (path: string) => JSON.parse((await get(path)).text);
-  return { running, clock, collects, get, json, login };
+  /**
+   * Shut down within a bounded time (#534). The manual clock never fires shutdown's grace timer
+   * by itself, so a connection still open would otherwise hang until the suite timeout.
+   */
+  const close = async () => {
+    let done = false;
+    const closing = running.close().then(() => void (done = true));
+    await until(() => (clock.fire(), done), "pdb serve to shut down", 5000);
+    await closing;
+  };
+  return { running, clock, collects, signals, get, json, login, close };
 }
 
 describe("serve diagnostics (#459)", () => {
@@ -139,7 +187,7 @@ describe("serve diagnostics (#459)", () => {
         });
       expect(s.collects).toEqual([]);
     } finally {
-      await s.running.close();
+      await s.close();
     }
   });
 
@@ -182,7 +230,7 @@ describe("serve diagnostics (#459)", () => {
       expect(later).toMatchObject({ state: "stale-eligible", hits: 1, ageMs: 600_000 });
       expect(s.collects).toEqual(["example/one"]);
     } finally {
-      await s.running.close();
+      await s.close();
     }
   });
 
@@ -208,7 +256,7 @@ describe("serve diagnostics (#459)", () => {
       expect(expired.status).toBe(409);
       expect(JSON.parse(expired.text).error.code).toBe("DIAGNOSTIC_CURSOR_EXPIRED");
     } finally {
-      await s.running.close();
+      await s.close();
     }
   });
 
@@ -250,7 +298,7 @@ describe("serve diagnostics (#459)", () => {
       );
       expect(s.collects).toEqual([]);
     } finally {
-      await s.running.close();
+      await s.close();
     }
   });
 
@@ -280,7 +328,7 @@ describe("serve diagnostics (#459)", () => {
       await pending;
       expect((await s.json("api/v1/diagnostics/inflight")).data.items).toEqual([]);
     } finally {
-      await s.running.close();
+      await s.close();
     }
   });
 
@@ -303,7 +351,7 @@ describe("serve diagnostics (#459)", () => {
       release();
       await Promise.all([first, second]);
     } finally {
-      await s.running.close();
+      await s.close();
     }
   });
 
@@ -347,7 +395,7 @@ describe("serve diagnostics (#459)", () => {
       );
       expect(s.collects).toEqual([]);
     } finally {
-      await s.running.close();
+      await s.close();
     }
   });
 
@@ -367,7 +415,7 @@ describe("serve diagnostics (#459)", () => {
       );
       expect(s.collects).toEqual([]);
     } finally {
-      await s.running.close();
+      await s.close();
     }
   });
 
@@ -406,7 +454,7 @@ describe("serve diagnostics (#459)", () => {
       expect((await s.json("api/v1/diagnostics/errors")).data.total).toBe(1);
       expect(s.collects).toEqual(["example/one"]);
     } finally {
-      await s.running.close();
+      await s.close();
     }
   });
 
@@ -423,7 +471,7 @@ describe("serve diagnostics (#459)", () => {
       // Newest first.
       expect(data.items[0].at > data.items[99].at).toBe(true);
     } finally {
-      await s.running.close();
+      await s.close();
     }
   });
 
@@ -451,7 +499,7 @@ describe("serve diagnostics (#459)", () => {
       for (let i = 0; i < 3; i++) expect((await s.get("api/v1/briefing")).status).toBe(502);
       expect((await s.json("api/v1/diagnostics/errors")).data.total).toBe(1);
     } finally {
-      await s.running.close();
+      await s.close();
     }
   });
 
@@ -473,7 +521,7 @@ describe("serve diagnostics (#459)", () => {
       const items = (await s.json("api/v1/diagnostics/errors")).data.items;
       expect(items.map((e: { subject: number | null }) => e.subject)).toEqual([1]);
     } finally {
-      await s.running.close();
+      await s.close();
     }
   });
 
@@ -492,7 +540,7 @@ describe("serve diagnostics (#459)", () => {
       expect((await s.get("api/v1/issues/1")).status).toBe(502);
       expect((await s.json("api/v1/diagnostics/errors")).data.total).toBe(1);
     } finally {
-      await s.running.close();
+      await s.close();
     }
   });
 
@@ -505,19 +553,23 @@ describe("serve diagnostics (#459)", () => {
       const pending = fetch(`${s.running.facts.url}api/v1/briefing`, {
         signal: controller.signal,
       }).catch(() => undefined);
-      for (let i = 0; i < 50 && s.collects.length === 0; i++)
-        await new Promise((r) => setTimeout(r, 10));
+      // #534: wait on events with bounded deadlines, never a fixed number of round trips. The
+      // cancelled collection stays listed in flight until it ends, and it cannot end before
+      // the gate opens, so the old "wait until nothing is in flight, then release" loop always
+      // ran its full 50 HTTP round trips, which under a loaded suite reached the 20 s timeout.
+      await until(() => s.collects.length > 0, "the collection to start");
       controller.abort();
-      for (let i = 0; i < 50; i++) {
-        if ((await s.json("api/v1/diagnostics/inflight")).data.total === 0) break;
-        await new Promise((r) => setTimeout(r, 10));
-      }
+      // Its only waiter left, so the shared collection itself is cancelled.
+      await aborted(s.signals[0], "the cancelled collection's signal");
       release();
       await pending;
-      await new Promise((r) => setTimeout(r, 20));
+      await until(
+        async () => (await s.json("api/v1/diagnostics/inflight")).data.total === 0,
+        "the cancelled collection to finish",
+      );
       expect((await s.json("api/v1/diagnostics/errors")).data.total).toBe(0);
     } finally {
-      await s.running.close();
+      await s.close();
     }
   });
 });
