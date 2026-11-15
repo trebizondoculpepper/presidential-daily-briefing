@@ -2,6 +2,8 @@
 
 Presidential Daily Briefing turns GitHub issues, pull requests, review feedback and dependencies into a compact, evidence-linked action briefing. It helps coding agents and maintainers answer **“What should I do next to move this repository forward?”** without manually piecing together dozens of GitHub searches.
 
+Visit [pdb.stodge.org](https://pdb.stodge.org/) for the story behind PDB, how it works, common use cases and a getting-started guide.
+
 It is a global command-line tool: install it once with `-g`, not as a project dependency.
 
 ```sh
