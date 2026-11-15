@@ -214,6 +214,29 @@ describe("gh transport keeps the same-response evidence (#293)", () => {
   );
 
   it.skipIf(process.platform === "win32")(
+    "an HTTP-date Retry-After on a secondary limit becomes the retry deadline schedulers read",
+    async () => {
+      const secondary = response(
+        { "Retry-After": "Wed, 21 Oct 2026 07:28:00 GMT" },
+        {
+          message: "slow down",
+          documentation_url: "https://docs.github.com/rest#secondary-rate-limits",
+        },
+        "HTTP/2.0 403 Forbidden",
+      );
+      await withGh(secondary, 1, async () => {
+        const error = (await ghQueryWith()("q", {}).catch((e: unknown) => e)) as RateLimitError;
+        expect(error).toBeInstanceOf(RateLimitError);
+        expect(error.retry).toEqual({
+          retryAfterSeconds: null,
+          resetAt: "2026-10-21T07:28:00.000Z",
+        });
+        expect(error.message).toContain("2026-10-21T07:28:00.000Z");
+      });
+    },
+  );
+
+  it.skipIf(process.platform === "win32")(
     "an exhausted quota keeps its reset; success and NOT_FOUND-only answers are unchanged",
     async () => {
       await withGh(response(quota(0), limited), 1, async () => {

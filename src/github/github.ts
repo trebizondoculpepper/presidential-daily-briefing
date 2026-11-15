@@ -192,7 +192,10 @@ function sameResponseLimit(response: GhResponse): RateLimitError | null {
     rateLimitMessage(c),
     {
       retryAfterSeconds: c.observation.retryAfterSeconds,
-      resetAt: c.quotaEvidence === "exhausted" ? c.observation.resetAt : null,
+      // The earliest proven retry time: an exhausted quota's reset, else an HTTP-date
+      // Retry-After from this response (an explicit request, so schedulers honour it).
+      resetAt:
+        (c.quotaEvidence === "exhausted" ? c.observation.resetAt : null) ?? c.observation.retryAt,
     },
     c,
   );
