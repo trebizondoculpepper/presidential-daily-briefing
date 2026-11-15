@@ -87,6 +87,51 @@ try {
   let r = await run(["--help"]);
   expect("--help exits 0 with usage", r.code === 0 && r.stdout.includes("Usage:"), r.code);
 
+  r = await run(["rebrief", "--help"]);
+  expect(
+    "rebrief help is installed",
+    r.code === 0 && r.stdout.includes("init|check|ack"),
+    r.stderr,
+  );
+  const rebriefArgs = [
+    "--json",
+    "--state-dir",
+    dir,
+    "--session",
+    "smoke-session",
+    "--repo",
+    repo,
+    "--agent",
+    "smoke",
+    "--role",
+    "implementer",
+    "--platform",
+    "codex",
+  ];
+  r = await run(["rebrief", "init", ...rebriefArgs]);
+  expect(
+    "rebrief initializes private state without gh",
+    r.code === 0 && JSON.parse(r.stdout).reason === "initialized",
+    r.stderr,
+  );
+  r = await run([
+    "rebrief",
+    "check",
+    ...rebriefArgs,
+    "--enabled",
+    "--reason",
+    "natural",
+    "--event",
+    "smoke-event",
+    "--transport",
+    "http-mcp",
+  ]);
+  expect(
+    "rebrief refuses HTTP freshness gap",
+    r.code === 0 && JSON.parse(r.stdout).reason === "fresh-read-unsupported",
+    r.stderr,
+  );
+
   r = await run(["--repo", "not-a-repo"]);
   expect("invalid --repo exits 1", r.code === 1 && r.stderr.includes("owner/name"), r.stderr);
 
