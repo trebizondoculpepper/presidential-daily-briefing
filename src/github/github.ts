@@ -945,10 +945,14 @@ export async function collect(
     const inWindow = <T extends { updatedAt: string }>(nodes: T[]) =>
       nodes.filter((node) => Date.parse(node.updatedAt) >= Date.parse(since));
     changed = summarize([...inWindow(issueHistory.nodes), ...inWindow(prHistory.nodes)]);
-    historySources = [
-      { source: "issues", ...issueHistory },
-      { source: "pull-requests", ...prHistory },
-    ];
+    // Summaries only: the history nodes themselves are reduced to `changed` and discarded.
+    const summary = (source: string, h: typeof issueHistory | typeof prHistory) => ({
+      source,
+      pages: h.pages,
+      complete: h.complete,
+      failure: h.failure,
+    });
+    historySources = [summary("issues", issueHistory), summary("pull-requests", prHistory)];
   }
   meter.cover("open-issues", repository, "complete");
   meter.cover("open-pull-requests", repository, "complete");

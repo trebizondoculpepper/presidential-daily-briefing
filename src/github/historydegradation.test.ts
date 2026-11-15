@@ -115,6 +115,9 @@ describe("current inventory survives a failed history read (#370)", () => {
   it("a complete history window is complete, with no warning", async () => {
     const data = await read(reader("ok").query);
     expect(data.history).toMatchObject({ state: "complete", failure: null });
+    // Source summaries only: no history nodes are retained in the snapshot.
+    for (const s of data.history!.sources)
+      expect(Object.keys(s).sort()).toEqual(["complete", "failure", "pages", "source"]);
     expect(historyCoverage(data)?.state).toBe("complete");
     expect(data.warnings).toEqual([]);
     expect(historyComplete(data)).toBe(true);
