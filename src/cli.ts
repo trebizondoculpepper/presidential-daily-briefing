@@ -45,6 +45,7 @@ import {
   planClaimWait,
   planWaitOnQuestion,
   stillWaitingFor,
+  verifyTransition,
 } from "./workflow/retained.js";
 import { cachedCheckForUpdate } from "./updates/updatecache.js";
 import { installedVersion, optOutEnv, legacyOptOutEnv, updateAdvisory } from "./updates/updates.js";
@@ -1066,10 +1067,22 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
             permission,
             admissionFor(repository, values.agent, query, permission),
           );
-    const result =
+    let result =
       values.dryRun || !plan.ok || plan.noop
         ? { ...plan, exitCode: plan.ok ? 0 : 1 }
         : await applyPlan(repository, plan, { run: runtime.ghRun ?? ghRun, query });
+    // A written record is not a transition until the fold accepts it.
+    if (result.ok && result.exitCode === 0 && !values.dryRun && plan.ok && plan.activityOpId) {
+      const conflict = await verifyTransition(
+        repository,
+        values.number,
+        values.agent,
+        plan.activityOpId,
+        query,
+        permission,
+      );
+      if (conflict) result = { ...result, conflict, exitCode: 2 } as typeof result;
+    }
     await output(
       values.json
         ? JSON.stringify({ schemaVersion: 1, ...result }, null, 2) + "\n"
@@ -1143,6 +1156,18 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
           const applied = waitPlan.noop
             ? { ...waitPlan, exitCode: 0 }
             : await applyPlan(repository, waitPlan, { run, query });
+          const stale =
+            applied.exitCode === 0 && !waitPlan.noop && waitPlan.activityOpId
+              ? await verifyTransition(
+                  repository,
+                  values.number,
+                  values.agent,
+                  waitPlan.activityOpId,
+                  query,
+                  permission,
+                )
+              : null;
+          if (stale) applied.exitCode = 2;
           waitOk = applied.exitCode === 0;
           waitNote = waitOk
             ? (waitPlan.reason ?? "Wait recorded.")

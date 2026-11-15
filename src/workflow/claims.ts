@@ -98,6 +98,8 @@ export interface ClaimAccepted {
   };
   /** Exact command that safely retries or completes this operation. */
   retry?: string;
+  /** claim wait/resume: the appended record's operation id, verified after the write (#412). */
+  activityOpId?: string;
   /** needs-human: the question's operation id, which a retained wait binds to (#412). */
   questionOpId?: string;
   /** needs-human: whether the caller holds the claim and keeps it (#412). */

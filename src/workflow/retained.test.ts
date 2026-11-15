@@ -20,6 +20,7 @@ import {
   planWaitOnQuestion,
   readRetained,
   stillWaitingFor,
+  verifyTransition,
 } from "./retained.js";
 import { permissions } from "../testing/fakegh.js";
 import { by, page, repo } from "../testing/snapshots.js";
@@ -349,6 +350,37 @@ describe("retained claims (#412)", () => {
     const open = await w.resume(1);
     expect(open.ok ? "ok" : open.error).toBe("QUESTION_OPEN");
     expect(open.ok ? [] : open.recovery.join(" ")).toContain(q.url);
+  });
+
+  it("resume refuses when a question's authority cannot be established", async () => {
+    const w = world();
+    w.add(1);
+    w.add(4);
+    await w.claim(1);
+    w.issues.get(1)!.blockers.push({ number: 4, state: "OPEN" });
+    await w.apply(await w.wait(1, { blockedBy: `${repo}#4` }));
+    w.issues.get(1)!.blockers[0]!.state = "CLOSED";
+    const q = await w.ask(1);
+    // Edited, and the editor cannot be established: unknown, not absent.
+    Object.assign(q, { lastEditedAt: "2026-11-15T09:00:00Z", editor: null });
+    expect(outcome(await w.resume(1))).toBe("EVIDENCE_INCOMPLETE");
+  });
+
+  it("of two waits planned on the same predecessor, only the first takes effect", async () => {
+    const w = world();
+    w.add(1);
+    w.add(4);
+    w.add(6);
+    await w.claim(1);
+    w.issues.get(1)!.blockers.push({ number: 4, state: "OPEN" }, { number: 6, state: "OPEN" });
+    const first = await w.wait(1, { blockedBy: `${repo}#4` });
+    const second = await w.wait(1, { blockedBy: `${repo}#6` });
+    await w.apply(first);
+    await w.apply(second);
+    const verify = (p: ClaimPlan) =>
+      verifyTransition(repo, 1, "kavya", p.ok ? p.activityOpId! : "", w.query, w.permission);
+    expect(await verify(first)).toBeNull();
+    expect(await verify(second)).toMatch(/another transition was accepted first/);
   });
 
   it("needs-human keeps the claim and binds a wait to its question; --release relinquishes it", async () => {

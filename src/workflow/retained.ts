@@ -537,6 +537,7 @@ export async function planClaimWait(
     facts,
     noop: false,
     reason: `${agent} keeps #${number}, waiting on ${describeBlocker(blocker)}.`,
+    activityOpId: record.opId,
     changes: [
       {
         step: "comment",
@@ -603,13 +604,24 @@ export async function planClaimResume(
       [command(`deps ${number} --tree`)],
     );
   const questions = new Map<string, string>();
+  const unverifiable: string[] = [];
   for (const c of read.comments) {
     const marker = readableQuestion(c.body, repository, number);
     // Legacy v1 questions keep label-based resolution; only explicit v2 questions hold a claim.
     if (marker?.version !== 2) continue;
-    if ((await commentAuthority(c, permission)).status === "trusted")
-      questions.set(String(c.databaseId), marker.opId);
+    const authority = await commentAuthority(c, permission);
+    if (authority.status === "trusted") questions.set(String(c.databaseId), marker.opId);
+    // Unknown authority is missing evidence, never absence of a question.
+    else if (authority.status === "unknown")
+      unverifiable.push(`question ${c.databaseId} (${authority.why})`);
   }
+  if (unverifiable.length)
+    return refuse(
+      "EVIDENCE_INCOMPLETE",
+      facts,
+      `Whether these questions are authoritative cannot be established: ${unverifiable.join("; ")}.`,
+      [`${triage} --issue ${number}`],
+    );
   if (questions.size) {
     const classified = await classifyMarkers(
       read.comments,
@@ -696,6 +708,7 @@ export async function planClaimResume(
     facts,
     noop: false,
     reason: `${agent} resumes #${number}: ${activity.cleared}.`,
+    activityOpId: record.opId,
     changes: [
       {
         step: "comment",
@@ -744,4 +757,29 @@ export async function planWaitOnQuestion(
     );
   const url = `https://github.com/${repository}/issues/${number}#issuecomment-${question.databaseId}`;
   return planClaimWait(repository, { number, agent, question: url, why }, query, permission);
+}
+
+/**
+ * After appending a wait or resume: whether the transition took effect. A concurrent transition
+ * on the same predecessor makes ours stale, so a successful comment write is not success; the
+ * appended record must be the one the fold accepted.
+ */
+export async function verifyTransition(
+  repository: string,
+  number: number,
+  agent: string,
+  opId: string,
+  query: GraphQuery,
+  permission: PermissionLookup,
+): Promise<string | null> {
+  const read = await readRetained(repository, number, agent, query, permission);
+  const a = read.activity;
+  if (a.state === "unknown" || a.state === "not-owned")
+    return `the transition could not be confirmed (${a.state === "unknown" ? a.why.join("; ") : a.why})`;
+  if (a.lastActivity === null) return "the appended record is not the claim's current activity";
+  const last = read.comments.find((c) => String(c.databaseId) === a.lastActivity);
+  const parsed = last ? parseActivityComment(last.body) : null;
+  if (parsed?.kind !== "record" || parsed.record.opId !== opId)
+    return `another transition was accepted first (comment ${a.lastActivity}); this one was rejected as stale. Re-read with pdb who ${number} and decide again`;
+  return null;
 }
