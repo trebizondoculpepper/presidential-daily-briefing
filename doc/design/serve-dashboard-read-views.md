@@ -73,6 +73,13 @@ work; explicit editing and claim controls are outside this ticket.
 
 **Owner clarification (#458, 2026-11-15), superseding conflicting text below.** This is the human mode of the **Work** page, selected in the same Work navigation as the designer and implementer views, with direct human-attention links retained. Show actionable next steps first, then a separate **Waiting** section below them. Waiting items remain responsibilities until their definition of done is met but are not presented as immediately executable actions. The shared ranking and evidence rules are unchanged. Human-only Unassign is a separate mutation slice ([human-unassign.md](human-unassign.md)); this read-only view does not wait for it.
 
+**Delivered (#458).** `/human?repo=R[&agent=NAME]` (`src/serve/human-page.ts`) renders `GET /api/v1/briefing?role=human` unchanged, in server order. The dashboard's Role selector and its "Human attention" link open it, and the page links back to the implementer and designer views. Those links drop `agent`, because on the agent views that name means an agent, not the human.
+
+- **Waiting.** The split uses only the projection's own fields. An item goes in the Waiting section when its `resolution` is `unknown` (a closed ticket whose question's outcome could not be established); every other item goes in "Needs your input". Requests and candidates are labelled from `explicit`, and "Addressed to you" from `addressed`.
+- **Validation.** The page is rendered per request with the `repo` checked through `selectRepository`. A missing `repo` shows a choice, never a guess. Malformed, unserved, unknown and repeated parameters get an HTML error. None of these makes a GitHub read.
+- **Reads.** `/human.js` reads one briefing for the page's project, aborts a superseded read, and drops a late answer or one for another project. An error clears the lists. "No human input is waiting" appears only for a complete, empty projection. The list is bounded at 50, then 100 on request, with the omitted count shown.
+- **Read-only.** The page makes no writes. Unassign (#588) is separate.
+
 Read `GET /api/v1/briefing?repo=R&role=human`, with an optional explicit `agent=NAME`
 human-routing focus. Reuse the exact `human` projection and ordering in
 `doc/design/human-briefing.md`, already shared with CLI/MCP. Never borrow a detected
