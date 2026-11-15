@@ -86,7 +86,7 @@ import type { PickupOrder } from "./briefing/ranking.js";
 import { complexityGuidanceJson, complexityGuidanceText } from "./estimation/complexity.js";
 import { impactGuidanceJson, impactGuidanceText } from "./estimation/impact.js";
 import { declaredRulesContext } from "./rules/declared-context.js";
-import { runConfig } from "./config/configcli.js";
+import { runConfig, runSetup } from "./config/configcli.js";
 import type { ConfigRuntime } from "./config/configcli.js";
 import { estimateUsage, runEstimate } from "./estimation/estimate.js";
 import {
@@ -313,6 +313,10 @@ Rollback: pdb config set briefing.engine typescript.
                         identity.triage_role in local pdb.toml (the first set imports a
                         matching legacy agent-inbox.toml entry once, never changing it), entry
                         chosen by --entry KEY, --harness NAME or the detected harness
+  setup identity --role implementer|designer [--entry KEY | --harness NAME] [--dry-run]
+                        How a new agent gets its own identity: a locally unique generated name
+                        kept in local pdb.toml (a rerun keeps it; another harness's entry is
+                        never reused; nothing is reserved remotely), then the --agent to use
   --repo owner/name     Repository (default: current gh checkout)
   --json                Versioned structured output (from a checkout: npm run --silent pdb)
   --issue N             Include full issue body/history, even if closed; diagnoses
@@ -1207,6 +1211,7 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
       ...runtime.quotas,
     });
   if (args[0] === "config") return runConfig(args.slice(1), output, runtime.config);
+  if (args[0] === "setup") return runSetup(args.slice(1), output, runtime.config);
   if (args[0] === "doctor") {
     const { values } = parseArgs({
       args: args.slice(1),

@@ -272,8 +272,8 @@ describe("local configuration doctor (#64)", () => {
       "triage.role": "unknown",
     });
     expect(check(absent.report, "identity.entry").next).toEqual([
-      "pdb config set identity.triage_role implementer --entry codex --repo owner/name",
-      "pdb config set identity.triage_role designer --entry codex --repo owner/name",
+      "pdb setup identity --role implementer --entry codex --repo owner/name",
+      "pdb setup identity --role designer --entry codex --repo owner/name",
     ]);
     const missingEntry = await run({}, persisted, { entry: "ori.review" });
     expect(missingEntry.status["identity.entry"]).toBe("missing");
@@ -327,7 +327,7 @@ describe("local configuration doctor (#64)", () => {
       "Existing entries: claude (claude harness), codex (codex harness); none of them is this agent's",
     );
     expect(entry.next).toEqual([
-      "pdb config set identity.triage_role ROLE --entry ori.SERVER --repo owner/name",
+      "pdb setup identity --role ROLE --entry ori.SERVER --repo owner/name",
     ]);
     expect(missing.text).not.toMatch(/secret-a|secret-b/);
     // Several ori entries: ambiguous, with the concrete candidates to choose from.

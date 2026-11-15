@@ -662,6 +662,11 @@ export interface IdentityWriteOptions {
   readonly expectedRaw?: string | null;
   /** Lock wait bound; injected for tests. The lock is never broken by age (#382). */
   readonly lockTiming?: Omit<LockTiming, "staleMs">;
+  /**
+   * `setup identity` (#314): refuse, before anything is written, an existing entry without a
+   * valid name; this writer generates names only for absent entries, so setup could not finish.
+   */
+  readonly requireName?: boolean;
 }
 
 export interface IdentityWriteResult {
@@ -921,6 +926,13 @@ export async function setIdentity(
     if (before.entryExists && !isTable((document.agents as Table)[entry])) {
       throw malformed(`agents.${entry} is not a table.`);
     }
+    // Checked under the lock, against the document about to be rewritten: nothing is written.
+    if (options.requireName && before.entryExists && !before.name)
+      throw new ConfigError(
+        "invalid-value",
+        `Entry [agents.${entry}] in ${IDENTITY_FILE} has no valid name, so no identity was set up and nothing was changed.`,
+        `Set one explicitly: pdb config set identity.name NAME --entry ${entry}`,
+      );
     if (field === "name" && namesInUse(document, entry).has(value.toLowerCase())) {
       throw new ConfigError(
         "conflict",

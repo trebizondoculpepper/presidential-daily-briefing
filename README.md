@@ -59,6 +59,14 @@ pdb --repo owner/repository --order oldest
 
 `--agent` is an explicit workflow identity, not your GitHub login. It highlights attention addressed to that name and recorded ownership; it does not authenticate an agent or claim work.
 
+A new agent gets its own identity once, from the checkout, with:
+
+```sh
+pdb setup identity --role implementer        # or --role designer; --dry-run previews
+```
+
+It generates a locally unique name for your harness's entry in the checkout's Git-ignored `pdb.toml`, keeps it on later runs, never reuses another harness's entry (under Ori, add `--entry ori.SERVER`), contacts no service and prints the `--agent` to use.
+
 ### Inspect a ticket or a blocked PR
 
 ```sh
