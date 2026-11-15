@@ -1271,6 +1271,49 @@ describe("pdb serve failure behaviour (#373)", () => {
     }
   });
 
+  it("who stopped by a linked-PR quota refusal starts the cooldown and is not cached", async () => {
+    let focused = 0;
+    const s = await setup(["--repo", repo], {
+      // A linked-PR read refused for quota: the focused read returns, incomplete, instead of
+      // throwing (#367), so only its collection's quota signal reaches serve.
+      collectIssueFocus: async (repository, number, options) => {
+        focused++;
+        await options.meter
+          .query(
+            async () => {
+              throw new RateLimitError("rate limited", { retryAfterSeconds: 120 });
+            },
+            "pull-request",
+            `${repository}#9`,
+          )("query{x}", {})
+          .catch(() => undefined);
+        options.meter.notAttempted.push(`https://github.com/${repository}/pull/9`);
+        return collectIssueFocus(repository, number, options, query, () => new Date(start));
+      },
+    });
+    try {
+      const first = await call(s.running.port, "/api/v1/issues/1/who");
+      expect(first.status).toBe(200);
+      expect(first.json.status).toBe("incomplete");
+      expect(first.json.result.collection.quota).toEqual({
+        retryAfterSeconds: 120,
+        resetAt: null,
+      });
+      // The cooldown is in force for every live read, as after a thrown RateLimitError.
+      const during = await call(s.running.port, "/api/v1/briefing");
+      expect(during.json.error.code).toBe("GITHUB_RATE_LIMITED");
+      expect(during.headers["retry-after"]).toBe("120");
+      expect(s.calls.collect).toHaveLength(0);
+      s.clock.advance(121_000);
+      // The incomplete answer was not cached as fresh: the next who read runs again.
+      const after = await call(s.running.port, "/api/v1/issues/1/who");
+      expect(after.json.freshness.source).not.toBe("cached");
+      expect(focused).toBe(2);
+    } finally {
+      await s.close();
+    }
+  });
+
   it("an incomplete collection is cached and served as incomplete", async () => {
     const s = await setup(["--repo", repo], {
       collect: async (repository, options) => ({
