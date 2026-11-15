@@ -12,6 +12,8 @@ import { startServe } from "../serve.js";
 import type { ServeRuntime } from "../serve.js";
 import type { ServeReadRuntime } from "./api.js";
 import { serveArguments } from "./options.js";
+import { RateLimitError } from "../github/dependencies.js";
+import { classifyGhFailure, parseGhResponse } from "../github/evidence.js";
 import { readServices } from "./services.js";
 
 const start = Date.parse("2026-11-15T00:00:00.000Z");
@@ -42,7 +44,7 @@ class ManualClock implements Clock {
   clearTimeout = () => undefined;
 }
 
-async function setup(repos = ["example/one"], gate?: Promise<void>) {
+async function setup(repos = ["example/one"], gate?: Promise<void>, fail?: () => Error) {
   const clock = new ManualClock();
   const collects: string[] = [];
   const login = { current: "octo-secret-login" };
@@ -69,6 +71,7 @@ async function setup(repos = ["example/one"], gate?: Promise<void>) {
     collect: async (repository, options) => {
       collects.push(`${repository}${options?.issue ? `#${options.issue}` : ""}`);
       if (gate) await gate;
+      if (fail) throw fail();
       return collect(repository, options, query(repository), () => clock.now());
     },
     dependencyReport: async () => {
@@ -93,11 +96,11 @@ describe("serve diagnostics (#459)", () => {
     const s = await setup(["example/one", "example/two"]);
     try {
       const status = await s.json("api/v1/status");
-      expect(status.diagnostics).toEqual([
-        "/api/v1/diagnostics/projects",
-        "/api/v1/diagnostics/cache",
-        "/api/v1/diagnostics/inflight",
-      ]);
+      expect(status.diagnostics).toEqual(
+        ["projects", "config", "cache", "inflight", "errors", "rules"].map(
+          (v) => `/api/v1/diagnostics/${v}`,
+        ),
+      );
       const projects = await s.json("api/v1/diagnostics/projects");
       expect(projects).toMatchObject({
         schemaVersion: 1,
@@ -296,6 +299,116 @@ describe("serve diagnostics (#459)", () => {
       expect(items.map((f: { subject: number | null }) => f.subject)).toEqual([1]);
       release();
       await Promise.all([first, second]);
+    } finally {
+      await s.running.close();
+    }
+  });
+
+  it("config shows held server settings and, without a project, the applicable defaults", async () => {
+    const s = await setup();
+    try {
+      const config = await s.json("api/v1/diagnostics/config");
+      expect(config.selection).toEqual({ repository: "example/one" });
+      expect(config.coverage).toEqual({
+        complete: false,
+        warnings: [
+          "No local project: repository-local settings were not read; defaults are shown.",
+        ],
+      });
+      expect(config.data.settings).toMatchObject({
+        "serve.port": { value: 0, source: "argument", known: true },
+        "serve.ttlSeconds": { value: 300, source: "default", known: true },
+        "serve.staleWindowSeconds": { value: 1800, source: "default", known: true },
+        processGuide: { value: false, source: "default", known: true },
+      });
+      expect(Object.keys(config.data.settings).sort()).toEqual(
+        [
+          "briefing.engine",
+          "complexity.enabled",
+          "impact.enabled",
+          "processGuide",
+          "serve.cacheEntries",
+          "serve.port",
+          "serve.staleWindowSeconds",
+          "serve.ttlSeconds",
+        ].sort(),
+      );
+      expect(s.collects).toEqual([]);
+    } finally {
+      await s.running.close();
+    }
+  });
+
+  it("rules reports the loaded artifact's identity without evaluating anything", async () => {
+    const s = await setup();
+    try {
+      const rules = (await s.json("api/v1/diagnostics/rules")).data;
+      expect(rules).toMatchObject({
+        policyVersion: expect.any(Number),
+        rulesHash: expect.stringMatching(/^[0-9a-f]{64}$/),
+        validation: { state: "build-checked" },
+        englishRules: { cli: "pdb rules", page: null },
+      });
+      expect(rules.supportedRoles).toEqual(
+        expect.arrayContaining(["implementer", "designer", "human"]),
+      );
+      expect(s.collects).toEqual([]);
+    } finally {
+      await s.running.close();
+    }
+  });
+
+  it("errors keep safe fields and same-response quota evidence, never GitHub's message", async () => {
+    const response = parseGhResponse(
+      'HTTP/2.0 200 OK\nX-Ratelimit-Remaining: 5000\nX-Ratelimit-Limit: 5000\nX-Ratelimit-Resource: graphql\n\n{"errors":[{"type":"RATE_LIMIT","message":"API rate limit already exceeded for user ID 783193."}]}',
+    );
+    const fail = () =>
+      new RateLimitError(
+        "refused for user ID 783193",
+        { resetAt: null },
+        classifyGhFailure({ response }),
+      );
+    const s = await setup(["example/one"], undefined, fail);
+    try {
+      expect((await s.get("api/v1/briefing")).status).toBe(502);
+      const read = await s.get("api/v1/diagnostics/errors");
+      const data = JSON.parse(read.text).data;
+      expect(data).toMatchObject({ total: 1, discarded: 0, nextCursor: null });
+      expect(data.items).toEqual([
+        {
+          id: expect.stringMatching(/^e\d+$/),
+          repository: "example/one",
+          at: "2026-11-15T00:00:00.000Z",
+          operation: expect.any(String),
+          code: "GITHUB_RATE_LIMITED",
+          category: "rate-limited",
+          subject: null,
+          hint: expect.stringContaining("Nothing retries automatically"),
+          quota: { resource: "graphql", limit: 5000, remaining: 5000, resetAt: null },
+        },
+      ]);
+      expect(read.text).not.toContain("783193");
+      expect(read.text).not.toContain("octo-secret-login");
+      // Reading errors creates no new event and starts no collection.
+      expect((await s.json("api/v1/diagnostics/errors")).data.total).toBe(1);
+      expect(s.collects).toEqual(["example/one"]);
+    } finally {
+      await s.running.close();
+    }
+  });
+
+  it("the error ring keeps the newest 100 and counts what it discarded", async () => {
+    const s = await setup(["example/one"], undefined, () => new Error("network down"));
+    try {
+      for (let i = 0; i < 102; i++) {
+        s.clock.time += 1000;
+        await s.get(`api/v1/issues/${(i % 50) + 1}`);
+      }
+      const data = (await s.json("api/v1/diagnostics/errors?limit=100")).data;
+      expect(data).toMatchObject({ total: 100, discarded: 2, omitted: 0 });
+      expect(data.items[0].code).toBe("GITHUB_UNAVAILABLE");
+      // Newest first.
+      expect(data.items[0].at > data.items[99].at).toBe(true);
     } finally {
       await s.running.close();
     }

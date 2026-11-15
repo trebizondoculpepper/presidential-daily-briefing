@@ -138,15 +138,15 @@ pdb serve --repo owner/name --port 0 --ttl 10m   # 0 picks a free port; TTL 1m t
 
 The first stdout line is `pdb serve VERSION listening on http://127.0.0.1:4372/`. At least one `--repo` or `--project` is required: the working directory is never used to choose a repository. It listens on 127.0.0.1 only unless `--host` names another address together with `--allow-remote`, which prints a warning: there is no authentication, and anyone who can reach the server can read what your gh login can see. Loopback binding does not keep out other users of the same machine. Requests whose `Host` or `Origin` does not name this server are refused (DNS-rebinding protection), and a busy port exits 3 instead of picking another one.
 
-| Route                                                                        | Result                                                                                 |
-| ---------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
-| `GET /api/v1/briefing?role=implementer`                                      | The CLI's `--json` briefing (`agent`, `role`, `order`, `since`, `limit` as on the CLI) |
-| `GET /api/v1/issues/N`, `/issues/N/deps`, `/issues/N/who`, `/prs/N`, `/team` | The CLI's `--issue N`, `deps N`, `who N`, `pr N`, `team` JSON                          |
-| `POST /api/v1/refresh` with `{"repo": "owner/name"}`                         | Drops cached entries; the next read collects live                                      |
-| `GET /api/v1/status`, `GET /healthz`                                         | Server status and cache counters; liveness                                             |
-| `/mcp`                                                                       | HTTP MCP: the same four read-only tools as `pdb-mcp`                                   |
-| `GET /`                                                                      | Read-only dashboard: choose a project and role to see the ranked next steps            |
-| `GET /api/v1/diagnostics/projects`, `/cache`, `/inflight`                    | The server's own state (projects, cached entries, collections running); never collects |
+| Route                                                                        | Result                                                                                               |
+| ---------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `GET /api/v1/briefing?role=implementer`                                      | The CLI's `--json` briefing (`agent`, `role`, `order`, `since`, `limit` as on the CLI)               |
+| `GET /api/v1/issues/N`, `/issues/N/deps`, `/issues/N/who`, `/prs/N`, `/team` | The CLI's `--issue N`, `deps N`, `who N`, `pr N`, `team` JSON                                        |
+| `POST /api/v1/refresh` with `{"repo": "owner/name"}`                         | Drops cached entries; the next read collects live                                                    |
+| `GET /api/v1/status`, `GET /healthz`                                         | Server status and cache counters; liveness                                                           |
+| `/mcp`                                                                       | HTTP MCP: the same four read-only tools as `pdb-mcp`                                                 |
+| `GET /`                                                                      | Read-only dashboard: choose a project and role to see the ranked next steps                          |
+| `GET /api/v1/diagnostics/{projects,config,cache,inflight,errors,rules}`      | The server's own state: settings, cache, running collections, recent failures, rules; never collects |
 
 Every data route wraps the unchanged CLI JSON in an envelope with `selection` and `freshness` (`source` is `live`, `cached` or `stale`, with `observedAt` and `ageSeconds`). `refresh=true` on any read bypasses a fresh entry. If GitHub fails, a result observed within the last 30 minutes is served as `stale` and `incomplete`, never as complete; otherwise the route answers 502 with the CLI command that inspects the same read. MCP results of `triage_briefing`, `triage_issue` and `triage_dependencies` carry the same block as `freshness.cache`; `triage_events` keeps its version-1 envelope, with no cache block.
 
