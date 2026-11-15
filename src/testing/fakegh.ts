@@ -7,7 +7,18 @@ import { page, repo, time } from "./snapshots.js";
 
 /** A fake repository of native edges served through the injected gh query boundary. */
 export type Graph = {
-  states?: Record<number, { state?: string; stateReason?: string | null; body?: string }>;
+  states?: Record<
+    number,
+    {
+      state?: string;
+      stateReason?: string | null;
+      body?: string;
+      labels?: string[];
+      createdAt?: string;
+      /** Open PRs that close this issue (closedByPullRequestsReferences). */
+      closedBy?: number[];
+    }
+  >;
   pullRequests?: Record<number, number[]>;
   edges: [blocked: number, blocker: number][];
   pageSize?: number;
@@ -43,7 +54,44 @@ export const graphQuery = (graph: Graph) => {
       more ? String(start + size) : null,
     );
   };
+  const known = (n: number) => n in (graph.states ?? {}) || graph.edges.flat().includes(n);
+  const eligibility = (n: number) => ({
+    createdAt: graph.states?.[n]?.createdAt ?? time,
+    labels: page((graph.states?.[n]?.labels ?? ["status:ready"]).map((name) => ({ name }))),
+    closedByPullRequestsReferences: page(
+      (graph.states?.[n]?.closedBy ?? []).map((p) => ({
+        number: p,
+        url: `https://github.com/${repo}/pull/${p}`,
+        state: "OPEN",
+      })),
+    ),
+  });
   const query: Query = async (source, variables) => {
+    // Batched dependant eligibility (#196): aliases d0..dK, one call per batch.
+    if ("n0" in variables) {
+      const answer: Record<string, unknown> = {};
+      for (let i = 0; `n${i}` in variables; i++) {
+        const n = Number(variables[`n${i}`]);
+        calls.push({ number: n, cursor: "batch" });
+        const limit = Number(/blockedBy\(first:(\d+)\)/.exec(source)?.[1] ?? 100);
+        const blockers = blockersOf(n);
+        answer[`d${i}`] = {
+          issue: known(n)
+            ? {
+                ...node(n),
+                ...eligibility(n),
+                blockedBy: page(
+                  blockers
+                    .slice(0, limit)
+                    .map((b) => ({ number: b, url: url(b), state: state(b) })),
+                  blockers.length > limit,
+                ),
+              }
+            : null,
+        };
+      }
+      return answer;
+    }
     const number = Number(variables.number);
     const cursor = variables.cursor as string | undefined;
     calls.push({ number, cursor });
@@ -81,7 +129,8 @@ export const graphQuery = (graph: Graph) => {
           ...node(number),
           body: graph.states?.[number]?.body ?? "",
           updatedAt: time,
-          labels: page([]),
+          labels: page((graph.states?.[number]?.labels ?? []).map((name) => ({ name }))),
+          ...(source.includes("closedByPullRequestsReferences") ? eligibility(number) : {}),
           blockedBy: connection(blockersOf(number)),
           blocking: connection(dependantsOf(number)),
         },

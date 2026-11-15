@@ -112,6 +112,7 @@ import {
   readWho,
   readWhoLive,
 } from "./workflow/readservices.js";
+import { directImpact, directImpactText } from "./briefing/dependencyimpact.js";
 import { readTicketStatus, ticketLimits, ticketStatusText } from "./workflow/ticketstatus.js";
 import { runServe } from "./serve.js";
 import type { ServeRuntime } from "./serve.js";
@@ -1529,8 +1530,18 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
     const report = await (runtime.dependencyReport ?? dependencyReport)(repository, values.number, {
       tree: !!values.tree,
       ...(values.maxNodes ? { maxNodes: values.maxNodes } : {}),
+      // Routine reads answer the direct-impact question; --tree stays a diagnosis (#196).
+      ...(values.tree ? {} : { impact: true }),
     });
-    await output(values.json ? JSON.stringify(report, null, 2) + "\n" : dependencyText(report));
+    const impact = directImpact(report);
+    await output(
+      values.json
+        ? JSON.stringify(impact ? { ...report, impact } : report, null, 2) + "\n"
+        : dependencyText(report) +
+            directImpactText(impact)
+              .map((line) => `${line}\n`)
+              .join(""),
+    );
     return dependencyReportIncomplete(report) ? 2 : 0;
   }
   const options = argumentsFor(args);
