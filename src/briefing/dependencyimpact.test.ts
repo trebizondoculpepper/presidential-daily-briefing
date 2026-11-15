@@ -108,6 +108,24 @@ describe("direct dependency impact (#196)", () => {
     expect(impact.nextAction).toContain("at least 50 dependant(s)");
   });
 
+  it("deps N exits 2 when dependants were not read, 0 when the direct answer is complete", async () => {
+    const quiet = async () => {};
+    const runtimeFor = (edges: [number, number][]) => {
+      const { query } = graphQuery({ edges });
+      return {
+        collect: async () => {
+          throw new Error("briefing collection must not run");
+        },
+        currentRepository: async () => repo,
+        dependencyReport: (r: string, n: number, o?: Parameters<typeof dependencyReport>[2]) =>
+          dependencyReport(r, n, o, query, clock),
+      };
+    };
+    const many = Array.from({ length: 60 }, (_, i): [number, number] => [100 + i, 1]);
+    expect(await main(["deps", "1"], quiet, runtimeFor(many))).toBe(2);
+    expect(await main(["deps", "1", "--json"], quiet, runtimeFor(many.slice(0, 50)))).toBe(0);
+  });
+
   it("keeps request volume and output small on a 165+ issue graph", async () => {
     // 1 blocks 40 heads; each head blocks a chain of 3 more: 161 issues.
     const edges: [number, number][] = [];
