@@ -10,6 +10,7 @@ import {
   planDependencyChange,
 } from "./dependencies.js";
 import { type Query } from "./github.js";
+import { dependenciesView, type ViewBase } from "../mcp/views.js";
 import type { Issue } from "./types.js";
 import { clock, issue, page, repo, time } from "../testing/snapshots.js";
 import { graphQuery } from "../testing/fakegh.js";
@@ -92,6 +93,103 @@ describe("native dependency read command", () => {
     expect(notPlanned.verdict).toContain("closed as not planned");
     const free = (await dependencyReport(repo, 7, {}, query, clock)).nodes[0];
     expect(free.verdict).toContain("No open native blockers");
+  });
+});
+
+/** A 170-issue injected graph: 1 blocks a fan of 40, each of which blocks a chain of 3. */
+const largeGraph = (): [number, number][] => {
+  const edges: [number, number][] = [];
+  for (let i = 0; i < 40; i++) {
+    const head = 10 + i * 4;
+    edges.push([head, 1], [head + 1, head], [head + 2, head + 1], [head + 3, head + 2]);
+  }
+  return edges;
+};
+
+describe("bounded --tree diagnosis (#196)", () => {
+  it("reads one issue for a direct read of a 165+ node graph", async () => {
+    const { query, calls } = graphQuery({ edges: largeGraph() });
+    const report = await dependencyReport(repo, 1, {}, query, clock);
+    expect(calls).toHaveLength(1);
+    expect(report.nodes).toHaveLength(1);
+    expect(report.nodes[0].downstream).toHaveLength(40);
+    expect(report.treeBounds).toBeUndefined();
+    expect(JSON.stringify(report).length).toBeLessThan(40_000);
+  });
+  it("stops at its node limit, lists what it did not read and never claims completeness", async () => {
+    const { query, calls } = graphQuery({ edges: largeGraph() });
+    const report = await dependencyReport(repo, 1, { tree: true }, query, clock);
+    // Request volume is bounded by the node limit, not by the 161-issue graph.
+    expect(calls).toHaveLength(50);
+    expect(report.nodes).toHaveLength(50);
+    expect(report.treeBounds).toMatchObject({
+      complete: false,
+      nodeLimit: 50,
+      nodesRead: 50,
+      stoppedBy: "node-limit",
+      cyclesComplete: false,
+    });
+    expect(report.treeBounds!.notRead).toBeGreaterThan(0);
+    expect(report.treeBounds!.notReadSample.length).toBeLessThanOrEqual(50);
+    expect(report.collection?.profile).toBe("dependency-tree-v1");
+    const text = dependencyText(report);
+    expect(text).toContain("TREE INCOMPLETE (node limit 50)");
+    expect(text).toContain("not a complete graph");
+    expect(text).not.toContain("Tree complete");
+    expect(text).toMatch(/Read cost: 50 request\(s\)/);
+    // Output stays bounded too.
+    expect(JSON.stringify(report).length).toBeLessThan(400_000);
+  });
+  it("reports a tree complete only when everything reachable was read", async () => {
+    const { query, calls } = graphQuery({ edges: largeGraph() });
+    const report = await dependencyReport(repo, 1, { tree: true, maxNodes: 500 }, query, clock);
+    expect(calls).toHaveLength(161);
+    expect(report.treeBounds).toMatchObject({ complete: true, notRead: 0, stoppedBy: null });
+    expect(dependencyText(report)).toContain("Tree complete: 161 issue(s) read");
+    // A limit equal to the graph size is still complete; one fewer is not.
+    const exact = await dependencyReport(repo, 1, { tree: true, maxNodes: 161 }, query, clock);
+    expect(exact.treeBounds?.complete).toBe(true);
+    const short = await dependencyReport(repo, 1, { tree: true, maxNodes: 160 }, query, clock);
+    expect(short.treeBounds).toMatchObject({ complete: false, notRead: 1 });
+  });
+  it("stops the walk on a quota refusal and keeps what it read as partial", async () => {
+    const { query: base } = graphQuery({ edges: largeGraph() });
+    let sent = 0;
+    const query: Query = async (source, variables) => {
+      if (++sent === 4)
+        throw Object.assign(new Error("rate limited"), { rateLimited: true, retry: {} });
+      return base(source, variables);
+    };
+    const report = await dependencyReport(repo, 1, { tree: true }, query, clock);
+    expect(sent).toBe(4);
+    expect(report.nodes).toHaveLength(3);
+    expect(report.treeBounds).toMatchObject({ complete: false, stoppedBy: "quota" });
+    expect(report.collection?.quota).not.toBeNull();
+    expect(dependencyText(report)).toContain("quota refusal");
+  });
+  it("makes the MCP dependencies view incomplete when the tree was truncated", async () => {
+    const { query } = graphQuery({ edges: largeGraph() });
+    const report = await dependencyReport(repo, 1, { tree: true, maxNodes: 5 }, query, clock);
+    const base = { repository: repo, status: "complete", notices: [], maxChars: 16_384 };
+    const view = dependenciesView(
+      base as unknown as ViewBase,
+      JSON.parse(JSON.stringify(report)),
+      1,
+      { offset: 0, limit: 20 },
+      {},
+    );
+    expect(view.status).toBe("incomplete");
+    expect(view.sourceCompleteness.complete).toBe(false);
+    expect(JSON.stringify(view.sourceCompleteness)).toContain("Tree incomplete");
+  });
+  it("rejects a node limit outside its bounds", async () => {
+    const { query } = graphQuery({ edges: [[1, 2]] });
+    await expect(
+      dependencyReport(repo, 1, { tree: true, maxNodes: 0 }, query, clock),
+    ).rejects.toThrow("node limit");
+    expect(depsArgumentsFor(["7", "--tree", "--max-nodes", "9"])).toMatchObject({ maxNodes: 9 });
+    expect(() => depsArgumentsFor(["7", "--max-nodes", "9"])).toThrow("--tree");
+    expect(() => depsArgumentsFor(["7", "--tree", "--max-nodes", "501"])).toThrow("1–500");
   });
 });
 

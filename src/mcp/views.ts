@@ -580,7 +580,14 @@ export function dependenciesView(
       (ref) => `Dependency ${ref} is in a repository this server does not serve; not read.`,
     ),
   ];
-  const incomplete = unknown.length > 0 || unfollowed.length > 0;
+  // An explicit tree stopped by its node limit or a quota refusal is a partial graph (#196).
+  const bounds = obj(report.treeBounds);
+  const truncated = report.tree === true && bounds.complete !== true;
+  if (truncated)
+    warnings.push(
+      `Tree incomplete: read ${String(bounds.nodesRead ?? "?")} issue(s); ${String(bounds.notRead ?? "unknown")} known issue(s) and more beyond them not read (${str(bounds.stoppedBy) || "bound unknown"}). Not a complete graph.`,
+    );
+  const incomplete = unknown.length > 0 || unfollowed.length > 0 || truncated;
   return {
     ...base,
     status: incomplete ? "incomplete" : base.status,

@@ -22,6 +22,8 @@ import {
   dependencyChangeText,
   dependencyReport,
   dependencyText,
+  treeNodeLimit,
+  treeNodeMaximum,
   ghRun,
   planDependencyChange,
 } from "./github/dependencies.js";
@@ -127,7 +129,15 @@ export type DepsArguments =
       repo?: string;
       json?: boolean;
     }
-  | { help?: undefined; number: number; repo?: string; json?: boolean; tree?: boolean };
+  | {
+      help?: undefined;
+      number: number;
+      repo?: string;
+      json?: boolean;
+      tree?: boolean;
+      /** `--max-nodes`: the explicit tree walk's node limit (#196). */
+      maxNodes?: number;
+    };
 
 /** Injected services for `main`; tests replace the GitHub-facing ones. */
 export interface Runtime {
@@ -314,7 +324,7 @@ Exit 0: complete evidence. 2: useful but incomplete evidence. 1: invalid argumen
 read (including an unavailable issue). The full intake stays: pdb --issue N --json.
 `;
 
-export const depsHelp = `Usage: pdb deps N [--tree] [--json] [--repo owner/name]
+export const depsHelp = `Usage: pdb deps N [--tree [--max-nodes K]] [--json] [--repo owner/name]
        pdb deps add N --on M [--on K] --note WHY [--dry-run] [--json]
        pdb deps remove N --on M [--on K] --note WHY [--dry-run] [--json]
        pdb deps migrate --plan FILE [--repo owner/name] [--json]
@@ -324,7 +334,11 @@ deps add/remove make N blocked (or no longer blocked) by each M, after fresh liv
 refuses self-dependencies, pull requests, missing issues and cycles; an edge that already
 exists (add) or is absent (remove) is a no-op. Posts one comment on N with the note.
 Changes no labels.
-  --tree                Follow blockers and dependants transitively; report cycles
+  --tree                Explicit, expensive diagnosis: follow blockers and dependants
+                        transitively (one request per issue), breadth first; report cycles.
+                        A walk stopped by its node limit says so and lists what it did not
+                        read; it is never reported as a complete graph
+  --max-nodes K         Tree node limit (default ${treeNodeLimit}, at most ${treeNodeMaximum}; --tree only)
   --on M                Blocker issue number (repeatable; add/remove only)
   --note WHY            Reason recorded in the comment (required for add/remove)
   --dry-run             Show the exact changes and comment; make none
@@ -344,6 +358,7 @@ export function depsArgumentsFor(args: string[]): DepsArguments {
       repo: { type: "string" },
       json: { type: "boolean" },
       tree: { type: "boolean" },
+      "max-nodes": { type: "string" },
       help: { type: "boolean" },
       on: { type: "string", multiple: true },
       note: { type: "string" },
@@ -396,12 +411,20 @@ export function depsArgumentsFor(args: string[]): DepsArguments {
     !/^[1-9]\d*$/.test(positionals[0]) ||
     !Number.isSafeInteger(Number(positionals[0]))
   )
-    throw new Error("Usage: deps N [--tree] [--json] [--repo owner/name]");
+    throw new Error("Usage: deps N [--tree [--max-nodes K]] [--json] [--repo owner/name]");
+  const limit = values["max-nodes"];
+  if (limit !== undefined) {
+    if (!values.tree) throw new Error("--max-nodes applies only to deps N --tree.");
+    const parsed = number(limit);
+    if (parsed === null || parsed > treeNodeMaximum)
+      throw new Error(`--max-nodes must be 1–${treeNodeMaximum}.`);
+  }
   return {
     repo: values.repo,
     json: values.json,
     tree: values.tree,
     number: Number(positionals[0]),
+    ...(limit !== undefined ? { maxNodes: Number(limit) } : {}),
   };
 }
 /** Dry runs report the exit code the real run would give if every apply succeeded. */
@@ -1493,6 +1516,7 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
     }
     const report = await (runtime.dependencyReport ?? dependencyReport)(repository, values.number, {
       tree: !!values.tree,
+      ...(values.maxNodes ? { maxNodes: values.maxNodes } : {}),
     });
     await output(values.json ? JSON.stringify(report, null, 2) + "\n" : dependencyText(report));
     return 0;
