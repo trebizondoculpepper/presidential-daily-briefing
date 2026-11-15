@@ -15,8 +15,8 @@ describe("local configuration doctor (#64)", () => {
     "gh auth status --active --hostname github.com": 0,
     "git rev-parse --show-toplevel": 0,
     "git remote -v": 0,
-    "git check-ignore --quiet --no-index agent-inbox.toml": 0,
-    "git ls-files --error-unmatch -- agent-inbox.toml": 1,
+    "git check-ignore --quiet --no-index pdb.toml": 0,
+    "git ls-files --error-unmatch -- pdb.toml": 1,
   };
   const SECRET = "SECRET-TOKEN-VALUE";
   async function run(
@@ -89,14 +89,14 @@ describe("local configuration doctor (#64)", () => {
   });
 
   it("distinguishes a missing ignore rule from an already tracked file", async () => {
-    const missingRule = await run({ "git check-ignore --quiet --no-index agent-inbox.toml": 1 });
+    const missingRule = await run({ "git check-ignore --quiet --no-index pdb.toml": 1 });
     expect(missingRule.status["identity.git-ignored"]).toBe("missing");
     expect(missingRule.status["identity.git-tracked"]).toBe("ok");
-    const tracked = await run({ "git ls-files --error-unmatch -- agent-inbox.toml": 0 });
+    const tracked = await run({ "git ls-files --error-unmatch -- pdb.toml": 0 });
     expect(tracked.status["identity.git-ignored"]).toBe("ok");
     expect(tracked.status["identity.git-tracked"]).toBe("invalid");
     expect(tracked.report.checks.find((c) => c.id === "identity.git-tracked")!.next).toEqual([
-      'git rm --cached -- ":/agent-inbox.toml"',
+      'git rm --cached -- ":/pdb.toml"',
     ]);
     expect(localDoctorExitCode(tracked.report)).toBe(1);
   });
@@ -111,11 +111,11 @@ describe("local configuration doctor (#64)", () => {
           ),
         );
       await git(dir, "init", "-q");
-      await writeFile(join(dir, "agent-inbox.toml"), "x\n");
-      await git(dir, "add", "agent-inbox.toml");
+      await writeFile(join(dir, "pdb.toml"), "x\n");
+      await git(dir, "add", "pdb.toml");
       const sub = join(dir, "sub");
       await mkdir(sub);
-      const tracked = await run({ "git ls-files --error-unmatch -- agent-inbox.toml": 0 });
+      const tracked = await run({ "git ls-files --error-unmatch -- pdb.toml": 0 });
       const suggested = tracked.report.checks.find((c) => c.id === "identity.git-tracked")!
         .next[0]!;
       // Run the suggested command's arguments from the subdirectory, as a user would.
@@ -369,10 +369,10 @@ describe("local configuration doctor (#64)", () => {
       );
       const worktree = join(dir, "wt");
       await git(primary, "worktree", "add", "-q", worktree);
-      await writeFile(join(dir, "agent-inbox.toml"), '[agents.claude]\nname = "decoy"\n');
-      await writeFile(join(primary, "agent-inbox.toml"), '[agents.claude]\nname = "decoy"\n');
+      await writeFile(join(dir, "pdb.toml"), '[agents.claude]\nname = "decoy"\n');
+      await writeFile(join(primary, "pdb.toml"), '[agents.claude]\nname = "decoy"\n');
       await writeFile(
-        join(worktree, "agent-inbox.toml"),
+        join(worktree, "pdb.toml"),
         '[agents.claude]\nname = "worktree_agent"\ntriage_role = "designer"\n',
       );
       const nested = join(worktree, "a", "b");

@@ -499,6 +499,10 @@ const selectionText = (selected: ReturnType<typeof selectionJson>): string =>
       ? `selected by --harness ${selected.harness}`
       : `detected ${selected.harness} from ${selected.signals.join(", ")}`;
 
+/** Read-only notice for a legacy identity: what it is and the one-time import command. */
+const legacyNote = (record: IdentityRecord, entry: string): string =>
+  `legacy-not-imported: read from ${record.path} because ${IDENTITY_FILE} has no [agents.${entry}] entry; nothing was imported. Import it once (that file is never changed): pdb config set identity.triage_role ${record.triageRole ?? "implementer|designer"} --entry ${entry}`;
+
 const identitySetting = (record: IdentityRecord, key: string) => {
   const value = identityValue(record, key);
   return { key, value, source: value === null ? ("unset" as const) : ("explicit" as const) };
@@ -542,6 +546,9 @@ async function runIdentity(
       schemaVersion: 1,
       kind: "config-get",
       ...where,
+      // Additive (#319): the file the value came from and its store category.
+      path: record.path,
+      store: record.source,
       fileExists: record.fileExists,
       entryExists: record.entryExists,
       ...setting,
@@ -549,11 +556,14 @@ async function runIdentity(
     };
     if (parsed.json) return JSON.stringify(result, null, 2) + "\n";
     const notes = [
+      record.source === "legacy-not-imported" ? legacyNote(record, entry) : "",
       !record.fileExists ? `${IDENTITY_FILE} not present` : "",
-      record.fileExists && !record.entryExists ? `no [agents.${entry}] entry` : "",
+      record.fileExists && !record.entryExists
+        ? `no [agents.${entry}] entry in ${IDENTITY_FILE}`
+        : "",
       ...record.problems,
     ].filter(Boolean);
-    return `${parsed.key} = ${setting.value ?? "(unset)"} (${setting.source}; entry ${entry} in ${IDENTITY_FILE}, ${selectionText(where)})${notes.length ? `\n  ${notes.join("\n  ")}\n  Set: ${record.entryExists ? `pdb config set ${parsed.key} ${parsed.key === "identity.name" ? "NAME" : "implementer|designer"}` : "pdb config set identity.triage_role implementer|designer"}${flags(parsed, entry)}` : ""}\n`;
+    return `${parsed.key} = ${setting.value ?? "(unset)"} (${setting.source}; entry ${entry} in ${record.path}, ${selectionText(where)})${notes.length ? `\n  ${notes.join("\n  ")}\n  Set: ${record.entryExists ? `pdb config set ${parsed.key} ${parsed.key === "identity.name" ? "NAME" : "implementer|designer"}` : "pdb config set identity.triage_role implementer|designer"}${flags(parsed, entry)}` : ""}\n`;
   }
   const write = await setIdentity(target, entry, parsed.key, parsed.value, {
     fs,
@@ -569,12 +579,16 @@ async function runIdentity(
     createdFile: write.createdFile,
     createdEntry: write.createdEntry,
     generatedName: write.generatedName,
+    importedFrom: write.importedFrom,
     excludeRuleAdded: write.excluded,
     ...setting,
   };
   if (parsed.json) return JSON.stringify(result, null, 2) + "\n";
   const extra = [
     write.generatedName ? `generated name ${write.generatedName} for new entry ${entry}` : "",
+    write.importedFrom
+      ? `imported the name${write.record.triageRole !== null && parsed.key !== "identity.triage_role" ? " and triage_role" : ""} of [agents.${entry}] from ${write.importedFrom} once (that file was not changed)`
+      : "",
     write.excluded ? `added /${IDENTITY_FILE} to this repository's local Git exclude file` : "",
   ].filter(Boolean);
   return `${parsed.key} = ${setting.value} (entry ${entry}, ${selectionText(where)}) — ${write.changed ? `written to ${IDENTITY_FILE} (local, not committed)` : "unchanged"}${extra.map((line) => `\n  ${line}`).join("")}\n`;
@@ -617,9 +631,10 @@ async function identityListing(
     const record = await readIdentity(root, entry, fs);
     return {
       resolved: true as const,
-      path: IDENTITY_FILE,
+      path: record.path,
       entry,
       ...selectionJson(resolution),
+      store: record.source,
       fileExists: record.fileExists,
       entryExists: record.entryExists,
       settings: IDENTITY_KEYS.map((key) => identitySetting(record, key.key)),
@@ -652,5 +667,5 @@ function identityListText(identity: Awaited<ReturnType<typeof identityListing>>)
           .map((line) => `  ${line}`)
           .join("\n")}\n`;
   }
-  return `Agent identity (entry ${identity.entry} in ${IDENTITY_FILE}${identity.fileExists ? "" : ", not present"}; ${selectionText(identity)}):\n${identity.settings.map((s) => `  ${s.key} = ${s.value ?? "(unset)"} (${s.source})`).join("\n")}\n${identity.problems.map((p) => `  ${p}\n`).join("")}`;
+  return `Agent identity (entry ${identity.entry} in ${identity.path}${identity.store === "legacy-not-imported" ? ", legacy-not-imported" : identity.fileExists ? "" : ", not present"}; ${selectionText(identity)}):\n${identity.settings.map((s) => `  ${s.key} = ${s.value ?? "(unset)"} (${s.source})`).join("\n")}\n${identity.problems.map((p) => `  ${p}\n`).join("")}`;
 }

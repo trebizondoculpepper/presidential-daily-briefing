@@ -41,6 +41,11 @@ export const selectionSchema = z.object({
   triageRole: z.string().nullable(),
   /** Why identity is unresolved (the read is unfocused), with recovery. */
   identityDiagnostic: z.string().nullable(),
+  /**
+   * Additive (#319): the local store category that supplied a persisted name — `pdb`, or
+   * `legacy-not-imported` for a legacy agent-inbox.toml entry not yet imported. Never a path.
+   */
+  identityStore: z.enum(["pdb", "legacy-not-imported"]).optional(),
 });
 export type Selection = z.infer<typeof selectionSchema>;
 

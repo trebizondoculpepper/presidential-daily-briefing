@@ -7,8 +7,9 @@
  * never prints file contents, credentials or `gh` output; paths are reported relative to the
  * checkout so output can be shared without exposing the local filesystem layout.
  *
- * The root `agent-inbox.toml` is read only through the shared identity service (#70, maintained
- * TOML parser) and entry resolver (#38). Only the selected entry's registered `name` and
+ * The root `pdb.toml` (with its read-only legacy `agent-inbox.toml` fallback, #319) is read
+ * only through the shared identity service (#70, maintained TOML parser) and entry resolver
+ * (#38). A legacy identity is reported as not imported; Doctor never imports it. Only the selected entry's registered `name` and
  * `triage_role` are used; parse errors report line/column only, never file text.
  */
 import { execFile } from "node:child_process";
@@ -23,7 +24,12 @@ import type { ConfigFileSystem, GitRunner } from "./config.js";
 import { roleNames } from "../briefing/roles.js";
 import { resolveEntry } from "./harness.js";
 import type { Environment } from "./harness.js";
-import { parseIdentityDocument, readIdentity, TRIAGE_ROLES } from "./identity.js";
+import {
+  LEGACY_IDENTITY_FILE,
+  parseIdentityDocument,
+  readIdentity,
+  TRIAGE_ROLES,
+} from "./identity.js";
 
 export const LOCAL_DOCTOR_SCHEMA_VERSION = 1;
 export { IDENTITY_FILE } from "./identity.js";
@@ -271,7 +277,7 @@ export async function localDoctor(
               id: "identity.file",
               status: "missing",
               source: `${IDENTITY_FILE} absent`,
-              detail: `No ${IDENTITY_FILE} at the checkout root. Setting a triage role creates it (Git-excluded) with a generated name; explicit --agent still works meanwhile.`,
+              detail: `No ${IDENTITY_FILE} at the checkout root. Setting a triage role creates it (Git-excluded), importing the name of a matching legacy ${LEGACY_IDENTITY_FILE} entry once (never changing that file) or else generating one; explicit --agent still works meanwhile.`,
               next: [
                 withRepo(
                   "pdb config set identity.triage_role <TRIAGE_ROLE> --entry <ENTRY>",
@@ -557,12 +563,57 @@ async function identityChecks(
     withRepo(`pdb config set identity.triage_role ${role} ${select}`, repository),
   );
   const record = await readIdentity(root, entry, fs);
+  if (record.source === "legacy-not-imported") {
+    // Read-only fallback: the legacy entry still identifies this agent, but it is not in
+    // pdb.toml yet. Doctor reports it and the import command; it never imports.
+    result.checks.push({
+      id: "identity.entry",
+      status: "missing",
+      source,
+      detail: `Entry [agents.${entry}] is not in ${IDENTITY_FILE}; a legacy ${LEGACY_IDENTITY_FILE} entry is used read-only (legacy-not-imported). Setting a triage role imports its name once; ${LEGACY_IDENTITY_FILE} is never changed.`,
+      next: record.triageRole
+        ? [
+            withRepo(
+              `pdb config set identity.triage_role ${record.triageRole} ${select}`,
+              repository,
+            ),
+          ]
+        : initialise,
+    });
+    result.name = record.name;
+    result.triageRole = record.triageRole;
+    result.checks.push({
+      id: "identity.name",
+      status: "ok",
+      source: `${LEGACY_IDENTITY_FILE} [agents.${entry}] name (legacy-not-imported)`,
+      detail: `Legacy name ${record.name} (not imported).`,
+      next: [],
+    });
+    result.checks.push(
+      record.triageRole !== null
+        ? {
+            id: "identity.triage-role",
+            status: "ok",
+            source: `${LEGACY_IDENTITY_FILE} [agents.${entry}] triage_role (legacy-not-imported)`,
+            detail: `Legacy triage role ${record.triageRole} (not imported).`,
+            next: [],
+          }
+        : {
+            id: "identity.triage-role",
+            status: "missing",
+            source: `${LEGACY_IDENTITY_FILE} [agents.${entry}] triage_role (legacy-not-imported)`,
+            detail: `The legacy entry has no valid triage_role; a generic 'role' key is not a substitute. Valid: ${TRIAGE_ROLES.join(", ")}.`,
+            next: initialise,
+          },
+    );
+    return result;
+  }
   if (!record.entryExists) {
     result.checks.push({
       id: "identity.entry",
       status: "missing",
       source,
-      detail: `Entry [agents.${entry}] is not in ${IDENTITY_FILE}${record.fileExists ? "" : " (file absent)"}. Setting a triage role creates it with a generated name.`,
+      detail: `Entry [agents.${entry}] is not in ${IDENTITY_FILE}${record.fileExists ? "" : " (file absent)"}. Setting a triage role creates it with a generated name.${record.problems.length ? ` ${record.problems.join(" ")}` : ""}`,
       next: initialise,
     });
     for (const id of ["identity.name", "identity.triage-role"])
