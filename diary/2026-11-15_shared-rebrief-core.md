@@ -7,3 +7,5 @@ HTTP MCP currently cannot request force-refresh or explicit platform, so that tr
 Caught and corrected an initial workspace routing mistake before commit: moved only the new files/service edit from the original checkout to this worktree, restoring the original checkout clean.
 
 Validation: full suite 1,945 passed with one existing skip; focused rebrief cases, check, build, built smoke and installed-archive package test passed. Check reports 45 pre-existing warnings and zero errors. The private state and Codex platform path were exercised without credentials, model calls, hooks or live mutations.
+
+Codex review found that validation stripped native unlock fields before fingerprinting. Preserved unlock counts/unknown evidence, assessment fields and band in the validated semantic action; added an acknowledged-session regression for changed native unlock evidence while action identity/order and subject metadata stay fixed.
