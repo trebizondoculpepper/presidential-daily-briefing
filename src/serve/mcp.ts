@@ -144,6 +144,8 @@ const jsonRpcError = (target: ServerResponse, status: number, code: number, mess
 /** Stateful MCP sessions for `/mcp`. */
 export class McpSessions {
   private readonly sessions = new Map<string, Session>();
+  /** Initialisations admitted but not yet registered (or failed); they count toward the bound. */
+  private pending = 0;
   private sweepTimer: unknown = null;
   private closed = false;
 
@@ -157,6 +159,11 @@ export class McpSessions {
 
   get size(): number {
     return this.sessions.size;
+  }
+
+  /** Reservations held by initialisations in progress (tests). */
+  get initializing(): number {
+    return this.pending;
   }
 
   private scheduleSweep(): void {
@@ -213,6 +220,12 @@ export class McpSessions {
     const header = request.headers["mcp-session-id"];
     let session: Session | undefined;
     let created = false;
+    let reserved = false;
+    const release = () => {
+      if (!reserved) return;
+      reserved = false;
+      this.pending--;
+    };
     if (header !== undefined) {
       session = typeof header === "string" ? this.sessions.get(header) : undefined;
       // The specified reconnect path: an unknown session makes the client re-initialize.
@@ -220,8 +233,17 @@ export class McpSessions {
     } else {
       if (method !== "POST")
         return jsonRpcError(response, 400, -32000, "Mcp-Session-Id header is required");
+      // Reserve capacity before any await, so concurrent initialisations cannot exceed the
+      // bound; the reservation is released once the session is registered or has failed.
+      this.pending++;
+      reserved = true;
       // Admit the new session by closing the least recently used one at the bound.
-      while (this.sessions.size >= MAX_MCP_SESSIONS) {
+      while (this.sessions.size + this.pending > MAX_MCP_SESSIONS) {
+        if (this.sessions.size === 0) {
+          // Every slot is held by initialisations still in progress.
+          release();
+          return jsonRpcError(response, 503, -32000, "Too many MCP sessions are initializing");
+        }
         const [id, oldest] = [...this.sessions].reduce((a, b) =>
           b[1].lastUsed < a[1].lastUsed ? b : a,
         );
@@ -237,13 +259,21 @@ export class McpSessions {
           // Tools send no server-initiated notifications: single JSON responses suffice.
           enableJsonResponse: true,
           maxRequestBodySize: MAX_BODY_BYTES,
-          onsessioninitialized: (id) => void this.sessions.set(id, fresh),
+          onsessioninitialized: (id) => {
+            this.sessions.set(id, fresh);
+            release();
+          },
           onsessionclosed: (id) => {
             if (this.sessions.get(id) === fresh) this.sessions.delete(id);
           },
         }),
       };
-      await server.connect(fresh.transport);
+      try {
+        await server.connect(fresh.transport);
+      } catch (error) {
+        release();
+        throw error;
+      }
       session = fresh;
       created = true;
     }
@@ -255,6 +285,8 @@ export class McpSessions {
       await writeResponse(reply, response);
     } finally {
       session.open.delete(response);
+      // An initialisation that failed or never registered gives its reservation back.
+      release();
       // A first request that did not initialize a session leaves nothing behind.
       if (created && session.transport.sessionId === undefined) await session.server.close();
     }

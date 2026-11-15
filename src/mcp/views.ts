@@ -505,17 +505,26 @@ export function dependenciesView(
     tool: "triage_dependencies",
     arguments: { ...args, number, offset, limit: page.limit },
   }));
-  const warnings = unknown.map(
-    (url) => `Native dependency evidence unknown for ${url}; refresh live.`,
-  );
+  // pdb serve does not walk into repositories it does not serve (#373): those nodes are
+  // missing source evidence, so the tree is incomplete, not merely shortened for display.
+  const unfollowed = list(report.unfollowed)
+    .map(obj)
+    .map((node) => `${str(node.repository)}#${String(node.number)}`);
+  const warnings = [
+    ...unknown.map((url) => `Native dependency evidence unknown for ${url}; refresh live.`),
+    ...unfollowed.map(
+      (ref) => `Dependency ${ref} is in a repository this server does not serve; not read.`,
+    ),
+  ];
+  const incomplete = unknown.length > 0 || unfollowed.length > 0;
   return {
     ...base,
-    status: unknown.length ? "incomplete" : base.status,
+    status: incomplete ? "incomplete" : base.status,
     tool: "triage_dependencies",
     view: "dependencies",
     subject: { type: "issue", number },
     freshness: pick(report, ["startedAt", "fetchedAt"]),
-    sourceCompleteness: { complete: unknown.length === 0, warnings },
+    sourceCompleteness: { complete: !incomplete, warnings },
     data: {
       reportSchemaVersion: report.schemaVersion,
       tree: report.tree === true,
