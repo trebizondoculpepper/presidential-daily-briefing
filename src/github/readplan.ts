@@ -161,6 +161,36 @@ export const readProfiles = {
     sources: ["issue", "labels", "native-blocked-by", "native-blocking"],
     bounds: { treeNodes: 50, nativeEdgesPerPage: 100, notReadListed: 50 },
   },
+  /**
+   * The routine briefing (#368): discovery of every open issue and PR (labels, creation time,
+   * native summaries and bounded direct edges, closing links, PR head/base/draft; no bodies,
+   * comments, reviews, threads or checks), ranked through the briefing's own engine, then the
+   * full snapshot fields of only the subjects the briefing would show plus the items their rules
+   * need (closing links both ways). Rounds re-rank after hydration and expand the frontier; at
+   * most `maxHydrated` items are hydrated, `issuesPerRequest` issues to a request. An item that
+   * was not hydrated is `not-requested`, never empty evidence.
+   */
+  "briefing-shortlist-v1": {
+    version: 1,
+    sources: [
+      "open-issues",
+      "open-pull-requests",
+      "issue",
+      "comments",
+      "native-blocked-by",
+      "native-blocking",
+      "pull-request",
+      "required-checks",
+    ],
+    bounds: {
+      pageSize: 50,
+      pages: 10,
+      maxHydrated: 40,
+      rounds: 4,
+      issuesPerRequest: 10,
+      hydrationConcurrency: 3,
+    },
+  },
   /** The explicit `pr N --history` diagnosis; never implicit in a routine read. */
   "review-history-v1": { version: 1, sources: ["review-history"], bounds: {} },
   /** The full open-inventory snapshot that `--issue N` intake promises (unchanged). */

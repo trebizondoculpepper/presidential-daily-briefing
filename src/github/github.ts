@@ -526,16 +526,16 @@ export async function currentRepository(cwd?: string, signal?: AbortSignal): Pro
     );
   }
 }
-const info = "pageInfo{hasNextPage endCursor}";
+export const info = "pageInfo{hasNextPage endCursor}";
 // Author type and edit history (#247) let the provenance reader apply the #212 trust rule; all
 // are existing IssueComment/PullRequestReviewComment fields, so no request is added.
-const comment =
+export const comment =
   "databaseId body url author{__typename login} createdAt updatedAt lastEditedAt includesCreatedEdit editor{__typename login}";
-const common = `number title body url state createdAt updatedAt lastEditedAt labels(first:100){nodes{name} ${info}} comments(first:100){nodes{${comment}} ${info}}`;
+export const common = `number title body url state createdAt updatedAt lastEditedAt labels(first:100){nodes{name} ${info}} comments(first:100){nodes{${comment}} ${info}}`;
 // The issue side of the closing link (#162): proves an issue has no open closing PR when an
 // open PR's closing references are truncated.
-const closedBy = `closedByPullRequestsReferences(first:10,includeClosedPrs:false){nodes{number url state} ${info}}`;
-const prFields = `${common} headRefOid headRefName baseRefName isDraft mergeable mergeStateStatus reviewDecision mergedAt
+export const closedBy = `closedByPullRequestsReferences(first:10,includeClosedPrs:false){nodes{number url state} ${info}}`;
+export const prFields = `${common} headRefOid headRefName baseRefName isDraft mergeable mergeStateStatus reviewDecision mergedAt
  closingIssuesReferences(first:100){nodes{number url} ${info}}
  reviewThreads(first:100){nodes{isResolved isOutdated comments(first:1){totalCount nodes{${comment}} ${info}}} ${info}}
  reviews(first:100){nodes{body url author{__typename login} state submittedAt commit{oid}} ${info}}
@@ -1254,7 +1254,7 @@ export async function hydratePullRequests(
     /** Receives a warning for every PR whose evidence is incomplete or unknown. */
     warnings: string[];
     /** How the PR relates to the ticket, for warnings: a closing link or a delivery member. */
-    role: "linked" | "delivery member";
+    role: "linked" | "delivery member" | "shortlisted";
   },
   base: Query = ghQueryWith(options.signal),
 ): Promise<PullRequest[]> {

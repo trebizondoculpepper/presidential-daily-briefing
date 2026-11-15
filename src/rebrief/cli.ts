@@ -4,6 +4,7 @@ import { codexResponse } from "./codex.js";
 import { parseArgs } from "node:util";
 import { isAbsolute } from "node:path";
 import { collect, currentRepository, ghQueryWith, ghRest } from "../github/github.js";
+import { collectShortlist } from "../github/shortlist.js";
 import { dependencyReport } from "../github/dependencies.js";
 import { resolveIdentityTarget } from "../config/identity.js";
 import { validateHarness } from "../config/harness.js";
@@ -240,6 +241,7 @@ export async function runRebrief(
             : (runtime.transport?.(input) ??
               serviceTransport({
                 collect,
+                collectShortlist,
                 dependencyReport,
                 rest: ghRest,
                 queryWith: runtime.read ? undefined : ghQueryWith,
