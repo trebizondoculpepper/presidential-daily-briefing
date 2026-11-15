@@ -12,6 +12,7 @@ import {
   collectIssueFocus,
   ghQuery,
   ghRest,
+  historyComplete,
   IssueUnavailable,
   permissionLookup,
   prop,
@@ -1564,7 +1565,16 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
       await output(options.json ? JSON.stringify(report, null, 2) + "\n" : unavailableText(d));
       return 2;
     }
-    if (options.cache) await atomicJson(options.cache, snapshot);
+    // An incomplete history read never replaces the last successful explicit snapshot.
+    if (options.cache && historyComplete(snapshot)) await atomicJson(options.cache, snapshot);
+    else if (options.cache)
+      snapshot = {
+        ...snapshot,
+        warnings: [
+          ...snapshot.warnings,
+          `${options.cache} was not overwritten: this read's history window is incomplete.`,
+        ],
+      };
   }
   if (options.issue && !snapshot.issues.some((issue) => issue.number === options.issue))
     throw new Error(`Issue #${options.issue} not in this cache. Refresh live with --issue.`);

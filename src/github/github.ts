@@ -18,7 +18,7 @@ import type {
   SourceCoverage,
 } from "./changes.js";
 import type { Comment, Issue, Page, PullRequest, Reference, Snapshot } from "./types.js";
-import { hydrate, quotaRefusal, ReadMeter, readProfiles } from "./readplan.js";
+import { hydrate, QuotaStopped, quotaRefusal, ReadMeter, readProfiles } from "./readplan.js";
 import type { Hydrated } from "./readplan.js";
 import {
   classifyGhFailure,
@@ -605,6 +605,28 @@ export function declaredDependencyContexts(body: string, repository: string): De
   return [...refs.values()];
 }
 
+/**
+ * Whether a snapshot may replace an explicit `--cache` (doc/design/read-degradation.md "Cache
+ * and checkpoint safety"): never when its requested history window was not completely read.
+ */
+export const historyComplete = (snapshot: Snapshot): boolean =>
+  (!snapshot.history || snapshot.history.state === "complete") &&
+  snapshot.changeEvidence?.complete !== false;
+
+/**
+ * A history source's failure as a safe category (#370): the gh boundary's classified category
+ * when present, never the raw message. Cancellation is rethrown: a cancelled read never returns.
+ */
+function historyFailure(error: unknown, signal?: AbortSignal): string {
+  if (signal?.aborted || (error instanceof Error && error.name === "AbortError")) throw error;
+  // After a definitive quota refusal the meter stops further requests: not attempted, not failed.
+  if (error instanceof QuotaStopped) return "not-attempted";
+  const category = prop(error, "evidence", "category");
+  if (typeof category === "string" && /^[a-z][a-z-]{0,40}$/.test(category)) return category;
+  if (quotaRefusal(error)) return "rate-limited";
+  return "unknown";
+}
+
 export interface CollectOptions {
   since?: string;
   issue?: number;
@@ -698,18 +720,27 @@ export async function collect(
     let pageCount = 0;
     let reachedCutoff = false;
     let more = false;
-    const nodes = await pages<T>(
-      async (cursor) => {
-        const page = prop(await request(source, cursor ? { cursor } : {}), field);
-        pageCount++;
-        more = prop(page, "pageInfo", "hasNextPage") === true;
-        return page;
-      },
-      (batch) => {
-        reachedCutoff = batch.some((node) => Date.parse(node.updatedAt) < Date.parse(cutoff));
-        return reachedCutoff || pageCount >= maxPages;
-      },
-    );
+    // Pages read before a failure are kept (#370): a later page's error makes the source
+    // partial, never discards what was observed, and never reads as "no changes".
+    const nodes: T[] = [];
+    let failure: string | null = null;
+    try {
+      await pages<T>(
+        async (cursor) => {
+          const page = prop(await request(source, cursor ? { cursor } : {}), field);
+          pageCount++;
+          more = prop(page, "pageInfo", "hasNextPage") === true;
+          return page;
+        },
+        (batch) => {
+          nodes.push(...batch);
+          reachedCutoff = batch.some((node) => Date.parse(node.updatedAt) < Date.parse(cutoff));
+          return reachedCutoff || pageCount >= maxPages;
+        },
+      );
+    } catch (error) {
+      failure = historyFailure(error, options.signal);
+    }
     const unique = [
       ...new Map(
         nodes
@@ -717,7 +748,7 @@ export async function collect(
           .map((node) => [node.url, node]),
       ).values(),
     ];
-    const complete = reachedCutoff || !more;
+    const complete = !failure && (reachedCutoff || !more);
     const label = field === "issues" ? "issues" : "pull-requests";
     return [
       unique,
@@ -726,9 +757,12 @@ export async function collect(
         complete,
         pages: pageCount,
         nodes: unique.length,
-        omission: complete
-          ? null
-          : `${label} page cap (${maxPages} x 50) reached before ${cutoff}; older changes were not read.`,
+        omission: failure
+          ? `${label} history ${pageCount ? `stopped after ${pageCount} page(s)` : "could not be read"} (${failure}); changes back to ${cutoff} were not all read.`
+          : complete
+            ? null
+            : `${label} page cap (${maxPages} x 50) reached before ${cutoff}; older changes were not read.`,
+        ...(failure ? { failure } : {}),
       },
     ];
   };
@@ -807,6 +841,12 @@ export async function collect(
   const since = options.since ?? options.changeWindow?.from ?? undefined;
   let changed: Snapshot["changed"] = [];
   let changeEvidence: Snapshot["changeEvidence"];
+  let historySources: {
+    source: string;
+    pages: number;
+    complete: boolean;
+    failure: string | null;
+  }[] = [];
   if (since && options.changeWindow) {
     const window = options.changeWindow;
     const maxPages = options.maxChangePages ?? DEFAULT_CHANGE_PAGES;
@@ -829,6 +869,12 @@ export async function collect(
     );
     changed = summarize([...issueNodes, ...prNodes]);
     const coverage = [issueCoverage, prCoverage];
+    historySources = coverage.map((c) => ({
+      source: c.source,
+      pages: c.pages,
+      complete: c.complete,
+      failure: c.failure ?? null,
+    }));
     for (const item of coverage)
       if (!item.complete) warnings.push(`Change evidence incomplete: ${item.omission}`);
     changeEvidence = {
@@ -855,19 +901,81 @@ export async function collect(
       cost: { requests: 0, maxPagesPerSource: 0 },
     };
   } else if (since) {
-    const values = await Promise.all([
-      collection<Issue>(
-        "issues",
-        `${common} stateReason ${closedBy} ${nativeFields}`,
-        ",states:[OPEN,CLOSED]",
-        since,
-      ),
-      collection<PullRequest>("pullRequests", prFields, ",states:[OPEN,CLOSED,MERGED]", since),
-    ]);
-    changed = summarize([...values[0], ...values[1]]);
+    // Sequential, so a definitive quota refusal stops the next source instead of spending it.
+    const read = async <T extends { url: string; updatedAt: string }>(
+      field: "issues" | "pullRequests",
+      fields: string,
+      states: string,
+    ): Promise<{ nodes: T[]; pages: number; complete: boolean; failure: string | null }> => {
+      const source = `query($owner:String!,$name:String!,$cursor:String){repository(owner:$owner,name:$name){${field}(first:50,after:$cursor,orderBy:{field:UPDATED_AT,direction:DESC}${states}){nodes{${fields}} ${info}}} rateLimit{remaining resetAt}}`;
+      const nodes: T[] = [];
+      let count = 0;
+      try {
+        await pages<T>(
+          async (cursor) => {
+            const page = prop(await request(source, cursor ? { cursor } : {}), field);
+            count++;
+            return page;
+          },
+          (batch) => {
+            nodes.push(...batch);
+            return batch.some((node) => Date.parse(node.updatedAt) < Date.parse(since));
+          },
+        );
+        return { nodes, pages: count, complete: true, failure: null };
+      } catch (error) {
+        return {
+          nodes,
+          pages: count,
+          complete: false,
+          failure: historyFailure(error, options.signal),
+        };
+      }
+    };
+    const issueHistory = await read<Issue>(
+      "issues",
+      `${common} stateReason ${closedBy} ${nativeFields}`,
+      ",states:[OPEN,CLOSED]",
+    );
+    const quotaStop =
+      issueHistory.failure === "rate-limited" || issueHistory.failure === "secondary-rate-limit";
+    const prHistory = quotaStop
+      ? { nodes: [] as PullRequest[], pages: 0, complete: false, failure: "not-attempted" }
+      : await read<PullRequest>("pullRequests", prFields, ",states:[OPEN,CLOSED,MERGED]");
+    const inWindow = <T extends { updatedAt: string }>(nodes: T[]) =>
+      nodes.filter((node) => Date.parse(node.updatedAt) >= Date.parse(since));
+    changed = summarize([...inWindow(issueHistory.nodes), ...inWindow(prHistory.nodes)]);
+    historySources = [
+      { source: "issues", ...issueHistory },
+      { source: "pull-requests", ...prHistory },
+    ];
   }
   meter.cover("open-issues", repository, "complete");
   meter.cover("open-pull-requests", repository, "complete");
+  // History is a separate source (doc/design/read-degradation.md): its failure keeps the
+  // current inventory, makes the read incomplete, and never reads as "no changes".
+  let history: Snapshot["history"];
+  if (since && historySources.length) {
+    const failed = historySources.filter((h) => h.failure);
+    const state = historySources.every((h) => h.complete)
+      ? "complete"
+      : historySources.every((h) => h.failure && !h.pages)
+        ? "failed"
+        : "partial";
+    const failure = failed.map((h) => `${h.source}: ${h.failure}`).join(", ") || null;
+    meter.cover("history", `${repository} since ${since}`, state, {
+      failure,
+      omission:
+        state === "complete"
+          ? null
+          : `changes since ${since} were not all read${failure ? ` (${failure})` : ""}`,
+    });
+    history = { since, state, failure, sources: historySources };
+    if (failed.length && !options.changeWindow)
+      warnings.push(
+        `History since ${since} is ${state} (${failure}): changes in that window are unknown, not none. The current inventory was read completely.`,
+      );
+  }
   if (options.issue) meter.cover("issue", `${repository}#${options.issue}`, "complete");
   return {
     schemaVersion: 1,
@@ -879,6 +987,7 @@ export async function collect(
     dependencies,
     changed,
     since: since ?? null,
+    ...(history ? { history } : {}),
     ...(changeEvidence ? { changeEvidence } : {}),
     warnings,
     rateLimit,

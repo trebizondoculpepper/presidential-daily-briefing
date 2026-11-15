@@ -134,6 +134,8 @@ export interface SourceCoverage {
   nodes: number;
   /** Why coverage is incomplete, else null. */
   omission: string | null;
+  /** A safe failure category when the source failed part-way (#370). */
+  failure?: string;
 }
 export interface NativeLink {
   relation: "closes" | "closed-by" | "blocked-by" | "blocking";
