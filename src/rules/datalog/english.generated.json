@@ -1,7 +1,7 @@
 {
   "modelVersion": 2,
   "policyVersion": 1,
-  "rulesHash": "46626bfab869f6c7cc979f2dfe3e0a9631a22e927b825f38949005fd357205a5",
+  "rulesHash": "c6563add3e63a298cd27775bac7c5269ce572bda497080e25284833f02b1ff04",
   "sources": [
     "policy/schema.edn",
     "policy/rules.edn",
@@ -3627,6 +3627,25 @@
               "args": [
                 {
                   "var": "?t"
+                }
+              ]
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "fact",
+                  "scope": "entity",
+                  "entity": {
+                    "var": "?t"
+                  },
+                  "attribute": "claim-activity",
+                  "value": {
+                    "lit": "not-owned"
+                  },
+                  "phrase": "activity of your retained claim (active, waiting, resume-required or unknown)",
+                  "many": false
                 }
               ]
             }
@@ -10057,6 +10076,6 @@
     "overrides": 4,
     "constants": 14,
     "attributes": 71,
-    "clauses": 582
+    "clauses": 584
   }
 }

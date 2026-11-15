@@ -81,7 +81,7 @@ export interface DatalogOptions {
    */
   claimActivity?: ReadonlyMap<
     string,
-    { state: "active" | "waiting" | "resume-required" | "unknown"; reason: string }
+    { state: "active" | "waiting" | "resume-required" | "unknown" | "not-owned"; reason: string }
   >;
   /**
    * The viewer's open implementation claims in this repository, oldest first, and whether that

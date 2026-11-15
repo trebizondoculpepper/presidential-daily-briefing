@@ -538,7 +538,7 @@ export interface BriefingOptions {
     ownedClaims: { urls: readonly string[]; complete: boolean };
     claimActivity?: ReadonlyMap<
       string,
-      { state: "active" | "waiting" | "resume-required" | "unknown"; reason: string }
+      { state: "active" | "waiting" | "resume-required" | "unknown" | "not-owned"; reason: string }
     >;
   };
   stale?: {

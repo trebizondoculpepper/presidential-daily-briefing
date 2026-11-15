@@ -82,6 +82,8 @@ export interface ActionFacts {
   extraReasonCodes?: string[];
   /** Why there is no command (inspection only); null when `nextCommand` is set. */
   inspection: string | null;
+  /** The rule's explanation when the builder knows it (#413 retained-claim rows), as Datalog's. */
+  why?: string;
 }
 
 const isCurrent = (m: ActionFacts["impact"], sizes: readonly ComplexitySize[]): boolean =>
@@ -263,6 +265,7 @@ export function rankActions(
         impact: { state: a.impact.state, size: a.impact.size },
         unlocks: a.unlocks,
         unlocksUnknown: a.unlocksUnknown,
+        ...(a.why ? { why: { text: a.why, ruleIds: [], facts: {}, overriddenRuleIds: [] } } : {}),
       },
     ];
   });
@@ -372,7 +375,8 @@ export function roleCandidates(input: CandidateInput): ActionFacts[] {
         s.isIssue &&
         s.state === "OPEN" &&
         input.ownedByViewer(s.url) &&
-        activity(s.url) !== "waiting",
+        activity(s.url) !== "waiting" &&
+        activity(s.url) !== "not-owned",
     )
     .map((s) => s.number);
   const facts = (url: string, kind: ActionKind, sequence?: number): ActionFacts | null => {
@@ -447,14 +451,31 @@ export function roleCandidates(input: CandidateInput): ActionFacts[] {
   const out: ActionFacts[] = [];
   let sequence = 0;
   // #413: an own claim's activity decides its row, as decisions.edn does for the Datalog engine.
-  const ownKind = (url: string): [ActionKind, string[]] => {
+  // The texts are decisions.edn's templates; retainedranking.test.ts compares the two engines.
+  const reason = (url: string) => input.retained?.claimActivity?.get(url)?.reason ?? "";
+  const ownKind = (url: string): [ActionKind, string[], string?] | null => {
     switch (activity(url)) {
       case "resume-required":
-        return ["resume-claim", []];
+        return [
+          "resume-claim",
+          [],
+          `What your claim waited on has cleared (${reason(url)}); resume it explicitly before starting other work.`,
+        ];
       case "waiting":
-        return ["wait-claim", []];
+        return [
+          "wait-claim",
+          [],
+          `Waiting: ${reason(url)}. You keep this claim; nothing to do on it until that clears.`,
+        ];
       case "unknown":
-        return ["inspect", ["own-claim-unknown"]];
+        return [
+          "inspect",
+          ["own-claim-unknown"],
+          `Your claim's activity is unknown (${reason(url)}); inspect its wait evidence. Unknown is never waiting, so no other claim is admitted.`,
+        ];
+      case "not-owned":
+        // Released or transferred since the snapshot: no longer this viewer's to rank.
+        return null;
       default:
         return ["continue-implementation", []];
     }
@@ -463,12 +484,19 @@ export function roleCandidates(input: CandidateInput): ActionFacts[] {
     const kind = sectionKinds[section.name];
     if (section.background || !kind) continue;
     for (const row of section.rows) {
-      const [k, codes] =
+      const mapped =
         kind === "continue-implementation" && input.role === "implementer"
           ? ownKind(row.url)
-          : [kind, []];
+          : ([kind, []] as [ActionKind, string[]]);
+      if (!mapped) continue;
+      const [k, codes, why] = mapped;
       const f = facts(row.url, k, sequence++);
-      if (f) out.push(codes.length ? { ...f, extraReasonCodes: codes } : f);
+      if (f)
+        out.push({
+          ...f,
+          ...(codes.length ? { extraReasonCodes: codes } : {}),
+          ...(why ? { why } : {}),
+        });
     }
   }
   const owned = input.retained?.ownedClaims;
@@ -483,7 +511,14 @@ export function roleCandidates(input: CandidateInput): ActionFacts[] {
     (!input.isParked(first) || input.isAddressed(first))
   ) {
     const f = facts(first, "review-owned-work");
-    if (f) out.push(f);
+    const n = owned.urls.length;
+    if (f)
+      out.push({
+        ...f,
+        why: owned.complete
+          ? `You retain ${n} implementation claims; review which to finish, justify as waiting, release or reassign before starting more work.`
+          : `You retain at least ${n} implementation claims (the claim inventory is incomplete); review which to finish, justify as waiting, release or reassign before starting more work.`,
+      });
   }
   for (const [url, a] of input.assessments) {
     const s = input.subjects.get(url);
