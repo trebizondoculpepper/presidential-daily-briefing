@@ -3,10 +3,10 @@
  * real runner categorizes each deliberately broken input correctly.
  */
 import { describe, expect, it } from "vite-plus/test";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { main, runAll } from "../rules/datalog/runner.js";
+import { join, resolve } from "node:path";
+import { main, runAll, scenarioDir } from "../rules/datalog/runner.js";
 import { categoriesMarkdown, categoryCases, judge } from "./rulecategories.js";
 
 const failure = '<failure type="RuleDecisionFailure" message="x">x</failure>';
@@ -83,9 +83,11 @@ describe("rule category demonstration with the real runner (#394)", () => {
     }
   });
 
-  it("keeps the production scenarios passing and unaffected by the demonstration inputs", () => {
-    const outcomes = runAll();
-    expect(outcomes.filter((o) => o.status !== "passed")).toEqual([]);
-    expect(outcomes.some((o) => o.file.includes("category-demo"))).toBe(false);
+  // Structural, not a second full run: rules.test.ts already evaluates every production scenario
+  // once, and repeating that here (~3 s idle) timed out at 20 s under a loaded suite.
+  it("keeps the demonstration inputs out of the production scenarios", () => {
+    for (const c of categoryCases("r"))
+      expect(resolve(c.scenarios).startsWith(resolve(scenarioDir))).toBe(false);
+    expect(readdirSync(scenarioDir).some((f) => /category|demo|malformed/.test(f))).toBe(false);
   });
 });
