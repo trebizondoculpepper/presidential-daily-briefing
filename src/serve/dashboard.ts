@@ -33,12 +33,12 @@ export const dashboardPage = (): string => `<!doctype html>
 <h1>pdb serve</h1>
 <form id="selection">
 <label>Project <select id="repo"></select></label>
-<label>Role <select id="role"><option value="implementer">implementer</option><option value="designer">designer</option></select></label>
+<label>Role <select id="role"><option value="implementer">implementer</option><option value="designer">designer</option><option value="human">human</option></select></label>
 <label>Agent <input id="agent" type="text" placeholder="optional" autocomplete="off" spellcheck="false"></label>
 <button id="show" type="submit">Show</button>
 <button id="refresh" type="button">Refresh</button>
 </form>
-<p><a id="rules-link" href="/rules">Project rules</a> · <a id="setup-link" href="/setup">Agent setup</a></p>
+<p><a id="human-link" href="/human">Human attention</a> · <a id="rules-link" href="/rules">Project rules</a> · <a id="setup-link" href="/setup">Agent setup</a></p>
 </header>
 <main>
 <section id="state" aria-live="polite"></section>
@@ -73,6 +73,12 @@ ul.projects li { display: inline; margin: 0 .5rem 0 0; }
 .toc li { margin: 0; }
 a.detail { font-size: .8rem; margin-left: .4rem; }
 blockquote { margin: .2rem 0 .2rem 1rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+.kind.request { font-weight: 600; }
+.kind.candidate { border-style: dashed; }
+.kind.addressed { font-weight: 600; text-decoration: underline; }
+.notice { border-left: 3px solid GrayText; padding-left: .5rem; }
+nav a[aria-current] { font-weight: 700; text-decoration-thickness: 3px; }
+main a, main code { overflow-wrap: anywhere; }
 `;
 
 export interface DashboardRenderers {
@@ -237,7 +243,12 @@ export function dashboardClient(render: DashboardRenderers): void {
   const rulesLink = byId("rules-link") as HTMLAnchorElement | null;
   // The rules page link follows the selected project, encoded, on this same origin.
   const setupLink = byId("setup-link") as HTMLAnchorElement | null;
+  // The human mode of Work (#458) is its own page; it never reuses the agent field as a human.
+  const humanLink = byId("human-link") as HTMLAnchorElement | null;
+  const humanHref = () =>
+    `/human${repo.value ? `?${new URLSearchParams({ repo: repo.value }).toString()}` : ""}`;
   const linkRules = () => {
+    if (humanLink) humanLink.href = humanHref();
     if (rulesLink && repo.value)
       rulesLink.href = `/rules?${new URLSearchParams({ repo: repo.value }).toString()}`;
     // The agent setup page (#391) follows the same selection.
@@ -301,6 +312,11 @@ export function dashboardClient(render: DashboardRenderers): void {
       state.innerHTML = "<p>Select a project.</p>";
     }
     if (initial.get("role") === "designer") role.value = "designer";
+    // An old deep link to the human role opens its page, for the same project.
+    if (initial.get("role") === "human" && preset) {
+      location.assign(humanHref());
+      return;
+    }
     agent.value = initial.get("agent") ?? "";
     byId("selection").addEventListener("submit", (event) => {
       event.preventDefault();
@@ -308,7 +324,10 @@ export function dashboardClient(render: DashboardRenderers): void {
     });
     byId("refresh").addEventListener("click", () => void show(true));
     repo.addEventListener("change", () => void show(false));
-    role.addEventListener("change", () => void show(false));
+    role.addEventListener("change", () => {
+      if (role.value === "human") location.assign(humanHref());
+      else void show(false);
+    });
     // Only the view the user opened is fetched: one project, one role, on load or on request.
     if (preset) await show(false);
   };
