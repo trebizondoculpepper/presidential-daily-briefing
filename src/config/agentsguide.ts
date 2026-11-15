@@ -106,7 +106,7 @@ export async function installCoordinationSection(
       if ("unchanged" in next) return { keep: `${file} already has the current pdb section` };
       return { write: next.text };
     },
-    options,
+    { ...options, checkUnchanged: true },
   );
   return { ...outcome, file };
 }

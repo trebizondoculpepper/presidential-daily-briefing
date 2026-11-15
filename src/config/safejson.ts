@@ -92,6 +92,12 @@ export interface UpdateOptions {
   lockWaitMs?: number;
   sleep?: (ms: number) => Promise<void>;
   now?: () => number;
+  /**
+   * Re-read the target just before the commit and refuse if it changed since it was read (#351):
+   * for files that people and tools edit without honouring the lock, such as AGENTS.md. This
+   * narrows, but cannot portably close, the window between that re-read and the rename.
+   */
+  checkUnchanged?: boolean;
 }
 
 /** Serialize exactly as the files have always been written. */
@@ -213,6 +219,25 @@ export async function updateTextFile(
         "this writer no longer holds the lock (it was removed or replaced) before the commit; nothing was replaced",
       cleanup,
     });
+  }
+  if (options.checkUnchanged) {
+    let now: TextState;
+    try {
+      now = { state: "text", text: await fs.readFile(path) };
+    } catch (error) {
+      now = code(error) === "ENOENT" ? { state: "absent" } : { state: "unreadable", why: "" };
+    }
+    const same =
+      now.state === current.state &&
+      (now.state !== "text" || (current.state === "text" && now.text === current.text));
+    if (!same || now.state === "unreadable") {
+      await dropTemporary();
+      return finish({
+        status: "not-written",
+        reason: "the file changed while it was being updated; nothing was replaced, so retry",
+        cleanup,
+      });
+    }
   }
   for (let attempt = 0; ; attempt++) {
     try {

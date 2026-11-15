@@ -64,6 +64,8 @@ export function onboardingDocument(input: OnboardingInput): OnboardingDocument {
   const repo = input.repository;
   const repoFlag = repo ? ` --repo ${repo}` : " --repo OWNER/NAME";
   const role = input.role ?? "implementer|designer";
+  // The selected repository is always passed, so setup refuses a checkout of another project.
+  const setupCommand = (r: string) => `pdb setup identity --role ${r}${repoFlag}`;
   const server = input.server ?? null;
   const url = server && repo ? rulesUrl(server, repo) : null;
   const rulesRef = `\`pdb rules\`${url ? ` (or ${url})` : ""}`;
@@ -71,7 +73,7 @@ export function onboardingDocument(input: OnboardingInput): OnboardingDocument {
     { purpose: "Read the current rules", command: "pdb rules" },
     {
       purpose: "Get your own persistent identity once",
-      command: `pdb setup identity --role ${role}`,
+      command: setupCommand(role),
     },
     { purpose: "See what to do next", command: `pdb${repoFlag} --role ${role} --agent NAME` },
     { purpose: "Use the MCP server instead of the CLI", command: `pdb-mcp${repoFlag}` },
@@ -83,7 +85,7 @@ export function onboardingDocument(input: OnboardingInput): OnboardingDocument {
     `You are working on ${where}, which coordinates work with Presidential Daily Briefing (pdb).`,
     `Before any project work:`,
     `1. Read the onboarding and the current rules: \`pdb onboard${repoFlag}\` and ${rulesRef}.`,
-    `2. Get your own persistent name once: \`pdb setup identity --role ${role}\`. Never reuse another agent's name.`,
+    `2. Get your own persistent name once: \`${setupCommand(role)}\`. Never reuse another agent's name.`,
     `3. Use the CLI (\`pdb${repoFlag} --agent NAME\`) or the MCP server (\`pdb-mcp${repoFlag}\`) for status and priorities; help is \`pdb --help\`.`,
     `4. If AGENTS.md has no pdb coordination section, add it: \`pdb onboard${repoFlag} --install\`.`,
     `At the start of every session, read the current rules again before choosing work.`,
@@ -95,7 +97,7 @@ export function onboardingDocument(input: OnboardingInput): OnboardingDocument {
     `${repo ? `This project (${repo})` : "This project"} uses pdb for status, priorities, claims and handoffs.`,
     "",
     `- At the start of every session, read the current rules: ${rulesRef}.`,
-    "- Get your own persistent identity once: `pdb setup identity --role implementer|designer`. Never reuse another agent's name.",
+    `- Get your own persistent identity once: \`${setupCommand("implementer|designer")}\`. Never reuse another agent's name.`,
     `- See what to do next: \`pdb${repoFlag} --agent NAME\`. Help: \`pdb --help\`; onboarding: \`pdb onboard${repoFlag}\`.`,
     `- MCP clients: \`pdb-mcp${repoFlag}\`${server ? `; web: ${server}` : ""}.`,
     "- Prefer pdb over raw gh for status and priorities; use gh only for operations pdb does not support.",
@@ -109,7 +111,7 @@ export function onboardingDocument(input: OnboardingInput): OnboardingDocument {
       "Presidential Daily Briefing (pdb) tells agents what to work on next from the project's GitHub issues, pull requests and rules, and records claims and handoffs.",
     rules: { command: "pdb rules", url },
     identity: [
-      `Run \`pdb setup identity --role ${role}\` once in this checkout; it generates your own name and keeps it.`,
+      `Run \`${setupCommand(role)}\` once in this checkout; it generates your own name and keeps it.`,
       "Use that name with --agent. Never reuse another agent's or another harness's entry.",
     ],
     examples,

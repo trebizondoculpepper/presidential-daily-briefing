@@ -12,6 +12,7 @@ import {
 } from "./onboarding.js";
 import { firstUseHint, hintFileName, runOnboard } from "./onboardcli.js";
 import { installCoordinationSection, withCoordinationSection } from "../config/agentsguide.js";
+import { nodeSafeFs } from "../config/safejson.js";
 import { main } from "../cli.js";
 import type { GitRunner } from "../config/config.js";
 
@@ -67,6 +68,19 @@ describe("onboarding document (#351)", () => {
     expect(doc.persistentSection).not.toMatch(/--agent [a-z]+_[a-z]+/);
     expect(doc.selectProject).toBeNull();
     expect(doc.rules.url).toBeNull();
+  });
+
+  it("passes the selected repository to every identity setup command", () => {
+    const doc = onboardingDocument({ repository: "owner/B", role: "implementer" });
+    const all = [
+      doc.prompt,
+      doc.persistentSection,
+      ...doc.identity,
+      ...doc.examples.map((e) => e.command),
+    ];
+    const setups = all.flatMap((t) => t.match(/pdb setup identity[^`\n]*/g) ?? []);
+    expect(setups.length).toBeGreaterThanOrEqual(4);
+    for (const command of setups) expect(command).toContain("--repo owner/B");
   });
 
   it("without a project gives a selection hint and placeholders, never another project", () => {
@@ -174,6 +188,24 @@ describe("AGENTS.md coordination section (#351)", () => {
       const outcome = await installCoordinationSection(dir, section);
       expect(outcome).toMatchObject({ status: "not-written" });
       expect(await readFile(join(dir, "elsewhere", "guide.md"), "utf8")).toBe("# Outside\n");
+    });
+  });
+
+  it("refuses, keeping the other edit, when AGENTS.md changes during the install", async () => {
+    await withDir(async (dir) => {
+      const target = join(dir, "AGENTS.md");
+      await writeFile(target, "# Guide\n");
+      const fs = {
+        ...nodeSafeFs,
+        createSynced: async (path: string, text: string) => {
+          await writeFile(target, "# Guide\nedited by someone else\n");
+          await nodeSafeFs.createSynced(path, text);
+        },
+      };
+      const outcome = await installCoordinationSection(dir, section, { fs });
+      expect(outcome).toMatchObject({ status: "not-written" });
+      expect(await readFile(target, "utf8")).toBe("# Guide\nedited by someone else\n");
+      expect((await readdir(dir)).sort()).toEqual(["AGENTS.md"]);
     });
   });
 
