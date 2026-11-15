@@ -198,9 +198,14 @@ const isPr = (s: Issue | PullRequest): s is PullRequest => "headRefOid" in s;
 function blocksOf(subject: Issue | PullRequest): HumanItem["blocks"] {
   if (isPr(subject)) {
     const refs = subject.closingIssuesReferences;
+    const extra = refs.nodes.length - humanPolicy.maxBlocks;
     return {
       subjects: refs.nodes.map((r) => r.url).slice(0, humanPolicy.maxBlocks),
-      unknown: refs.pageInfo.hasNextPage ? ["closing issue references truncated"] : [],
+      unknown: [
+        ...(refs.pageInfo.hasNextPage ? ["closing issue references truncated"] : []),
+        // Display trimming, not missing evidence: the "omitted" suffix keeps it out of coverage.
+        ...(extra > 0 ? [`${extra} more closed issue(s) omitted`] : []),
+      ],
     };
   }
   const open = (subject.blocking?.nodes ?? []).filter((n) => n.state === "OPEN");
