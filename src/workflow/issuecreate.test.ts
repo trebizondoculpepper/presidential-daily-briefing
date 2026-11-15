@@ -1,0 +1,368 @@
+import { describe, expect, it } from "vite-plus/test";
+import { mkdtemp, readFile, rm, stat, writeFile, mkdir } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { main } from "../cli.js";
+import type { Rest, RestAnswer } from "../github/github.js";
+import {
+  createIssue,
+  creationMarker,
+  intentDigest,
+  ISSUE_CREATE_MARKER,
+  issueCreateExitCode,
+} from "./issuecreate.js";
+import type { IssueCreateRequest, IssueCreateRuntime, PostAnswer } from "./issuecreate.js";
+
+const target = "owner/repo";
+const repoBody = (over: Record<string, unknown> = {}) => ({
+  full_name: target,
+  id: 42,
+  node_id: "R_kgDO42",
+  html_url: `https://github.com/${target}`,
+  archived: false,
+  has_issues: true,
+  permissions: { admin: false, push: true, triage: true, pull: true },
+  ...over,
+});
+const issueBody = (number: number, labels: string[], over: Record<string, unknown> = {}) => ({
+  number,
+  node_id: `I_${number}`,
+  html_url: `https://github.com/${target}/issues/${number}`,
+  repository_url: `https://api.github.com/repos/${target}`,
+  labels: labels.map((name) => ({ name })),
+  ...over,
+});
+
+interface Fake {
+  rt: IssueCreateRuntime;
+  posts: { path: string; payload: { title: string; body: string; labels?: string[] } }[];
+  gets: string[];
+  stderr: string[];
+}
+function fake(
+  options: {
+    repo?: RestAnswer;
+    labels?: Record<string, number>;
+    post?: (n: number) => PostAnswer | Promise<PostAnswer>;
+    readBack?: RestAnswer;
+    current?: () => Promise<string>;
+    stdin?: string;
+    files?: Record<string, string>;
+  } = {},
+): Fake {
+  const posts: Fake["posts"] = [];
+  const gets: string[] = [];
+  const stderr: string[] = [];
+  const rest: Rest = async (path) => {
+    gets.push(path);
+    if (path === `repos/${target}` || path === "repos/other/name")
+      return options.repo ?? { status: 200, body: repoBody() };
+    if (path === "user") return { status: 200, body: { login: "reporter" } };
+    const label = /\/labels\/(.+)$/.exec(path);
+    if (label) {
+      const name = decodeURIComponent(label[1]!);
+      return { status: options.labels?.[name] ?? 200, body: { name } };
+    }
+    if (/\/issues\/\d+$/.test(path)) return options.readBack ?? { status: 500, body: null };
+    return { status: 404, body: null };
+  };
+  const rt: IssueCreateRuntime = {
+    rest,
+    post: async (path, payload) => {
+      posts.push({ path, payload: payload as Fake["posts"][number]["payload"] });
+      return options.post
+        ? options.post(posts.length)
+        : {
+            dispatched: true,
+            status: 201,
+            body: issueBody(100 + posts.length, (payload as { labels?: string[] }).labels ?? []),
+          };
+    },
+    currentRepository: options.current ?? (async () => target),
+    now: () => new Date("2026-11-15T12:00:00Z"),
+    operationId: (() => {
+      let n = 0;
+      return () => `op${String(++n).padStart(14, "0")}`;
+    })(),
+    readFile: async (path) => {
+      const text = options.files?.[path];
+      if (text === undefined) throw new Error(`ENOENT secret ${path}`);
+      return Buffer.from(text);
+    },
+    readStdin: async () => Buffer.from(options.stdin ?? ""),
+    stderr: (t) => stderr.push(t),
+  };
+  return { rt, posts, gets, stderr };
+}
+const request = (over: Partial<IssueCreateRequest> = {}): IssueCreateRequest => ({
+  title: "A bug",
+  labels: [],
+  dryRun: false,
+  json: true,
+  ...over,
+});
+
+describe("issue create: targeting", () => {
+  it("defaults to the current checkout and shows the resolved target before writing", async () => {
+    const f = fake();
+    const result = await createIssue(request({ json: false }), f.rt);
+    expect(result.status).toBe("created");
+    expect(result.target).toMatchObject({ repository: target, nodeId: "R_kgDO42" });
+    expect(f.posts.map((p) => p.path)).toEqual([`repos/${target}/issues`]);
+    expect(f.stderr.join("")).toContain(`creating in ${target} (R_kgDO42)`);
+    expect(result.issue).toEqual({
+      number: 101,
+      nodeId: "I_101",
+      url: `https://github.com/${target}/issues/101`,
+    });
+    expect(issueCreateExitCode(result)).toBe(0);
+  });
+  it("uses an explicit --repo without consulting the checkout", async () => {
+    let asked = false;
+    const f = fake({
+      repo: { status: 200, body: repoBody({ full_name: "other/name" }) },
+      current: async () => {
+        asked = true;
+        return target;
+      },
+    });
+    const result = await createIssue(request({ repo: "other/name" }), f.rt);
+    expect(asked).toBe(false);
+    expect(f.posts[0]!.path).toBe("repos/other/name/issues");
+    // The response URL is in owner/repo, not other/name: never reported as created.
+    expect(result.status).toBe("unknown");
+    expect(result.issue).toBeNull();
+    expect(f.posts).toHaveLength(1);
+  });
+  it("fails with guidance outside a checkout instead of guessing", async () => {
+    const f = fake({
+      current: async () => {
+        throw new Error("Cannot resolve repository. Supply --repo owner/name");
+      },
+    });
+    await expect(createIssue(request(), f.rt)).rejects.toThrow("--repo");
+    expect(f.posts).toHaveLength(0);
+  });
+  it("refuses a redirect to a different canonical repository", async () => {
+    const f = fake({ repo: { status: 200, body: repoBody({ full_name: "new/home" }) } });
+    const result = await createIssue(request(), f.rt);
+    expect(result).toMatchObject({ status: "refused", error: { id: "TARGET_REDIRECTED" } });
+    expect(f.posts).toHaveLength(0);
+  });
+  it("refuses inaccessible, archived and issue-disabled repositories", async () => {
+    for (const [answer, id] of [
+      [{ status: 404, body: { message: "Not Found" } }, "INACCESSIBLE"],
+      [{ status: 200, body: repoBody({ archived: true }) }, "ARCHIVED"],
+      [{ status: 200, body: repoBody({ has_issues: false }) }, "ISSUES_DISABLED"],
+    ] as const) {
+      const f = fake({ repo: answer });
+      const result = await createIssue(request(), f.rt);
+      expect(result.error?.id).toBe(id);
+      expect(issueCreateExitCode(result)).toBe(1);
+      expect(f.posts).toHaveLength(0);
+    }
+  });
+  it("stops on a rate-limited read without dispatching", async () => {
+    const f = fake({
+      repo: {
+        status: 403,
+        body: null,
+        evidence: {
+          category: "rate-limited",
+          quotaEvidence: "exhausted",
+          errorTypes: [],
+          httpStatus: 403,
+          observation: {} as never,
+        },
+      },
+    });
+    const result = await createIssue(request(), f.rt);
+    expect(result.error?.id).toBe("QUOTA");
+    expect(f.posts).toHaveLength(0);
+  });
+});
+
+describe("issue create: permissions and labels", () => {
+  it("lets a reporter without write access create an issue", async () => {
+    const f = fake({
+      repo: { status: 200, body: repoBody({ permissions: { push: false, pull: true } }) },
+    });
+    expect((await createIssue(request(), f.rt)).status).toBe("created");
+  });
+  it("reports a definitive permission refusal as refused, not unknown", async () => {
+    const f = fake({ post: () => ({ dispatched: true, status: 403, body: null }) });
+    const result = await createIssue(request(), f.rt);
+    expect(result).toMatchObject({ status: "refused", error: { id: "PERMISSION" } });
+    expect(f.posts).toHaveLength(1);
+  });
+  it("refuses a missing label instead of creating it", async () => {
+    const f = fake({ labels: { "typo-bug": 404 } });
+    const result = await createIssue(request({ labels: ["bug", "typo-bug"] }), f.rt);
+    expect(result).toMatchObject({ status: "refused", error: { id: "LABEL_MISSING" } });
+    expect(f.posts).toHaveLength(0);
+  });
+  it("reports dropped labels as partial with the real URL and no second create", async () => {
+    const f = fake({
+      repo: { status: 200, body: repoBody({ permissions: { push: false } }) },
+      post: () => ({ dispatched: true, status: 201, body: issueBody(7, []) }),
+      readBack: { status: 200, body: issueBody(7, []) },
+    });
+    const result = await createIssue(request({ labels: ["bug"] }), f.rt);
+    expect(result.status).toBe("partial");
+    expect(result.issue?.url).toBe(`https://github.com/${target}/issues/7`);
+    expect(result.labels).toEqual({ requested: ["bug"], applied: [] });
+    expect(result.warnings.join(" ")).toContain("lacks push access");
+    expect(issueCreateExitCode(result)).toBe(2);
+    expect(f.posts).toHaveLength(1);
+  });
+  it("validates and deduplicates labels before any request", async () => {
+    const f = fake();
+    const result = await createIssue(request({ labels: ["Bug", "bug", " docs "] }), f.rt);
+    expect(result.labels.requested).toEqual(["Bug", "docs"]);
+    await expect(createIssue(request({ labels: [""] }), f.rt)).rejects.toThrow("Invalid --label");
+    await expect(
+      createIssue(request({ labels: Array.from({ length: 21 }, (_, i) => `l${i}`) }), f.rt),
+    ).rejects.toThrow("At most 20");
+  });
+});
+
+describe("issue create: retries and honest outcomes", () => {
+  it("an uncertain reply is unknown; a retry finds no duplicate made automatically", async () => {
+    const f = fake({
+      post: (n) =>
+        n === 1
+          ? { dispatched: true, status: null, body: null, timedOut: true }
+          : { dispatched: true, status: 201, body: issueBody(9, []) },
+    });
+    const first = await createIssue(request(), f.rt);
+    expect(first.status).toBe("unknown");
+    expect(issueCreateExitCode(first)).toBe(2);
+    expect(f.posts).toHaveLength(1);
+    expect(first.recovery.join("\n")).toContain(first.operationId);
+    expect(first.recovery.join("\n")).toContain("Do not re-run");
+    // A 5xx and a malformed 201 are also unknown and also exactly one POST each.
+    for (const answer of [
+      { dispatched: true, status: 502, body: null },
+      { dispatched: true, status: 201, body: { number: "x" } },
+      { dispatched: true, status: 201, body: { ...issueBody(3, []), pull_request: {} } },
+    ]) {
+      const g = fake({ post: () => answer });
+      expect((await createIssue(request(), g.rt)).status).toBe("unknown");
+      expect(g.posts).toHaveLength(1);
+    }
+    // A not-dispatched failure is refused, never unknown.
+    const h = fake({ post: () => ({ dispatched: false, status: null, body: null }) });
+    expect((await createIssue(request(), h.rt)).error?.id).toBe("NOT_DISPATCHED");
+  });
+  it("binds the marker to operation, target and intent without copying private text", async () => {
+    const f = fake();
+    await createIssue(request({ body: "secret details" }), f.rt);
+    const body = f.posts[0]!.payload.body;
+    expect(body.startsWith("secret details\n\n<!-- " + ISSUE_CREATE_MARKER)).toBe(true);
+    const marker = body.slice(body.indexOf("<!--"));
+    expect(marker).toBe(
+      creationMarker({
+        operationId: "op00000000000001",
+        repository: target,
+        repositoryId: "R_kgDO42",
+        digest: intentDigest("A bug", "secret details", []),
+      }),
+    );
+    expect(marker).not.toContain("secret");
+  });
+});
+
+describe("issue create: input safety", () => {
+  it("passes untrusted title and body as data", async () => {
+    const f = fake({ files: { "body.md": '$(rm -rf /) `id` "quoted" -->' } });
+    const title = "'; rm -rf / #\" $(id) `whoami` --> ${HOME}";
+    const result = await createIssue(request({ title, bodyFile: "body.md" }), f.rt);
+    expect(result.status).toBe("created");
+    expect(f.posts[0]!.payload.title).toBe(title);
+    expect(f.posts[0]!.payload.body.startsWith('$(rm -rf /) `id` "quoted" -->\n\n')).toBe(true);
+  });
+  it("reads the body from stdin with -", async () => {
+    const f = fake({ stdin: "from stdin" });
+    await createIssue(request({ bodyFile: "-" }), f.rt);
+    expect(f.posts[0]!.payload.body.startsWith("from stdin\n\n")).toBe(true);
+  });
+  it("rejects bad input before any request and never echoes file contents", async () => {
+    const f = fake({ files: { big: "x".repeat(70_000) } });
+    await expect(createIssue(request({ title: "  " }), f.rt)).rejects.toThrow("empty");
+    await expect(createIssue(request({ title: "a\nb" }), f.rt)).rejects.toThrow("one line");
+    await expect(createIssue(request({ title: "x".repeat(257) }), f.rt)).rejects.toThrow("256");
+    await expect(createIssue(request({ body: "a", bodyFile: "-" }), f.rt)).rejects.toThrow(
+      "not both",
+    );
+    await expect(createIssue(request({ bodyFile: "big" }), f.rt)).rejects.toThrow("exceeds");
+    const missing = createIssue(request({ bodyFile: "nope" }), f.rt);
+    await expect(missing).rejects.toThrow("Cannot read --body-file.");
+    await expect(createIssue(request({ repo: "bad" }), f.rt)).rejects.toThrow("owner/name");
+    expect(f.gets).toHaveLength(0);
+    expect(f.posts).toHaveLength(0);
+  });
+  it("dry-run resolves and previews with zero writes", async () => {
+    const f = fake();
+    const result = await createIssue(request({ dryRun: true, body: "b", labels: ["bug"] }), f.rt);
+    expect(result.status).toBe("planned");
+    expect(result.preview?.body).toContain(ISSUE_CREATE_MARKER);
+    expect(result.target?.repository).toBe(target);
+    expect(f.posts).toHaveLength(0);
+    expect(issueCreateExitCode(result)).toBe(0);
+  });
+});
+
+describe("pdb issue create CLI", () => {
+  it("prints help without a checkout or login", async () => {
+    let out = "";
+    const code = await main(
+      ["issue", "create", "--help", "--no-update-check"],
+      async (t) => {
+        out += t;
+      },
+      {
+        collect: () => Promise.reject(new Error("no")),
+        currentRepository: () => Promise.reject(new Error("no")),
+      },
+    );
+    expect(code).toBe(0);
+    expect(out).toContain("Usage: pdb issue create");
+  });
+  it("emits exactly one JSON document and never touches local configuration", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "issue-create-"));
+    try {
+      await mkdir(join(dir, ".github"));
+      const files = [join(dir, "pdb.toml"), join(dir, ".github", "triage.toml")];
+      for (const file of files) await writeFile(file, "# untouched\n");
+      const before = await Promise.all(files.map((f) => stat(f)));
+      const f = fake();
+      let out = "";
+      const code = await main(
+        ["issue", "create", "--title", "T", "--repo", target, "--json", "--no-update-check"],
+        async (t) => {
+          out += t;
+        },
+        {
+          collect: () => Promise.reject(new Error("no")),
+          currentRepository: () => Promise.reject(new Error("no")),
+          rest: f.rt.rest,
+          issueCreate: { ...f.rt },
+          stderr: () => {},
+        },
+      );
+      expect(code).toBe(0);
+      expect(JSON.parse(out)).toMatchObject({
+        schemaVersion: 1,
+        kind: "issue-create",
+        status: "created",
+      });
+      for (const [i, file] of files.entries()) {
+        expect(await readFile(file, "utf8")).toBe("# untouched\n");
+        expect((await stat(file)).mtimeMs).toBe(before[i]!.mtimeMs);
+      }
+      expect(f.stderr).toHaveLength(0);
+    } finally {
+      await rm(dir, { recursive: true });
+    }
+  });
+});
