@@ -19,6 +19,7 @@ import type { DeliveryRead } from "../workflow/deliveryread.js";
 import { markerTrust } from "../workflow/delivery.js";
 import { readSnapshotResponsibility } from "../workflow/responsibility.js";
 import type { TrustDecision } from "../workflow/delivery.js";
+import { ReadMeter } from "../github/readplan.js";
 import { impactMetric } from "../estimation/metrics.js";
 import { dependencyReport, dependencyText } from "../github/dependencies.js";
 import type { DependencyReport } from "../github/dependencies.js";
@@ -46,6 +47,8 @@ export interface PresentOptions extends Omit<BriefingOptions, "estimation" | "as
   engineSetting?: EngineSetting;
   /** Compact text budget. */
   maxChars: number;
+  /** Advancing timer for read durations (#367); default `performance.now`. Not `now`. */
+  monotonic?: () => number;
   /**
    * Expanded compact text: background sections, totals and evaluator metadata (#355). Off by
    * default, when the text holds only the next steps; never changes the JSON or the actions.
@@ -89,10 +92,37 @@ export async function presentBriefing(
     Pick<typeof import("../rules/datalog/datalog.js"), "evaluateDatalog">
   > = () => import("../rules/datalog/datalog.js"),
   /** #192: live PR and compare reads for delivery; absent (offline) means not evaluated. */
-  live?: { query: Query; rest: Rest },
+  live?: {
+    query: Query;
+    rest: Rest;
+    /** Rebuilds `trust` over a metered REST boundary, so an intake counts its lookups (#367). */
+    trustWith?: (rest: Rest) => TrustDecision;
+  },
 ): Promise<PresentedBriefing> {
   if (options.role === humanRole && !options.full && !options.issue)
     return presentHuman(snapshot, options, now, trust, signal, loadEngine);
+  // #367: an issue intake's cost is the whole command's, so the reads made while presenting it
+  // (permission lookups and delivery evidence) are metered after its snapshot read.
+  const intakeMeter =
+    options.issue && snapshot.collection
+      ? new ReadMeter(
+          "compatibility-full-v1",
+          "issue-intake",
+          () => now,
+          options.monotonic ?? (() => performance.now()),
+          signal,
+        )
+      : undefined;
+  if (intakeMeter) {
+    const subject = `${snapshot.repository}#${options.issue}`;
+    if (live?.trustWith)
+      trust = live.trustWith(intakeMeter.rest(live.rest, "permissions", subject));
+    if (live)
+      live = {
+        query: intakeMeter.query(live.query, "delivery-records", subject),
+        rest: intakeMeter.rest(live.rest, "delivery-records", subject),
+      };
+  }
   // Sizes come from the snapshot's labels (#152); only configuration is read here.
   const collected = await collectLabelEstimationInput(snapshot.repository, estimationRuntime);
   // Locally generated configuration diagnostics may name local directories; a remote front end
@@ -209,6 +239,17 @@ export async function presentBriefing(
     ? { ...snapshot, issues: snapshot.issues.filter((i) => i.number === options.issue) }
     : snapshot;
   const delivery = deliveryRead(scoped, await diagnoseDelivery(scoped, { trust, live, signal }));
+  if (intakeMeter)
+    intakeMeter.cover(
+      "delivery-records",
+      `${snapshot.repository}#${options.issue}`,
+      !trust || !live ? "not-requested" : delivery.complete ? "complete" : "partial",
+      !trust || !live
+        ? { omission: "offline or no delivery boundaries; delivery is not evaluated" }
+        : delivery.complete
+          ? {}
+          : { omission: delivery.omissions.join("; ") },
+    );
   const base = compact ?? expanded;
   const report = {
     ...base,
@@ -222,6 +263,10 @@ export async function presentBriefing(
         },
     decisionEngine,
     ...(delivery.tickets.length || !delivery.complete ? { delivery } : {}),
+    // #367: an issue intake reports its compatibility-full-v1 profile, coverage and cost.
+    ...(intakeMeter && snapshot.collection
+      ? { collection: intakeMeter.collection(snapshot.collection) }
+      : {}),
   };
   // The engine banner is evaluator metadata: context only, or the expanded --full report (#355).
   const engineHeader =
@@ -434,6 +479,8 @@ export async function readBriefing(
           query: runtime.queryWith ? runtime.queryWith(request.signal) : runtime.query!,
           rest: (path, options) =>
             runtime.rest!(path, { ...options, signal: options?.signal ?? request.signal }),
+          trustWith: (rest: Rest) =>
+            markerTrust(permissionLookup(request.repository, rest, request.signal)),
         }
       : undefined,
   );

@@ -393,6 +393,7 @@ export function readApi(
     memoRest && memoQueryWith
       ? {
           trust: markerTrust(permissionLookup(repository, memoRest, signal)),
+          trustWith: (rest: Rest) => markerTrust(permissionLookup(repository, rest, signal)),
           live: {
             query: memoQueryWith(signal),
             rest: (path, o) => memoRest(path, { ...o, signal: o?.signal ?? signal }),
@@ -704,6 +705,8 @@ export function readApi(
                             trust: markerTrust(
                               permissionLookup(served.repository, guardedRest, inner),
                             ),
+                            trustWith: (rest: Rest) =>
+                              markerTrust(permissionLookup(served.repository, rest, inner)),
                             live: {
                               query: guardedQueryWith!(inner),
                               rest: (p, o) => guardedRest!(p, { ...o, signal: o?.signal ?? inner }),

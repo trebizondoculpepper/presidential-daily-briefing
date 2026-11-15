@@ -593,6 +593,7 @@ const deliveryBoundaries = (runtime: Runtime, repository: string, offline: boole
   !offline && runtime.rest && runtime.query
     ? {
         trust: markerTrust(permissionLookup(repository, runtime.rest)),
+        trustWith: (rest: Rest) => markerTrust(permissionLookup(repository, rest)),
         live: { query: runtime.query, rest: runtime.rest },
       }
     : {};
@@ -1200,7 +1201,11 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
     undefined,
     // #192: delivery evidence is read live only on a live read with both boundaries.
     !options.offline && runtime.rest && runtime.query
-      ? { query: runtime.query, rest: runtime.rest }
+      ? {
+          query: runtime.query,
+          rest: runtime.rest,
+          trustWith: (rest: Rest) => markerTrust(permissionLookup(snapshot.repository, rest)),
+        }
       : undefined,
   );
   const checkpoint = options.checkpoint

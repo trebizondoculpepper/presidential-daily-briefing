@@ -4,6 +4,7 @@
  * terminal text, so both emit the same versioned JSON for the same facts.
  */
 import type { Query, Rest } from "../github/github.js";
+import { ReadMeter } from "../github/readplan.js";
 import type { Snapshot } from "../github/types.js";
 import { diagnoseDelivery } from "./deliverydoctor.js";
 import type { TrustDecision } from "./delivery.js";
@@ -28,6 +29,11 @@ import { ticketOwnership, ticketOwnershipText } from "./who.js";
 /** Live delivery boundaries; empty (offline, or not injected) means delivery is not evaluated. */
 export interface DeliveryBoundaries {
   trust?: TrustDecision;
+  /**
+   * Builds the same trust decision over a given REST boundary, so a focused read can meter its
+   * permission lookups (#367). When absent, `trust` is used unmetered.
+   */
+  trustWith?: (rest: Rest) => TrustDecision;
   live?: { query: Query; rest: Rest };
   signal?: AbortSignal;
 }
@@ -87,7 +93,70 @@ export async function readWho(
     ...deliveryLines(view),
     ...omissionLines(read),
   ]);
-  return { report, text, complete: report.completeness.complete };
+  return { report, text, complete: report.completeness.complete, delivery: read };
+}
+
+/**
+ * Boundaries whose GitHub reads are recorded by `meter` as `source`. Trust is rebuilt over the
+ * metered REST boundary when the caller supplies `trustWith`.
+ */
+export function meteredBoundaries(
+  boundaries: DeliveryBoundaries,
+  meter: ReadMeter,
+  subject: string,
+): DeliveryBoundaries {
+  if (!boundaries.live) return boundaries;
+  const live = {
+    query: meter.query(boundaries.live.query, "delivery-records", subject),
+    rest: meter.rest(boundaries.live.rest, "delivery-records", subject),
+  };
+  return {
+    ...boundaries,
+    live,
+    trust: boundaries.trustWith
+      ? boundaries.trustWith(meter.rest(boundaries.live.rest, "permissions", subject))
+      : boundaries.trust,
+  };
+}
+
+/** Record delivery and permission coverage from a delivery read and the metered calls. */
+export function coverDelivery(
+  meter: ReadMeter,
+  subject: string,
+  boundaries: DeliveryBoundaries,
+  delivery: { complete: boolean; omissions: string[] } | null,
+): void {
+  if (!boundaries.trust || !boundaries.live || !delivery) {
+    meter.cover("delivery-records", subject, "not-requested", {
+      omission: "offline or no delivery boundaries; delivery is not evaluated",
+    });
+    meter.cover("permissions", subject, "not-requested", {
+      omission: "no permission lookup; no record author is trusted",
+    });
+    return;
+  }
+  meter.cover(
+    "delivery-records",
+    subject,
+    delivery.complete ? "complete" : "partial",
+    delivery.complete ? {} : { omission: delivery.omissions.join("; ") },
+  );
+  const lookups = meter.calls.filter((c) => c.source === "permissions");
+  // A lookup GitHub did not answer with 200 leaves that author's authority unknown.
+  const unanswered = lookups.filter((c) => c.outcome !== "success" || c.status !== 200).length;
+  if (!boundaries.trustWith)
+    meter.cover("permissions", subject, "partial", {
+      omission: "permission lookups were not metered; their completeness is unknown",
+    });
+  else
+    meter.cover(
+      "permissions",
+      subject,
+      unanswered ? "partial" : "complete",
+      unanswered
+        ? { omission: `${unanswered} of ${lookups.length} lookups unanswered; authority unknown` }
+        : {},
+    );
 }
 
 /** `pr N --history`: review rounds, findings and recurring files. */
@@ -109,7 +178,11 @@ export async function readPullRequest(
   boundaries: DeliveryBoundaries,
   now?: () => Date,
 ) {
-  const status = await pullRequestStatus(repository, number, query, now);
+  // pr-status-v1 (#367): the selected PR, then delivery of the issues it closes; nothing else.
+  const meter = new ReadMeter("pr-status-v1", "pr", now, undefined, boundaries.signal);
+  const subject = `${repository}#${number}`;
+  const status = await pullRequestStatus(repository, number, query, now, meter);
+  const metered = meteredBoundaries(boundaries, meter, subject);
   // Keep each linked issue's repository: a PR may close an issue elsewhere.
   const linked = status.linkedIssues.map((i) => {
     const m = i.url.match(/^https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/issues\/\d+/);
@@ -118,7 +191,7 @@ export async function readPullRequest(
   const local = linked.filter((i) => i.repository.toLowerCase() === repository.toLowerCase());
   const foreign = linked.filter((i) => i.repository.toLowerCase() !== repository.toLowerCase());
   const delivery =
-    boundaries.trust && boundaries.live
+    metered.trust && metered.live
       ? prDelivery(
           status.pullRequest.url,
           reportFollowUpFacts(status),
@@ -126,13 +199,17 @@ export async function readPullRequest(
           await readIssuesDelivery(
             repository,
             local.map((i) => i.number),
-            { ...boundaries.live, trust: boundaries.trust, signal: boundaries.signal },
+            { ...metered.live, trust: metered.trust, signal: metered.signal },
           ),
           repository,
           foreign,
         )
       : null;
-  const report = withDeliveryCompleteness(delivery ? { ...status, delivery } : status, delivery);
+  coverDelivery(meter, subject, metered, delivery);
+  const report = {
+    ...withDeliveryCompleteness(delivery ? { ...status, delivery } : status, delivery),
+    collection: meter.collection(),
+  };
   const text = appendLines(prStatusText(status), delivery ? prDeliveryLines(delivery) : []);
   return { report, text, complete: report.completeness.complete };
 }
