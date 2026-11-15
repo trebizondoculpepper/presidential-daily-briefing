@@ -2,7 +2,7 @@
 ;; Each witness is a vector of where-clauses binding ?value for subject ?t.
 {:policy-version 1
  :many
- ["label" "owner" "responsible" "platform" "attention" "blocker" "dependent" "closes" "closing" "check" "review" "receipt" "thread" "matched" "overridden" "unlocks-dependent" "permit" "deny" "unknown" "unlock-unknown"]
+ ["label" "owner" "responsible" "platform" "attention" "blocker" "dependent" "closes" "closing" "check" "review" "receipt" "thread" "matched" "overridden" "unlocks-dependent" "permit" "deny" "unknown" "unlock-unknown" "question-record"]
  :constants
  {"small" ["XS" "S"]
   "large" ["L" "XL" "XXL"]
@@ -16,7 +16,8 @@
   "merge-state" ["CLEAN" "HAS_HOOKS" "UNSTABLE"]
   "refresh-state" ["BEHIND" "UNKNOWN"]
   "unknown-mergeable" ["UNKNOWN"]
-  "readiness" ["status:ready" "status:incomplete"]}
+  "readiness" ["status:ready" "status:incomplete"]
+  "question-label" ["question" "design:decision-needed"]}
  :common-witnesses
  {"impact" [[?t "impact-size" ?value]]
   "complexity" [[?t "complexity-size" ?value]]

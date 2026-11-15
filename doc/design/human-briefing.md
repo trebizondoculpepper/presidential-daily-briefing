@@ -1,6 +1,6 @@
 # Human briefing: explicit questions, approvals and unblock actions
 
-Contract for #457 (parent #42). This is the documentation-first contract; it does not claim the behaviour has shipped. The dashboard page #458 and the minimal HTTP MCP slice #390 consume the projection defined here; neither may build its own. Unresolved questions on closed tickets are #414 and are deliberately not duplicated here.
+Contract for #457 (parent #42). Delivered: `src/briefing/human.ts` (record reading, trust and projection), the `D-HUMAN-*` decisions in `src/rules/datalog/policy/decisions.edn` with scenarios in `scenarios/human-briefing.edn`, and the shared `presentBriefing` path used by the CLI, MCP and `pdb serve`. The dashboard page #458 and the minimal HTTP MCP slice #390 consume the projection defined here; neither may build its own. Unresolved questions on closed tickets are #414 and are deliberately not duplicated here.
 
 ## Why
 

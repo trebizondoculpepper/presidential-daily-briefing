@@ -248,6 +248,8 @@ describe("pdb serve read API (#373)", () => {
       for (const [role, order] of [
         ["implementer", "impact"],
         ["designer", "oldest"],
+        // The human briefing (#457) goes through the same shared service.
+        ["human", "impact"],
       ] as const) {
         const reply = await call(
           s.running.port,
