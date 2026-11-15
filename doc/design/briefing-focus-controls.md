@@ -104,6 +104,23 @@ view is reused accidentally. MCP inputs mirror CLI as an optional label array; t
 same service drives CLI, MCP and future web filtering. Existing mutation commands
 continue to use fresh unfiltered authority facts.
 
+Implementation note (#312): shipped as repeatable CLI `--label NAME` and the MCP
+`triage_briefing` `label` array. `normalizeLabelRequest` bounds the request (nonempty, at
+most 50 characters, eight distinct ignoring case); `resolveLabels` resolves it in one GraphQL
+read (exact `label(name:)` plus a bounded `labels(query:)` search, since GitHub names are
+unique ignoring case but the exact lookup is case-sensitive). Unknown labels are an argument
+error naming them; a failed or malformed lookup is `label-filter-unresolved`. `compactBriefing`
+applies `inScope` after evaluation and before the display limit (ranked actions under either
+engine, legacy sections, role sections before their budgets, other-context, `--section`,
+the estimation queue and conflicts), so included items keep their reasons and order while
+blockers and claims outside the filter still count. Truncated labels add the subject to
+`filter.unknownMembership` and make the result incomplete. The report's additive `filter`
+object records the canonical labels, `semantics: "all"` and the caller's owned/addressed
+obligations outside the filter; the text states the scope once. Every current ranked
+action has one target, so no aggregate needs scoping yet. Rendered results are not cached
+(the server caches raw snapshots), so no cache key changes. The HTTP route is deferred to the
+web filtering work.
+
 ## Shared acceptance and delivery
 
 Keep each ticket's own implementation PR and estimate. #311 can ship without #312;
