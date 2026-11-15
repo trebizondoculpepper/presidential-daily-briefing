@@ -18,6 +18,8 @@ import { MAX_ENTRIES } from "./cache.js";
 import { defaultEngine } from "../config/engine-setting.js";
 import { briefingRoleNames } from "../briefing/roles.js";
 import { httpMcp } from "./mcp.js";
+import { QuotaService } from "../github/quotas.js";
+import { quotasApi } from "./quotas-page.js";
 import type { ServeOptions } from "./options.js";
 
 /** Production read boundaries: authenticated gh through the existing argument-array runners. */
@@ -47,6 +49,19 @@ export function readServices(
       onAuthChange: (auth) => (facts.auth = auth),
     });
     const api = readApi(options, read, cache)(facts);
+    // #548: one quota service per server for its verified gh login; nothing runs until asked.
+    const quotas = quotasApi(
+      new QuotaService({
+        rest:
+          read.rest ??
+          (async () => {
+            throw new Error("no REST boundary");
+          }),
+        now: () => serve.clock.now(),
+        telemetry: () => cache.quotaTelemetry(),
+      }),
+      () => ({ host: facts.auth.host, login: facts.auth.login }),
+    );
     const mcp = httpMcp(options, facts, read, cache, serve.clock, serve.stderr);
     // Public, random per process: scopes diagnostic cursors; not a credential (#459).
     const diagnostics = diagnosticsApi({
@@ -88,6 +103,7 @@ export function readServices(
           return true;
         }
         if (await diagnostics(context)) return true;
+        if (await quotas(context)) return true;
         return api(context);
       },
       status: {

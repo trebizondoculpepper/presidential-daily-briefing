@@ -38,7 +38,7 @@ export const dashboardPage = (): string => `<!doctype html>
 <button id="show" type="submit">Show</button>
 <button id="refresh" type="button">Refresh</button>
 </form>
-<p><a id="human-link" href="/human">Human attention</a> · <a id="rules-link" href="/rules">Project rules</a> · <a id="setup-link" href="/setup">Agent setup</a></p>
+<p><a id="human-link" href="/human">Human attention</a> · <a href="/quotas">GitHub quotas</a> · <a id="rules-link" href="/rules">Project rules</a> · <a id="setup-link" href="/setup">Agent setup</a></p>
 </header>
 <main>
 <section id="state" aria-live="polite"></section>
@@ -78,6 +78,15 @@ blockquote { margin: .2rem 0 .2rem 1rem; white-space: pre-wrap; overflow-wrap: a
 .kind.addressed { font-weight: 600; text-decoration: underline; }
 .notice { border-left: 3px solid GrayText; padding-left: .5rem; }
 nav a[aria-current] { font-weight: 700; text-decoration-thickness: 3px; }
+ul.quotas { list-style: none; padding: 0; display: grid; gap: 1rem; grid-template-columns: repeat(auto-fill, minmax(min(100%, 20rem), 1fr)); }
+ul.quotas li { border: 1px solid GrayText; border-radius: .4rem; padding: .5rem .75rem; margin: 0; }
+ul.quotas h3 { font-size: 1rem; margin: .2rem 0 .5rem; }
+ul.quotas meter { width: 100%; height: 1.25rem; }
+.quota-warning, .quota-critical, .quota-exhausted { border-width: 3px; }
+.quota-critical .state, .quota-exhausted .state { font-weight: 700; }
+.quota-unknown, .quota-inconsistent, .quota-zero-limit, .quota-reset-passed { border-style: dashed; }
+.nobar, .scope, .note { font-size: .85rem; }
+button:focus-visible, a:focus-visible { outline: 2px solid Highlight; outline-offset: 2px; }
 main a, main code { overflow-wrap: anywhere; }
 `;
 

@@ -25,7 +25,8 @@ identity read (gh api user). No repository scan, no project needed, no retries, 
 Each resource keeps its own unit and reset window; buckets are never added together. Usage is
 account-wide and can include other agents, machines and applications; it is not attributed to
 any repository or command. Secondary limits have no advance meter and are reported as unmetered.
-Warning (80% used) and critical (95%) are PDB display heuristics, not GitHub limits.
+Warning (20% remaining or less) and critical (below 5% remaining) are PDB display heuristics,
+not GitHub limits.
 Exit: 0 fresh complete view (not permission to send more work); 2 partial, stale or unavailable
 evidence; 1 invalid arguments.
 `;
@@ -222,7 +223,7 @@ export function quotasText(view: QuotaView): string {
       `  ${e.observedAt} ${e.category} (${e.operation})${e.retryAfterSeconds !== null ? `; retry after ${e.retryAfterSeconds}s` : e.retryAt ? `; retry after ${e.retryAt}` : ""}`,
     );
   lines.push(
-    `Requests: ${view.requests.quota} quota + ${view.requests.context} identity. PDB display thresholds: warning 80%, critical 95%.`,
+    `Requests: ${view.requests.quota} quota + ${view.requests.context} identity. PDB display thresholds: warning at 20% remaining, critical below 5% remaining.`,
   );
   return `${lines.join("\n")}\n`;
 }

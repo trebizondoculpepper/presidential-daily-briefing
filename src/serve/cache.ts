@@ -9,6 +9,7 @@
  * fails (interim rule pending #369). Nothing is persisted and nothing is collected in the
  * background: an idle server makes no GitHub requests.
  */
+import type { QuotaEvent, QuotaTelemetrySnapshot } from "../github/quotas.js";
 import type {
   CacheEntryDiagnostic,
   ErrorEventDiagnostic,
@@ -424,6 +425,33 @@ export class ServeCache {
       errors: this.errors.filter((e) => e.auth === auth).map(({ auth: _auth, ...event }) => event),
       discardedErrors: this.discardedErrors,
       errorsSince: this.errorsSince,
+    };
+  }
+
+  /**
+   * Recent classified throttling and resource-limit failures of the current login, for the
+   * quota view's secondary-limit history (#548). Built from the same sanitized error ring the
+   * diagnostics show; other logins' events never appear. In memory only: a restart loses them.
+   */
+  quotaTelemetry(): QuotaTelemetrySnapshot {
+    const auth = `${this.auth.host}/${this.auth.login}`;
+    const kinds = new Set(["rate-limited", "secondary-rate-limit", "resource-limit"]);
+    return {
+      scope: "service",
+      since: this.errorsSince,
+      events: this.errors
+        .filter((e) => e.auth === auth && e.category !== null && kinds.has(e.category))
+        .map((e) => ({
+          category: e.category as QuotaEvent["category"],
+          observedAt: e.at,
+          operation: e.operation,
+          retryAfterSeconds: null,
+          retryAt: e.quota?.remaining === 0 ? e.quota.resetAt : null,
+          resource: e.quota?.resource ?? null,
+          limit: e.quota?.limit ?? null,
+          remaining: e.quota?.remaining ?? null,
+        })),
+      discarded: this.discardedErrors,
     };
   }
 
