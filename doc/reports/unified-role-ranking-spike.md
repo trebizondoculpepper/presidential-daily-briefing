@@ -6,7 +6,7 @@ For #651 and #652. Main base: `9e02949`. No production policy change.
 
 Can a shared activity pool preserve ownership-first ordering and prefer the viewer's
 role without hiding the other role's activities? Yes in this bounded pure-rules model:
-seven existing assessment-first scenarios passed 49 assertions.
+seven existing assessment-first scenarios passed 63 invariant groups.
 
 The experiment evaluates each existing scenario using the real DataScript decision
 engine under both roles, unions its emitted activities by subject and action kind,
@@ -27,7 +27,7 @@ npm ci
 SENTRY_DISABLED=1 npx tsx scripts/experiments/unified-role-ranking/run.ts
 ```
 
-Expected final line: `49 assertions passed; production policy unchanged.`
+Expected final line: `63 invariant groups passed; production policy unchanged.`
 
 ## Limits and implementation work
 
@@ -50,3 +50,8 @@ designers prefer impact assessment, design documents and ticket preparation;
 implementers prefer PR follow-up, complexity estimation and implementation. Other-role
 activities remain lower in the same list, with no fallback heading. Human briefing
 remains a separate audience. See #651 for the contract and #652 for runtime acceptance.
+
+Review strengthened the oracle: emitted ownership, base and affinity keys are now checked
+against source activities independently; reversed or collapsed affinity mutations must be
+rejected when both source roles are present. Membership compares exact activity identities,
+not only counts.
