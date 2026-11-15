@@ -33,5 +33,8 @@ export {
   type ProjectEvaluation,
   type ProjectEvaluationOptions,
 } from "./project/evaluate.js";
-export { loadProjectPolicy } from "./project/compile.js";
-export { projectionSubjects } from "./project/projection.js";
+export { loadProjectPolicy, compileProjectPolicy } from "./project/compile.js";
+export { starterProjectRules } from "./project/starter.js";
+export { projectionSubjects, projectionLimits, protectedBands } from "./project/projection.js";
+export { workerLimits } from "./project/worker.js";
+export { projectionVocabulary } from "./project/grammar.js";
