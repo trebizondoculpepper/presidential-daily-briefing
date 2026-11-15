@@ -161,7 +161,7 @@ async function rulesIdentity(
       detail:
         "Validated by npm run rules:build --check before packaging; the server does not re-run it.",
     },
-    englishRules: { cli: "pdb rules", page: null },
+    englishRules: { cli: "pdb rules", page: "/rules" },
   };
   return { rules, warnings: engine.known ? [] : config.warnings };
 }

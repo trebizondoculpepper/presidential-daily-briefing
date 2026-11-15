@@ -144,6 +144,18 @@ async function serveSmoke(bin: string, env: NodeJS.ProcessEnv, cwd: string): Pro
       if (["cache", "inflight", "errors"].includes(view) && diag.data?.total !== 0)
         throw new Error(`Installed diagnostics ${view} is not empty before any read.`);
     }
+    // The project rules page (#392) from the packaged artifact, with no source tree: the same
+    // compiled policy as pdb rules, settings unknown for a --repo-only project, no script.
+    const rulesPage = await fetch(`${url}rules`);
+    const rulesHtml = await rulesPage.text();
+    if (
+      rulesPage.status !== 200 ||
+      !rulesHtml.includes("<h1>Project rules</h1>") ||
+      !/Coverage of the full policy: \d+ decision rules/.test(rulesHtml) ||
+      !rulesHtml.includes("effective settings: unknown") ||
+      rulesHtml.includes("<script")
+    )
+      throw new Error(`Installed pdb serve /rules is wrong: ${rulesHtml.slice(0, 400)}`);
     // HTTP MCP from the installed artifact (#390): initialize, list the read tools and read one
     // role briefing through the shared cache, as a real SDK client would.
     const mcp = new Client({ name: "package-test", version: "1.0.0" });

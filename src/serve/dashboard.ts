@@ -37,6 +37,7 @@ export const dashboardPage = (): string => `<!doctype html>
 <button id="show" type="submit">Show</button>
 <button id="refresh" type="button">Refresh</button>
 </form>
+<p><a id="rules-link" href="/rules">Project rules</a></p>
 </header>
 <main>
 <section id="state" aria-live="polite"></section>
@@ -63,6 +64,12 @@ li { margin: 0 0 1rem; }
 .why { margin: .2rem 0; }
 code { font-size: .85rem; word-break: break-all; }
 footer { margin-top: 2rem; font-size: .8rem; color: GrayText; }
+pre.rules { white-space: pre-wrap; overflow-wrap: anywhere; font-size: .85rem; }
+.identity { display: grid; grid-template-columns: max-content 1fr; gap: .2rem 1rem; }
+.identity dd { margin: 0; }
+ul.projects { display: inline; padding: 0; }
+ul.projects li { display: inline; margin: 0 .5rem 0 0; }
+.toc li { margin: 0; }
 `;
 
 export interface DashboardRenderers {
@@ -209,6 +216,12 @@ export function dashboardClient(render: DashboardRenderers): void {
   const agent = byId("agent") as HTMLInputElement;
   const state = byId("state");
   const actions = byId("actions");
+  const rulesLink = byId("rules-link") as HTMLAnchorElement | null;
+  // The rules page link follows the selected project, encoded, on this same origin.
+  const linkRules = () => {
+    if (rulesLink && repo.value)
+      rulesLink.href = `/rules?${new URLSearchParams({ repo: repo.value }).toString()}`;
+  };
   const initial = new URLSearchParams(location.search);
   let request = 0;
 
@@ -219,6 +232,7 @@ export function dashboardClient(render: DashboardRenderers): void {
     const shown = new URLSearchParams({ repo: selection.repo, role: selection.role });
     if (selection.agent) shown.set("agent", selection.agent);
     history.replaceState(null, "", `?${shown.toString()}`);
+    linkRules();
     // Earlier results stay visible but marked provisional until the new response arrives.
     actions.classList.add("provisional");
     state.innerHTML = render.renderState(null, true);
