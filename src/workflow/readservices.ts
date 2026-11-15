@@ -182,14 +182,45 @@ export async function readWhoLive(
   clock: () => Date = () => new Date(),
   focus: typeof collectIssueFocus = collectIssueFocus,
 ) {
+  const meter = new ReadMeter("issue-detail-v1", "who", clock, undefined, options.signal);
+  const read = await readWhoWith(meter, repository, number, options, boundaries, query, focus);
+  const report = { ...read.report, collection: meter.collection() };
+  return { report, text: read.text, complete: read.complete };
+}
+
+/**
+ * The focused `who N` plan over a caller's meter: the ticket, its linked open PRs, its delivery
+ * records and the open required members. `pdb ticket N` (#197) builds on the same read; the
+ * caller reports `meter.collection()`. Returns the snapshot, the metered boundaries and the
+ * delivery diagnosis so a caller reads nothing twice.
+ */
+export async function readWhoWith(
+  meter: ReadMeter,
+  repository: string,
+  number: number,
+  options: {
+    staleHours: number;
+    now: Date;
+    signal?: AbortSignal;
+    locate?: FocusOptions["locate"];
+    nativeEdges?: boolean;
+  },
+  boundaries: DeliveryBoundaries,
+  query: Query,
+  focus: typeof collectIssueFocus,
+) {
   const { locate, signal } = options;
-  const meter = new ReadMeter("issue-detail-v1", "who", clock, undefined, signal);
   const snapshot = await focus(
     repository,
     number,
-    { meter, signal, ...(locate ? { locate } : {}) },
+    {
+      meter,
+      signal,
+      ...(locate ? { locate } : {}),
+      ...(options.nativeEdges ? { nativeEdges: true } : {}),
+    },
     query,
-    clock,
+    meter.now,
   );
   const subject = `${repository}#${number}`;
   // A definitive quota refusal while hydrating linked PRs stops the read: no delivery, permission
@@ -242,13 +273,25 @@ export async function readWhoLive(
         complete: false,
         warnings: [...read.report.completeness.warnings, warning],
       },
-      collection: meter.collection(),
     };
-    return { report, text: appendLines(read.text, [`INCOMPLETE: ${warning}`]), complete: false };
+    return {
+      report,
+      text: appendLines(read.text, [`INCOMPLETE: ${warning}`]),
+      complete: false,
+      snapshot,
+      metered,
+      delivery: read.delivery,
+    };
   }
   coverDelivery(meter, subject, metered, metered.trust && metered.live ? read.delivery : null);
-  const report = { ...read.report, collection: meter.collection() };
-  return { report, text: read.text, complete: read.complete };
+  return {
+    report: read.report,
+    text: read.text,
+    complete: read.complete,
+    snapshot,
+    metered,
+    delivery: read.delivery,
+  };
 }
 
 /** States whose follow-up memberView derives from the PR's own checks and review. */

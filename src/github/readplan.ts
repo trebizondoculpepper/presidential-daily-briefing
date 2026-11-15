@@ -67,6 +67,41 @@ export const readProfiles = {
     ],
     bounds: { checks: 100, reviewThreads: 100, closingIssues: 10 },
   },
+  /**
+   * `pdb ticket N` (#197): issue-detail-v1 for the selected issue, its direct native edges and
+   * every associated PR identity (closed included), then pr-status-v1 for at most
+   * `detailedPullRequests` of them, required members first. The detail bound is the default of
+   * `--limit-prs`; the report states the bound actually used.
+   */
+  "ticket-status-v1": {
+    version: 1,
+    sources: [
+      "issue",
+      "labels",
+      "comments",
+      "native-blocked-by",
+      "native-blocking",
+      "linked-pull-requests",
+      "pull-request",
+      "checks",
+      "reviews",
+      "review-threads",
+      "closing-issues",
+      "delivery-records",
+      "permissions",
+    ],
+    bounds: {
+      labels: 100,
+      commentsPerPage: 100,
+      nativeEdgesPerPage: 100,
+      linkedPullRequestsPerPage: 10,
+      linkedPullRequestPages: 5,
+      hydrationConcurrency: 3,
+      detailedPullRequests: 10,
+      checks: 100,
+      reviewThreads: 100,
+    },
+  },
   /** The explicit `pr N --history` diagnosis; never implicit in a routine read. */
   "review-history-v1": { version: 1, sources: ["review-history"], bounds: {} },
   /** The full open-inventory snapshot that `--issue N` intake promises (unchanged). */
