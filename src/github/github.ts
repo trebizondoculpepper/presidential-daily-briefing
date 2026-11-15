@@ -18,7 +18,7 @@ import type {
   SourceCoverage,
 } from "./changes.js";
 import type { Comment, Issue, Page, PullRequest, Reference, Snapshot } from "./types.js";
-import { ReadMeter } from "./readplan.js";
+import { hydrate, quotaRefusal, ReadMeter, readProfiles } from "./readplan.js";
 import {
   classifyGhFailure,
   operationIds,
@@ -887,6 +887,228 @@ export async function collect(
       durationMs: Date.parse(now().toISOString()) - Date.parse(startedAt),
       ...(injected ? {} : { github: summarizeAttempts(attempts) }),
     },
+  };
+}
+
+/** Options of a focused issue read. */
+export interface FocusOptions {
+  /** Records requests and coverage; the caller reports `meter.collection()`. */
+  meter: ReadMeter;
+  locate?: (repository: string, number: number) => Promise<IssueDiagnosis>;
+  signal?: AbortSignal;
+}
+/**
+ * One issue and the open pull requests in the same repository that would close it
+ * (issue-detail-v1, #367): no repository inventory. The issue's comments and each linked PR's
+ * comments are read completely, as the full snapshot reads them; the linked-PR list is bounded
+ * by the profile and an unread continuation is reported, never treated as "no PR". A linked PR
+ * that fails or is not attempted (after a quota refusal) is a warning and `failed` or
+ * `not-attempted` coverage, so the result is incomplete rather than silently smaller.
+ *
+ * The result is a snapshot of that ticket only. It carries its focused `collection` record and
+ * must never be read as a repository inventory.
+ */
+export async function collectIssueFocus(
+  repository: string,
+  number: number,
+  options: FocusOptions,
+  base: Query = ghQueryWith(options.signal),
+  now: () => Date = () => new Date(),
+): Promise<Snapshot> {
+  const { meter, signal } = options;
+  const bounds = readProfiles["issue-detail-v1"].bounds;
+  const startedAt = now().toISOString();
+  const [owner, name] = repository.split("/");
+  const subject = `${repository}#${number}`;
+  const warnings: string[] = [];
+  const locate =
+    options.locate ?? ((repo: string, n: number) => locateIssue(repo, n, ghRestWith(signal)));
+  const read = async (q: Query, source: string, variables: QueryVariables) => {
+    signal?.throwIfAborted();
+    const data = await q(source, { owner, name, ...variables });
+    if (!data.repository) throw new Error(`Repository unavailable: ${repository}`);
+    return data.repository;
+  };
+  const commentsSource = `query($owner:String!,$name:String!,$number:Int!,$cursor:String){repository(owner:$owner,name:$name){issueOrPullRequest(number:$number){... on Issue{comments(first:100,after:$cursor){nodes{${comment}} ${info}}} ... on PullRequest{comments(first:100,after:$cursor){nodes{${comment}} ${info}}}}}}`;
+  /** The whole comment history, as the full snapshot reads it (the existing unbounded read). */
+  const completeComments = async (item: Issue, q: Query) => {
+    if (!item.comments.pageInfo.hasNextPage) return;
+    const initial = item.comments;
+    item.comments.nodes = await pages<Comment>(async (cursor) => {
+      if (!cursor) return initial;
+      const node = prop(
+        await read(q, commentsSource, { number: item.number, cursor }),
+        "issueOrPullRequest",
+      );
+      return prop(node, "comments");
+    });
+    item.comments.pageInfo = { hasNextPage: false, endCursor: null };
+  };
+
+  const issueQuery = meter.query(base, "issue", subject);
+  let issue: Issue | null;
+  try {
+    issue = selected<Issue>(
+      prop(
+        await read(
+          issueQuery,
+          `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){${common} stateReason ${closedBy}}}}`,
+          { number },
+        ),
+        "issue",
+      ),
+    );
+  } catch (error) {
+    signal?.throwIfAborted();
+    // As collect: only REST's own answer decides; "unknown" keeps the original failure.
+    const diagnosis = await locate(repository, number);
+    if (diagnosis.state === "unknown") throw error;
+    throw new IssueUnavailable(diagnosis);
+  }
+  if (!issue) throw new IssueUnavailable(await locate(repository, number));
+  meter.cover("issue", subject, "complete");
+  await completeComments(issue, meter.query(base, "comments", subject));
+  meter.cover("comments", subject, "complete");
+  if (issue.labels.pageInfo.hasNextPage) {
+    warnings.push(`${issue.url}: labels exceed 100; label analysis incomplete.`);
+    meter.cover("labels", subject, "partial", { omission: "labels beyond the first 100" });
+  } else meter.cover("labels", subject, "complete");
+  for (const source of ["native-blocked-by", "native-blocking"])
+    meter.cover(source, subject, "not-requested", { omission: "not needed for ownership" });
+
+  // Linked open PRs, from the issue side of the closing link; bounded pages.
+  // An absent connection is not "no PR": it stays an unread continuation (partial).
+  const linked = issue.closedByPullRequestsReferences ?? {
+    nodes: [],
+    pageInfo: { hasNextPage: true, endCursor: null },
+  };
+  const references = [...linked.nodes];
+  let pageInfo = linked.pageInfo;
+  let linkedPages = 1;
+  const linkQuery = meter.query(base, "linked-pull-requests", subject);
+  while (pageInfo.hasNextPage && linkedPages < bounds.linkedPullRequestPages) {
+    const cursor = pageInfo.endCursor;
+    if (!cursor) break;
+    const page = selected<Page<{ number: number; url: string; state: string }>>(
+      prop(
+        await read(
+          linkQuery,
+          `query($owner:String!,$name:String!,$number:Int!,$cursor:String){repository(owner:$owner,name:$name){issue(number:$number){closedByPullRequestsReferences(first:${bounds.linkedPullRequestsPerPage},includeClosedPrs:false,after:$cursor){nodes{number url state} ${info}}}}}`,
+          { number, cursor },
+        ),
+        "issue",
+        "closedByPullRequestsReferences",
+      ),
+    );
+    if (!page || page.pageInfo.endCursor === cursor) break;
+    references.push(...page.nodes);
+    pageInfo = page.pageInfo;
+    linkedPages++;
+  }
+  if (pageInfo.hasNextPage) {
+    const omission = `linked pull requests beyond ${references.length} (${linkedPages} pages of ${bounds.linkedPullRequestsPerPage}) not read`;
+    warnings.push(`${issue.url}: ${omission}; ownership evidence incomplete.`);
+    meter.cover("linked-pull-requests", subject, "partial", { omission });
+  } else meter.cover("linked-pull-requests", subject, "complete");
+  // The full snapshot holds only this repository's open PRs: keep the same population.
+  const prefix = `https://github.com/${repository}/pull/`.toLowerCase();
+  const targets = [
+    ...new Map(
+      references
+        .filter((ref) => ref.state === "OPEN" && ref.url.toLowerCase().startsWith(prefix))
+        .map((ref) => [ref.number, ref]),
+    ).values(),
+  ];
+  const hydrated = await hydrate(
+    targets,
+    async (ref) => {
+      const prSubject = `${repository}#${ref.number}`;
+      const q = meter.query(base, "pull-request", prSubject);
+      const pr = selected<PullRequest>(
+        prop(
+          await read(
+            q,
+            `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){${prFields}}}}`,
+            { number: ref.number },
+          ),
+          "pullRequest",
+        ),
+      );
+      if (!pr) throw new Error("not readable");
+      await completeComments(pr, q);
+      return pr;
+    },
+    { concurrency: bounds.hydrationConcurrency, signal },
+  );
+  const pullRequests: PullRequest[] = [];
+  hydrated.forEach((outcome, index) => {
+    const ref = targets[index];
+    const prSubject = `${repository}#${ref.number}`;
+    if (outcome.state === "done") {
+      // Only open PRs belong to the population; ticketOwnership keeps those whose closing
+      // references still name this issue, exactly as it does over a full snapshot.
+      const pr = outcome.value;
+      if (pr.state !== "OPEN") {
+        meter.cover("pull-request", prSubject, "complete");
+        return;
+      }
+      pullRequests.push(pr);
+      const nested: [string, Page<unknown> | undefined][] = [
+        ["closing references", pr.closingIssuesReferences],
+        ["review threads", pr.reviewThreads],
+        ["reviews", pr.reviews],
+        ["head checks", pr.commits.nodes[0]?.commit.statusCheckRollup?.contexts],
+      ];
+      const partial = nested.filter(([, c]) => c?.pageInfo.hasNextPage).map(([label]) => label);
+      for (const label of partial)
+        warnings.push(`${pr.url}: ${label} exceed 100; review/merge evidence incomplete.`);
+      if (pr.labels.pageInfo.hasNextPage)
+        warnings.push(`${pr.url}: labels exceed 100; label analysis incomplete.`);
+      meter.cover(
+        "pull-request",
+        prSubject,
+        partial.length ? "partial" : "complete",
+        partial.length ? { omission: `${partial.join(", ")} beyond the first 100` } : {},
+      );
+    } else if (outcome.state === "failed") {
+      const rateLimited = quotaRefusal(outcome.error);
+      warnings.push(
+        `${ref.url}: linked pull request could not be read${rateLimited ? " (rate limited)" : ""}; its ownership and review evidence is unknown.`,
+      );
+      meter.cover("pull-request", prSubject, "failed", {
+        failure: rateLimited ? "rate-limited" : "read-failed",
+      });
+    } else {
+      meter.notAttempted.push(ref.url);
+      warnings.push(
+        `${ref.url}: linked pull request not read after a rate-limit refusal; its evidence is unknown.`,
+      );
+      meter.cover("pull-request", prSubject, "not-requested", {
+        omission: "not attempted after a quota refusal",
+      });
+    }
+  });
+  const telemetry = meter.collection().telemetry;
+  return {
+    schemaVersion: 1,
+    repository,
+    startedAt,
+    fetchedAt: now().toISOString(),
+    issues: [issue],
+    pullRequests,
+    dependencies: [],
+    changed: [],
+    since: null,
+    warnings,
+    rateLimit:
+      telemetry.rateLimit?.remaining != null && telemetry.rateLimit.resetAt
+        ? { remaining: telemetry.rateLimit.remaining, resetAt: telemetry.rateLimit.resetAt }
+        : null,
+    metrics: {
+      requestCount: telemetry.requests,
+      durationMs: Date.parse(now().toISOString()) - Date.parse(startedAt),
+    },
+    collection: meter.collection(),
   };
 }
 

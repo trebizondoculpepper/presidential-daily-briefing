@@ -3,7 +3,8 @@
  * summary", #373). The CLI and `pdb serve` call these directly; neither runs the other or parses
  * terminal text, so both emit the same versioned JSON for the same facts.
  */
-import type { Query, Rest } from "../github/github.js";
+import { collectIssueFocus, ghQueryWith } from "../github/github.js";
+import type { FocusOptions, Query, Rest } from "../github/github.js";
 import { ReadMeter } from "../github/readplan.js";
 import type { Snapshot } from "../github/types.js";
 import { diagnoseDelivery } from "./deliverydoctor.js";
@@ -157,6 +158,47 @@ export function coverDelivery(
         ? { omission: `${unanswered} of ${lookups.length} lookups unanswered; authority unknown` }
         : {},
     );
+}
+
+/**
+ * `who N` live (issue-detail-v1, #367): reads only the ticket and its linked open PRs, then the
+ * delivery records of that ticket. CLI and serve share this plan.
+ */
+export async function readWhoLive(
+  repository: string,
+  number: number,
+  options: {
+    staleHours: number;
+    now: Date;
+    signal?: AbortSignal;
+    /** Issue-location diagnosis over a confined boundary (serve); default: gh REST. */
+    locate?: FocusOptions["locate"];
+  },
+  boundaries: DeliveryBoundaries,
+  query: Query = ghQueryWith(options.signal),
+  clock: () => Date = () => new Date(),
+  focus: typeof collectIssueFocus = collectIssueFocus,
+) {
+  const { locate, signal } = options;
+  const meter = new ReadMeter("issue-detail-v1", "who", clock, undefined, signal);
+  const snapshot = await focus(
+    repository,
+    number,
+    { meter, signal, ...(locate ? { locate } : {}) },
+    query,
+    clock,
+  );
+  const subject = `${repository}#${number}`;
+  const metered = meteredBoundaries(boundaries, meter, subject);
+  const read = await readWho(
+    snapshot,
+    number,
+    { staleHours: options.staleHours, now: options.now, offline: false },
+    metered,
+  );
+  coverDelivery(meter, subject, metered, metered.trust && metered.live ? read.delivery : null);
+  const report = { ...read.report, collection: meter.collection() };
+  return { report, text: read.text, complete: read.complete };
 }
 
 /** `pr N --history`: review rounds, findings and recurring files. */

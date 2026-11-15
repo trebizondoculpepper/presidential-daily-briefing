@@ -9,7 +9,7 @@ import { describe, expect, it, vi } from "vite-plus/test";
 import { main } from "../cli.js";
 import { TOML_CONFIG_PATH } from "../config/config.js";
 import type { ConfigFileSystem, GitRunner } from "../config/config.js";
-import { collect, ghQueryFailure, IssueUnavailable } from "../github/github.js";
+import { collect, collectIssueFocus, ghQueryFailure, IssueUnavailable } from "../github/github.js";
 import { dependencyReport } from "../github/dependencies.js";
 import type { Query } from "../github/github.js";
 import { RateLimitError } from "../github/dependencies.js";
@@ -106,6 +106,7 @@ async function setup(
   args: string[] = ["--repo", repo],
   overrides: {
     collect?: ServeReadRuntime["collect"];
+    collectIssueFocus?: ServeReadRuntime["collectIssueFocus"];
     authContext?: ServeRuntime["authContext"];
     queryWith?: ServeReadRuntime["queryWith"];
     dependencyReport?: ServeReadRuntime["dependencyReport"];
@@ -133,6 +134,11 @@ async function setup(
   const base: ServeReadRuntime["collect"] = (repository, options) =>
     collect(repository, options, query, () => clock.now());
   const read: ServeReadRuntime = {
+    // The focused `who` read over the same facts (#367).
+    collectIssueFocus:
+      overrides.collectIssueFocus ??
+      ((repository, number, options) =>
+        collectIssueFocus(repository, number, options, query, () => clock.now())),
     collect: (repository, options) => {
       calls.collect.push({ repository, options: { ...options, signal: undefined } });
       return (overrides.collect ?? base)(repository, options);
@@ -223,6 +229,8 @@ async function cliJson(args: string[]): Promise<Record<string, unknown>> {
     async (text) => void (out += text),
     {
       collect: (repository, options) => collect(repository, options, query, () => new Date(start)),
+      collectIssueFocus: (repository, number, options) =>
+        collectIssueFocus(repository, number, options, query, () => new Date(start)),
       currentRepository: async () => repo,
       dependencyReport: async () => {
         throw new Error("not used");
@@ -299,7 +307,9 @@ describe("pdb serve read API (#373)", () => {
       );
       const who = await call(s.running.port, "/api/v1/issues/1/who?staleHours=24");
       expect(who.json.view).toBe("who");
-      expect(who.json.result).toEqual(await cliJson(["who", "1", "--stale-hours", "24"]));
+      expect(timeless(who.json.result)).toEqual(
+        timeless(await cliJson(["who", "1", "--stale-hours", "24"])),
+      );
       const team = await call(s.running.port, "/api/v1/team");
       expect(team.json.view).toBe("team");
       expect(team.json.result).toEqual(await cliJson(["team"]));
@@ -652,7 +662,7 @@ describe("pdb serve classifies GitHub failures by structured signals (#373 revie
 
 describe("pdb serve maps domain errors (#373 review)", () => {
   it("who answers an unavailable issue with its diagnosis, not a 500", async () => {
-    const s = await setup(["--repo", repo], { collect: moved("someone/else") });
+    const s = await setup(["--repo", repo], { collectIssueFocus: moved("someone/else") });
     try {
       const reply = await call(s.running.port, "/api/v1/issues/7/who");
       expect(reply.status).toBe(200);
