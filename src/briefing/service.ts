@@ -222,6 +222,8 @@ export async function presentBriefing(
         },
     decisionEngine,
     ...(delivery.tickets.length || !delivery.complete ? { delivery } : {}),
+    // #367: an issue intake reports its compatibility-full-v1 profile, coverage and cost.
+    ...(options.issue && snapshot.collection ? { collection: snapshot.collection } : {}),
   };
   // The engine banner is evaluator metadata: context only, or the expanded --full report (#355).
   const engineHeader =

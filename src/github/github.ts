@@ -18,6 +18,7 @@ import type {
   SourceCoverage,
 } from "./changes.js";
 import type { Comment, Issue, Page, PullRequest, Reference, Snapshot } from "./types.js";
+import { ReadMeter } from "./readplan.js";
 import {
   classifyGhFailure,
   operationIds,
@@ -630,9 +631,21 @@ export async function collect(
   // The production transport records one event per gh attempt for the additive metrics.github
   // summary (#293); an injected query keeps its own behaviour and adds no summary.
   const attempts: AttemptEvent[] = [];
-  let query: Query =
+  // The full intake keeps its promised inventory (contract: compatibility-full-v1); the meter
+  // only records its cost, bytes and source coverage.
+  const meter = new ReadMeter(
+    "compatibility-full-v1",
+    options.issue ? "issue-intake" : "snapshot",
+    now,
+    undefined,
+    options.signal,
+  );
+  let query: Query = meter.query(
     injected ??
-    ghQueryWith(options.signal, { operation: "snapshot", observer: (e) => attempts.push(e) });
+      ghQueryWith(options.signal, { operation: "snapshot", observer: (e) => attempts.push(e) }),
+    "snapshot",
+    repository,
+  );
   const originalQuery = query;
   let requestCount = 0;
   query = (...args: Parameters<Query>) => {
@@ -852,6 +865,9 @@ export async function collect(
     ]);
     changed = summarize([...values[0], ...values[1]]);
   }
+  meter.cover("open-issues", repository, "complete");
+  meter.cover("open-pull-requests", repository, "complete");
+  if (options.issue) meter.cover("issue", `${repository}#${options.issue}`, "complete");
   return {
     schemaVersion: 1,
     repository,
@@ -865,6 +881,7 @@ export async function collect(
     ...(changeEvidence ? { changeEvidence } : {}),
     warnings,
     rateLimit,
+    collection: meter.collection(),
     metrics: {
       requestCount,
       durationMs: Date.parse(now().toISOString()) - Date.parse(startedAt),
