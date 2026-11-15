@@ -400,11 +400,15 @@ export interface CommentRunOptions {
   /** One raw dispatch of the frozen command; throws on failure (classified by its fields). */
   dispatch: (args: string[]) => Promise<unknown>;
   /** Read the ticket for this exact frozen body authored by the authenticated viewer. */
-  readBack?: (target: {
-    repository: string;
-    number: number;
-    body: string;
-  }) => Promise<CommentReceipt>;
+  /**
+   * Read the ticket for this exact frozen body authored by the authenticated viewer, created no
+   * earlier than `since` (this write's first dispatch): an identical older comment, such as a
+   * previous acquisition's claim, is never this attempt's receipt.
+   */
+  readBack?: (
+    target: { repository: string; number: number; body: string },
+    since: Date,
+  ) => Promise<CommentReceipt>;
   now?: () => number;
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
   signal?: AbortSignal;
@@ -426,6 +430,7 @@ export function withCommentRecovery(
       return undefined;
     }
     const frozen = [...args];
+    const since = new Date((options.now ?? Date.now)());
     const result = await postCommentWithRecovery({
       post: async () => {
         try {
@@ -439,7 +444,7 @@ export function withCommentRecovery(
           return attemptFromError(error);
         }
       },
-      ...(options.readBack ? { readBack: () => options.readBack!(target) } : {}),
+      ...(options.readBack ? { readBack: () => options.readBack!(target, since) } : {}),
       ...(call?.guard ? { guard: call.guard } : {}),
       ...(options.now ? { now: options.now } : {}),
       ...(options.sleep ? { sleep: options.sleep } : {}),

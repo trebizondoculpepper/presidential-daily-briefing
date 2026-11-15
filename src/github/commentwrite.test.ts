@@ -15,7 +15,7 @@ import { parseGhResponse } from "./evidence.js";
 import { applyPlan, claimText } from "../workflow/claims.js";
 import type { ClaimPlan } from "../workflow/claims.js";
 import { AuthenticationError } from "./github.js";
-import { RateLimitError } from "./dependencies.js";
+import { ghCommentReceipt, RateLimitError } from "./dependencies.js";
 
 const T0 = Date.parse("2026-11-15T12:00:00Z");
 const secondary = (over: Partial<Extract<CommentAttempt, { kind: "throttled" }>> = {}) =>
@@ -549,5 +549,77 @@ describe("the shared gh write boundary (#345)", () => {
       expect(steps[0]!.recovery).toMatchObject({ status: "conflict" });
       expect(b.calls).toHaveLength(1);
     }
+  });
+  describe("release, reclaim, throttle and retry: receipts bound to this attempt", () => {
+    const claimBody = "Claimed by `ana` on `fix/7`. <!-- github-triage:claim:abc123 -->";
+    const claim = ["issue", "comment", "7", "--repo", "o/r", "--body", claimBody];
+    function reclaim(failures: unknown[]) {
+      let clock = T0;
+      const sleeps: number[] = [];
+      // The earlier acquisition's identical claim comment, an hour before this attempt.
+      const comments = [{ body: claimBody, createdAt: new Date(T0 - 3_600_000).toISOString() }];
+      const query = async () => ({
+        repository: {
+          issue: {
+            comments: {
+              pageInfo: { hasPreviousPage: false },
+              nodes: comments.map((c, i) => ({
+                ...c,
+                url: `https://c/${i}`,
+                viewerDidAuthor: true,
+              })),
+            },
+          },
+        },
+      });
+      let posts = 0;
+      const run = withCommentRecovery({
+        dispatch: async () => {
+          posts += 1;
+          const failure = failures.shift();
+          if (failure === "lost") {
+            comments.push({ body: claimBody, createdAt: new Date(clock).toISOString() });
+            throw new Error("socket hang up");
+          }
+          if (failure) throw failure;
+          comments.push({ body: claimBody, createdAt: new Date(clock).toISOString() });
+          return { url: `https://c/${comments.length - 1}` };
+        },
+        readBack: (target, since) => ghCommentReceipt(target, since, query),
+        now: () => clock,
+        sleep: async (ms) => {
+          sleeps.push(ms);
+          clock += ms;
+        },
+      });
+      return { run, comments, posts: () => posts, sleeps };
+    }
+    it("does not take the earlier claim comment as this throttled claim's receipt", async () => {
+      const t = reclaim([throttle()]);
+      expect(await t.run(claim, { guard: async () => "same" })).toMatchObject({
+        status: "posted",
+        matchedReceipt: false,
+        attempts: 2,
+      });
+      expect(t.posts()).toBe(2);
+      expect(t.comments).toHaveLength(2);
+      expect(t.sleeps).toEqual([2000]);
+    });
+    it("confirms only this attempt's lost-reply claim, not the earlier one", async () => {
+      const t = reclaim(["lost"]);
+      expect(await t.run(claim, { guard: async () => "same" })).toMatchObject({
+        status: "posted",
+        matchedReceipt: true,
+        url: "https://c/1",
+      });
+      expect(t.posts()).toBe(1);
+      expect(t.comments).toHaveLength(2);
+    });
+    it("reports a lost reply as unknown when only the earlier claim exists", async () => {
+      const t = reclaim([new Error("socket hang up")]);
+      const error = await t.run(claim).catch((e: unknown) => e);
+      expect((error as CommentWriteError).recovery).toMatchObject({ status: "unknown" });
+      expect(t.posts()).toBe(1);
+    });
   });
 });
