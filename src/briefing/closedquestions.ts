@@ -24,6 +24,12 @@ import type { ActivityComment } from "../workflow/claimactivity.js";
 import { parseQuestionRecord } from "./questionrecord.js";
 import type { HumanRecord } from "./questionrecord.js";
 
+/**
+ * Labels that keep a legacy v1 question open: the policy's `question-label` set
+ * (src/rules/datalog/policy/schema.edn). Used only to choose which records an item lists.
+ */
+const legacyQuestionLabels: readonly string[] = ["question", "design:decision-needed"];
+
 /** Request bounds of one closed-source read. */
 export interface ClosedQuestionBounds {
   requests: number;
@@ -320,9 +326,11 @@ export async function discoverClosedQuestions(
     const facts: QuestionRecordFact[] = [];
     const records: HumanRecord[] = [];
     const seen = new Set<string>();
+    let labelGapReported = false;
     for (const { comment, record } of [...candidates].reverse()) {
+      // Only a trusted record reserves its marker: an untrusted copy of a genuine marker must not
+      // hide the original (Codex, #607).
       if (seen.has(record.marker)) continue;
-      seen.add(record.marker);
       const authority = await trust(comment);
       if (authority.status === "untrusted") {
         counts.untrusted++;
@@ -335,6 +343,7 @@ export async function discoverClosedQuestions(
         );
         continue;
       }
+      seen.add(record.marker);
       const id = typeof comment.databaseId === "number" ? String(comment.databaseId) : null;
       const outcome = id ? folded.outcomes.get(id) : undefined;
       const state: NonNullable<QuestionRecordFact["outcome"]> = outcome
@@ -353,7 +362,19 @@ export async function discoverClosedQuestions(
           `${url}: question record ${record.url} has no comment id; its resolution is unknown.`,
         );
       facts.push({ trust: "trusted", to: record.to, version: record.version, outcome: state });
-      if (state === "none" || state === "unknown") records.push(record);
+      // The policy decides per source; the item lists only records it could be asking about, so a
+      // legacy v1 question resolved by label removal is never shown beside a v2 one (Codex, #607).
+      const legacyResolved =
+        record.version === 1 &&
+        !issue.labels.pageInfo.hasNextPage &&
+        !issue.labels.nodes.some((l) => legacyQuestionLabels.includes(l.name));
+      if (record.version === 1 && issue.labels.pageInfo.hasNextPage && !labelGapReported) {
+        labelGapReported = true;
+        warnings.push(
+          `${url}: closed ticket's labels are truncated; whether its legacy question is resolved is unknown.`,
+        );
+      }
+      if ((state === "none" || state === "unknown") && !legacyResolved) records.push(record);
     }
     if (facts.length)
       sources.push({
