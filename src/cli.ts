@@ -145,6 +145,8 @@ export type DepsArguments =
       json?: boolean;
       /** Fills the suggested claim command (NAME otherwise). */
       agent?: string;
+      /** The viewer's platform for platform-restricted pickup, as the briefing's --platform. */
+      platform?: string;
     }
   | {
       help?: undefined;
@@ -156,6 +158,8 @@ export type DepsArguments =
       maxNodes?: number;
       /** Fills the suggested claim command (NAME otherwise). */
       agent?: string;
+      /** The viewer's platform for platform-restricted pickup, as the briefing's --platform. */
+      platform?: string;
     };
 
 /** Injected services for `main`; tests replace the GitHub-facing ones. */
@@ -345,8 +349,8 @@ Exit 0: complete evidence. 2: useful but incomplete evidence. 1: invalid argumen
 read (including an unavailable issue). The full intake stays: pdb --issue N --json.
 `;
 
-export const depsHelp = `Usage: pdb deps N [--tree [--max-nodes K]] [--agent NAME] [--json] [--repo owner/name]
-       pdb deps --top [--limit K] [--agent NAME] [--json] [--repo owner/name]
+export const depsHelp = `Usage: pdb deps N [--tree [--max-nodes K]] [--agent NAME] [--platform P] [--json] [--repo owner/name]
+       pdb deps --top [--limit K] [--agent NAME] [--platform P] [--json] [--repo owner/name]
        pdb deps add N --on M [--on K] --note WHY [--dry-run] [--json]
        pdb deps remove N --on M [--on K] --note WHY [--dry-run] [--json]
        pdb deps migrate --plan FILE [--repo owner/name] [--json]
@@ -366,6 +370,7 @@ Changes no labels.
                         A walk stopped by its node limit says so and lists what it did not
                         read; it is never reported as a complete graph
   --agent NAME          Your agent name, filled into the suggested claim command (else NAME)
+  --platform P          Your platform, for platform-restricted pickup (as the briefing's)
   --top                 Repository-wide direct-impact ranking (read-only, bounded)
   --limit K             Entries per --top list (default 10, at most 50)
   --max-nodes K         Tree node limit (default ${treeNodeLimit}, at most ${treeNodeMaximum}; --tree only)
@@ -433,6 +438,7 @@ export function depsArgumentsFor(args: string[]): DepsArguments {
       tree: { type: "boolean" },
       "max-nodes": { type: "string" },
       agent: { type: "string" },
+      platform: { type: "string" },
       top: { type: "boolean" },
       limit: { type: "string" },
       help: { type: "boolean" },
@@ -452,6 +458,12 @@ export function depsArgumentsFor(args: string[]): DepsArguments {
       throw new Error("--agent applies only to deps N and deps --top.");
     if (!/^[A-Za-z0-9][\w.-]*$/.test(values.agent))
       throw new Error("--agent must be an agent name such as kavya_sabbagh.");
+  }
+  if (values.platform !== undefined) {
+    if (["migrate", "add", "remove"].includes(positionals[0] ?? "") || values.tree)
+      throw new Error("--platform applies only to deps N and deps --top.");
+    if (!/^[\w.-]+$/.test(values.platform))
+      throw new Error("--platform must be a platform name such as claude-code.");
   }
   // --max-nodes belongs to deps N --tree alone: refuse it everywhere else, before any branch.
   if (values["max-nodes"] !== undefined) {
@@ -507,6 +519,7 @@ export function depsArgumentsFor(args: string[]): DepsArguments {
       repo: values.repo,
       json: values.json,
       ...(values.agent ? { agent: values.agent } : {}),
+      ...(values.platform ? { platform: values.platform } : {}),
     };
   }
   if (values.limit) throw new Error("--limit applies only to deps --top.");
@@ -530,6 +543,7 @@ export function depsArgumentsFor(args: string[]): DepsArguments {
     number: Number(positionals[0]),
     ...(limit !== undefined ? { maxNodes: Number(limit) } : {}),
     ...(values.agent ? { agent: values.agent } : {}),
+    ...(values.platform ? { platform: values.platform } : {}),
   };
 }
 /** Dry runs report the exit code the real run would give if every apply succeeded. */
@@ -1567,7 +1581,12 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
     }
     if ("top" in values) {
       const inventory = await (runtime.dependencyInventory ?? readDependencyInventory)(repository);
-      const ranked = repositoryImpact(inventory, values.limit, { prs: [] }, values.agent);
+      const ranked = repositoryImpact(
+        inventory,
+        values.limit,
+        { prs: [], ...(values.platform ? { platform: values.platform } : {}) },
+        values.agent,
+      );
       await output(
         values.json ? JSON.stringify(ranked, null, 2) + "\n" : repositoryImpactText(ranked),
       );
@@ -1599,7 +1618,11 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
       // Routine reads answer the direct-impact question; --tree stays a diagnosis (#196).
       ...(values.tree ? {} : { impact: true }),
     });
-    const impact = directImpact(report, { prs: [] }, values.agent);
+    const impact = directImpact(
+      report,
+      { prs: [], ...(values.platform ? { platform: values.platform } : {}) },
+      values.agent,
+    );
     await output(
       values.json
         ? JSON.stringify(impact ? { ...report, impact } : report, null, 2) + "\n"

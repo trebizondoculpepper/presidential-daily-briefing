@@ -406,6 +406,9 @@ export function dependencyReportIncomplete(report: DependencyReport): boolean {
   if (report.collection?.quota || report.collection?.notAttempted.length) return true;
   if (report.unfollowed?.length) return true;
   if (report.direct?.notRead.length || report.direct?.partial?.length) return true;
+  // Any partial or failed source (truncated labels, partial dependant evidence) is incomplete.
+  if (report.collection?.coverage.some((c) => c.state === "partial" || c.state === "failed"))
+    return true;
   return report.nodes.some((node) => !node.known);
 }
 /** The open-issue inventory a `deps --top` answer ranks (dependency-discovery-v1, #196). */
@@ -594,6 +597,11 @@ async function readDependants(
             url: facts.url,
             reason: `blockers beyond the first ${bounds.dependantBlockersListed} not read`,
           });
+        if (facts.labels.pageInfo.hasNextPage)
+          (evidence.partial ??= []).push({
+            url: facts.url,
+            reason: `labels beyond the first ${bounds.labels} not read`,
+          });
       } else evidence.notRead.push({ url: node.url, reason: "unavailable" });
     });
   }
@@ -609,7 +617,9 @@ async function readDependants(
               ? [`${evidence.notRead.length} dependant(s) not read`]
               : []),
             ...(evidence.partial?.length
-              ? [`${evidence.partial.length} dependant(s) with truncated blocker lists`]
+              ? [
+                  `${evidence.partial.length} truncated dependant connection(s) (blockers or labels)`,
+                ]
               : []),
           ].join("; "),
         }

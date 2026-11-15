@@ -360,6 +360,7 @@ export interface RepositoryImpact {
   completionUnlocksTotal: number;
   /** Open issues the pickup gates cannot decide from this read; never offered for pickup. */
   undecided: (ImpactDependant & { reason: string })[];
+  undecidedTotal: number;
   nextAction: string;
   policy: string;
   transitive: { computed: false; how: string };
@@ -406,13 +407,18 @@ export function repositoryImpact(
     urgency: r.urgency,
   }));
   const eligible = new Set(ranked.map((r) => r.issue.url));
-  const blocked = inventory.issues
+  const keyOf = (issue: Issue) =>
+    `${repositoryOf(issue.url, inventory.repository)}#${issue.number}`;
+  // Only decided issues (complete labels and blockers) reach the gates; an issue whose shared
+  // pickup gate is unknown (platform without --platform, unproven closing PRs) is undecided too.
+  const gated = issues
     .filter((issue) => !eligible.has(issue.url))
-    .map((issue) => ({
-      issue,
-      impact: immediateUnlocks(issue, byUrl, context),
-      gate: pickupEligibility(issue, context),
-    }))
+    .map((issue) => ({ issue, gate: pickupEligibility(issue, context) }));
+  for (const { issue, gate } of gated)
+    if (gate.status === "unknown") undecidedReason.set(keyOf(issue), gate.reasons.join("; "));
+  const blocked = gated
+    .filter(({ gate }) => gate.status === "ineligible")
+    .map(({ issue, gate }) => ({ issue, gate, impact: immediateUnlocks(issue, byUrl, context) }))
     .filter(({ impact }) => impact.unlocks.length || impact.unknown.length)
     .sort(
       (a, b) =>
@@ -425,23 +431,12 @@ export function repositoryImpact(
     ...identity(issue),
     unlocks: impact.unlocks.map((d) => d.number),
     unknown: unknownOf(impact.unknown),
-    notPickable: [
-      ...gate.reasons,
-      ...[
-        undecidedReason.get(`${repositoryOf(issue.url, inventory.repository)}#${issue.number}`),
-      ].filter((r): r is string => !!r),
-    ],
+    notPickable: gate.reasons,
   }));
-  const undecided = inventory.issues
-    .filter((issue) =>
-      undecidedReason.has(`${repositoryOf(issue.url, inventory.repository)}#${issue.number}`),
-    )
-    .map((issue) => ({
-      ...identity(issue),
-      reason: undecidedReason.get(
-        `${repositoryOf(issue.url, inventory.repository)}#${issue.number}`,
-      )!,
-    }));
+  const undecidedAll = inventory.issues
+    .filter((issue) => undecidedReason.has(keyOf(issue)))
+    .map((issue) => ({ ...identity(issue), reason: undecidedReason.get(keyOf(issue))! }));
+  const undecided = undecidedAll;
   const provisionalReasons = inventory.complete
     ? []
     : [
@@ -469,6 +464,7 @@ export function repositoryImpact(
     completionUnlocks,
     completionUnlocksTotal: blocked.length,
     undecided: undecided.slice(0, limit),
+    undecidedTotal: undecided.length,
     nextAction: `${inventory.complete ? "" : "Provisional: "}${nextAction}`,
     policy: finishFirst,
     transitive: { computed: false, how: transitiveHow },
@@ -505,7 +501,7 @@ export function repositoryImpactText(impact: RepositoryImpact): string {
       ...(impact.undecided.length
         ? [
             "",
-            "Undecided (inspect before pickup):",
+            `Undecided, inspect before pickup (${impact.undecided.length} of ${impact.undecidedTotal}):`,
             ...impact.undecided.map((r) => `  #${r.number} ${r.title} — ${r.reason}`),
           ]
         : []),
