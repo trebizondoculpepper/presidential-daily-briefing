@@ -77,6 +77,19 @@ export function ruleIds(model: EnglishPolicy): string[] {
   ].filter((id, i, all) => all.indexOf(id) === i);
 }
 
+/** Predicate calls anywhere in the clauses, nested groups included. */
+function callsIn(clauses: Clause[]): string[] {
+  return clauses.flatMap((c) =>
+    c.type === "call"
+      ? [c.predicate]
+      : c.type === "not" || c.type === "and"
+        ? callsIn(c.body)
+        : c.type === "or"
+          ? c.alternatives.flatMap(callsIn)
+          : [],
+  );
+}
+
 /** Predicates reachable from `roots` through calls, in glossary order; cycles stop naturally. */
 function closure(model: EnglishPolicy, roots: string[]): Set<string> {
   const byName = new Map(model.predicates.map((p) => [p.name, p]));
@@ -194,12 +207,21 @@ export function rulesDocument(
         `${id} names role(s) ${model.decisions.find((d) => d.id === id)?.roles?.join(", ")}, so --role ${filters.role} excludes it`,
       );
     }
-    const roots =
-      selected?.type === "predicate"
-        ? [id]
-        : selected?.type === "denial"
-          ? [denial?.predicate ?? "", ...(denial?.calls ?? [])]
-          : (decision?.calls ?? []);
+    // The glossary is the transitive closure over everything this view renders: the selected
+    // item, the same-kind decisions and override context kept with it, their evidence and the
+    // ordering queries, so every predicate named in the output is defined in it (#480 review).
+    const contextQueries =
+      selected?.type === "decision"
+        ? [...model.ordering.overrideQueries, model.ordering.sortQuery, ...keyQueries]
+        : [];
+    const evidence = selected?.type === "decision" ? model.evidence : [];
+    const roots = [
+      ...(selected?.type === "predicate" ? [id] : []),
+      ...decisions.flatMap((d) => [...d.calls, ...d.evidence.flatMap((e) => callsIn(e.clauses))]),
+      ...denials.flatMap((d) => [d.predicate, ...d.calls]),
+      ...contextQueries.flatMap((q) => q.calls),
+      ...evidence.flatMap((e) => callsIn(e.clauses)),
+    ];
     const needed = closure(model, roots);
     predicates = model.predicates.filter((p) => needed.has(p.name));
     queries = [];
