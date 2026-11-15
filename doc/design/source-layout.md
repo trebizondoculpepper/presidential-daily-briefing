@@ -149,7 +149,7 @@ Measured over non-test modules at `7384969`:
 1. `github ↔ dependencies`. Both go to `src/github/`, so the cycle stays inside one directory.
 2. One strongly connected group: `assessments → claims`, `briefing → assessments`, `briefing → reviewevidence`, `reviewevidence → prstatus` (type only), `prstatus → briefing`, `claims → briefing` (the registered `workflow` definition), `delivery → claims`, `estimate → claims/delivery`, `complexitylabels → estimation → estimate`, `assessments → estimate`. After the moves it spans `briefing/`, `workflow/` and `estimation/`.
 
-The moves must not add a cycle or merge further modules into this group. Each move PR checks the group's membership; a script or test can automate that. Breaking the group is follow-up work, for example by moving the registered `workflow` definition out of `briefing.ts` into `workflow/`, so `claims` no longer imports `briefing`. Each such change needs its own focused ticket.
+The moves must not add a cycle or merge further modules into this group. `src/acceptance/importcycles.test.ts` (#436) enforces this: it computes the strongly connected groups over non-test modules (static, type-only and `import()` edges) and fails on a new group or a module joining a known one. A shrunken or broken group also fails until the pinned list in the test and this section are updated, so the list only tightens. Breaking the group is follow-up work, for example by moving the registered `workflow` definition out of `briefing.ts` into `workflow/`, so `claims` no longer imports `briefing`. Each such change needs its own focused ticket.
 
 ## Delivery sequence
 
