@@ -24,6 +24,15 @@ jobs:
         # Current Node LTS (doc/design/runtime.md, #108); update deliberately as LTS changes.
         node: [26]
     runs-on: ${{ matrix.os }}
+    # Structured reports (#393, doc/design/test-reporting.md): each step runs through
+    # scripts/ci-step.ts, which streams output unchanged, keeps the command's exit code and
+    # records a bounded tail; tests also write JUnit. Bash on every OS, so the wrapper's `--`
+    # separator reaches it intact on Windows.
+    defaults:
+      run:
+        shell: bash
+    env:
+      PDB_PLATFORM: ${{ matrix.os }}, node ${{ matrix.node }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -33,16 +42,38 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
           cache: npm
-      - run: npm ci
-      - run: npm run check
-      - run: npm test
-      - run: npm run build
+      - id: install
+        run: npm ci
+      - name: check
+        run: npx tsx scripts/ci-step.ts check -- npm run check
+      - name: rule decisions
+        run: npx tsx scripts/ci-step.ts rules -- npm run rules:test -- --junit reports/junit-rules.xml
+      - name: test
+        # Naming reporters disables Vitest's automatic annotations, so github-actions is explicit.
+        run: npx tsx scripts/ci-step.ts tests -- npx vp test run --reporter=default --reporter=github-actions --reporter=junit --outputFile.junit=reports/junit-tests.xml
+      - name: build
+        run: npx tsx scripts/ci-step.ts build -- npm run build
       - run: node --version
       - run: node dist/cli.mjs --help
       - run: npx tsx src/cli.ts --help
-      - run: npm run smoke
-      - run: npx tsx scripts/smoke.ts src/cli.ts
-      - run: npm run package-test
+      - name: smoke
+        run: npx tsx scripts/ci-step.ts smoke -- npm run smoke
+      - name: smoke (source)
+        run: npx tsx scripts/ci-step.ts smoke-source -- npx tsx scripts/smoke.ts src/cli.ts
+      - name: package-test
+        run: npx tsx scripts/ci-step.ts package-test -- npm run package-test
+      - name: Test summary
+        # Never makes the job green: fails only when a passing step left no (or a malformed) report.
+        if: always() && steps.install.outcome == 'success'
+        run: npx tsx scripts/test-summary.ts reports
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports-${{ matrix.os }}-node${{ matrix.node }}
+          path: reports/
+          retention-days: 14
+          if-no-files-found: warn
 
   # FreeBSD TRIAL (owner decision, 2026-11-13): exercises the runtime inside a FreeBSD VM on an
   # Ubuntu host. Deliberately NOT in `verify`'s needs, so a slow or broken VM cannot block merges.
