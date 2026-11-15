@@ -19,6 +19,7 @@ The tool reduces GitHub searching and encodes agreed lifecycle prerequisites and
 | [Diagnostics page](serve-diagnostics-page.md)                              | #585                                |
 | [Human-view Unassign](human-unassign.md)                                   | #588                                |
 | [Dashboard navigation and pipeline metrics](dashboard-pipeline-metrics.md) | #573; pages #574–#576, #456, #605   |
+| [Served-page shell and project navigation](served-page-shell.md)           | #627; implementation #605           |
 
 ## Handoff and sequencing
 
