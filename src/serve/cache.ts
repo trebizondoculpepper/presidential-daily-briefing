@@ -60,7 +60,10 @@ export class CollectionError extends Error {
   constructor(
     readonly code: CollectionCode,
     message: string,
+    /** When live reads may resume: the bounded cooldown end, not necessarily GitHub's reset. */
     readonly resetAt: string | null = null,
+    /** Whether GitHub itself reported Retry-After or a reset time (#371); never invented. */
+    readonly resetReported = false,
   ) {
     super(message);
   }
@@ -74,7 +77,13 @@ export interface Freshness {
   ttlSeconds: number;
   expiresAt: string;
   stale: boolean;
-  refreshError: { code: CollectionCode; message: string } | null;
+  refreshError: {
+    code: CollectionCode;
+    message: string;
+    /** Rate limits only (#371): when live reads resume, and whether GitHub reported it. */
+    retryNotBefore?: string;
+    resetReported?: boolean;
+  } | null;
 }
 
 /** What a cache key covers: the repository, which collector, and its option object. */
@@ -187,15 +196,23 @@ export function classifyFailure(error: unknown, now: number): CollectionError {
   if (record.rateLimited === true) {
     const retry = record.retry ?? {};
     let until = now + DEFAULT_RATE_LIMIT_COOLDOWN_MS;
-    if (typeof retry.retryAfterSeconds === "number") until = now + retry.retryAfterSeconds * 1000;
-    else if (retry.resetAt && Number.isFinite(Date.parse(retry.resetAt)))
+    let reported = false;
+    if (typeof retry.retryAfterSeconds === "number") {
+      until = now + retry.retryAfterSeconds * 1000;
+      reported = true;
+    } else if (retry.resetAt && Number.isFinite(Date.parse(retry.resetAt))) {
       until = Date.parse(retry.resetAt);
+      reported = true;
+    }
     until = Math.min(Math.max(until, now), now + MAX_RATE_LIMIT_COOLDOWN_MS);
     const resetAt = new Date(until).toISOString();
     return new CollectionError(
       "GITHUB_RATE_LIMITED",
-      `GitHub rate limited this login; live reads resume after ${resetAt}.`,
+      reported
+        ? `GitHub rate limited this login; live reads resume after ${resetAt}.`
+        : `GitHub rate limited this login and reported no reset time; live reads pause until ${resetAt} (a default cooldown), then retry once.`,
       resetAt,
+      reported,
     );
   }
   // Typed signals only: gh's general advice mentions authentication on every failure, so
@@ -549,7 +566,13 @@ export class ServeCache {
       ttlSeconds: this.ttlMs / 1000,
       expiresAt: new Date(entry.observedAt + this.ttlMs).toISOString(),
       stale: source === "stale",
-      refreshError: refreshError && { code: refreshError.code, message: refreshError.message },
+      refreshError: refreshError && {
+        code: refreshError.code,
+        message: refreshError.message,
+        ...(refreshError.code === "GITHUB_RATE_LIMITED" && refreshError.resetAt
+          ? { retryNotBefore: refreshError.resetAt, resetReported: refreshError.resetReported }
+          : {}),
+      },
     };
   }
 

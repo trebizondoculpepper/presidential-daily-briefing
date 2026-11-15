@@ -1,6 +1,6 @@
 /** Compact presentation of the registered findings; contract #698. */
 import { leanRow } from "./leanrows.js";
-import { isParked, owners, excerpt } from "./briefing.js";
+import { cacheWord, isParked, owners, excerpt } from "./briefing.js";
 import type { BriefingProcess } from "./process.js";
 import type { Briefing, BriefingOptions, Bounded, CheckOutcome } from "./briefing.js";
 import { estimateLine } from "../estimation/estimation.js";
@@ -737,11 +737,11 @@ export function compactText(
   const brief = !context && !report.detail;
   const lines = brief
     ? [
-        `${report.repository} — ${report.role ? `${report.role.name} ` : ""}next steps (fetched ${report.freshness.fetchedAt}${report.freshness.offline ? "; OFFLINE CACHE, live verification unavailable" : ""})`,
+        `${report.repository} — ${report.role ? `${report.role.name} ` : ""}next steps (fetched ${report.freshness.fetchedAt}${report.freshness.offline ? `; ${cacheWord(report.freshness)}, live verification unavailable` : ""})`,
       ]
     : [
         `Presidential Daily Briefing: ${report.repository}`,
-        `Fetched ${report.freshness.fetchedAt} — ${report.freshness.offline ? "OFFLINE CACHE; live verification unavailable" : "LIVE fetch window"}`,
+        `Fetched ${report.freshness.fetchedAt} — ${report.freshness.offline ? `${cacheWord(report.freshness)}; live verification unavailable` : "LIVE fetch window"}`,
         `${report.summary.issues} issues; ${report.summary.pullRequests} PRs; ${report.summary.findings} findings on ${report.summary.distinctSubjects} subjects.`,
       ];
   if (report.guidance.includes(unfocusedIdentityNotice)) lines.push(unfocusedIdentityNotice);
@@ -780,7 +780,7 @@ export function compactText(
   if ("focus" in report && report.focus) {
     const f = report.focus;
     const header = [
-      `${report.repository} — ${f.role} section ${f.section} (fetched ${report.freshness.fetchedAt}${report.freshness.offline ? "; OFFLINE CACHE, live verification unavailable" : ""})`,
+      `${report.repository} — ${f.role} section ${f.section} (fetched ${report.freshness.fetchedAt}${report.freshness.offline ? `; ${cacheWord(report.freshness)}, live verification unavailable` : ""})`,
     ];
     if (report.guidance.includes(unfocusedIdentityNotice)) header.push(unfocusedIdentityNotice);
     if (filterNotice) header.push(filterNotice);
