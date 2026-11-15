@@ -1,7 +1,8 @@
 # Read-only service diagnostics over REST
 
-Contract for #459, following #390's minimum HTTP MCP briefings. This is a proposed
-interface, not a claim that these URLs are installed. It extends the existing
+Contract for #459, following #390's minimum HTTP MCP briefings. First slice
+implemented: `projects`, `cache` and `inflight` (with the envelope, cursors and status links);
+`config`, `errors` and `rules` are not installed yet. It extends the existing
 `/api/v1/status`; it does not duplicate the collector or expose raw process memory.
 The owner wants small curl requests to explain the service's current state, even
 when MCP has no equivalent tool. Dashboard editing and full CLI parity come later.

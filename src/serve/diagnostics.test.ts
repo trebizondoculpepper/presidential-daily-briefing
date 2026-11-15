@@ -1,0 +1,303 @@
+/**
+ * Read-only diagnostics (#459, doc/design/serve-diagnostics-api.md), first slice: projects, cache
+ * and inflight. Reads never collect, refresh or renew; rows carry only allowlisted fields.
+ */
+import { EventEmitter } from "node:events";
+import { describe, expect, it } from "vite-plus/test";
+import { collect } from "../github/github.js";
+import type { Query } from "../github/github.js";
+import type { Issue, Page } from "../github/types.js";
+import type { Clock } from "../mcp/polling.js";
+import { startServe } from "../serve.js";
+import type { ServeRuntime } from "../serve.js";
+import type { ServeReadRuntime } from "./api.js";
+import { serveArguments } from "./options.js";
+import { readServices } from "./services.js";
+
+const start = Date.parse("2026-11-15T00:00:00.000Z");
+const page = <T>(nodes: T[]): Page<T> => ({
+  nodes,
+  pageInfo: { hasNextPage: false, endCursor: null },
+});
+const issue = (repository: string, n: number): Issue => ({
+  number: n,
+  title: `Secret title ${n}`,
+  body: "",
+  url: `https://github.com/${repository}/issues/${n}`,
+  state: "OPEN",
+  stateReason: null,
+  createdAt: "2026-11-01T00:00:00Z",
+  updatedAt: "2026-11-12T09:00:00.000Z",
+  issueDependenciesSummary: { blockedBy: 0, totalBlockedBy: 0, blocking: 0, totalBlocking: 0 },
+  blockedBy: page([]),
+  blocking: page([]),
+  labels: page([{ name: "status:ready" }]),
+  comments: page([]),
+});
+
+class ManualClock implements Clock {
+  time = start;
+  now = () => new Date(this.time);
+  setTimeout = () => ({});
+  clearTimeout = () => undefined;
+}
+
+async function setup(repos = ["example/one"], gate?: Promise<void>) {
+  const clock = new ManualClock();
+  const collects: string[] = [];
+  const login = { current: "octo-secret-login" };
+  const serve: ServeRuntime = {
+    currentRepository: async () => repos[0]!,
+    authContext: async () => ({ host: "github.com", login: login.current }),
+    clock,
+    stdout: () => undefined,
+    stderr: () => undefined,
+    signals: new EventEmitter(),
+    exit: () => undefined,
+    version: async () => "9.9.9",
+    platform: "linux",
+  };
+  const query =
+    (repository: string): Query =>
+    async (source) => ({
+      repository: {
+        issues: page(source.includes("issues(first") ? [issue(repository, 1)] : []),
+        pullRequests: page([]),
+      },
+    });
+  const read: ServeReadRuntime = {
+    collect: async (repository, options) => {
+      collects.push(`${repository}${options?.issue ? `#${options.issue}` : ""}`);
+      if (gate) await gate;
+      return collect(repository, options, query(repository), () => clock.now());
+    },
+    dependencyReport: async () => {
+      throw new Error("unused");
+    },
+    now: () => clock.now(),
+    env: {},
+  };
+  const options = serveArguments(["--port", "0", ...repos.flatMap((r) => ["--repo", r])]);
+  const running = await startServe(options, serve, readServices(options, serve, read));
+  const base = running.facts.url;
+  const get = async (path: string, init?: RequestInit) => {
+    const response = await fetch(`${base}${path}`, init);
+    return { status: response.status, text: await response.text() };
+  };
+  const json = async (path: string) => JSON.parse((await get(path)).text);
+  return { running, clock, collects, get, json, login };
+}
+
+describe("serve diagnostics (#459)", () => {
+  it("an empty service answers every view with zero GitHub calls, and status links them", async () => {
+    const s = await setup(["example/one", "example/two"]);
+    try {
+      const status = await s.json("api/v1/status");
+      expect(status.diagnostics).toEqual([
+        "/api/v1/diagnostics/projects",
+        "/api/v1/diagnostics/cache",
+        "/api/v1/diagnostics/inflight",
+      ]);
+      const projects = await s.json("api/v1/diagnostics/projects");
+      expect(projects).toMatchObject({
+        schemaVersion: 1,
+        kind: "serve-diagnostics",
+        view: "projects",
+        observedAt: "2026-11-15T00:00:00.000Z",
+        selection: { repository: null },
+        coverage: { complete: true, warnings: [] },
+        data: { total: 2, omitted: 0, nextCursor: null },
+      });
+      expect(projects.data.items).toEqual([
+        {
+          repository: "example/one",
+          host: "github.com",
+          default: false,
+          hasLocalContext: false,
+          registrationSource: "explicit",
+        },
+        {
+          repository: "example/two",
+          host: "github.com",
+          default: false,
+          hasLocalContext: false,
+          registrationSource: "explicit",
+        },
+      ]);
+      for (const view of ["cache", "inflight"])
+        expect((await s.json(`api/v1/diagnostics/${view}?repo=example/one`)).data).toEqual({
+          total: 0,
+          omitted: 0,
+          nextCursor: null,
+          items: [],
+        });
+      expect(s.collects).toEqual([]);
+    } finally {
+      await s.running.close();
+    }
+  });
+
+  it("shows held entries with allowlisted fields only, and reading never collects, renews or counts a hit", async () => {
+    const s = await setup();
+    try {
+      await s.get("api/v1/briefing");
+      await s.get("api/v1/briefing");
+      expect(s.collects).toEqual(["example/one"]);
+      const read = await s.get("api/v1/diagnostics/cache");
+      const items = JSON.parse(read.text).data.items;
+      expect(items).toHaveLength(1);
+      expect(Object.keys(items[0]).sort()).toEqual(
+        [
+          "ageMs",
+          "approxBytes",
+          "collector",
+          "expiresAt",
+          "hits",
+          "id",
+          "observedAt",
+          "options",
+          "repository",
+          "state",
+          "subject",
+        ].sort(),
+      );
+      expect(items[0]).toMatchObject({
+        repository: "example/one",
+        state: "fresh",
+        hits: 1,
+        subject: null,
+        ageMs: 0,
+      });
+      // No payload, login, raw key or title ever leaves.
+      for (const sentinel of ["Secret title", "octo-secret-login", "\\u0000"])
+        expect(read.text).not.toContain(sentinel);
+      s.clock.time += 10 * 60_000;
+      const later = (await s.json("api/v1/diagnostics/cache")).data.items[0];
+      expect(later).toMatchObject({ state: "stale-eligible", hits: 1, ageMs: 600_000 });
+      expect(s.collects).toEqual(["example/one"]);
+    } finally {
+      await s.running.close();
+    }
+  });
+
+  it("pages with cursors that expire when the listed state changes", async () => {
+    const s = await setup();
+    try {
+      await s.get("api/v1/briefing");
+      await s.get("api/v1/issues/1");
+      const first = await s.json("api/v1/diagnostics/cache?limit=1");
+      expect(first.data).toMatchObject({ total: 2, omitted: 1 });
+      expect(first.data.items[0].subject).toBeNull();
+      const cursor = first.data.nextCursor as string;
+      const second = await s.json(`api/v1/diagnostics/cache?limit=1&cursor=${cursor}`);
+      expect(second.data.items[0].subject).toBe(1);
+      expect(second.data.nextCursor).toBeNull();
+      // An evicted entry changes the inventory: the old cursor is refused, never merged.
+      await s.get("api/v1/refresh", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ repo: "example/one", scope: "briefing" }),
+      });
+      const expired = await s.get(`api/v1/diagnostics/cache?limit=1&cursor=${cursor}`);
+      expect(expired.status).toBe(409);
+      expect(JSON.parse(expired.text).error.code).toBe("DIAGNOSTIC_CURSOR_EXPIRED");
+    } finally {
+      await s.running.close();
+    }
+  });
+
+  it("refuses unknown, repeated and out-of-range parameters, other methods and unserved repositories", async () => {
+    const s = await setup(["example/one", "example/two"]);
+    try {
+      const cases: [string, number][] = [
+        ["api/v1/diagnostics/projects?debug=1", 400],
+        ["api/v1/diagnostics/cache?repo=example/one&repo=example/two", 400],
+        ["api/v1/diagnostics/cache?repo=example/one&limit=0", 400],
+        ["api/v1/diagnostics/cache?repo=example/one&limit=101", 400],
+        ["api/v1/diagnostics/cache?repo=example/one&cursor=%%%", 400],
+        ["api/v1/diagnostics/cache?repo=example/one&cursor=abc", 400],
+        ["api/v1/diagnostics/cache", 400],
+        ["api/v1/diagnostics/cache?repo=someone/else", 403],
+        ["api/v1/diagnostics/inflight?repo=owner/ghp_secretvalue", 403],
+        ["api/v1/diagnostics/nothing", 404],
+      ];
+      for (const [path, status] of cases) expect((await s.get(path)).status, path).toBe(status);
+      const post = await s.get("api/v1/diagnostics/projects", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+      });
+      expect(post.status).toBe(405);
+      // A secret-looking parameter value is never reflected.
+      const unserved = await s.get("api/v1/diagnostics/cache?repo=owner/ghp_secretvalue");
+      expect(unserved.text).not.toContain("ghp_secretvalue");
+      expect(JSON.parse(unserved.text).error).toMatchObject({
+        code: "REPOSITORY_NOT_SERVED",
+        message: "That repository is not served by this server.",
+      });
+      const reflected = await s.get("api/v1/diagnostics/projects?ghp_abc=1&%2FUsers%2Fme=2");
+      expect(reflected.status).toBe(400);
+      expect(reflected.text).not.toContain("ghp_abc");
+      expect(reflected.text).not.toContain("/Users/me");
+      expect(JSON.parse(reflected.text).error.message).toBe(
+        "Unknown parameter; allowed: limit, cursor.",
+      );
+      expect(s.collects).toEqual([]);
+    } finally {
+      await s.running.close();
+    }
+  });
+
+  it("shows an in-flight shared collection with its waiters, without starting one", async () => {
+    let release = () => undefined as void;
+    const s = await setup(["example/one"], new Promise<void>((done) => (release = done)));
+    try {
+      const pending = s.get("api/v1/briefing");
+      for (let i = 0; i < 50 && s.collects.length === 0; i++)
+        await new Promise((r) => setTimeout(r, 10));
+      s.clock.time += 1500;
+      const inflight = (await s.json("api/v1/diagnostics/inflight")).data.items;
+      expect(inflight).toEqual([
+        {
+          id: expect.stringMatching(/^f\d+$/),
+          repository: "example/one",
+          collector: expect.any(String),
+          subject: null,
+          startedAt: "2026-11-15T00:00:00.000Z",
+          elapsedMs: 1500,
+          waiters: 1,
+          cancelled: false,
+        },
+      ]);
+      expect(s.collects).toEqual(["example/one"]);
+      release();
+      await pending;
+      expect((await s.json("api/v1/diagnostics/inflight")).data.items).toEqual([]);
+    } finally {
+      await s.running.close();
+    }
+  });
+
+  it("never shows a collection still running for a retired gh login", async () => {
+    let release = () => undefined as void;
+    const s = await setup(["example/one"], new Promise<void>((done) => (release = done)));
+    try {
+      const first = s.get("api/v1/briefing");
+      for (let i = 0; i < 50 && s.collects.length === 0; i++)
+        await new Promise((r) => setTimeout(r, 10));
+      expect((await s.json("api/v1/diagnostics/inflight")).data.total).toBe(1);
+      // gh auth switch: the next live collection (after the TTL) notices and clears the cache.
+      s.login.current = "someone-else";
+      s.clock.time += 6 * 60_000;
+      const second = s.get("api/v1/issues/1");
+      for (let i = 0; i < 50 && s.collects.length < 2; i++)
+        await new Promise((r) => setTimeout(r, 10));
+      const items = (await s.json("api/v1/diagnostics/inflight")).data.items;
+      expect(items.map((f: { subject: number | null }) => f.subject)).toEqual([1]);
+      release();
+      await Promise.all([first, second]);
+    } finally {
+      await s.running.close();
+    }
+  });
+});

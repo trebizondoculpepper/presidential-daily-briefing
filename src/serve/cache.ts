@@ -9,6 +9,7 @@
  * fails (interim rule pending #369). Nothing is persisted and nothing is collected in the
  * background: an idle server makes no GitHub requests.
  */
+import type { CacheEntryDiagnostic, InflightDiagnostic } from "./diagnostics.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { getEventListeners } from "node:events";
 import { AuthenticationError, IssueUnavailable, SubjectUnavailable } from "../github/github.js";
@@ -71,7 +72,28 @@ export interface CacheKey {
   coverage: Record<string, unknown>;
 }
 
+const subjectOf = (coverage: Record<string, unknown>): number | null => {
+  const n = coverage.issue ?? coverage.n;
+  return typeof n === "number" && Number.isSafeInteger(n) && n > 0 ? n : null;
+};
+const optionKeys = ["tree", "history", "includeTransferred", "staleHours"];
+const safeOptions = (coverage: Record<string, unknown>): Record<string, boolean | number> =>
+  Object.fromEntries(
+    optionKeys.flatMap((k) => {
+      const v = coverage[k];
+      return typeof v === "boolean" || (typeof v === "number" && Number.isFinite(v))
+        ? [[k, v]]
+        : [];
+    }),
+  );
+
 interface Entry {
+  /** Process-scoped opaque ID for diagnostics (#459); never the key or anything derived from it. */
+  id: string;
+  /** The key's coverage, so diagnostics can show a focused subject without the key itself. */
+  coverage: Record<string, unknown>;
+  /** Cached reads served from this entry. */
+  hits: number;
   key: string;
   repository: string;
   collector: string;
@@ -84,6 +106,13 @@ interface Entry {
 }
 
 interface Inflight {
+  id: string;
+  /** The login this collection runs under; diagnostics show only the current one's (#459). */
+  auth: AuthContext;
+  repository: string;
+  collector: string;
+  coverage: Record<string, unknown>;
+  startedAt: number;
   promise: Promise<Entry>;
   controller: AbortController;
   waiters: number;
@@ -202,6 +231,7 @@ export class ServeCache {
     { observedAt: string | null; lastError: { code: string; at: string } | null }
   >();
   readonly counters = { hits: 0, misses: 0, coalesced: 0, evictions: 0 };
+  private nextId = 0;
 
   /** Abort listeners currently registered on the cache-lifetime signal (leak tests). */
   lifetimeListeners(): number {
@@ -249,6 +279,51 @@ export class ServeCache {
 
   currentAuth(): AuthContext {
     return this.auth;
+  }
+
+  /**
+   * Metadata of held entries and in-flight collections for the diagnostics API (#459). Reads
+   * only: it never collects, refreshes, renews or sweeps. Values, keys, auth and raw coverage
+   * strings stay inside; only the typed fields below leave.
+   */
+  diagnostics(): { entries: CacheEntryDiagnostic[]; inflight: InflightDiagnostic[] } {
+    const now = this.now();
+    const entries = [...this.entries.values()].map((e): CacheEntryDiagnostic => {
+      const age = now - e.observedAt;
+      return {
+        id: e.id,
+        repository: e.repository,
+        collector: e.collector,
+        subject: subjectOf(e.coverage),
+        options: safeOptions(e.coverage),
+        observedAt: new Date(e.observedAt).toISOString(),
+        expiresAt: new Date(e.observedAt + this.ttlMs).toISOString(),
+        ageMs: age,
+        approxBytes: e.bytes,
+        state:
+          age < this.ttlMs
+            ? "fresh"
+            : age <= Math.max(this.staleWindowMs, this.ttlMs)
+              ? "stale-eligible"
+              : "expired",
+        hits: e.hits,
+      };
+    });
+    // A collection still running for a retired login stays with its own waiters, but is never
+    // shown under the new one: auth contexts stay isolated in diagnostics too.
+    const inflight = [...this.flights]
+      .filter((f) => f.auth === this.auth)
+      .map((f): InflightDiagnostic => ({
+        id: f.id,
+        repository: f.repository,
+        collector: f.collector,
+        subject: subjectOf(f.coverage),
+        startedAt: new Date(f.startedAt).toISOString(),
+        elapsedMs: now - f.startedAt,
+        waiters: f.waiters,
+        cancelled: f.controller.signal.aborted,
+      }));
+    return { entries, inflight };
   }
 
   /**
@@ -483,7 +558,17 @@ export class ServeCache {
     const controller = new AbortController();
     const generation = ++this.generation;
     const epoch = this.epochOf(repository);
-    const flight = { controller, waiters: 0, epoch } as Inflight;
+    const flight = {
+      id: `f${++this.nextId}`,
+      auth: this.auth,
+      repository: repository.toLowerCase(),
+      collector,
+      coverage: cacheKey.coverage,
+      startedAt: this.now(),
+      controller,
+      waiters: 0,
+      epoch,
+    } as Inflight;
     this.flights.add(flight);
     flight.promise = (async () => {
       try {
@@ -505,9 +590,13 @@ export class ServeCache {
         // to this flight's own waiters, whose key names the old login, but never stored where
         // the new login's reads would find it.
         const collectedAs = this.auth;
+        flight.auth = collectedAs;
         const storeKey = this.keyOf(cacheKey);
         const value = await produce(controller.signal);
         const entry: Entry = {
+          id: `c${++this.nextId}`,
+          coverage: cacheKey.coverage,
+          hits: 0,
           key: storeKey,
           repository: repository.toLowerCase(),
           collector,
@@ -620,6 +709,7 @@ export class ServeCache {
       this.entries.delete(key);
       this.entries.set(key, entry);
       this.counters.hits++;
+      entry.hits++;
       return served(entry, "cached");
     }
     this.counters.misses++;

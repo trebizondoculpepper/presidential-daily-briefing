@@ -146,6 +146,7 @@ The first stdout line is `pdb serve VERSION listening on http://127.0.0.1:4372/`
 | `GET /api/v1/status`, `GET /healthz`                                         | Server status and cache counters; liveness                                             |
 | `/mcp`                                                                       | HTTP MCP: the same four read-only tools as `pdb-mcp`                                   |
 | `GET /`                                                                      | Read-only dashboard: choose a project and role to see the ranked next steps            |
+| `GET /api/v1/diagnostics/projects`, `/cache`, `/inflight`                    | The server's own state (projects, cached entries, collections running); never collects |
 
 Every data route wraps the unchanged CLI JSON in an envelope with `selection` and `freshness` (`source` is `live`, `cached` or `stale`, with `observedAt` and `ageSeconds`). `refresh=true` on any read bypasses a fresh entry. If GitHub fails, a result observed within the last 30 minutes is served as `stale` and `incomplete`, never as complete; otherwise the route answers 502 with the CLI command that inspects the same read. MCP results of `triage_briefing`, `triage_issue` and `triage_dependencies` carry the same block as `freshness.cache`; `triage_events` keeps its version-1 envelope, with no cache block.
 
