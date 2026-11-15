@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { crashMessage, initializeCrashes, sanitizeCrash } from "./crashes.js";
+import { crashMessage, initializeCrashes, mappedFrame, sanitizeCrash } from "./crashes.js";
 
 const execute = promisify(execFile);
 const root = fileURLToPath(new URL("../../", import.meta.url));
@@ -113,6 +113,74 @@ describe("fatal telemetry boundary", () => {
       }
     } finally {
       await rm(temporary, { recursive: true, force: true });
+    }
+  });
+  // Injected source-map cases (#629). The real packaged subprocess case, with an installed
+  // archive and its shipped maps, is in scripts/package-test.ts.
+  it("maps a built frame to its public src/ origin through the package's own map only", async () => {
+    const temporary = await mkdtemp(join(tmpdir(), "pdb-map-"));
+    // Generated line 1 -> a.ts line 1; generated line 2 col 3 -> a.ts line 5 col 2;
+    // generated line 3 -> an origin outside src/.
+    const map = (sources: string[]) =>
+      JSON.stringify({ version: 3, sources, names: [], mappings: "AAAA;GAIC;ACAA" });
+    try {
+      await mkdir(join(temporary, "dist"));
+      await writeFile(join(temporary, "dist", "cli.mjs"), "a\nb\nc\n");
+      await writeFile(
+        join(temporary, "dist", "cli.mjs.map"),
+        map(["../src/a.ts", "../../private/home/secret.ts"]),
+      );
+      expect(mappedFrame(temporary, "dist/cli.mjs", 1, 1)).toEqual({
+        filename: "src/a.ts",
+        lineno: 1,
+        colno: 1,
+      });
+      expect(mappedFrame(temporary, "dist/cli.mjs", 2, 4)).toEqual({
+        filename: "src/a.ts",
+        lineno: 5,
+        colno: 2,
+      });
+      // Outside src/, past the generated lines, or no column: the built location stays.
+      expect(mappedFrame(temporary, "dist/cli.mjs", 3, 1)).toBeUndefined();
+      expect(mappedFrame(temporary, "dist/cli.mjs", 99, 1)).toBeUndefined();
+      expect(mappedFrame(temporary, "dist/cli.mjs", 1, undefined)).toBeUndefined();
+      // Not a built file, or no shipped map beside it.
+      expect(mappedFrame(temporary, "src/a.ts", 1, 1)).toBeUndefined();
+      expect(mappedFrame(temporary, "dist/mcp.mjs", 1, 1)).toBeUndefined();
+
+      const built = event(pathToFileURL(join(temporary, "dist", "cli.mjs")).href);
+      built.exception!.values![0]!.stacktrace!.frames![0]!.lineno = 2;
+      built.exception!.values![0]!.stacktrace!.frames![0]!.colno = 4;
+      expect(
+        sanitizeCrash(built, temporary, "cli")?.exception?.values?.[0]?.stacktrace?.frames,
+      ).toEqual([{ filename: "src/a.ts", lineno: 5, colno: 2, in_app: true }]);
+    } finally {
+      await rm(temporary, { recursive: true, force: true });
+    }
+  });
+  it("keeps the built location when the shipped map is malformed", async () => {
+    // Unparsable JSON, an out-of-range source index, a non-string source and a non-list.
+    for (const [i, text] of [
+      "{not json",
+      JSON.stringify({ version: 3, sources: [], names: [], mappings: "AAAA" }),
+      JSON.stringify({ version: 3, sources: [7], names: [], mappings: "AAAA" }),
+      JSON.stringify({ version: 3, sources: "../src/a.ts", names: [], mappings: "AAAA" }),
+    ].entries()) {
+      const temporary = await mkdtemp(join(tmpdir(), "pdb-map-"));
+      try {
+        await mkdir(join(temporary, "dist"));
+        await writeFile(join(temporary, "dist", "mcp.mjs"), "a\n");
+        await writeFile(join(temporary, "dist", "mcp.mjs.map"), text);
+        expect(mappedFrame(temporary, "dist/mcp.mjs", 1, 1), `case ${i}`).toBeUndefined();
+        const built = event(pathToFileURL(join(temporary, "dist", "mcp.mjs")).href);
+        built.exception!.values![0]!.stacktrace!.frames![0]!.lineno = 1;
+        built.exception!.values![0]!.stacktrace!.frames![0]!.colno = 1;
+        expect(
+          sanitizeCrash(built, temporary, "mcp")?.exception?.values?.[0]?.stacktrace?.frames,
+        ).toEqual([{ filename: "dist/mcp.mjs", lineno: 1, colno: 1, in_app: true }]);
+      } finally {
+        await rm(temporary, { recursive: true, force: true });
+      }
     }
   });
   it("does not load an SDK for absent, disabled or invalid configuration", async () => {
