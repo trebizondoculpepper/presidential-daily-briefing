@@ -9,7 +9,10 @@ import { PassThrough, Writable } from "node:stream";
 import { execFileSync } from "node:child_process";
 import {
   createIssue,
+  defaultReadFile,
   ghPostWith,
+  MAX_BODY_BYTES,
+  readStdinBounded,
   creationMarker,
   intentDigest,
   ISSUE_CREATE_MARKER,
@@ -371,24 +374,83 @@ describe("pdb issue create CLI", () => {
   });
 });
 
+describe("issue create: unverified labels and bounded input", () => {
+  it("keeps applied labels unknown when the reply lacks them and read-back fails", async () => {
+    const f = fake({
+      post: () => ({
+        dispatched: true,
+        status: 201,
+        body: { ...issueBody(8, []), labels: undefined },
+      }),
+    });
+    const result = await createIssue(request({ labels: ["bug"] }), f.rt);
+    expect(result.labels.applied).toBeNull();
+    expect(result).toMatchObject({ status: "partial", error: { id: "LABELS_UNVERIFIED" } });
+    expect(result.issue?.number).toBe(8);
+    expect(result.recovery).toEqual([]);
+    expect(f.posts).toHaveLength(1);
+  });
+  it("refuses an oversize body file by size and reads a small one", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "issue-body-"));
+    try {
+      const big = join(dir, "big.md");
+      const small = join(dir, "small.md");
+      await writeFile(big, Buffer.alloc(MAX_BODY_BYTES + 1, 120));
+      await writeFile(small, "hello");
+      await expect(defaultReadFile(big)).rejects.toThrow("exceeds");
+      expect(Buffer.from(await defaultReadFile(small)).toString()).toBe("hello");
+      const f = fake();
+      f.rt.readFile = defaultReadFile;
+      await expect(createIssue(request({ bodyFile: big }), f.rt)).rejects.toThrow("exceeds");
+      expect(f.gets).toHaveLength(0);
+    } finally {
+      await rm(dir, { recursive: true });
+    }
+  });
+  it("stops reading stdin once past the limit", async () => {
+    let pulled = 0;
+    async function* endless() {
+      for (;;) {
+        pulled++;
+        yield Buffer.alloc(16 * 1024, 120);
+      }
+    }
+    await expect(readStdinBounded(endless())).rejects.toThrow("exceeds");
+    expect(pulled).toBe(5);
+    async function* small() {
+      yield Buffer.from("ok");
+    }
+    expect(Buffer.from(await readStdinBounded(small())).toString()).toBe("ok");
+  });
+});
+
 describe("issue create: generated commands and the create boundary", () => {
   it.skipIf(process.platform === "win32")(
     "quotes untrusted label text in recovery commands so a shell treats it as data",
     async () => {
-      const hostile = ["$(touch pwned)", "`id`", 'it\'s "q"', "a b;c|d&e"];
+      const hostile = ["$(touch pwned)", "`id`", 'it\'s "q"', "a b;c|d&e", "bug,docs"];
       const f = fake({
         post: () => ({ dispatched: true, status: 201, body: issueBody(7, []) }),
         readBack: { status: 200, body: issueBody(7, []) },
       });
       const result = await createIssue(request({ labels: hostile }), f.rt);
       expect(result.status).toBe("partial");
-      for (const [i, command] of result.recovery.entries()) {
-        // printf echoes the shell's parsed last argument: it must equal the label exactly.
-        const parsed = execFileSync("sh", ["-c", `set -- ${command}; printf %s "$8"`], {
-          encoding: "utf8",
-        });
-        expect(parsed).toBe(hostile[i]);
-      }
+      expect(result.recovery).toHaveLength(1);
+      // A stand-in gh prints its arguments and stdin: the shell must pass both through intact.
+      const out = execFileSync(
+        "sh",
+        ["-c", `gh() { printf '%s\\n' "$@"; cat; }\n${result.recovery[0]!}`],
+        { encoding: "utf8" },
+      ).split("\n");
+      expect(out.slice(0, 6)).toEqual([
+        "api",
+        "--method",
+        "POST",
+        `repos/${target}/issues/7/labels`,
+        "--input",
+        "-",
+      ]);
+      expect(JSON.parse(out[6]!)).toEqual({ labels: hostile });
       // Newlines never reach a command: labels with control characters are rejected first.
       await expect(createIssue(request({ labels: ["a\nb"] }), f.rt)).rejects.toThrow(
         "Invalid --label",
