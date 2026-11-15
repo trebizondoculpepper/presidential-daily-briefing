@@ -35,8 +35,18 @@ import {
   planClaim,
   planNeedsHuman,
   planQuestionResolution,
+  type ClaimPlan,
+  type ClaimResult,
   planRelease,
 } from "./workflow/claims.js";
+import {
+  admissionFor,
+  planClaimResume,
+  planClaimWait,
+  planWaitOnQuestion,
+  stillWaitingFor,
+  verifyTransition,
+} from "./workflow/retained.js";
 import { cachedCheckForUpdate } from "./updates/updatecache.js";
 import { installedVersion, optOutEnv, legacyOptOutEnv, updateAdvisory } from "./updates/updates.js";
 import { defaultStaleHours } from "./workflow/team.js";
@@ -187,8 +197,14 @@ Rollback: pdb config set briefing.engine typescript.
   complete N --agent NAME [--dry-run]  Verify delivery from fresh evidence (every required PR
                         merged into its live target) and only then record completion and close
                         the issue as completed; never reopens or merges (complete --help)
-  needs-human N --agent NAME --designer NAME --why TEXT --question TEXT... [--dry-run]
-                        Record questions for a designer and mark the ticket decision-needed
+  claim wait N --agent NAME (--question URL | --blocked-by owner/name#M) --why TEXT [--dry-run]
+                        Keep your claim while it waits on a question or an open native blocker;
+                        while every other claim of yours verifiably waits, you may claim one more
+  claim resume N --agent NAME [--dry-run]  Make a waiting claim active again once its blocker
+                        cleared (never automatic; refused while another claim is active)
+  needs-human N --agent NAME --designer NAME --why TEXT --question TEXT... [--release] [--dry-run]
+                        Record questions for a designer and mark the ticket decision-needed;
+                        keeps your claim waiting on the question (--release relinquishes it)
   question resolve|withdraw N --agent NAME --question URL --why TEXT [--dry-run]
                         Record that a needs-human question was answered or withdrawn (explicit,
                         with a reason; never inferred from replies, labels or closure)
@@ -477,6 +493,7 @@ export function workflowArgumentsFor(command: "claim" | "needs-human" | "release
       note: { type: "string" },
       pr: { type: "string" },
       change: { type: "string" },
+      release: { type: "boolean" },
     },
   });
   const usage =
@@ -484,7 +501,7 @@ export function workflowArgumentsFor(command: "claim" | "needs-human" | "release
       ? "Usage: pdb claim N --agent NAME [--branch BRANCH] [--platform P] [--rework] [--dry-run] [--json]"
       : command === "release"
         ? releaseUsage
-        : "Usage: pdb needs-human N --agent NAME --designer NAME --why TEXT --question TEXT [--question TEXT...] [--dry-run] [--json]";
+        : "Usage: pdb needs-human N --agent NAME --designer NAME --why TEXT --question TEXT [--question TEXT...] [--release] [--dry-run] [--json]";
   const number =
     positionals.length === 1 && /^[1-9]\d*$/.test(positionals[0]) ? Number(positionals[0]) : null;
   const name = /^[A-Za-z0-9][\w.-]*$/;
@@ -506,7 +523,8 @@ export function workflowArgumentsFor(command: "claim" | "needs-human" | "release
       values.question ||
       values.branch ||
       values.platform ||
-      values.rework
+      values.rework ||
+      values.release
     )
       throw new Error(usage);
     const outcome = claimPolicy.outcomes.find((o) => o === values.as);
@@ -525,7 +543,7 @@ export function workflowArgumentsFor(command: "claim" | "needs-human" | "release
   }
   if (releaseOnly !== undefined) throw new Error(usage);
   if (command === "claim") {
-    if (values.designer || values.why || values.question) throw new Error(usage);
+    if (values.designer || values.why || values.question || values.release) throw new Error(usage);
     return {
       ...common,
       branch: values.branch,
@@ -537,7 +555,62 @@ export function workflowArgumentsFor(command: "claim" | "needs-human" | "release
   if (!values.designer || !name.test(values.designer) || !values.why?.trim() || !questions.length)
     throw new Error(usage);
   if (values.branch || values.platform || values.rework) throw new Error(usage);
-  return { ...common, designer: values.designer, why: values.why.trim(), questions };
+  return {
+    ...common,
+    designer: values.designer,
+    why: values.why.trim(),
+    questions,
+    release: !!values.release,
+  };
+}
+
+export const claimWaitUsage =
+  "Usage: pdb claim wait N --agent NAME (--question URL | --blocked-by owner/name#M) --why TEXT [--dry-run] [--json] [--repo owner/name]\n       pdb claim resume N --agent NAME [--dry-run] [--json] [--repo owner/name]";
+
+/** Arguments of `claim wait` and `claim resume` (#412). */
+export function claimActivityArgumentsFor(op: "wait" | "resume", args: string[]) {
+  const { values, positionals } = parseArgs({
+    args,
+    allowPositionals: true,
+    options: {
+      repo: { type: "string" },
+      json: { type: "boolean" },
+      "dry-run": { type: "boolean" },
+      agent: { type: "string" },
+      question: { type: "string" },
+      "blocked-by": { type: "string" },
+      why: { type: "string" },
+    },
+  });
+  if (
+    positionals.length !== 1 ||
+    !/^[1-9]\d*$/.test(positionals[0]!) ||
+    !values.agent ||
+    !/^[A-Za-z0-9][\w.-]*$/.test(values.agent)
+  )
+    throw new Error(claimWaitUsage);
+  if (values.repo && !/^[\w.-]+\/[\w.-]+$/.test(values.repo))
+    throw new Error("--repo must be owner/name.");
+  const common = {
+    op,
+    number: Number(positionals[0]),
+    agent: values.agent,
+    repo: values.repo,
+    json: values.json,
+    dryRun: !!values["dry-run"],
+  };
+  if (op === "resume") {
+    if (values.question || values["blocked-by"] || values.why) throw new Error(claimWaitUsage);
+    return common;
+  }
+  if (!values.why?.trim() || !values.question === !values["blocked-by"])
+    throw new Error(claimWaitUsage);
+  return {
+    ...common,
+    why: values.why.trim(),
+    ...(values.question ? { question: values.question } : {}),
+    ...(values["blocked-by"] ? { blockedBy: values["blocked-by"] } : {}),
+  };
 }
 export function argumentsFor(args: string[]) {
   const { values } = parseArgs({
@@ -1003,6 +1076,45 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
     );
     return result.exitCode;
   }
+  if (args[0] === "claim" && (args[1] === "wait" || args[1] === "resume")) {
+    const values = claimActivityArgumentsFor(args[1], args.slice(2));
+    const repository = values.repo ?? (await runtime.currentRepository());
+    const query = runtime.query ?? ghQuery;
+    const permission = permissionLookup(repository, runtime.rest ?? ghRest);
+    // Read live immediately before writing; never act on a cached snapshot.
+    const plan =
+      "why" in values
+        ? await planClaimWait(repository, values, query, permission)
+        : await planClaimResume(
+            repository,
+            values,
+            query,
+            permission,
+            admissionFor(repository, values.agent, query, permission),
+          );
+    let result =
+      values.dryRun || !plan.ok || plan.noop
+        ? { ...plan, exitCode: plan.ok ? 0 : 1 }
+        : await applyPlan(repository, plan, { run: runtime.ghRun ?? ghRun, query });
+    // A written record is not a transition until the fold accepts it.
+    if (result.ok && result.exitCode === 0 && !values.dryRun && plan.ok && plan.activityOpId) {
+      const conflict = await verifyTransition(
+        repository,
+        values.number,
+        values.agent,
+        plan.activityOpId,
+        query,
+        permission,
+      );
+      if (conflict) result = { ...result, conflict, exitCode: 2 } as typeof result;
+    }
+    await output(
+      values.json
+        ? JSON.stringify({ schemaVersion: 1, ...result }, null, 2) + "\n"
+        : claimText(result, values.dryRun),
+    );
+    return result.exitCode;
+  }
   if (args[0] === "claim" || args[0] === "needs-human" || args[0] === "release") {
     const values = workflowArgumentsFor(args[0], args.slice(1));
     const repository = values.repo ?? (await runtime.currentRepository());
@@ -1030,11 +1142,94 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
               values.rework
                 ? () => reworkAuthority(repository, values.number, values.agent, rt)
                 : undefined,
+              admissionFor(repository, values.agent, query, permission),
             );
+    const stillWaiting = stillWaitingFor(repository, values.agent, query, permission);
+    // needs-human on a claim the caller keeps (#412): question first, then the wait bound to
+    // it, then labels, so the wait never precedes a durable question and labels never claim
+    // a wait that was not recorded.
+    if ("questions" in values && plan.ok && plan.retainsClaim && !values.dryRun) {
+      const run = runtime.ghRun ?? ghRun;
+      const asked = await applyPlan(
+        repository,
+        { ...plan, changes: plan.changes.filter((c) => c.step === "comment"), recheck: undefined },
+        { run, query },
+      );
+      let wait: (ClaimPlan & { exitCode: number }) | ClaimResult | null = null;
+      let waitNote = "Question not saved; no wait recorded and no labels changed.";
+      let waitOk = false;
+      if (asked.exitCode === 0) {
+        const waitPlan = await planWaitOnQuestion(
+          repository,
+          {
+            number: values.number,
+            agent: values.agent,
+            questionOpId: plan.questionOpId!,
+            why: values.why,
+          },
+          query,
+          permission,
+        );
+        if (!waitPlan.ok) {
+          // A claim already waiting on another blocker keeps that wait; the labels still apply.
+          waitOk = waitPlan.error === "ALREADY_WAITING";
+          waitNote = waitOk
+            ? `Claim kept; ${waitPlan.prerequisite}`
+            : `Question saved, but the wait was not recorded (${waitPlan.error}: ${waitPlan.prerequisite}); labels not changed. Re-run the same command.`;
+          wait = { ...waitPlan, exitCode: waitOk ? 0 : 2 };
+        } else {
+          const applied = waitPlan.noop
+            ? { ...waitPlan, exitCode: 0 }
+            : await applyPlan(repository, waitPlan, { run, query });
+          const stale =
+            applied.exitCode === 0 && !waitPlan.noop && waitPlan.activityOpId
+              ? await verifyTransition(
+                  repository,
+                  values.number,
+                  values.agent,
+                  waitPlan.activityOpId,
+                  query,
+                  permission,
+                )
+              : null;
+          if (stale) applied.exitCode = 2;
+          waitOk = applied.exitCode === 0;
+          waitNote = waitOk
+            ? (waitPlan.reason ?? "Wait recorded.")
+            : "Question saved, but the wait could not be written; labels not changed. Re-run the same command.";
+          wait = { ...applied, exitCode: waitOk ? 0 : 2 };
+        }
+      }
+      const labelled =
+        asked.exitCode === 0 && waitOk
+          ? await applyPlan(
+              repository,
+              { ...plan, changes: plan.changes.filter((c) => c.step !== "comment") },
+              { run, query },
+            )
+          : null;
+      const exitCode = Math.max(asked.exitCode, wait?.exitCode ?? 0, labelled?.exitCode ?? 0);
+      const combined: ClaimResult = {
+        ...(labelled ?? asked),
+        steps: [...(asked.steps ?? []), ...(labelled?.steps ?? [])],
+        notes: [...(plan.notes ?? []), waitNote],
+        exitCode,
+      } as ClaimResult;
+      await output(
+        values.json
+          ? JSON.stringify({ schemaVersion: 1, ...combined, wait }, null, 2) + "\n"
+          : claimText(combined, false),
+      );
+      return exitCode;
+    }
     const result =
       values.dryRun || !plan.ok
         ? { ...plan, exitCode: plan.ok ? 0 : 1 }
-        : await applyPlan(repository, plan, { run: runtime.ghRun ?? ghRun, query });
+        : await applyPlan(repository, plan, {
+            run: runtime.ghRun ?? ghRun,
+            query,
+            stillWaiting,
+          });
     // Rework on the delivery-record path: after the claim, one `membership open` record
     // (doc "Rework authority"). A legacy rework writes nothing more; a failed or conflicting
     // claim writes nothing more. A retry of the same claim completes a missing record.
