@@ -45,6 +45,11 @@ export interface PresentOptions extends Omit<BriefingOptions, "estimation" | "as
   role?: string;
   /** Workflow guide (#71) for the compact briefing; omitted means no `process` object. */
   process?: BriefingProcess;
+  /**
+   * Monotonic milliseconds for the Datalog soft time-budget diagnostic only
+   * (doc/design/rules-component.md); defaults to `performance.now`. Tests inject a fixed one.
+   */
+  engineClock?: () => number;
 }
 
 /** The versioned briefing report and its text rendering. */
@@ -142,6 +147,7 @@ export async function presentBriefing(
         responsibilityUnknown: responsibility.unknown.map((u) => u.issue),
         limit: Number.MAX_SAFE_INTEGER,
         signal,
+        now: options.engineClock,
       });
     } catch (error) {
       if (signal?.aborted) throw error;
@@ -241,6 +247,8 @@ export interface ReadRuntime {
   queryWith?: (signal?: AbortSignal) => Query;
   /** Clock for freshness ages; defaults to the system clock. */
   now?: () => Date;
+  /** Monotonic timer for the Datalog soft-budget diagnostic; defaults to `performance.now`. */
+  engineClock?: () => number;
   /** Rewrites locally generated diagnostics (not GitHub evidence) for remote consumers. */
   redactDiagnostic?: (text: string) => string;
   /** Filesystem, git and working directory for the workflow-guide setting (#71). */
@@ -312,6 +320,7 @@ export async function readBriefing(
       ...(request.order ? { order: request.order } : {}),
       process,
       engineSetting,
+      ...(runtime.engineClock ? { engineClock: runtime.engineClock } : {}),
     },
     runtime.estimation,
     runtime.now?.(),
