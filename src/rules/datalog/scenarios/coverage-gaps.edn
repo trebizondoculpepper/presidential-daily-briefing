@@ -125,4 +125,16 @@
               :why "PR checks failed at head head2; inspect and repair before merge."
               :facts {"impact" "unknown" "complexity" "unknown" "impactState" "unknown" "complexityState" "unknown" "head" "head2" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "failedChecks" "verify:FAILURE"}
               :overridden [] :unlocks 0 :unknown [] :other-claims []}]
-           :denials #{[100 "D-DENY-OPEN-PR"]}}}]}
+           :denials #{[100 "D-DENY-OPEN-PR"]}}}
+
+ {:id "observed-failure-is-actionable-with-incomplete-evidence"
+  :doc "#502: a failed check observed on the current head of a non-draft PR is follow-up even though other PR evidence is incomplete; the delivery classifier agrees (deliveryread.test.ts). Same facts and expectation as guard-negatives' first scenario except pr-complete false."
+  :viewer {:role "designer" :agent "me"}
+  :facts [{:e 1 "forward-complete" true}
+          {:e 100 "kind" "pr" "state" "OPEN" "number" 2 "target" "https://github.com/o/r/pull/2" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "head2" "draft" false "pr-complete" false "review-decision" "" "mergeable" "MERGEABLE" "merge-state" "CLEAN" "label" "documentation" "responsible" "me" "check" 101}
+          {:e 101 "name" "verify" "outcome" "FAILURE"}]
+  :expect {:actions [{:subject 100 :rule "D-PR-FAIL" :kind "pr-follow-up" :band 2
+              :why "PR checks failed at head head2; inspect and repair before merge."
+              :facts {"impact" "unknown" "complexity" "unknown" "impactState" "unknown" "complexityState" "unknown" "head" "head2" "responsible" "me" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "failedChecks" "verify:FAILURE"}
+              :overridden [] :unlocks 0 :unknown [] :other-claims []}]
+           :denials #{}}}]}
