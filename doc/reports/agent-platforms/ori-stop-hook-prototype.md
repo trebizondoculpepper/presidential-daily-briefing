@@ -30,7 +30,7 @@ The transport used is the default live `service` transport. `--transport http-mc
 
 ## Runnable prototype
 
-The disposable adapter is a small TypeScript watcher (kept in the OS temp dir for the trial, removed afterward; not committed, since the repo keeps `scripts/` helpers under the strict language/type boundaries). It:
+The disposable adapter is a small TypeScript watcher committed at `scripts/ori-stop-hook-prototype.mts` (under the repo's strict `scripts/` language/type boundaries). It:
 
 1. runs a disposable work turn in an owned headless session,
 2. waits for `turn.succeeded` on that session's jsonl stream,
@@ -41,26 +41,16 @@ The disposable adapter is a small TypeScript watcher (kept in the OS temp dir fo
 
 It is synthetic/read-only: the fixture is an untracked text file and is removed afterward; no live ticket is mutated. This is disposable, not a production install.
 
-What it does, in the exact commands (kept here because the script itself is disposable):
+The script is the reproduction: it owns a private temp state directory (created with `mkdtempSync`), runs the work turn, drives `pdb rebrief init`/`check`/`ack`, resumes the same session, verifies the nonce and first action id, and removes its own state directory on exit. To reproduce: create the fixture, then run it from a checkout of this repository:
 
 ```sh
-state_dir=$(node -e 'process.stdout.write(require("node:fs").mkdtempSync(require("node:os").tmpdir()+"/pdb-rebrief-"))')
 printf 'REBRIEF-%s\nSynthetic fixture: no live tickets.\n' "$(openssl rand -hex 4)" > briefing.txt
-npm run --silent pdb -- rebrief init --json --state-dir "$state_dir" --session native-session \
-  --project "$(pwd)" --agent dalia_okafor --role implementer --platform ori
-# on turn.succeeded of the owned headless turn:
-npm run --silent pdb -- rebrief check --json --state-dir "$state_dir" --session native-session \
-  --project "$(pwd)" --agent dalia_okafor --role implementer --platform ori \
-  --enabled --event "ori-turn-<hex>" --reason natural
-# on {"decision":"continue"}: resume the SAME session with the briefing as its prompt
-ori code -p '[before-stop rebrief] <briefing>' --resume "<original-session-id>" --model google/gemini-2.5-flash
-# after the model echoes the fixture nonce and the first action id:
-npm run --silent pdb -- rebrief ack --json --state-dir "$state_dir" --session native-session \
-  --project "$(pwd)" --agent dalia_okafor --role implementer --platform ori \
-  --event "ori-turn-<hex>" --fingerprint "<the-returned-sha256>"
+tsx scripts/ori-stop-hook-prototype.mts "$(pwd)"
+# the script removes its own private temp state directory on exit.
 rm -f briefing.txt
-rm -r -- "$state_dir"
 ```
+
+The script's cleanup removes only the exact private state directory it created in a fresh `mkdtempSync`; it never globs `/tmp/pdb-rebrief-*`, so it never touches another session's state (consistent with the shared-rebrief-core requirement to preserve another agent's work).
 
 ## Observed evidence
 
@@ -103,11 +93,9 @@ User stop always wins: the prototype never resumes on `turn.cancelled` or `turn.
 ```sh
 # disposable checkout (this branch). Create the test fixture with the nonce the model must echo:
 printf 'REBRIEF-%s\nSynthetic fixture: no live tickets.\nMultiply 6 by 7.\n' "$(openssl rand -hex 4)" > briefing.txt
-# the disposable watcher (temp dir) runs the init/check/resume/ack commands shown above;
-# it must be run with cwd = this checkout so the resumed turn can read briefing.txt.
-# remove the disposable fixture and core state when done:
+tsx scripts/ori-stop-hook-prototype.mts "$(pwd)"
+# remove the disposable fixture when done; the script removes its own private state dir:
 rm -f briefing.txt
-rm -r -- /tmp/pdb-rebrief-*      # the core's private temp state; no live hook/global watcher was installed
 ```
 
 The prototype runs solely inside the disposable checkout, cleans its fixture, and leaves no hook or configuration. Nothing in the user's normal Ori setup is installed or changed.
