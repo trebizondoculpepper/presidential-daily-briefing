@@ -87,9 +87,10 @@ function fact(items: Form[], where: string, ctx: Context): Clause {
   const entity = term(items[0], where, ctx);
   const value = term(items[2], where, ctx);
   if (typeof items[1] !== "string") {
-    // Variable attributes would need guessed English; the policy uses none.
-    ctx.problems.push(`${where}: only literal string attributes are supported`);
-    return { type: "compare", op: "?", args: [] };
+    const attribute = term(items[1], where, ctx);
+    if ("lit" in attribute)
+      ctx.problems.push(`${where}: a dynamic attribute must be a variable or wildcard`);
+    return { type: "dynamic-fact", entity, attribute, value };
   }
   const attribute = items[1];
   const { bundle } = ctx;
@@ -338,6 +339,8 @@ export function clauseEdn(c: Clause): string {
   switch (c.type) {
     case "fact":
       return `[${t(c.entity)} ${JSON.stringify(c.attribute)} ${t(c.value)}]`;
+    case "dynamic-fact":
+      return `[${t(c.entity)} ${t(c.attribute)} ${t(c.value)}]`;
     case "call":
       return `(${[c.predicate, ...c.args.map(t)].join(" ")})`;
     case "compare":
