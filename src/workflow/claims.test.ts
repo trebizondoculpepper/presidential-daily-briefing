@@ -8,7 +8,14 @@ import {
   type RepositoryPermission,
   type Rest,
 } from "../github/github.js";
-import { applyPlan, claimText, planClaim, planNeedsHuman, planRelease } from "./claims.js";
+import {
+  applyPlan,
+  claimText,
+  parseQuestionMarker,
+  planClaim,
+  planNeedsHuman,
+  planRelease,
+} from "./claims.js";
 import type { ReworkAuthority } from "./claims.js";
 import type { ClaimAccepted, ClaimPlan, ClaimRefusal } from "./claims.js";
 import { by, issue, page, repo, time } from "../testing/snapshots.js";
@@ -542,6 +549,26 @@ describe("claim and needs-human review fixes", () => {
       const plan = await planNeedsHuman(repo, ask, await withMarker("kavya"), permission);
       expect(commented(plan)).toBe(false);
       expect(permission.calls).toEqual(["kavya"]);
+    });
+    it("posts a v2 marker bound to this issue, and a legacy v1 record still deduplicates (#412)", async () => {
+      const body = await questionBody();
+      const marker = parseQuestionMarker(body);
+      expect(marker).toMatchObject({ version: 2, repository: repo, issue: expect.any(Number) });
+      expect(body).toMatch(/<!-- github-triage:needs-human:[0-9a-f]{16} v2 \{"v":2,/);
+      // The same request recorded before #412, with the legacy marker, is still a repeat.
+      const legacy = body.replace(/ v2 \{.*\} -->/, " -->");
+      expect(parseQuestionMarker(legacy)).toEqual({ version: 1, opId: marker!.opId });
+      const data = base(["status:ready"]);
+      (data.repository.issueOrPullRequest.comments as unknown) = page([
+        { ...by("kavya"), body: legacy, createdAt: "2026-11-12T10:00:00Z" },
+      ]);
+      const plan = await planNeedsHuman(
+        repo,
+        ask,
+        async () => data,
+        permissions({ kavya: "write" }),
+      );
+      expect(commented(plan)).toBe(false);
     });
     it("a failed permission lookup does not suppress the question", async () => {
       const plan = await planNeedsHuman(
@@ -1578,5 +1605,28 @@ describe("release: coordinated handoff (#62, doc/design/workflow.md)", () => {
       await rework(awaiting(comments), permissionLookup(repo, rest));
       expect(paths).toHaveLength(4);
     });
+  });
+});
+
+describe("needs-human question markers (#412)", () => {
+  it("parses v1 and exact v2 markers; anything else is malformed, never legacy", () => {
+    const id = "0123456789abcdef";
+    expect(parseQuestionMarker("no marker")).toBeNull();
+    expect(parseQuestionMarker(`<!-- github-triage:needs-human:${id} -->`)).toEqual({
+      version: 1,
+      opId: id,
+    });
+    const v2 = `<!-- github-triage:needs-human:${id} v2 {"v":2,"repository":"o/r","issue":7,"resolution":"explicit"} -->`;
+    expect(parseQuestionMarker(v2)).toEqual({ version: 2, opId: id, repository: "o/r", issue: 7 });
+    for (const bad of [
+      `<!-- github-triage:needs-human:${id} v2 {"v":2,"repository":"o/r","issue":7} -->`,
+      `<!-- github-triage:needs-human:${id} v2 {"v":2,"repository":"o/r","issue":7,"resolution":"labels"} -->`,
+      `<!-- github-triage:needs-human:${id} v2 {"v":2,"repository":"o/r","issue":0,"resolution":"explicit"} -->`,
+      `<!-- github-triage:needs-human:${id} v2 {"v":2,"repository":"o/r","issue":7,"resolution":"explicit","x":1} -->`,
+      `<!-- github-triage:needs-human:${id} v2 not json -->`,
+      `<!-- github-triage:needs-human:${id} v2 {"v":2`,
+      `<!-- github-triage:needs-human:XYZ -->`,
+    ])
+      expect(parseQuestionMarker(bad)?.version, bad).toBe("malformed");
   });
 });

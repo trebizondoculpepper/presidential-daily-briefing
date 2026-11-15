@@ -10,7 +10,7 @@
  */
 import type { Comment, Issue, PullRequest, Snapshot } from "../github/types.js";
 import type { TrustDecision } from "../workflow/delivery.js";
-import { parseQuestionRecordBody } from "../workflow/claims.js";
+import { parseQuestionMarker, parseQuestionRecordBody } from "../workflow/claims.js";
 import type { Comment as MarkerComment } from "../workflow/claims.js";
 import type { DatalogAction, QuestionRecordFact } from "../rules/datalog/datalog.js";
 
@@ -40,6 +40,13 @@ export interface HumanRecord {
   raisedBy: string;
   why: string;
   questions: string[];
+  /**
+   * Marker version (#412): 1 legacy, 2 bound to its repository/issue with explicit-resolution
+   * semantics. Until the explicit resolve/withdraw commands ship, both resolve by labels here.
+   */
+  version: 1 | 2;
+  /** The needs-human operation id that identifies this question. */
+  opId: string;
 }
 
 const shorten = (text: string): string =>
@@ -54,7 +61,10 @@ export function parseQuestionRecord(comment: Comment): HumanRecord | null {
   const marker = body.slice(at, end < 0 ? undefined : end + 3);
   // The same format `pdb needs-human` writes (workflow/claims.ts), multiline values included.
   const parts = parseQuestionRecordBody(body.slice(0, at));
+  const parsed = parseQuestionMarker(body);
   return {
+    version: parsed?.version === 2 ? 2 : 1,
+    opId: parsed?.opId ?? "",
     url: comment.url,
     createdAt: comment.createdAt ?? "",
     marker,
@@ -110,7 +120,30 @@ export async function readHumanEvidence(
       );
     const parsed = issue.comments.nodes
       .map((comment) => ({ comment, record: parseQuestionRecord(comment) }))
-      .filter((r): r is { comment: Comment; record: HumanRecord } => r.record !== null);
+      .filter((r): r is { comment: Comment; record: HumanRecord } => {
+        if (r.record === null) return false;
+        const marker = parseQuestionMarker(r.comment.body ?? "");
+        // A v2 record copied from another issue never becomes this issue's question (#412).
+        if (
+          marker?.version === 2 &&
+          (marker.repository.toLowerCase() !== snapshot.repository.toLowerCase() ||
+            marker.issue !== issue.number)
+        ) {
+          evidence.warnings.push(
+            `${issue.url}: question record ${r.comment.url} is bound to ${marker.repository}#${marker.issue}; ignored.`,
+          );
+          return false;
+        }
+        // A malformed marker is missing evidence, never read as a legacy question.
+        if (marker?.version === "malformed") {
+          evidence.counts.unverified++;
+          evidence.warnings.push(
+            `${issue.url}: question record ${r.comment.url} has a malformed marker (${marker.why}); ignored.`,
+          );
+          return false;
+        }
+        return true;
+      });
     if (!parsed.length) continue;
     const facts: QuestionRecordFact[] = [];
     if (!trust) {

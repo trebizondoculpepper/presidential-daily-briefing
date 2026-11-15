@@ -287,8 +287,66 @@ const ignoredNote = (ignored: string[]): string[] =>
   ignored.length ? [`Ignored marker(s) without write authority: ${ignored.join("; ")}.`] : [];
 const markerRecovery = "a maintainer must re-post or confirm the handoff on the ticket";
 
+const markerId = (parts: unknown[]): string =>
+  createHash("sha256").update(JSON.stringify(parts)).digest("hex").slice(0, 16);
 const marker = (kind: string, parts: unknown[]): string =>
-  `<!-- github-triage:${kind}:${createHash("sha256").update(JSON.stringify(parts)).digest("hex").slice(0, 16)} -->`;
+  `<!-- github-triage:${kind}:${markerId(parts)} -->`;
+
+/** Prefix of every needs-human question marker, v1 and v2. */
+export const questionMarkerPrefix = "<!-- github-triage:needs-human:";
+/**
+ * The v2 question marker: the operation id, then a JSON binding to the repository and issue and
+ * `resolution: "explicit"`. Such a question stays open until an explicit resolve or withdraw,
+ * whether its asker kept or released the claim; label removal does not answer it.
+ */
+export const questionMarker = (opId: string, repository: string, issue: number): string =>
+  `${questionMarkerPrefix}${opId} v2 ${JSON.stringify({ v: 2, repository, issue, resolution: "explicit" })} -->`;
+
+export type ParsedQuestionMarker =
+  /** Legacy: label removal keeps its compatibility meaning. */
+  | { version: 1; opId: string }
+  | { version: 2; opId: string; repository: string; issue: number }
+  | { version: "malformed"; opId: string | null; why: string };
+
+/**
+ * Read a needs-human marker of either version; null when the comment has none. A v2 binding
+ * must be complete and exact; anything else is malformed, never read as legacy.
+ */
+export function parseQuestionMarker(body: string): ParsedQuestionMarker | null {
+  const at = body.indexOf(questionMarkerPrefix);
+  if (at < 0) return null;
+  const rest = body.slice(at + questionMarkerPrefix.length);
+  const id = /^([0-9a-f]{16})( -->| v2 )/.exec(rest);
+  if (!id) return { version: "malformed", opId: null, why: "marker has no operation id" };
+  if (id[2] === " -->") return { version: 1, opId: id[1]! };
+  const end = rest.indexOf(" -->", id[0].length);
+  if (end < 0) return { version: "malformed", opId: id[1]!, why: "marker is not terminated" };
+  let payload: unknown;
+  try {
+    payload = JSON.parse(rest.slice(id[0].length, end));
+  } catch {
+    return { version: "malformed", opId: id[1]!, why: "binding is not JSON" };
+  }
+  const p = payload as Record<string, unknown>;
+  const ok =
+    typeof p === "object" &&
+    p !== null &&
+    Object.keys(p).sort().join() === "issue,repository,resolution,v" &&
+    p.v === 2 &&
+    p.resolution === "explicit" &&
+    typeof p.repository === "string" &&
+    /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})\/[A-Za-z0-9._-]{1,100}$/.test(p.repository) &&
+    typeof p.issue === "number" &&
+    Number.isSafeInteger(p.issue) &&
+    p.issue > 0;
+  return ok
+    ? { version: 2, opId: id[1]!, repository: p.repository as string, issue: p.issue as number }
+    : {
+        version: "malformed",
+        opId: id[1]!,
+        why: "binding is not {v:2, repository, issue, resolution:explicit}",
+      };
+}
 
 /** A release's durable intent, recorded in its handoff comment before labels change. */
 interface ReleaseRecord {
@@ -1003,11 +1061,17 @@ export async function planNeedsHuman(
       [`${triage} --issue ${number}`],
     );
   const mine = claimPolicy.owner(agent);
-  const op = marker("needs-human", [repository, number, agent, designer, why, questions]);
+  // v2 marker (#412, doc/reports/closed-question-discovery.md): the same 16-hex operation id
+  // after the existing prefix, plus a binding to this repository/issue and explicit-resolution
+  // semantics. Retries match either version by that id, so a v1 record still suppresses.
+  const opId = markerId([repository, number, agent, designer, why, questions]);
+  const op = questionMarker(opId, repository, number);
+  const opToken = `${questionMarkerPrefix}${opId}`;
   // Page back until a marker WITH authority is found (#214): stopping at any matching marker
   // would let a newer forged copy hide an older genuine one, so a retry would post twice.
   // Permission lookups are cached per run, so re-checking candidates per page costs no requests.
-  const candidates = (c: Comment[]) => c.filter((x) => x.body.includes(op));
+  const candidates = (c: Comment[]) =>
+    c.filter((x) => parseQuestionMarker(x.body)?.opId === opId && x.body.includes(opToken));
   const seen = await commentHistory(
     repository,
     number,

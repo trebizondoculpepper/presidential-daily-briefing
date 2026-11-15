@@ -205,6 +205,16 @@ identities (`previousActivity`, `questionCommentId`) are the comment's numeric
 orders delivery records; GraphQL node IDs are not fetched. Records reject unknown
 fields, and a reason is at most 1000 characters.
 
+Implementation note (#412, slice 2a): `needs-human` now writes the v2 question
+marker from doc/reports/closed-question-discovery.md in place of the v1 marker:
+`<!-- github-triage:needs-human:OPID v2 {"v":2,"repository":R,"issue":N,"resolution":"explicit"} -->`,
+keeping the same prefix and 16-hex operation id, so retries still match v1 records and
+existing readers still find the record. The shared reader (`parseQuestionMarker`)
+returns v1, an exact v2 binding, or malformed (never read as legacy); the human view
+ignores copied and malformed records with warnings. v2 questions keep the label-based
+resolution of v1 until the explicit `question resolve/withdraw` commands ship with the
+wait/resume transitions, so no question becomes unanswerable in the meantime.
+
 Use a separate `github-triage:claim-activity v1` JSON marker. Required fields:
 `v: 1`, `op: wait|resume`, `opId`, `repository`, `issue`, `agent`, `claimStartedAt`,
 `previousActivity` (comment node ID or null), and `reason`. A wait also carries
