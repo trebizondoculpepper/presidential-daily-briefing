@@ -113,9 +113,16 @@ export function evaluatePolicy(input: PolicyFacts, options: PolicyOptions = {}):
   const query = (db: Db, q: string) => (q.includes(":in $ %") ? ds.q(q, db, clauses) : ds.q(q, db));
   if (!["implementer", "designer"].includes(input.viewer.role))
     throw new DatalogError("unsupported-role", "use --role implementer or --role designer");
-  for (const [entity] of input.datoms)
+  for (const [entity, attribute, value] of input.datoms) {
     if (entity !== 1 && entity < firstSubjectId)
       throw new DatalogError("invalid-facts", `entity ${entity} is reserved for the policy`);
+    // NaN and infinities are not comparable keys: one would reorder unrelated subjects (#450).
+    if (typeof value === "number" && !Number.isFinite(value))
+      throw new DatalogError(
+        "invalid-facts",
+        `entity ${entity} ${attribute} is ${value}, not a finite number`,
+      );
+  }
   // Subjects are the entities with a "kind" fact; the same limit the adapter applies first.
   const subjects = new Set(input.datoms.filter(([, a]) => a === "kind").map(([e]) => e));
   if (subjects.size > maxSubjects)

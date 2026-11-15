@@ -199,6 +199,21 @@ describe("next-action ranking (#45, doc/design/briefings.md acceptance examples)
     expect(newest.ready.items.map((i) => i.number)).toEqual([41, 40]);
     expect(brief(data).ready.items.map((i) => i.number)).toEqual([41, 40]);
   });
+  it("an unparseable createdAt sorts last in every mode and never reorders valid tickets (#450)", () => {
+    const bad = at(issue(60), "not a date");
+    const [a, b] = [at(issue(61), "2026-02-01T00:00:00Z"), at(issue(62), "2026-02-01T00:00:00Z")];
+    for (const order of ["oldest", "newest", "impact"] as const)
+      for (const issues of [
+        [bad, a, b],
+        [a, bad, b],
+        [b, a, bad],
+      ])
+        expect(
+          briefing(snapshot(issues, []), { limit: 100, order }, new Date(time)).ready.items.map(
+            (i) => i.number,
+          ),
+        ).toEqual([61, 62, 60]);
+  });
   it("unknown platform or native evidence never becomes pickup", () => {
     const restricted = issue(50, ["status:ready", "platform:codex", "platform:ori"]);
     const missing = issue(51) as Partial<Issue>;
