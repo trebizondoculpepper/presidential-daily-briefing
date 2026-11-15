@@ -62,6 +62,7 @@ const briefingFields = [
   "actions",
   "sections",
   "role",
+  "focus",
   "rankedActions",
   "estimation",
   "impactEstimation",
@@ -130,6 +131,8 @@ export function briefingView(
         // Beyond the first few, warnings yield before the ranked shortlist; their count remains.
         { path: [warningsList] },
         { path: ["rankedActions", "items"] },
+        // A requested section (#311) is the content asked for: its rows yield last.
+        { path: ["focus", "items"] },
         // The human briefing (#457) keeps its ranked items longest, like rankedActions.
         { path: ["human", "coverage", "warnings"] },
         { path: ["human", "items"] },
@@ -147,6 +150,14 @@ export function briefingView(
       const lines = [
         `Presidential Daily Briefing: ${base.repository} — fetched ${str(freshness.fetchedAt)}${freshness.offline ? " (OFFLINE CACHE)" : ""}`,
       ];
+      // #311: an explicit section request leads with that section's rows.
+      if (d.focus) {
+        const focus = obj(d.focus);
+        lines.push(
+          `Section ${str(focus.section)} of role ${str(focus.role)} (${list(focus.items).length} shown of ${Number(focus.total ?? 0)}):`,
+          ...itemsLine("", list(focus.items)),
+        );
+      }
       if (d.rankedActions) {
         const titles = new Map(
           list(report.subjects).map((s) => [str(obj(s).url), obj(s)] as const),

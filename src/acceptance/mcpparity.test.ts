@@ -270,3 +270,70 @@ it("uses ten MCP next actions when limit is omitted, matching the CLI default", 
   expect(ranked.items.length).toBe(10);
   expectParity(mcp, cli);
 });
+
+describe("--section and the MCP section input report the same section (#311)", () => {
+  const pickupIssues = () =>
+    Array.from({ length: 8 }, (_, i) =>
+      issue(20 + i, ["status:ready"], `2026-10-0${i + 1}T00:00:00Z`),
+    );
+  const runtime = (): McpRuntime => ({
+    ...runtimeFor(null),
+    collect: (repository, options) =>
+      collect(
+        repository,
+        options,
+        async (source) => ({
+          repository: {
+            issues: page(source.includes("issues(first") ? pickupIssues() : []),
+            pullRequests: page([]),
+          },
+        }),
+        clock,
+      ),
+  });
+  it("lifts the pickup row cap identically in both front ends", async () => {
+    let out = "";
+    const code = await main(
+      [
+        "--repo",
+        repo,
+        "--agent",
+        "me",
+        "--role",
+        "implementer",
+        "--section",
+        "pickup",
+        "--json",
+        "--no-update-check",
+      ],
+      async (text) => void (out += text),
+      { ...runtime(), updateCheck: async () => ({ status: "disabled" }) as never },
+    );
+    expect(code).toBe(0);
+    const cli = JSON.parse(out) as {
+      focus: { section: string; total: number; items: { url: string }[] };
+    };
+    expect(cli.focus).toMatchObject({ section: "pickup", total: 8, shown: 8, omitted: 0 });
+
+    const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+    await createServer({ repo }, runtime()).connect(serverSide);
+    const client = new Client({ name: "parity", version: "1.0.0" });
+    await client.connect(clientSide);
+    try {
+      const raw = await client.callTool({
+        name: "triage_briefing",
+        arguments: { agent: "me", role: "implementer", section: "pickup" },
+      });
+      const parsed = boundedEnvelope.parse(raw.structuredContent);
+      expect((parsed.data as { focus: unknown }).focus).toEqual(cli.focus);
+      const bad = await client.callTool({
+        name: "triage_briefing",
+        arguments: { role: "implementer", section: "nope" },
+      });
+      expect(bad.isError).toBe(true);
+      expect(JSON.stringify(bad.content)).toMatch(/must be one of: addressed, pr-follow-up/);
+    } finally {
+      await client.close();
+    }
+  });
+});

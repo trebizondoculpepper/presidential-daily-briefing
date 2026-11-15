@@ -8,7 +8,7 @@ import { assessmentsText, provenanceText } from "./assessments.js";
 import type { MetricAvailability, SubjectAssessments } from "./assessments.js";
 import type { EstimateEntry } from "../estimation/estimation.js";
 import { compareImpact, impactLookup, urgencyBand } from "./ranking.js";
-import { followUpRules, roleSectionRows, roleView } from "./roles.js";
+import { followUpRules, roleSectionIds, roleSectionRows, roleView } from "./roles.js";
 import type { RoleContext } from "./roles.js";
 import { designFollowUpSections, rankActions, roleCandidates } from "./blended.js";
 import type { BlendedRole, RankedActions } from "./blended.js";
@@ -145,10 +145,17 @@ export interface ImpactEstimation {
 const unfocusedIdentityNotice =
   "No --agent given: addressed attention and owned-work focus are unavailable (identity is never inferred from the GitHub login).";
 
+/** An invalid briefing argument detected while projecting (#311): exit 1, never a partial view. */
+export class BriefingArgumentError extends Error {
+  override name = "BriefingArgumentError";
+}
+
 export function compactBriefing(
   snapshot: Snapshot,
   options: Pick<BriefingOptions, "limit" | "agent" | "estimate" | "responsible"> & {
     role?: string;
+    /** One registered section, every row (#311, doc/design/briefing-focus-controls.md). */
+    section?: string;
   },
   expanded: Briefing,
   assessments?: ReadonlyMap<string, SubjectAssessments>,
@@ -315,6 +322,17 @@ export function compactBriefing(
         baseline,
       }
     : null;
+  // The Datalog view's OTHER CONTEXT rows, every one; the section shows the first five unless
+  // --section other-context asks for all (#311).
+  const datalogContext = (targets: ReadonlySet<string>) =>
+    objects
+      .filter((item) => item.state === "OPEN" && !targets.has(item.url))
+      .map((item) => ({
+        url: item.url,
+        reason: isParked(item)
+          ? "Parked; not a next step."
+          : "Background context; not a Datalog next action.",
+      }));
   const role: RoleView | null =
     experimental && options.role
       ? {
@@ -322,22 +340,16 @@ export function compactBriefing(
           question: "Datalog-derived next actions",
           sections: (() => {
             const nextTargets = new Set(experimental.items.map((i) => i.target));
-            const context = objects
-              .filter((item) => item.state === "OPEN" && !nextTargets.has(item.url))
-              .map((item) => ({
-                url: item.url,
-                reason: isParked(item)
-                  ? "Parked; not a next step."
-                  : "Background context; not a Datalog next action.",
-              }));
+            const context = datalogContext(nextTargets);
+            const cap = options.section === "other-context" ? context.length : 5;
             return [
               {
                 name: "other-context",
                 title: "OTHER CONTEXT",
                 background: true,
                 total: context.length,
-                omitted: Math.max(0, context.length - 5),
-                items: context.slice(0, 5),
+                omitted: Math.max(0, context.length - cap),
+                items: context.slice(0, cap),
               },
             ];
           })(),
@@ -347,7 +359,7 @@ export function compactBriefing(
           })),
         }
       : options.role && roleContext
-        ? roleView(options.role, roleContext)
+        ? roleView(options.role, roleContext, { expand: options.section })
         : null;
   const rowsBySection = new Map(
     !experimental && options.role && roleContext
@@ -478,7 +490,42 @@ export function compactBriefing(
       ? { total: queue.total, omitted: queue.total - shownQueue.length, items: shownQueue }
       : null,
   };
+  // #311: one registered section of the selected role with its fixed row cap lifted, through
+  // the same selector and ordering (doc/design/briefing-focus-controls.md). A presentation
+  // selection: nothing is reclassified, and the text byte budget still applies.
+  const focus = (() => {
+    if (!options.section) return null;
+    if (!options.role || !roleContext)
+      throw new BriefingArgumentError(
+        "--section needs a role view: add --role implementer or --role designer.",
+      );
+    const ids = roleSectionIds(options.role);
+    if (!ids.includes(options.section))
+      throw new BriefingArgumentError(
+        ids.length
+          ? `--section for role ${options.role} must be one of: ${ids.join(", ")}.`
+          : `Role ${options.role} has no sections to select; omit --section.`,
+      );
+    const view =
+      role?.sections.find((s) => s.name === options.section) ??
+      defined(
+        roleView(options.role, roleContext, { expand: options.section }).sections.find(
+          (s) => s.name === options.section,
+        ),
+      );
+    return {
+      role: options.role,
+      section: options.section,
+      title: view.title,
+      background: view.background,
+      total: view.total,
+      shown: view.items.length,
+      omitted: view.total - view.items.length,
+      items: view.items,
+    };
+  })();
   const urls = new Set([
+    ...(focus?.items.map((row) => row.url) ?? []),
     ...actions.items.map((item) => item.target),
     // NEXT STEPS renders the ranked actions (#246, #259); their subjects must be present.
     ...(rankedActions?.items.map((item) => item.target) ?? []),
@@ -534,6 +581,8 @@ export function compactBriefing(
     actions: { ...actions, items: actions.items.map(({ target }) => target) },
     sections,
     role: projectedRole,
+    // Additive (#311): present only for an explicit --section request.
+    ...(focus ? { focus } : {}),
     rankedActions,
     // Additive and designer-only (#246): other views keep their exact previous shape.
     ...(impactEstimation ? { impactEstimation } : {}),
@@ -620,6 +669,41 @@ export function compactText(
       );
     }
   };
+  // #311: an explicit --section request renders only a minimal header, material warnings and
+  // that section's rows, under the same byte budget.
+  if ("focus" in report && report.focus) {
+    const f = report.focus;
+    const header = [
+      `${report.repository} — ${f.role} section ${f.section} (fetched ${report.freshness.fetchedAt}${report.freshness.offline ? "; OFFLINE CACHE, live verification unavailable" : ""})`,
+    ];
+    if (report.guidance.includes(unfocusedIdentityNotice)) header.push(unfocusedIdentityNotice);
+    add(
+      f.background ? `${f.title} (background)` : f.title,
+      { total: f.total, omitted: f.omitted, items: f.items.map((row) => row.url) },
+      new Map(f.items.map((row) => [row.url, row.reason])),
+    );
+    if (!f.total)
+      rows.push(
+        report.completeness.complete
+          ? `\nNo rows in section ${f.section}.`
+          : `\nNo rows observed in section ${f.section}, but evidence is incomplete: this does not mean none exist.`,
+      );
+    const warnings = report.completeness.warnings;
+    for (const warning of warnings.slice(0, 5)) header.push(`INCOMPLETE: ${warning}`);
+    if (warnings.length > 5)
+      header.push(
+        `INCOMPLETE: ${warnings.length - 5} more warning(s) omitted; use --json for all.`,
+      );
+    const cut = "\nTruncated due to maximum size; raise --max-chars or use --json for every row.\n";
+    for (const row of rows) {
+      if (header.join("\n").length + row.length + cut.length + 2 > maxChars) {
+        header.push(cut);
+        break;
+      }
+      header.push(row);
+    }
+    return header.join("\n") + "\n";
+  }
   const estimation = report.estimation;
   const estimationRows = (): void => {
     if (estimation.status === "disabled") return;
@@ -725,6 +809,11 @@ export function compactText(
         { ...section, items: section.items.map((row) => row.url) },
         reasons,
       );
+      // A fixed row cap is lifted only by naming the section (#311); --max-chars cannot.
+      if (section.omitted)
+        rows.push(
+          `  ${section.omitted} more: pdb --role ${report.role.name} --section ${section.name}`,
+        );
     }
   }
   const titles: Record<string, string> = {
@@ -745,8 +834,8 @@ export function compactText(
       `INCOMPLETE: ${warnings.length - shownWarnings} more warning(s) omitted; use --json for all.`,
     );
   const notice = brief
-    ? "\nMore next steps omitted by text budget; use --max-chars, --json or --context.\n"
-    : "\nMore context omitted by text budget; use --json, --full, --issue N or --max-chars.\n";
+    ? "\nTruncated due to maximum size; raise --max-chars, or use --json or --context.\n"
+    : "\nTruncated due to maximum size; raise --max-chars, request one section with --section ID, or use --json.\n";
   // The workflow-guide footer (config diagnostics plus the pointer or omission notice) is
   // required output, so its space is reserved before evidence rows are allocated (#71).
   const guide = report.process;

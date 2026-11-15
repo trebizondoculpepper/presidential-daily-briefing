@@ -55,7 +55,7 @@ import {
 } from "./views.js";
 import type { ViewBase } from "./views.js";
 import { pickupOrders } from "../briefing/ranking.js";
-import { briefingRoleNames } from "../briefing/roles.js";
+import { briefingRoleNames, roleSectionIds } from "../briefing/roles.js";
 
 /** Startup selection. Client roots remain a separately tested follow-up (#25). */
 export interface McpOptions {
@@ -233,13 +233,33 @@ export const briefingInput = z
     /** Pickup order (#260): same as CLI --order; the CLI default is impact. */
     order: z.enum(pickupOrders).optional(),
     /**
+     * One registered section of the role view with its row cap lifted (#311): same IDs and
+     * validation as CLI --section; the byte budget still applies.
+     */
+    section: z
+      .string()
+      .regex(/^[a-z][a-z-]{0,40}$/, "section must be a registered section ID")
+      .optional(),
+    /**
      * Expanded text (#355, doc/design/next-steps-only.md): same as CLI --context. Text only; the
      * structured result is the same either way.
      */
     context: z.boolean().optional(),
   })
   .superRefine((args, ctx) => {
-    for (const key of ["role", "order"] as const)
+    if (args.section !== undefined) {
+      const role = args.role ?? "implementer";
+      const ids = roleSectionIds(role);
+      if (args.role === "human")
+        ctx.addIssue({ code: "custom", path: ["section"], message: "role human has no sections" });
+      else if (args.role !== undefined && !ids.includes(args.section))
+        ctx.addIssue({
+          code: "custom",
+          path: ["section"],
+          message: `section for role ${role} must be one of: ${ids.join(", ")}`,
+        });
+    }
+    for (const key of ["role", "order", "section"] as const)
       if (args.mode === "briefing" && args[key] !== undefined)
         ctx.addIssue({
           code: "custom",
@@ -587,6 +607,7 @@ export function createServer(
                 limit: args.limit ?? (args.mode === "briefing" ? catchUpLimits.limit.default : 10),
                 maxChars: args.maxChars,
                 role: args.role,
+                ...(args.section ? { section: args.section } : {}),
                 order: args.order ?? "impact",
                 context: args.context,
                 signal: ctx.mcpReq.signal,
