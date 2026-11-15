@@ -344,6 +344,7 @@ describe("serve diagnostics (#459)", () => {
     try {
       const rules = (await s.json("api/v1/diagnostics/rules")).data;
       expect(rules).toMatchObject({
+        configuredEngine: { value: "datalog", source: "default", known: true },
         policyVersion: expect.any(Number),
         rulesHash: expect.stringMatching(/^[0-9a-f]{64}$/),
         validation: { state: "build-checked" },
@@ -409,6 +410,56 @@ describe("serve diagnostics (#459)", () => {
       expect(data.items[0].code).toBe("GITHUB_UNAVAILABLE");
       // Newest first.
       expect(data.items[0].at > data.items[99].at).toBe(true);
+    } finally {
+      await s.running.close();
+    }
+  });
+
+  it("records a failure once per shared collection, and not again for cooldown refusals", async () => {
+    let release = () => undefined as void;
+    const gate = new Promise<void>((done) => (release = done));
+    const response = parseGhResponse("HTTP/2.0 403 Forbidden\nX-Ratelimit-Remaining: 0\n\n{}");
+    const fail = () =>
+      new RateLimitError("limited", { resetAt: null }, classifyGhFailure({ response }));
+    const s = await setup(["example/one"], gate, fail);
+    try {
+      const waiters = [
+        s.get("api/v1/briefing"),
+        s.get("api/v1/briefing"),
+        s.get("api/v1/briefing"),
+      ];
+      for (let i = 0; i < 50 && s.collects.length === 0; i++)
+        await new Promise((r) => setTimeout(r, 10));
+      release();
+      await Promise.all(waiters);
+      // Three coalesced waiters, one collection, one event.
+      expect(s.collects).toEqual(["example/one"]);
+      expect((await s.json("api/v1/diagnostics/errors")).data.total).toBe(1);
+      // During the cooldown nothing runs, so nothing new is recorded.
+      for (let i = 0; i < 3; i++) expect((await s.get("api/v1/briefing")).status).toBe(502);
+      expect((await s.json("api/v1/diagnostics/errors")).data.total).toBe(1);
+    } finally {
+      await s.running.close();
+    }
+  });
+
+  it("a failure of a collection that ran under a retired login is never shown under the new one", async () => {
+    let release = () => undefined as void;
+    const gate = new Promise<void>((done) => (release = done));
+    const s = await setup(["example/one"], gate, () => new Error("network down"));
+    try {
+      const first = s.get("api/v1/briefing");
+      for (let i = 0; i < 50 && s.collects.length === 0; i++)
+        await new Promise((r) => setTimeout(r, 10));
+      s.login.current = "someone-else";
+      s.clock.time += 6 * 60_000;
+      const second = s.get("api/v1/issues/1");
+      for (let i = 0; i < 50 && s.collects.length < 2; i++)
+        await new Promise((r) => setTimeout(r, 10));
+      release();
+      await Promise.all([first, second]);
+      const items = (await s.json("api/v1/diagnostics/errors")).data.items;
+      expect(items.map((e: { subject: number | null }) => e.subject)).toEqual([1]);
     } finally {
       await s.running.close();
     }

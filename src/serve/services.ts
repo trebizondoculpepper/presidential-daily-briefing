@@ -71,7 +71,7 @@ export function readServices(
         }
       },
       config: (repository) => serveSettings(options, facts.served, repository),
-      rules: rulesIdentity,
+      rules: (repository) => rulesIdentity(serveSettings(options, facts.served, repository)),
       instanceId: randomUUID(),
       now: () => serve.clock.now(),
     });
@@ -143,10 +143,15 @@ function serveSettings(
  * The bundled policy's identity, from the same lazily loaded evaluator chunk briefings use (so
  * the main bundle stays unchanged); nothing is evaluated.
  */
-async function rulesIdentity(): Promise<RulesDiagnostic> {
+async function rulesIdentity(
+  config: ReturnType<typeof serveSettings>,
+): Promise<{ rules: RulesDiagnostic; warnings: string[] }> {
   const { rulesHash, policyVersion } = await import("../rules/datalog/datalog.js");
-  return {
-    configuredEngine: defaultEngine(),
+  const engine = config.settings["briefing.engine"]!;
+  const rules: RulesDiagnostic = {
+    // The same effective setting the config view reports: the repository's engine when held,
+    // never the default passed off as a project's configuration.
+    configuredEngine: engine,
     policyVersion,
     rulesHash,
     supportedRoles: briefingRoleNames(),
@@ -157,4 +162,5 @@ async function rulesIdentity(): Promise<RulesDiagnostic> {
     },
     englishRules: { cli: "pdb rules", page: null },
   };
+  return { rules, warnings: engine.known ? [] : config.warnings };
 }

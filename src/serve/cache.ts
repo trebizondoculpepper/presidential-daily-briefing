@@ -254,7 +254,12 @@ export class ServeCache {
    * category and quota numbers the #293 evidence proved, and a fixed hint. Never GitHub's
    * message, stderr, a body or a key.
    */
-  private recordError(key: CacheKey, failure: CollectionError, error: unknown): void {
+  private recordError(
+    key: CacheKey,
+    failure: CollectionError,
+    error: unknown,
+    auth: AuthContext,
+  ): void {
     const evidence = (error as { evidence?: unknown } | null)?.evidence as
       | { category?: unknown; observation?: Record<string, unknown> }
       | undefined;
@@ -263,7 +268,7 @@ export class ServeCache {
     this.errors.push({
       id: `e${++this.nextId}`,
       repository: key.repository.toLowerCase(),
-      auth: `${this.auth.host}/${this.auth.login}`,
+      auth: `${auth.host}/${auth.login}`,
       at: new Date(this.now()).toISOString(),
       operation: key.collector,
       code: failure.code,
@@ -696,7 +701,14 @@ export class ServeCache {
         controller.abort();
         // Start a rate-limit cooldown before this slot is released, so a read queued behind
         // this one sees it (the waiters' own handling runs only after the release).
-        if (!isSubjectAnswer(error)) this.noteRateLimit(classifyFailure(error, this.now()));
+        if (!isSubjectAnswer(error)) {
+          const failure = classifyFailure(error, this.now());
+          this.noteRateLimit(failure);
+          // Once per shared collection (not per waiter), under the login it ran as; a refusal
+          // during a cooldown or at shutdown ran nothing and is not a new failure (#459).
+          if (error !== this.cooldownError && !this.closed)
+            this.recordError(cacheKey, failure, error, flight.auth);
+        }
         throw error;
       } finally {
         this.release();
@@ -796,7 +808,6 @@ export class ServeCache {
       if (isSubjectAnswer(error)) throw error;
       const failure = classifyFailure(error, this.now());
       this.noteRateLimit(failure);
-      this.recordError(cacheKey, failure, error);
       this.lastSeen.set(cacheKey.repository.toLowerCase(), {
         observedAt: this.lastSeen.get(cacheKey.repository.toLowerCase())?.observedAt ?? null,
         lastError: { code: failure.code, at: new Date(this.now()).toISOString() },

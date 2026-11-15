@@ -89,7 +89,8 @@ export interface SettingDiagnostic {
 }
 /** The loaded rules' identity (doc/design/serve-diagnostics-api.md "Rules"). */
 export interface RulesDiagnostic {
-  configuredEngine: string | null;
+  /** The selected repository's engine setting; null when it is read per request, not held. */
+  configuredEngine: SettingDiagnostic;
   policyVersion: number;
   rulesHash: string;
   supportedRoles: string[];
@@ -108,7 +109,7 @@ export interface DiagnosticSources {
     settings: Record<string, SettingDiagnostic>;
     warnings: string[];
   };
-  rules: () => Promise<RulesDiagnostic>;
+  rules: (repository: string) => Promise<{ rules: RulesDiagnostic; warnings: string[] }>;
   instanceId: string;
   now: () => Date;
 }
@@ -195,7 +196,8 @@ export function diagnosticsApi(
       return true;
     }
     if (view === "rules") {
-      envelope(await sources.rules());
+      const { rules, warnings } = await sources.rules(selected!);
+      envelope(rules, warnings);
       return true;
     }
     const state = view === "projects" ? null : held();
