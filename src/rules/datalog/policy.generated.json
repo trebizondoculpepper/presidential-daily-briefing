@@ -127,6 +127,24 @@
     "target",
     "kind"
   ],
+  "overrides": [
+    {
+      "winner": "D-EASY",
+      "loser": "D-ORDINARY"
+    },
+    {
+      "winner": "D-UNFAVORABLE",
+      "loser": "D-ORDINARY"
+    },
+    {
+      "winner": "D-OWN-EASY",
+      "loser": "D-OWN"
+    },
+    {
+      "winner": "D-OWN-UNFAVORABLE",
+      "loser": "D-OWN"
+    }
+  ],
   "sortClauses": "[[(selected ?t ?r) [?t \"matched\" ?r] (not [?t \"overridden\" ?r])] [(age ?t ?r ?created) [?r \"kind\" \"implement\"] [1 \"order\" \"oldest\"] [?t \"created\" ?created]] [(age ?t ?r ?created) [?r \"kind\" \"implement\"] [1 \"order\" \"newest\"] [?t \"created\" ?c] [(- 0 ?c) ?created]] [(keys ?t ?r ?b ?g ?p ?u ?un ?own ?inc ?created) (selected ?t ?r) [?r \"band\" ?b] [(<= ?b 3)] (fixed-key ?t ?r ?b ?g ?p) [(+ 0 0) ?u] [(+ 0 0) ?un] [(+ 0 0) ?own] [(+ 0 0) ?inc] [?t \"number\" ?created]] [(fixed-key ?t ?r ?b ?g ?p) [?t \"kind\" _] [?r \"band\" ?b] [(= ?b 1)] [(+ 0 0) ?g] [(+ 0 0) ?p]] [(fixed-key ?t ?r ?b ?g ?p) [?t \"linked-key\" ?g] [?r \"band\" ?b] [(= ?b 2)] [?r \"preference\" ?p]] [(fixed-key ?t ?r ?b ?g ?p) [?r \"band\" ?b] [(= ?b 3)] [?r \"preference\" ?g] [?t \"active-count\" ?n] [(- 0 ?n) ?p]] [(keys ?t ?r ?b ?g ?p ?u ?un ?own ?inc ?created) (selected ?t ?r) [?r \"band\" ?b] [(> ?b 3)] (age ?t ?r ?created) [(+ 0 1) ?g] [(+ 0 0) ?p] [(+ 0 0) ?u] [(+ 0 0) ?un] [(+ 0 0) ?own] [(+ 0 0) ?inc]] [(keys ?t ?r ?b ?g ?p ?u ?un ?own ?inc ?created) (selected ?t ?r) [?r \"band\" ?b] [(> ?b 3)] (not (age ?t ?r _)) [(+ 0 0) ?g] [?r \"preference\" ?p] [?t \"urgency-key\" ?u] [?t \"own-key\" ?own] [?t \"incomplete-key\" ?inc] [?t \"created\" ?created] [?r \"kind\" ?k] (or-join [?t ?k ?un] (and [1 \"assessment-kind\" ?k] [(+ 0 0) ?un]) (and (not [1 \"assessment-kind\" ?k]) [?t \"unlock-count\" ?n] [(- 0 ?n) ?un]))]]",
   "definitions": [
     {
@@ -485,7 +503,8 @@
     "D-DENY-PLATFORM": "The ticket names a platform the viewer is not known to run on."
   },
   "queries": {
-    "q0": "[:find ?t ?r :where [?t \"matched\" ?r] [?t \"matched\" ?o] [?r \"kind\" ?k] [?o \"kind\" ?k] [?r \"rule\" ?rid] [?o \"rule\" ?oid] (or-join [?rid ?oid ?r ?o] (and [?r \"band\" ?b] [?o \"band\" ?b] [?r \"preference\" ?p] [?o \"preference\" ?p] [(< ?o ?r)]) (and [?r \"band\" ?b] [?o \"band\" ?b] [?r \"preference\" ?p] [?o \"preference\" ?op] [(< ?op ?p)]) (and [(= ?rid \"D-ORDINARY\")] [(= ?oid \"D-EASY\")]) (and [(= ?rid \"D-ORDINARY\")] [(= ?oid \"D-UNFAVORABLE\")]) (and [(= ?rid \"D-OWN\")] [(= ?oid \"D-OWN-EASY\")]) (and [(= ?rid \"D-OWN\")] [(= ?oid \"D-OWN-UNFAVORABLE\")]))]",
+    "q0": "[:find ?t ?r :where [?t \"matched\" ?r] [?t \"matched\" ?o] [?r \"kind\" ?k] [?o \"kind\" ?k] (or-join [?r ?o] (and [?r \"band\" ?b] [?o \"band\" ?b] [?r \"preference\" ?p] [?o \"preference\" ?p] [(< ?o ?r)]) (and [?r \"band\" ?b] [?o \"band\" ?b] [?r \"preference\" ?p] [?o \"preference\" ?op] [(< ?op ?p)]))]",
+    "declared-overrides": "[:find ?t ?r :in $ [[?winner ?loser]] :where [?t \"matched\" ?r] [?t \"matched\" ?o] [?r \"kind\" ?k] [?o \"kind\" ?k] [?r \"rule\" ?loser] [?o \"rule\" ?winner]]",
     "q1": "[:find ?t ?d :in $ % :where [?t \"dependent\" ?d] (otherwise ?d) [?d \"native-complete\" true] [?d \"open-blockers\" 1] [?d \"blocker\" ?t] (open ?t)]",
     "q2": "[:find ?t (count-distinct ?d) :where [?t \"unlocks-dependent\" ?d]]",
     "q3": "[:find ?t :where [?t \"kind\" _] (not [?t \"unlock-count\" _])]",

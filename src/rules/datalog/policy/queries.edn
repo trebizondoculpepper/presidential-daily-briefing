@@ -1,9 +1,13 @@
 ;; Named queries the engine runs, in phase order. Queries with ":in $ %" receive rules.edn,
 ;; except :q4, which receives the ordering rules. :key-queries add one sort-key attribute each.
 ;; :match and :witness are templates: the build appends a decision's :when clauses, or one
-;; witness's clauses, to their :where, so the engine runs complete queries.
+;; witness's clauses, to their :where, so the engine runs complete queries. :q0 is the generic
+;; same-kind band/preference override; :declared-overrides receives ordering.edn :overrides as
+;; [[winner loser]] tuples, so no rule ID is written into a query.
 {:q0
- [:find ?t ?r :where [?t "matched" ?r] [?t "matched" ?o] [?r "kind" ?k] [?o "kind" ?k] [?r "rule" ?rid] [?o "rule" ?oid] (or-join [?rid ?oid ?r ?o] (and [?r "band" ?b] [?o "band" ?b] [?r "preference" ?p] [?o "preference" ?p] [(< ?o ?r)]) (and [?r "band" ?b] [?o "band" ?b] [?r "preference" ?p] [?o "preference" ?op] [(< ?op ?p)]) (and [(= ?rid "D-ORDINARY")] [(= ?oid "D-EASY")]) (and [(= ?rid "D-ORDINARY")] [(= ?oid "D-UNFAVORABLE")]) (and [(= ?rid "D-OWN")] [(= ?oid "D-OWN-EASY")]) (and [(= ?rid "D-OWN")] [(= ?oid "D-OWN-UNFAVORABLE")]))]
+ [:find ?t ?r :where [?t "matched" ?r] [?t "matched" ?o] [?r "kind" ?k] [?o "kind" ?k] (or-join [?r ?o] (and [?r "band" ?b] [?o "band" ?b] [?r "preference" ?p] [?o "preference" ?p] [(< ?o ?r)]) (and [?r "band" ?b] [?o "band" ?b] [?r "preference" ?p] [?o "preference" ?op] [(< ?op ?p)]))]
+ :declared-overrides
+ [:find ?t ?r :in $ [[?winner ?loser]] :where [?t "matched" ?r] [?t "matched" ?o] [?r "kind" ?k] [?o "kind" ?k] [?r "rule" ?loser] [?o "rule" ?winner]]
  :q1
  [:find ?t ?d :in $ % :where [?t "dependent" ?d] (otherwise ?d) [?d "native-complete" true] [?d "open-blockers" 1] [?d "blocker" ?t] (open ?t)]
  :q2

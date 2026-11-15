@@ -18,7 +18,7 @@ import { isDeepStrictEqual } from "node:util";
 import { readOne, printEdn } from "./edn.js";
 import { commandKinds } from "./commands.js";
 import { requiredQueries, requiredKeyQueries } from "./bundle.js";
-import type { PolicyBundle, DecisionRule, RequiredQuery } from "./bundle.js";
+import type { PolicyBundle, DecisionRule, OverridePair, RequiredQuery } from "./bundle.js";
 import { rulesHashOf } from "./hash.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -117,6 +117,15 @@ export function queryInputs(query: Form): string[] {
   } else throw new Error("a query must be a vector or a map");
   if (declared === null) return ["$"];
   return declared.map((f) => {
+    // A relation binding [[?a ?b]]: the only collection form the policy uses.
+    if (
+      Array.isArray(f) &&
+      f.length === 1 &&
+      Array.isArray(f[0]) &&
+      f[0].length > 0 &&
+      f[0].every((v) => symbol(v)?.startsWith("?"))
+    )
+      return printEdn(f, "query input");
     const name = symbol(f);
     if (name === null) throw new Error(`unsupported query input ${JSON.stringify(f)}`);
     return name;
@@ -223,7 +232,11 @@ export function readSources(
       Object.fromEntries(
         named(form, where).map(([k, v]) => [k, appended("witness", v, `${where} "${k}"`)]),
       );
-    const ordering = keyed(file("ordering.edn"), "policy/ordering.edn", ["comparison", "rules"]);
+    const ordering = keyed(file("ordering.edn"), "policy/ordering.edn", [
+      "overrides",
+      "comparison",
+      "rules",
+    ]);
     const decisionsFile = keyed(file("decisions.edn"), "policy/decisions.edn", [
       "decisions",
       "denials",
@@ -286,6 +299,17 @@ export function readSources(
         need(ordering, "comparison", "policy/ordering.edn"),
         "policy/ordering.edn :comparison",
       ).map((c) => text(c, "policy/ordering.edn :comparison")),
+      overrides: vector(
+        need(ordering, "overrides", "policy/ordering.edn"),
+        "policy/ordering.edn :overrides",
+      ).map((form, i): OverridePair => {
+        const where = `policy/ordering.edn :overrides[${i}]`;
+        const m = keyed(form, where, ["winner", "loser"]);
+        return {
+          winner: text(need(m, "winner", where), `${where} :winner`),
+          loser: text(need(m, "loser", where), `${where} :loser`),
+        };
+      }),
       sortClauses: printEdn(
         vector(need(ordering, "rules", "policy/ordering.edn"), "policy/ordering.edn :rules"),
         "policy/ordering.edn :rules",
@@ -383,6 +407,8 @@ export function validateBundle(bundle: PolicyBundle): PolicyBundle {
       if (inputs[0] !== "$") throw new Error(`first query input must be $, found ${inputs[0]}`);
       const args = inputs.slice(1).map((input) => {
         if (input === "%") return rules;
+        // The only relation input is the declared override list.
+        if (input.startsWith("[[")) return overridePairs(bundle);
         // A scalar binding such as ?t: any entity id exercises the query on an empty database.
         if (/^\?[^\s]+$/.test(input)) return 0;
         throw new Error(`unsupported query input ${input}`);
@@ -443,10 +469,61 @@ export function validateBundle(bundle: PolicyBundle): PolicyBundle {
   for (const id of Object.keys(bundle.denials))
     if (!derived.has(id))
       problems.push(`decisions.edn :denials: ${id} is never derived by rules.edn`);
+  problems.push(...overrideProblems(bundle));
   for (const key of bundle.comparison)
     if (!/^[a-z]+$/.test(key)) problems.push(`ordering.edn :comparison: invalid key "${key}"`);
   if (problems.length) throw new PolicyBuildError(problems);
   return bundle;
+}
+
+/** The declared overrides as the [winner loser] tuples the `declared-overrides` query binds. */
+export const overridePairs = (bundle: Pick<PolicyBundle, "overrides">): [string, string][] =>
+  bundle.overrides.map(({ winner, loser }) => [winner, loser]);
+
+/**
+ * Declared overrides must name decision rules of the same kind (the query joins on kind, so a
+ * cross-kind pair would silently do nothing), must not repeat or contradict each other, and must
+ * not form a cycle.
+ */
+export function overrideProblems(bundle: Pick<PolicyBundle, "overrides" | "definitions">) {
+  const problems: string[] = [];
+  const kinds = new Map(bundle.definitions.map((d) => [d.id, d.kind]));
+  const seen = new Set<string>();
+  const beats = new Map<string, Set<string>>();
+  for (const [i, { winner, loser }] of bundle.overrides.entries()) {
+    const where = `ordering.edn :overrides[${i}] ${winner} over ${loser}`;
+    for (const id of [winner, loser])
+      if (!kinds.has(id)) problems.push(`${where}: unknown rule ID ${id}`);
+    if (winner === loser) problems.push(`${where}: a rule cannot override itself`);
+    else if (kinds.has(winner) && kinds.has(loser) && kinds.get(winner) !== kinds.get(loser))
+      problems.push(
+        `${where}: kinds differ (${kinds.get(winner)}, ${kinds.get(loser)}), so it would never apply`,
+      );
+    const key = `${winner}\u0000${loser}`;
+    if (seen.has(key)) problems.push(`${where}: duplicate pair`);
+    else if (seen.has(`${loser}\u0000${winner}`))
+      problems.push(`${where}: contradicts an earlier pair`);
+    seen.add(key);
+    beats.set(winner, (beats.get(winner) ?? new Set()).add(loser));
+  }
+  // A longer cycle (A over B over C over A) has no consistent winner either. Two-rule cycles are
+  // already reported as contradictions.
+  const visit = (id: string, path: string[]): string[] | null => {
+    for (const next of [...(beats.get(id) ?? [])].sort()) {
+      const at = path.indexOf(next);
+      if (at >= 0) return path.slice(at);
+      const cycle = visit(next, [...path, next]);
+      if (cycle) return cycle;
+    }
+    return null;
+  };
+  for (const start of [...beats.keys()].sort()) {
+    const cycle = visit(start, [start]);
+    // Reported once, from its alphabetically first rule.
+    if (cycle && cycle.length > 2 && cycle[0] === start && cycle.every((id) => id >= start))
+      problems.push(`ordering.edn :overrides: cycle ${[...cycle, start].join(" over ")}`);
+  }
+  return problems;
 }
 
 /** Reads and validates policy/*.edn. */
