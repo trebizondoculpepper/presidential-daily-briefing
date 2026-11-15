@@ -46,6 +46,7 @@ import {
   dashboardScript,
   dashboardSecurityPolicy,
 } from "./serve/dashboard.js";
+import { ticketPage, ticketPageParameters, ticketScript } from "./serve/ticket-page.js";
 
 export { serveHelp } from "./serve/options.js";
 
@@ -242,6 +243,9 @@ const dashboardFiles = (): Map<string, { type: string; body: string }> =>
     ["/", { type: "text/html; charset=utf-8", body: dashboardPage() }],
     ["/dashboard.css", { type: "text/css; charset=utf-8", body: dashboardCss }],
     ["/dashboard.js", { type: "text/javascript; charset=utf-8", body: dashboardScript() }],
+    // The consolidated ticket detail (#454): another static page under the same policy.
+    ["/ticket", { type: "text/html; charset=utf-8", body: ticketPage() }],
+    ["/ticket.js", { type: "text/javascript; charset=utf-8", body: ticketScript() }],
   ]);
 
 /**
@@ -374,9 +378,10 @@ export async function startServe(
       if (file) {
         // The page keeps its selection in the URL so a view can be reloaded or bookmarked; only
         // those parameters are accepted, and only on the page itself (#374).
-        const selection = ["repo", "role", "agent"];
+        const selection: readonly string[] =
+          path === "/ticket" ? ticketPageParameters : ["repo", "role", "agent"];
         if (
-          path === "/" &&
+          (path === "/" || path === "/ticket") &&
           [...context.url.searchParams.keys()].every((k) => selection.includes(k))
         ) {
           if (request.method !== "GET" && request.method !== "HEAD")

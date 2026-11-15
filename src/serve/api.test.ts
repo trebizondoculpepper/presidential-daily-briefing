@@ -26,6 +26,7 @@ import {
   servedOnlyRest,
 } from "./api.js";
 import { readServices } from "./services.js";
+import { ticketRenderers } from "./ticket-page.js";
 import type { ServeReadRuntime } from "./api.js";
 import { classifyFailure, ServeCache } from "./cache.js";
 import { serveArguments } from "./options.js";
@@ -110,6 +111,7 @@ async function setup(
     authContext?: ServeRuntime["authContext"];
     queryWith?: ServeReadRuntime["queryWith"];
     dependencyReport?: ServeReadRuntime["dependencyReport"];
+    rest?: ServeReadRuntime["rest"];
   } = {},
 ): Promise<Setup> {
   const clock = new ManualClock();
@@ -156,6 +158,7 @@ async function setup(
       } as never;
     },
     queryWith: overrides.queryWith,
+    ...(overrides.rest ? { rest: overrides.rest } : {}),
     now: () => clock.now(),
     env: {},
     git,
@@ -1474,3 +1477,229 @@ async function until(predicate: () => boolean, timeoutMs = 10_000): Promise<void
 }
 
 void ({} as Snapshot);
+
+describe("pdb serve ticket detail (#454)", () => {
+  // The fixture's GraphQL plus the closing-reference list the ticket service reads (none).
+  let ticketReads = 0;
+  const ticketQuery: Query = async (source, variables) => {
+    ticketReads++;
+    const answer = (await query(source, variables)) as { repository: Record<string, unknown> };
+    // The ticket's closing references (none), open or closed, are read in full.
+    if (source.includes("issue(number"))
+      answer.repository.issue = {
+        ...(answer.repository.issue as object),
+        closedByPullRequestsReferences: page([]),
+      };
+    return answer;
+  };
+  const ticketWorld = () => ({
+    queryWith: () => ticketQuery,
+    rest: ticketRest,
+    collectIssueFocus: ((repository, number, options) =>
+      collectIssueFocus(
+        repository,
+        number,
+        options,
+        ticketQuery,
+        () => new Date(start),
+      )) as ServeReadRuntime["collectIssueFocus"],
+  });
+  // Record authors' permissions are known, so delivery records are evaluated, not skipped.
+  const ticketRest: ServeReadRuntime["rest"] = async (path) =>
+    path.includes("/collaborators/")
+      ? { status: 200, body: { user: { login: "writer" }, role_name: "write" } }
+      : { status: 404, body: null };
+
+  it("serves the shared service's ticket-status document unchanged, as the CLI prints it", async () => {
+    const s = await setup(["--repo", repo], ticketWorld());
+    try {
+      const reply = await call(s.running.port, "/api/v1/tickets/1?agent=me");
+      expect(reply.status).toBe(200);
+      expect(Object.keys(reply.json)).toEqual(envelopeKeys);
+      expect(reply.json).toMatchObject({
+        view: "ticket",
+        selection: { repository: repo, agent: "me" },
+        result: { kind: "ticket-status", schemaVersion: 1, number: 1 },
+      });
+      let out = "";
+      await main(
+        ["ticket", "1", "--agent", "me", "--repo", repo, "--json", "--no-update-check"],
+        async (text) => void (out += text),
+        {
+          collectIssueFocus: ticketWorld().collectIssueFocus,
+          query: ticketQuery,
+          rest: ticketRest,
+          currentRepository: async () => repo,
+          now: () => new Date(start),
+          updateCheck: async () => ({ status: "disabled" }) as never,
+        } as never,
+      );
+      const cli = JSON.parse(out) as Record<string, any>;
+      expect(timeless(reply.json.result)).toEqual(timeless(cli));
+      // The envelope status follows the document's own completeness, never the page's guess.
+      expect(cli.completeness.warnings).toEqual([]);
+      expect(cli.completeness.complete).toBe(true);
+      expect(reply.json.status).toBe("complete");
+      // The page projects the shared service's evidence, not its own interpretation.
+      const html = ticketRenderers().renderTicket(reply.json);
+      expect(html).toContain(`#1 ${String(cli.title)}`);
+      expect(html).toContain(`data-delivery="${String(cli.delivery.verdict)}"`);
+      expect(html).toContain(String(cli.ownership.answer));
+      expect(html).toContain(String(cli.links.intake));
+      expect(html).toContain("not proof that none exists");
+    } finally {
+      await s.close();
+    }
+  });
+
+  it("caches the whole result per ticket and selection; refresh=true reads live again", async () => {
+    const s = await setup(["--repo", repo], ticketWorld());
+    try {
+      await call(s.running.port, "/api/v1/tickets/1");
+      const reads = ticketReads;
+      const second = await call(s.running.port, "/api/v1/tickets/1");
+      expect(second.json.status).toBe("complete");
+      expect(second.json.freshness.source).toBe("cached");
+      expect(ticketReads).toBe(reads);
+      const fresh = await call(s.running.port, "/api/v1/tickets/1?refresh=true");
+      expect(fresh.json.freshness.source).toBe("live");
+      expect(ticketReads).toBeGreaterThan(reads);
+      // The refresh scope evicts ticket results.
+      const evicted = await call(s.running.port, "/api/v1/refresh", {
+        method: "POST",
+        body: JSON.stringify({ scope: "tickets" }),
+        headers: { "content-type": "application/json" },
+      });
+      expect(evicted.json).toMatchObject({ kind: "serve-refresh", scope: "tickets" });
+    } finally {
+      await s.close();
+    }
+  });
+
+  it("rejects bad arguments and unserved repositories before any read", async () => {
+    let focused = 0;
+    const s = await setup(["--repo", repo], {
+      queryWith: () => ticketQuery,
+      collectIssueFocus: async (...args) => {
+        focused++;
+        return collectIssueFocus(args[0], args[1], args[2], ticketQuery, () => new Date(start));
+      },
+    });
+    try {
+      for (const [path, code] of [
+        ["/api/v1/tickets/1?repo=someone/else", "REPOSITORY_NOT_SERVED"],
+        ["/api/v1/tickets/1?bogus=1", "INVALID_ARGUMENT"],
+        ["/api/v1/tickets/1?agent=me&agent=you", "INVALID_ARGUMENT"],
+        ["/api/v1/tickets/1?limitPrs=0", "INVALID_ARGUMENT"],
+        ["/api/v1/tickets/1?platform=%3Cx%3E", "INVALID_ARGUMENT"],
+        ["/api/v1/tickets/1?agent=%3Cscript%3E", "INVALID_ARGUMENT"],
+      ] as const) {
+        const reply = await call(s.running.port, path);
+        expect(reply.json.error?.code, path).toBe(code);
+        expect(reply.json.view, path).toBe("ticket");
+      }
+      expect((await call(s.running.port, "/api/v1/tickets/0")).status).toBe(404);
+      expect(focused).toBe(0);
+    } finally {
+      await s.close();
+    }
+  });
+
+  it("keeps a missing and an inaccessible ticket distinct, never a server error", async () => {
+    for (const state of ["missing", "forbidden"] as const) {
+      const s = await setup(["--repo", repo], {
+        queryWith: () => ticketQuery,
+        collectIssueFocus: async () => {
+          throw new IssueUnavailable({
+            repository: repo,
+            number: 7,
+            url: url(7),
+            state,
+            detail: `It is ${state}.`,
+            next: "gh issue view 7",
+          });
+        },
+      });
+      try {
+        const reply = await call(s.running.port, "/api/v1/tickets/7");
+        expect(reply.status).toBe(200);
+        expect(reply.json).toMatchObject({
+          view: "ticket",
+          status: "incomplete",
+          result: { kind: "issue-unavailable", state },
+        });
+      } finally {
+        await s.close();
+      }
+    }
+  });
+
+  it("a quota refusal the read stopped on starts the cooldown and is not cached", async () => {
+    let focused = 0;
+    const s = await setup(["--repo", repo], {
+      queryWith: () => ticketQuery,
+      collectIssueFocus: async (repository, number, options) => {
+        focused++;
+        const snapshot = await collectIssueFocus(
+          repository,
+          number,
+          options,
+          ticketQuery,
+          () => new Date(start),
+        );
+        await options.meter
+          .query(
+            async () => {
+              throw new RateLimitError("rate limited", { retryAfterSeconds: 120 });
+            },
+            "pull-request",
+            `${repository}#9`,
+          )("query{x}", {})
+          .catch(() => undefined);
+        return snapshot;
+      },
+    });
+    try {
+      const first = await call(s.running.port, "/api/v1/tickets/1");
+      expect(first.status).toBe(200);
+      expect(first.json.status).toBe("incomplete");
+      expect(first.json.result.collection.quota).toEqual({
+        retryAfterSeconds: 120,
+        resetAt: null,
+      });
+      const during = await call(s.running.port, "/api/v1/briefing");
+      expect(during.json.error.code).toBe("GITHUB_RATE_LIMITED");
+      expect(during.headers["retry-after"]).toBe("120");
+      s.clock.advance(121_000);
+      const after = await call(s.running.port, "/api/v1/tickets/1");
+      expect(after.json.freshness.source).not.toBe("cached");
+      expect(focused).toBe(2);
+    } finally {
+      await s.close();
+    }
+  });
+
+  it("serves the ticket page under the dashboard policy, with Host and Origin guarded", async () => {
+    const s = await setup(["--repo", repo], ticketWorld());
+    const port = s.running.port;
+    const before = ticketReads;
+    try {
+      const page = await call(port, "/ticket?repo=example%2Fparity&n=1&agent=me");
+      expect(page.status).toBe(200);
+      expect(page.headers["content-security-policy"]).toContain("script-src 'self'");
+      expect(page.body).toContain('<script src="/ticket.js" defer></script>');
+      expect((await call(port, "/ticket.js")).headers["content-type"]).toContain("javascript");
+      expect((await call(port, "/ticket?evil=1")).status).toBe(400);
+      expect((await call(port, "/ticket.js?repo=x")).status).toBe(400);
+      expect((await call(port, "/ticket", { headers: { host: "evil.example" } })).status).toBe(421);
+      expect(
+        (await call(port, "/api/v1/tickets/1", { headers: { origin: "http://evil.example" } }))
+          .status,
+      ).toBe(403);
+      // Opening the page reads nothing from GitHub: the browser asks for the ticket itself.
+      expect(ticketReads).toBe(before);
+    } finally {
+      await s.close();
+    }
+  });
+});
