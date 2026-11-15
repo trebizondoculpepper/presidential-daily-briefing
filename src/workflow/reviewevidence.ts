@@ -25,8 +25,8 @@ export const codexReviewer = "chatgpt-codex-connector";
 export function headReviewed(pr: PullRequest): boolean {
   return headAccepted(
     pr.headRefOid,
-    pr.reviews.nodes.map((r) => ({ state: r.state, commit: r.commit?.oid ?? null })),
-    pr.comments.nodes.map((c) => ({
+    (pr.reviews?.nodes ?? []).map((r) => ({ state: r.state, commit: r.commit?.oid ?? null })),
+    (pr.comments?.nodes ?? []).map((c) => ({
       by: c.author?.login ?? "",
       state: codexMarker(c.body)?.code_review,
     })),

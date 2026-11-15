@@ -356,7 +356,7 @@ export interface CheckOutcome {
   url: string;
 }
 export function prChecks(pr: PullRequest): CheckOutcome[] {
-  const contexts = pr.commits.nodes[0]?.commit.statusCheckRollup?.contexts.nodes ?? [];
+  const contexts = pr.commits?.nodes?.[0]?.commit.statusCheckRollup?.contexts.nodes ?? [];
   return contexts.map((check) => ({
     name: check.name ?? check.context ?? "unnamed",
     outcome: check.conclusion ?? check.state ?? check.status ?? "UNKNOWN",
