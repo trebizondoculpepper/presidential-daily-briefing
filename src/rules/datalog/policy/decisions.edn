@@ -7,7 +7,7 @@
    :kind "addressed-response"
    :band 1
    :preference 0
-   :when [(addressed ?t)]
+   :when [(open ?t) (addressed ?t)]
    :why "Explicitly addressed to you; respond before clearing attention."
    :codes ["addressed"]
    :witnesses {"addressedAgent" [[1 "agent" ?value] [?t "attention" ?value]]}}
@@ -269,7 +269,7 @@
    :when [[1 "role" "human"] (open-question ?t) (asks-viewer ?t)]
    :why "A trusted question record routed to you ({routedTo}) awaits answers on the ticket."
    :codes ["explicit" "addressed"]
-   :witnesses {"routedTo" [(trusted-record ?t ?r) [?r "record-to" ?value]]}}
+   :witnesses {"routedTo" [(asking-record ?t ?r) [?r "record-to" ?value]]}}
 
   {:id "D-HUMAN-ASK"
    :kind "answer-questions"
@@ -278,7 +278,7 @@
    :when [[1 "role" "human"] (open-question ?t) (not (asks-viewer ?t))]
    :why "A trusted question record routed to {routedTo} awaits answers on the ticket."
    :codes ["explicit"]
-   :witnesses {"routedTo" [(trusted-record ?t ?r) [?r "record-to" ?value]]}}
+   :witnesses {"routedTo" [(asking-record ?t ?r) [?r "record-to" ?value]]}}
 
   {:id "D-HUMAN-UNVERIFIED"
    :kind "decide"
@@ -297,6 +297,34 @@
    :why "Labelled {questionLabel} without a trusted question record. Inferred: a decision may be needed."
    :codes ["inferred"]
    :witnesses {"questionLabel" [[?t "label" ?value] [1 "question-label" ?value]]}}
+
+  ;; #414: a question outlives its source's closure until explicitly resolved or withdrawn.
+  {:id "D-HUMAN-ORPHANED-YOU"
+   :kind "orphaned-question"
+   :band 1
+   :preference 1
+   :when [[1 "role" "human"] (orphan-asks-viewer ?t)]
+   :why "The ticket is closed but its trusted question routed to you ({routedTo}) has no recorded resolve or withdraw; closure is not an answer."
+   :codes ["explicit" "addressed"]
+   :witnesses {"routedTo" [(orphaned-record ?t ?r) [?r "record-to" ?value]]}}
+
+  {:id "D-HUMAN-ORPHANED"
+   :kind "orphaned-question"
+   :band 3
+   :preference 0
+   :when [[1 "role" "human"] (has-orphaned ?t) (not (orphan-asks-viewer ?t))]
+   :why "The ticket is closed but its trusted question routed to {routedTo} has no recorded resolve or withdraw; closure is not an answer."
+   :codes ["explicit"]
+   :witnesses {"routedTo" [(orphaned-record ?t ?r) [?r "record-to" ?value]]}}
+
+  {:id "D-HUMAN-ORPHANED-UNKNOWN"
+   :kind "orphaned-question"
+   :band 3
+   :preference 1
+   :when [[1 "role" "human"] (has-orphan-unknown ?t)]
+   :why "The ticket is closed and whether its trusted question routed to {routedTo} was resolved could not be established; it is not read as answered."
+   :codes ["explicit" "resolution-unknown"]
+   :witnesses {"routedTo" [(orphan-unknown ?t ?r) [?r "record-to" ?value]]}}
 
   {:id "D-HUMAN-SIGNOFF"
    :kind "sign-off"

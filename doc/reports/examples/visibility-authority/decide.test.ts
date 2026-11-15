@@ -158,7 +158,9 @@ describe("read-only and external reporters", () => {
     } as unknown as Snapshot;
     const evidence = await readHumanEvidence(snapshot, markerTrust(levels));
     expect(evidence.counts).toMatchObject({ current: 1, untrusted: 1 });
-    expect(evidence.current.get(snapshot.issues[0]!.url)?.url).toBe(genuine.url);
+    // needs-human writes v2 questions (#412), which the reader keeps per question (#414).
+    const url = snapshot.issues[0]!.url;
+    expect((evidence.questions.get(url)?.[0] ?? evidence.current.get(url))?.url).toBe(genuine.url);
   });
 });
 

@@ -190,3 +190,36 @@ bounded request/concurrency counts, full-profile parity when all relevant facts 
 known, and explicit provisional ranking when they are not. Cache tests use fake
 clocks for TTL/coalescing, coverage keys, invalidation-generation races and no eager
 comment loading. No live mutation, credential rotation or universal speedup claim.
+
+## Serve implementation notes (#453)
+
+Serve uses the existing shortlist collector for routine implementer/designer reads.
+Two optional typed whole-fact readers keep discovery and selected issue hydration
+separate. Discovery caches each complete bounded issue/PR inventory; selected issue
+facts cache whole selected issue records, after comment/native pagination finishes. Their
+keys include profile/version, source or selected numbers and collection bounds,
+on top of the cache's verified host/login/repository isolation. These are whole
+results, not independently cached GraphQL pages. Partial/failed/unknown fact sets
+are returned with coverage but not retained as definitive cache entries.
+
+Facts are cloned before caller-specific preparation. Each request reruns selection
+and projection with current local settings and its own identity/role; no rendered
+queue is cached. Reused source observations retain their original timestamps.
+A joined caller replays coverage and any shared quota refusal, without recording
+another caller's network cost as its own. Selected issue facts have individual
+cache membership, so partially overlapping selections share common records. Missing records are batched within the existing
+collector bounds; no individual GraphQL page is stored.
+
+An earlier in-flight read whose generation was invalidated can return only as
+stale/incomplete, with `freshness.refreshError.code: CACHE_INVALIDATED`; it neither
+repopulates cache nor overwrites the repository's latest observation. No automatic
+retry occurs. A later explicit read starts or joins the new generation.
+
+`src/serve/mutations.ts` supplies the service-writer boundary: call the existing
+live mutation service once and classify its actual result. Applied, partial or
+unknown outcomes (including thrown errors) invalidate all contexts held by this
+server, conservatively including served cross-repository dependants. Definitive
+refusal/unchanged results retain cached facts. This helper adds no HTTP write API,
+permission or production mutation endpoint; #455 can invoke it around its reviewed
+assessment service. Existing CLI/external writes do not call into another process's
+memory and still use TTL/manual refresh. All mutation evidence stays uncached.

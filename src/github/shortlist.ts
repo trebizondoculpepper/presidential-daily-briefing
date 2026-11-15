@@ -24,6 +24,7 @@ import {
   selected,
 } from "./github.js";
 import type { Query, QueryVariables, Rest } from "./github.js";
+import type { ReadCollection, ReadSourceCoverage } from "./readplan.js";
 import { hydrate, quotaRefusal, ReadMeter, readProfiles } from "./readplan.js";
 import { hydrateRequiredChecks } from "./requiredchecks.js";
 import type { Comment, Issue, Page, PullRequest, Snapshot } from "./types.js";
@@ -64,12 +65,52 @@ export interface ShortlistRecord {
   notice: string | null;
 }
 
+/** Whole bounded discovery results, never individual GraphQL pages or projections. */
+export interface DiscoveryFacts {
+  nodes: (Issue | PullRequest)[];
+  complete: boolean;
+  observedAt: string;
+  omission: string | null;
+}
+export interface DiscoveryRequest {
+  repository: string;
+  source: "issues" | "pullRequests";
+  pageSize: number;
+  pages: number;
+}
+export type DiscoveryReader = (
+  request: DiscoveryRequest,
+  read: (query: Query, signal?: AbortSignal) => Promise<DiscoveryFacts>,
+  signal?: AbortSignal,
+) => Promise<DiscoveryFacts>;
+
+/** Complete selected issue records (including all their comment/native pages), not pages. */
+export interface IssueFacts {
+  issues: Issue[];
+  gone: string[];
+  unavailable: [string, NotHydratedReason][];
+  coverage: ReadSourceCoverage[];
+  quota: ReadCollection["quota"];
+  notAttempted: string[];
+  warnings: string[];
+  complete: boolean;
+}
+export type IssueFactReader = (
+  request: { repository: string; numbers: number[]; issuesPerRequest: number; concurrency: number },
+  read: (query: Query, signal?: AbortSignal, numbers?: readonly number[]) => Promise<IssueFacts>,
+  signal?: AbortSignal,
+) => Promise<IssueFacts>;
+
 export interface ShortlistOptions {
   /**
    * Rank a snapshot through the briefing engine and return the URLs it would show (its
    * subjects), most important first. Called once per round; it must not read GitHub.
    */
   select: (snapshot: Snapshot) => Promise<string[]>;
+  /** Optional whole-fact cache; selection and all hydration remain per caller. */
+  discovery?: DiscoveryReader;
+  /** Cache only complete whole selected records under their distinct hydration coverage. */
+  issueFacts?: IssueFactReader;
   signal?: AbortSignal;
   /** REST boundary for required-check evidence (#343); absent leaves requiredness unknown. */
   rest?: Rest;
@@ -118,6 +159,12 @@ const pullRequestStub = (node: PullRequest): PullRequest => ({
   commits: { nodes: [] },
 });
 
+/** A malformed inventory record cannot be reused as complete discovery. */
+const unreadableDiscovery = (node: unknown): boolean =>
+  typeof prop(node, "number") !== "number" ||
+  typeof prop(node, "url") !== "string" ||
+  typeof prop(node, "labels", "pageInfo", "hasNextPage") !== "boolean";
+
 export async function collectShortlist(
   repository: string,
   options: ShortlistOptions,
@@ -136,53 +183,85 @@ export async function collectShortlist(
   const startedAt = now().toISOString();
   const [owner, name] = repository.split("/");
   const warnings: string[] = [];
-  const read = async (q: Query, source: string, variables: QueryVariables = {}) => {
-    signal?.throwIfAborted();
+  const read = async (
+    q: Query,
+    source: string,
+    variables: QueryVariables = {},
+    activeSignal = signal,
+  ) => {
+    activeSignal?.throwIfAborted();
     const data = await q(source, { owner, name, ...variables });
     if (!data.repository) throw new Error(`Repository unavailable: ${repository}`);
     return data.repository;
   };
 
-  // 1. Discovery: each connection paginated independently, at most `pages` pages.
-  const discover = async <T>(field: "issues" | "pullRequests", fields: string) => {
+  // 1. Discovery: each whole connection result is independently cacheable. No page cache.
+  const discover = async (field: "issues" | "pullRequests", fields: string) => {
     const label = field === "issues" ? "open-issues" : "open-pull-requests";
-    const q = meter.query(base, label, repository);
-    const source = `query($owner:String!,$name:String!,$cursor:String){repository(owner:$owner,name:$name){${field}(first:${bounds.pageSize},after:$cursor,orderBy:{field:UPDATED_AT,direction:DESC},states:OPEN){nodes{${fields}} ${info}}}}`;
-    let count = 0;
-    let more = false;
-    const nodes = await pages<T>(
-      async (cursor) => {
-        const page = prop(await read(q, source, cursor ? { cursor } : {}), field);
-        count++;
-        more = prop(page, "pageInfo", "hasNextPage") === true;
-        return page;
-      },
-      () => count >= bounds.pages,
-    );
-    const complete = !more;
-    if (complete) meter.cover(label, repository, "complete");
-    else {
-      const omission = `open ${field === "issues" ? "issues" : "pull requests"} beyond ${nodes.length} (${bounds.pages} pages of ${bounds.pageSize}) not discovered`;
-      meter.cover(label, repository, "partial", { omission });
-      warnings.push(`Discovery incomplete: ${omission}; they are unknown, not absent.`);
-    }
-    return { nodes, complete };
+    const produce = async (
+      baseQuery: Query,
+      activeSignal?: AbortSignal,
+    ): Promise<DiscoveryFacts> => {
+      const q = meter.query(baseQuery, label, repository);
+      const source = `query($owner:String!,$name:String!,$cursor:String){repository(owner:$owner,name:$name){${field}(first:${bounds.pageSize},after:$cursor,orderBy:{field:UPDATED_AT,direction:DESC},states:OPEN){nodes{${fields}} ${info}}}}`;
+      let count = 0;
+      let more = false;
+      const nodes = await pages<Issue | PullRequest>(
+        async (cursor) => {
+          activeSignal?.throwIfAborted();
+          const data = await q(source, { owner, name, ...(cursor ? { cursor } : {}) });
+          if (!data.repository) throw new Error(`Repository unavailable: ${repository}`);
+          const page = prop(data.repository, field);
+          count++;
+          more = prop(page, "pageInfo", "hasNextPage") === true;
+          return page;
+        },
+        () => count >= bounds.pages,
+      );
+      return {
+        nodes,
+        complete:
+          !more &&
+          nodes.every(
+            (node) =>
+              !unreadableDiscovery(node) &&
+              (field === "issues" ||
+                typeof prop(node, "closingIssuesReferences", "pageInfo", "hasNextPage") ===
+                  "boolean"),
+          ),
+        observedAt: now().toISOString(),
+        omission: more
+          ? `open ${field === "issues" ? "issues" : "pull requests"} beyond ${nodes.length} (${bounds.pages} pages of ${bounds.pageSize}) not discovered`
+          : null,
+      };
+    };
+    const facts = options.discovery
+      ? await options.discovery(
+          { repository, source: field, pageSize: bounds.pageSize, pages: bounds.pages },
+          produce,
+          signal,
+        )
+      : await produce(base, signal);
+    // Discovery nodes are mutated during candidate preparation; cache values stay immutable.
+    const copy = structuredClone(facts);
+    meter.cover(label, repository, copy.complete ? "complete" : "partial", {
+      observedAt: copy.observedAt,
+      omission: copy.omission,
+    });
+    if (copy.omission)
+      warnings.push(`Discovery incomplete: ${copy.omission}; they are unknown, not absent.`);
+    return copy;
   };
   const [issueInventory, prInventory] = await Promise.all([
-    discover<Issue>("issues", discoveryIssueFields),
-    discover<PullRequest>("pullRequests", discoveryPullRequestFields),
+    discover("issues", discoveryIssueFields),
+    discover("pullRequests", discoveryPullRequestFields),
   ]);
   const stubs = new Map<string, Issue | PullRequest>();
   const kinds = new Map<string, "issue" | "pull-request">();
-  /** A discovery node without its identity or label page cannot be a candidate: unknown. */
-  const unreadable = (node: unknown): boolean =>
-    typeof prop(node, "number") !== "number" ||
-    typeof prop(node, "url") !== "string" ||
-    typeof prop(node, "labels", "pageInfo", "hasNextPage") !== "boolean";
   let unreadableNodes = 0;
   const readable = <T>(nodes: T[]): T[] =>
     nodes.filter((node) => {
-      if (!unreadable(node)) return true;
+      if (!unreadableDiscovery(node)) return true;
       unreadableNodes++;
       return false;
     });
@@ -208,7 +287,7 @@ export async function collectShortlist(
   for (const node of prInventory.nodes) {
     const timeline = prop(node, "timelineItems");
     delete (node as { timelineItems?: unknown }).timelineItems;
-    stubs.set(node.url, pullRequestStub(node));
+    stubs.set(node.url, pullRequestStub(node as PullRequest));
     kinds.set(node.url, "pull-request");
     const sources = (prop(timeline, "nodes") as unknown[] | undefined) ?? [];
     // A mention whose source could not be read (null: no access, deleted) may hold a record.
@@ -342,7 +421,7 @@ export async function collectShortlist(
   };
 
   const commentsSource = `query($owner:String!,$name:String!,$number:Int!,$cursor:String){repository(owner:$owner,name:$name){issue(number:$number){comments(first:100,after:$cursor){nodes{${comment}} ${info}}}}}`;
-  const hydrateIssues = async (urls: string[]) => {
+  const loadIssues = async (urls: string[], baseQuery = base, activeSignal = signal) => {
     const batches: string[][] = [];
     for (let i = 0; i < urls.length; i += bounds.issuesPerRequest)
       batches.push(urls.slice(i, i + bounds.issuesPerRequest));
@@ -350,7 +429,7 @@ export async function collectShortlist(
       batches,
       async (batch) => {
         const numbers = batch.map((url) => stubs.get(url)!.number);
-        const q = meter.query(base, "issue", `${repository}#${numbers.join(",")}`);
+        const q = meter.query(baseQuery, "issue", `${repository}#${numbers.join(",")}`);
         const declared = numbers.map((_, i) => `$n${i}:Int!`).join(",");
         const fields = numbers
           .map((_, i) => `i${i}:issue(number:$n${i}){${hydratedIssueFields}}`)
@@ -359,10 +438,11 @@ export async function collectShortlist(
           q,
           `query($owner:String!,$name:String!,${declared}){repository(owner:$owner,name:$name){${fields}}}`,
           Object.fromEntries(numbers.map((n, i) => [`n${i}`, n])),
+          activeSignal,
         );
         return numbers.map((_, i) => selected<Issue>(prop(repo, `i${i}`)));
       },
-      { concurrency: bounds.hydrationConcurrency, signal },
+      { concurrency: bounds.hydrationConcurrency, signal: activeSignal },
     );
     for (const [b, outcome] of outcomes.entries()) {
       for (const [i, url] of batches[b].entries()) {
@@ -406,12 +486,12 @@ export async function collectShortlist(
         }
         try {
           if (issue.comments.pageInfo.hasNextPage) {
-            const q = meter.query(base, "comments", subject);
+            const q = meter.query(baseQuery, "comments", subject);
             const initial = issue.comments;
             issue.comments.nodes = await pages<Comment>(async (cursor) => {
               if (!cursor) return initial;
               return prop(
-                await read(q, commentsSource, { number: issue.number, cursor }),
+                await read(q, commentsSource, { number: issue.number, cursor }, activeSignal),
                 "issue",
                 "comments",
               );
@@ -419,7 +499,7 @@ export async function collectShortlist(
             issue.comments.pageInfo = { hasNextPage: false, endCursor: null };
           }
         } catch (error) {
-          signal?.throwIfAborted();
+          activeSignal?.throwIfAborted();
           unhydratable.set(url, quotaRefusal(error) ? "not-attempted" : "failed");
           meter.cover("comments", subject, "failed", {
             failure: quotaRefusal(error) ? "rate-limited" : "read-failed",
@@ -427,9 +507,13 @@ export async function collectShortlist(
           continue;
         }
         try {
-          await completeNative(issue, repository, meter.query(base, "native-blocked-by", subject));
+          await completeNative(
+            issue,
+            repository,
+            meter.query(baseQuery, "native-blocked-by", subject),
+          );
         } catch (error) {
-          signal?.throwIfAborted();
+          activeSignal?.throwIfAborted();
           // Unknown edges are never "no blockers".
           delete issue.issueDependenciesSummary;
           delete issue.blockedBy;
@@ -446,6 +530,67 @@ export async function collectShortlist(
         meter.cover("issue", subject, "complete");
       }
     }
+  };
+  const hydrateIssues = async (urls: string[]) => {
+    if (!urls.length) return;
+    if (!options.issueFacts) return loadIssues(urls);
+    const produced = new Set<string>();
+    const facts = await options.issueFacts(
+      {
+        repository,
+        numbers: urls.map((url) => stubs.get(url)!.number),
+        issuesPerRequest: bounds.issuesPerRequest,
+        concurrency: bounds.hydrationConcurrency,
+      },
+      async (query, activeSignal, numbers) => {
+        const targets = numbers
+          ? urls.filter((url) => numbers.includes(stubs.get(url)!.number))
+          : urls;
+        for (const url of targets) produced.add(`${repository}#${stubs.get(url)!.number}`);
+        const coverageStart = meter.coverage.length;
+        const warningStart = warnings.length;
+        const notAttemptedStart = meter.notAttempted.length;
+        await loadIssues(targets, query, activeSignal);
+        const coverage = meter.coverage.slice(coverageStart);
+        const values = targets.flatMap((url) =>
+          hydratedIssues.has(url) ? [hydratedIssues.get(url)!] : [],
+        );
+        return structuredClone({
+          issues: values,
+          gone: targets.filter((url) => gone.has(url)),
+          unavailable: targets.flatMap((url) =>
+            unhydratable.has(url)
+              ? [[url, unhydratable.get(url)!] as [string, NotHydratedReason]]
+              : [],
+          ),
+          coverage,
+          quota: meter.collection().quota,
+          notAttempted: meter.notAttempted.slice(notAttemptedStart),
+          warnings: warnings.slice(warningStart),
+          complete:
+            targets.every((url) => hydratedIssues.has(url) || gone.has(url)) &&
+            coverage.every((source) => source.state === "complete") &&
+            values.every(
+              (value) => !value.labels.pageInfo.hasNextPage && value.blockedBy && value.blocking,
+            ),
+        });
+      },
+      signal,
+    );
+    // Replay cached/joined facts only; own produced sources already contributed telemetry
+    // and coverage. Each issue is independently coalesced, even for overlapping selections.
+    if (facts.quota) meter.noteQuotaRefusal(facts.quota);
+    const copy = structuredClone(facts);
+    for (const value of copy.issues) {
+      if (!hydratedIssues.has(value.url)) hydratedOrder.push(value.url);
+      hydratedIssues.set(value.url, value);
+    }
+    for (const url of copy.gone) gone.add(url);
+    for (const [url, reason] of copy.unavailable) unhydratable.set(url, reason);
+    meter.coverage.push(...copy.coverage.filter((source) => !produced.has(source.subject)));
+    for (const target of copy.notAttempted)
+      if (!meter.notAttempted.includes(target)) meter.notAttempted.push(target);
+    for (const warning of copy.warnings) if (!warnings.includes(warning)) warnings.push(warning);
   };
   const restBoundary = options.rest ?? (injected ? undefined : ghRestWith(signal));
   const metredRest = restBoundary

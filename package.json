@@ -18,9 +18,12 @@
   },
   "files": [
     "dist/cli.mjs",
+    "dist/cli.mjs.map",
     "dist/mcp.mjs",
+    "dist/mcp.mjs.map",
     "third-party",
-    "dist/datalog-*.mjs"
+    "dist/datalog-*.mjs",
+    "dist/datalog-*.mjs.map"
   ],
   "type": "module",
   "publishConfig": {
@@ -28,7 +31,7 @@
   },
   "scripts": {
     "triage": "tsx src/cli.ts",
-    "build": "vp pack src/cli.ts --format esm --out-dir dist && vp pack src/mcp.ts --format esm --out-dir dist --no-clean",
+    "build": "vp pack src/cli.ts --format esm --out-dir dist --sourcemap && vp pack src/mcp.ts --format esm --out-dir dist --no-clean --sourcemap && tsx scripts/sourcemaps.ts dist",
     "check": "vp check && tsc -p doc/reports/examples && tsx src/rules/datalog/build.ts --check",
     "lint": "vp lint",
     "fmt": "vp fmt",
@@ -43,11 +46,15 @@
     "pdb": "tsx src/cli.ts",
     "rules:build": "tsx src/rules/datalog/build.ts",
     "rules:test": "tsx src/rules/datalog/runner.ts",
-    "test:report": "tsx scripts/test-report.ts"
+    "test:report": "tsx scripts/test-report.ts",
+    "website:preview:build": "tsx scripts/website/build.ts --preview",
+    "website:capture": "tsx scripts/website/run-capture.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/server": "2.4.0",
+    "@sentry/node": "11.12.0",
     "datascript": "1.8.1",
+    "edn-data": "1.2.2",
     "env-paths": "4.0.0",
     "smol-toml": "1.9.1",
     "zod": "4.6.7"
@@ -55,7 +62,6 @@
   "devDependencies": {
     "@modelcontextprotocol/client": "2.4.0",
     "@types/node": "^26.6.6",
-    "edn-data": "1.2.2",
     "tsx": "^4.23.15",
     "typescript": "~7.0.2",
     "vite": "npm:@voidzero-dev/vite-plus-core@1.5.0",

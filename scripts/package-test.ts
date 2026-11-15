@@ -12,9 +12,11 @@ import { execFile, spawn } from "node:child_process";
 import { chmod, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
 import { resolveEngineSetting, defaultEngine } from "../src/config/engine-setting.js";
 import { parityDifference } from "../src/mcp/parity.js";
+import { crashMessage } from "../src/telemetry/crashes.js";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { StdioClientTransport } from "@modelcontextprotocol/client/stdio";
 
@@ -27,7 +29,9 @@ const expected = [
   "LICENSE",
   "README.md",
   "dist/cli.mjs",
+  "dist/cli.mjs.map",
   "dist/mcp.mjs",
+  "dist/mcp.mjs.map",
   "package.json",
   "third-party/README.md",
   "third-party/datascript-LICENSE",
@@ -84,6 +88,8 @@ const issue = (number, labels, createdAt) => ({
 const args = process.argv.slice(2);
 // pdb serve reads the login once at startup (doc/design/serve.md); no token is involved.
 if (args[0] === "api" && args[1] === "user") { process.stdout.write(JSON.stringify({ login: "package-test" })); process.exit(0); }
+// #516: only when asked, pdb serve --project resolves the checkout's repository to this fixture.
+if (process.env.PDB_FAKE_REPO_VIEW && args[0] === "repo" && args[1] === "view") { process.stdout.write("example/parity\\n"); process.exit(0); }
 // pdb quotas (#547): one REST GET /rate_limit with --include; synthetic counts, no token.
 if (args[0] === "api" && args[1] === "--include" && args[2] === "rate_limit") {
   const reset = Math.floor(Date.now() / 1000) + 1800;
@@ -443,6 +449,210 @@ async function projectWorkerSmoke(chunk: string, cwd: string): Promise<void> {
     throw new Error(`Installed project worker returned ${stdout}.`);
 }
 
+/**
+ * Packaged crash frames (#629, doc/design/sentry-crash-reporting.md "Packaged stack
+ * locations"). Runs the installed bundle under the test-only preload `scripts/crash-preload.ts`,
+ * which records SDK envelopes locally (no network) and throws from a builtin that PDB's own
+ * event-listener code calls, so the fault is a real unhandled exception through the installed
+ * dist files. The recorded event must carry only mapped public `src/` frames that point at
+ * the expected source line, the fixed message, mode, release and environment, and nothing from
+ * the thrown error or the machine.
+ */
+async function packagedCrash(
+  kind: "serve" | "mcp",
+  packageDir: string,
+  env: NodeJS.ProcessEnv,
+  cwd: string,
+  work: string,
+  /** Extra process environment, for example NODE_OPTIONS=--enable-source-maps. */
+  extra: NodeJS.ProcessEnv = {},
+): Promise<string> {
+  const capture = join(work, `crash-${kind}-${Object.keys(extra).length}.txt`);
+  const preload = pathToFileURL(join(root, "scripts", "crash-preload.ts")).href;
+  const entry = join(packageDir, "dist", kind === "serve" ? "cli.mjs" : "mcp.mjs");
+  const args =
+    kind === "serve"
+      ? [entry, "serve", "--repo", "example/parity", "--port", "0"]
+      : [entry, "--repo", "example/parity", "--poll"];
+  const child = spawn(process.execPath, ["--import", preload, ...args], {
+    cwd,
+    env: {
+      ...env,
+      SENTRY_DSN: "https://public@sentry.example.invalid/1",
+      SENTRY_DISABLED: "",
+      SENTRY_DEBUG: "",
+      SENTRY_SPOTLIGHT: "",
+      https_proxy: "",
+      http_proxy: "",
+      PDB_CRASH_CAPTURE: capture,
+      PDB_CRASH_TRIGGER: kind === "serve" ? "^GET /healthz " : "exit",
+      ...extra,
+    },
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  let stdout = "";
+  let stderr = "";
+  child.stdout.setEncoding("utf8").on("data", (text: string) => (stdout += text));
+  child.stderr.setEncoding("utf8").on("data", (text: string) => (stderr += text));
+  const exited = new Promise<number | null>((done) => child.once("exit", (code) => done(code)));
+  const until = async (ready: () => boolean, what: string) => {
+    const deadline = Date.now() + 20_000;
+    while (!ready()) {
+      if (Date.now() > deadline || child.exitCode !== null)
+        throw new Error(`Installed ${kind} crash check: ${what} never happened. stderr: ${stderr}`);
+      await new Promise((done) => setTimeout(done, 50));
+    }
+  };
+  let expected: { file: string; text: string };
+  if (kind === "serve") {
+    await until(() => stdout.includes("\n"), "the banner");
+    const url = /listening on (http:\/\/127\.0\.0\.1:\d+\/)/.exec(stdout)?.[1];
+    await fetch(`${url}healthz`);
+    expected = { file: "src/serve.ts", text: "process.stderr.write(text)" };
+  } else {
+    await until(() => stderr.includes("SIGTERM handler registered"), "polling start");
+    child.kill("SIGTERM");
+    expected = { file: "src/mcp.ts", text: "process.exit(0)" };
+  }
+  const code = await Promise.race([
+    exited,
+    new Promise<"timeout">((done) => setTimeout(() => done("timeout"), 20_000)),
+  ]);
+  if (code === "timeout") {
+    child.kill("SIGKILL");
+    throw new Error(`Installed ${kind} did not exit after its fault.`);
+  }
+  if (code !== 1) throw new Error(`Installed ${kind} fault exited ${code}, not 1.`);
+  const recorded = (await readFile(capture, "utf8")).split("\n\u0000\n").filter(Boolean);
+  if (recorded.length !== 1)
+    throw new Error(`Installed ${kind} sent ${recorded.length} envelopes.`);
+  const [header, item, payload] = recorded[0]!.split("\n");
+  if (!header || JSON.parse(item ?? "{}").type !== "event" || !payload)
+    throw new Error(`Installed ${kind} envelope is not one event: ${recorded[0]!.slice(0, 300)}`);
+  for (const leak of ["DO_NOT_SEND", "secret-token", "ghp_", "/Users/private", work, packageDir])
+    if (recorded[0]!.includes(leak))
+      throw new Error(`Installed ${kind} crash envelope contains ${JSON.stringify(leak)}.`);
+  const event = JSON.parse(payload) as {
+    level?: string;
+    environment?: string;
+    release?: string;
+    tags?: Record<string, string>;
+    exception?: {
+      values?: {
+        value?: string;
+        stacktrace?: { frames?: { filename?: string; lineno?: number }[] };
+      }[];
+    };
+  };
+  const { version } = JSON.parse(await readFile(join(packageDir, "package.json"), "utf8")) as {
+    version: string;
+  };
+  const exception = event.exception?.values?.[0];
+  if (
+    event.level !== "fatal" ||
+    event.environment !== "node" ||
+    event.release !== `pdb@${version}` ||
+    JSON.stringify(event.tags) !== JSON.stringify({ mode: kind }) ||
+    exception?.value !== crashMessage
+  )
+    throw new Error(`Installed ${kind} event labels are wrong: ${payload.slice(0, 400)}`);
+  const frames = exception.stacktrace?.frames ?? [];
+  if (!frames.length || frames.some((f) => !(f.filename ?? "").startsWith("src/")))
+    throw new Error(
+      `Installed ${kind} frames are not all mapped to src/: ${JSON.stringify(frames)}`,
+    );
+  // The newest frame (last) must be PDB's own call into the faulting builtin, on the right line.
+  const top = frames.at(-1)!;
+  const line = (await readFile(join(root, top.filename!), "utf8")).split("\n")[top.lineno! - 1];
+  if (top.filename !== expected.file || !line?.includes(expected.text))
+    throw new Error(
+      `Installed ${kind} top frame ${top.filename}:${top.lineno} is not ${expected.file} (${expected.text}).`,
+    );
+  return frames.map((f) => `${f.filename}:${f.lineno}`).join(" <- ");
+}
+
+/**
+ * Installed project preferences (#516): `pdb rules init` and `pdb config set` in a checkout, then
+ * the installed CLI briefing, `pdb rules`, the MCP briefing (through blendedParity, which compares
+ * decisionEngine) and a `pdb serve --project` briefing and /rules page must all name the same
+ * active effective revision, without a source checkout or development dependency.
+ */
+async function projectRulesParity(
+  bin: string,
+  mcpCommand: { command: string; args: string[] },
+  env: NodeJS.ProcessEnv,
+  checkout: string,
+): Promise<string> {
+  await run(bin, ["rules", "init"], { cwd: checkout, env });
+  const before = JSON.parse(
+    (await run(bin, ["rules", "--json"], { cwd: checkout, env })).stdout,
+  ) as {
+    effectivePolicy: { state: string };
+  };
+  if (before.effectivePolicy.state !== "disabled")
+    throw new Error(
+      `A pdb.rules.edn file alone changed the policy: ${before.effectivePolicy.state}.`,
+    );
+  await run(bin, ["config", "set", "rules.project.enabled", "true"], { cwd: checkout, env });
+  try {
+    const rules = JSON.parse(
+      (await run(bin, ["rules", "--json"], { cwd: checkout, env })).stdout,
+    ) as {
+      effectivePolicy: { state: string; effectiveRulesHash: string };
+    };
+    const hash = rules.effectivePolicy.effectiveRulesHash;
+    if (rules.effectivePolicy.state !== "active" || !/^[0-9a-f]{64}$/.test(hash))
+      throw new Error(`Installed pdb rules does not report an active project policy.`);
+    const briefing = JSON.parse(
+      (
+        await run(
+          bin,
+          ["--repo", "example/parity", "--role", "implementer", "--json", "--no-update-check"],
+          { cwd: checkout, env, maxBuffer: 64 * 1024 * 1024 },
+        )
+      ).stdout,
+    ) as { decisionEngine: { rulesHash: string; effectivePolicy?: { state: string } } };
+    if (
+      briefing.decisionEngine.rulesHash !== hash ||
+      briefing.decisionEngine.effectivePolicy?.state !== "active"
+    )
+      throw new Error("Installed CLI briefing and pdb rules name different effective revisions.");
+    // MCP: blendedParity fails unless its decisionEngine (with effectivePolicy) equals the CLI's.
+    await blendedParity(bin, mcpCommand, "example/parity", "implementer", "impact", env, checkout);
+    const child = spawn(bin, ["serve", "--project", checkout, "--port", "0"], {
+      cwd: checkout,
+      env: { ...env, PDB_FAKE_REPO_VIEW: "1" },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf8").on("data", (t: string) => (stdout += t));
+    child.stderr.setEncoding("utf8").on("data", (t: string) => (stderr += t));
+    try {
+      const deadline = Date.now() + 20_000;
+      while (!stdout.includes("\n")) {
+        if (Date.now() > deadline || child.exitCode !== null)
+          throw new Error(`pdb serve --project printed no banner. stderr: ${stderr}`);
+        await new Promise((done) => setTimeout(done, 50));
+      }
+      const url = /listening on (http:\/\/127\.0\.0\.1:\d+\/)/.exec(stdout)?.[1];
+      const served = (await (
+        await fetch(`${url}api/v1/briefing?repo=example%2Fparity&role=implementer`)
+      ).json()) as { result?: { decisionEngine?: { rulesHash?: string } } };
+      if (served.result?.decisionEngine?.rulesHash !== hash)
+        throw new Error("Installed pdb serve briefing names a different effective revision.");
+      const page = await (await fetch(`${url}rules?repo=example%2Fparity`)).text();
+      if (!page.includes(hash) || !page.includes("Project preferences"))
+        throw new Error("Installed /rules page does not show the effective project policy.");
+    } finally {
+      child.kill("SIGTERM");
+    }
+    return hash.slice(0, 12);
+  } finally {
+    await run(bin, ["config", "set", "rules.project.enabled", "false"], { cwd: checkout, env });
+  }
+}
+
 const work = await mkdtemp(join(tmpdir(), "triage-package-"));
 try {
   const { stdout } = await npm(
@@ -452,9 +662,27 @@ try {
   const packed = parsePack(stdout);
   const files = packed.files.map((f) => f.path).sort();
   const engineChunks = files.filter((p) => /^dist\/datalog-[A-Za-z0-9_-]+\.mjs$/.test(p));
-  if (engineChunks.length !== 1)
-    throw new Error("Expected exactly one packaged lazy evaluator chunk.");
-  const expectedFiles = [...expected, ...engineChunks].sort();
+  // The CLI and MCP entries are built separately; each references one lazy evaluator chunk, which
+  // may be the same file. Every chunk an entry imports must be packaged, and nothing else.
+  const referenced = new Set<string>();
+  for (const entry of ["dist/cli.mjs", "dist/mcp.mjs"])
+    for (const m of (await readFile(join(root, entry), "utf8")).matchAll(
+      /import\("\.\/(datalog-[A-Za-z0-9_-]+\.mjs)"\)/g,
+    ))
+      referenced.add(`dist/${m[1]}`);
+  if (
+    engineChunks.length < 1 ||
+    engineChunks.length > 2 ||
+    JSON.stringify([...referenced].sort()) !== JSON.stringify(engineChunks)
+  )
+    throw new Error(
+      `Packaged evaluator chunks ${JSON.stringify(engineChunks)} differ from those the entries load ${JSON.stringify([...referenced])}.`,
+    );
+  const expectedFiles = [
+    ...expected,
+    ...engineChunks,
+    ...engineChunks.map((c) => `${c}.map`),
+  ].sort();
   if (JSON.stringify(files) !== JSON.stringify(expectedFiles))
     throw new Error(
       `Archive contents ${JSON.stringify(files)} differ from ${JSON.stringify(expectedFiles)}.`,
@@ -486,11 +714,28 @@ try {
   if (manifest?.scripts?.postinstall || manifest?.scripts?.install || manifest?.scripts?.preinstall)
     throw new Error("The package must not run install scripts on installation.");
   console.log("ok   installed globally into an isolated prefix without install scripts");
+  for (const file of expectedFiles.filter((f) => f.endsWith(".map"))) {
+    const map = JSON.parse(await readFile(join(packageDir, file), "utf8")) as {
+      sources?: unknown[];
+      sourcesContent?: unknown;
+    };
+    const bundle = await readFile(join(packageDir, file.slice(0, -".map".length)), "utf8");
+    if (/\/\/# sourceMappingURL=/.test(bundle))
+      throw new Error(`Installed ${file} is referenced by its bundle; Node would discover it.`);
+    if (
+      map.sourcesContent !== undefined ||
+      !map.sources?.every((s) => typeof s === "string" && s.startsWith("../src/"))
+    )
+      throw new Error(`Installed ${file} embeds source text or names a non-public path.`);
+  }
+  console.log(
+    "ok   installed source maps name only public ../src/ paths, embed no source and are not referenced",
+  );
   await nativeStopSmoke(join(packageDir, "dist", "cli.mjs"), work);
   console.log(
     "ok   installed native Codex adapter: stdin, literal args, framing and deadline outside checkout",
   );
-  await projectWorkerSmoke(join(packageDir, engineChunks[0]!), work);
+  for (const chunk of engineChunks) await projectWorkerSmoke(join(packageDir, chunk), work);
   console.log("ok   installed evaluator runs a project-preference worker from its own chunk");
 
   const bin = windows ? join(prefix, "pdb.cmd") : join(prefix, "bin", "pdb");
@@ -783,6 +1028,14 @@ try {
     await nativeStopSmoke(join(packageDir, "dist", "cli.mjs"), work, env);
     console.log("ok   installed native Codex offer and duplicate guard with fake gh");
     console.log(`ok   installed pdb serve: ${await serveSmoke(bin, env, checkout)}`);
+    for (const kind of ["serve", "mcp"] as const)
+      console.log(
+        `ok   installed ${kind} unhandled fault reports mapped public frames only: ${await packagedCrash(kind, packageDir, env, checkout, work)}`,
+      );
+    // Node's own source-map support must not rewrite installed frames to unpackaged src/ paths.
+    console.log(
+      `ok   installed serve fault with NODE_OPTIONS=--enable-source-maps keeps the same frames: ${await packagedCrash("serve", packageDir, env, checkout, work, { NODE_OPTIONS: "--enable-source-maps" })}`,
+    );
     // pdb quotas (#547): the installed command reads one /rate_limit plus one identity read
     // through the fake gh, from any directory, and its text and JSON agree.
     const quotasJson = await run(bin, ["quotas", "--json"], { cwd: work, env });
@@ -832,6 +1085,9 @@ try {
           );
         console.log(`ok   installed CLI = MCP ${role} (${order}): ${kinds.join(", ")}`);
       }
+    console.log(
+      `ok   installed project preferences: CLI, pdb rules, MCP, serve and /rules name ${await projectRulesParity(bin, mcpCommand, env, checkout)}`,
+    );
     await run(bin, ["config", "set", "briefing.engine", "typescript"], { cwd: checkout, env });
     for (const role of ["implementer", "designer"])
       for (const order of ["impact", "oldest"]) {
