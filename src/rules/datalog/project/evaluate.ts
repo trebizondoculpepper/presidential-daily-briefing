@@ -66,6 +66,7 @@ export async function evaluateProjectPreferences<A extends Actions>(
           rules: policy.rules,
           preferences: policy.preferences.map((p) => ({
             id: p.id,
+            matchQuery: p.matchQuery,
             query: p.query,
             witnesses: Object.entries(p.witnesses),
           })),
@@ -75,7 +76,7 @@ export async function evaluateProjectPreferences<A extends Actions>(
     : {
         version: 1,
         ...identity,
-        preferences: policy.preferences.map((p) => ({ id: p.id, rows: [] })),
+        preferences: policy.preferences.map((p) => ({ id: p.id, matched: [], rows: [] })),
       };
   const admitted = admitProjectResult(raw, policy, projection, options.generation);
   if (options.isCurrent && !options.isCurrent())

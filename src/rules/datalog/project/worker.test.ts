@@ -224,6 +224,17 @@ describe("bounded project worker (#515)", () => {
       ),
     ).toBe("output-limit");
   });
+  it("rejects a :when match whose :priority binds nothing, through the worker", async () => {
+    const unpriced = compile((t) =>
+      t.replace(
+        "[(+ 0 10) ?value] [(not= ?value 0)]",
+        '[?a "pdb.action-label" "area:1"] [(+ 0 10) ?value]',
+      ),
+    );
+    expect(await code(evaluateProjectPreferences(unpriced, actions, subjects, options()))).toBe(
+      "missing-priority",
+    );
+  });
   it("rejects recursive or unvalidated policies before any worker starts", async () => {
     expect(() =>
       compile((t) =>
