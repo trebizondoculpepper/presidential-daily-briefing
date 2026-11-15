@@ -18,6 +18,8 @@ import type {
   SourceCoverage,
 } from "./changes.js";
 import type { Comment, Issue, Page, PullRequest, Reference, Snapshot } from "./types.js";
+import { classifyGhFailure, parseGhResponse, rateLimitMessage } from "./evidence.js";
+import type { GhResponse } from "./evidence.js";
 
 const execute = promisify(execFile);
 
@@ -63,7 +65,9 @@ export const ghQueryWith =
   (signal?: AbortSignal): Query =>
   async (query, variables) => {
     signal?.throwIfAborted();
-    const args = ["api", "graphql", "-f", `query=${query}`];
+    // --include keeps the response's own status and headers, so a failure is classified from
+    // the same response's evidence (#293), never from a separate /rate_limit reading.
+    const args = ["api", "graphql", "--include", "-f", `query=${query}`];
     for (const [key, value] of Object.entries(variables)) args.push("-F", `${key}=${value}`);
     let stdout: string;
     try {
@@ -74,16 +78,24 @@ export const ghQueryWith =
       }));
     } catch (error) {
       signal?.throwIfAborted();
+      const response = responseOf(prop(error, "stdout"));
       // gh exits non-zero on any GraphQL error but still prints the response. A response whose
       // only errors are NOT_FOUND is a valid answer ("no such issue"): callers see null fields.
-      const answer = graphqlAnswer(prop(error, "stdout"));
+      const answer = graphqlAnswer(response?.body);
       if (answer) return answer;
-      throw ghQueryFailure(error);
+      throw ghQueryFailure(error, response);
     }
+    let response: GhResponse;
+    try {
+      response = parseGhResponse(stdout);
+    } catch {
+      throw new Error("GitHub returned a malformed response; no fresh report saved.");
+    }
+    stdout = response.body;
     const parsed: unknown = JSON.parse(stdout);
     const errors = prop(parsed, "errors");
     if (Array.isArray(errors) && errors.length && !graphqlAnswer(stdout)) {
-      const limited = rateLimitFailure("", stdout);
+      const limited = sameResponseLimit(response) ?? rateLimitFailure("", stdout);
       if (limited) throw limited;
       throw new Error("GitHub returned incomplete query data; no fresh report saved.");
     }
@@ -130,8 +142,21 @@ export class AuthenticationError extends Error {
  * the rate-limit discriminator, gh's exit status and the HTTP status gh reports. The message
  * keeps its general advice; callers must classify by type, never by message text.
  */
-export function ghQueryFailure(error: unknown): Error {
-  const limited = rateLimitFailure(prop(error, "stderr"), prop(error, "stdout"));
+export function ghQueryFailure(error: unknown, response: GhResponse | null = null): Error {
+  const evidence =
+    response?.status !== null && response
+      ? classifyGhFailure({ response, exitCode: prop(error, "code") })
+      : null;
+  const sameResponse = response ? sameResponseLimit(response) : null;
+  if (sameResponse) return sameResponse;
+  if (evidence?.category === "authentication")
+    return new AuthenticationError(
+      "GitHub refused the gh login. Run gh auth status (or gh auth login), then retry.",
+    );
+  const limited = rateLimitFailure(
+    prop(error, "stderr"),
+    response ? response.body : prop(error, "stdout"),
+  );
   if (limited) return limited;
   const httpStatus = /\bHTTP (\d{3})\b/.exec(text(prop(error, "stderr")))?.[1];
   if (prop(error, "code") === 4 || httpStatus === "401")
@@ -141,6 +166,38 @@ export function ghQueryFailure(error: unknown): Error {
   // Do not echo subprocess arguments, stderr, credentials or private API response bodies.
   return new Error(
     "GitHub query failed. Check gh auth status, repository access and API rate limits.",
+  );
+}
+
+/** gh output as a response, or null when it is not text or not framed as one. */
+function responseOf(output: unknown): GhResponse | null {
+  try {
+    return parseGhResponse(text(output));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A RateLimitError decided from one response's own evidence (#293): a registered rate-limit or
+ * secondary-limit signal, with the quota headers of that same response. Its retry metadata is
+ * only what that response proves: a reset only when the quota is exhausted, never a guess when
+ * the headers contradict the refusal. Null when the response shows no rate limiting.
+ */
+function sameResponseLimit(response: GhResponse): RateLimitError | null {
+  if (response.status === null) return null;
+  const c = classifyGhFailure({ response });
+  if (c.category !== "rate-limited" && c.category !== "secondary-rate-limit") return null;
+  return new RateLimitError(
+    rateLimitMessage(c),
+    {
+      retryAfterSeconds: c.observation.retryAfterSeconds,
+      // The earliest proven retry time: an exhausted quota's reset, else an HTTP-date
+      // Retry-After from this response (an explicit request, so schedulers honour it).
+      resetAt:
+        (c.quotaEvidence === "exhausted" ? c.observation.resetAt : null) ?? c.observation.retryAt,
+    },
+    c,
   );
 }
 
