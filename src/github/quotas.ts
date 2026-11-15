@@ -22,8 +22,6 @@ export const QUOTA_FAILURE_TTL_MS = 10_000;
 export const QUOTA_LAST_GOOD_MS = 5 * 60_000;
 /** Deadline of one quota collection. */
 export const QUOTA_TIMEOUT_MS = 5_000;
-/** Longest retry embargo honoured from a refused quota lookup, whatever GitHub reports. */
-export const QUOTA_MAX_EMBARGO_MS = 10 * 60_000;
 /** Most resource rows in a view; more are counted as omitted. */
 export const QUOTA_MAX_ROWS = 20;
 /** Most recent throttling events shown. */
@@ -499,16 +497,29 @@ export function buildQuotaView(input: QuotaViewInput): QuotaView {
   };
 }
 
+/** Notices that make the primary evidence partial or unusable, whatever its freshness. */
+const partialNotices = new Set<QuotaNotice["code"]>([
+  "missing-family",
+  "unknown",
+  "inconsistent",
+  "reset-passed",
+  "clock-rollback",
+  "omitted-resources",
+]);
+
 /**
- * Exit status of `pdb quotas`: 0 for a fresh, complete primary view of a verified account (not
- * permission to send more work; an exhausted bucket is still a successful diagnostic); 2 for
- * partial, stale, stored, unavailable or unverified evidence.
+ * Exit status of `pdb quotas`: 0 for a fresh, complete and usable primary view of a verified
+ * account (not permission to send more work; an exhausted bucket is still a successful
+ * diagnostic); 2 for partial, stale, stored, unavailable or unverified evidence, including an
+ * empty or family-incomplete reading, contradictory or unknown counts and passed resets.
  */
 export function quotaExitCode(view: QuotaView): 0 | 2 {
   return (view.freshness === "live" || view.freshness === "cached") &&
     view.failure === null &&
     view.accountVerified &&
-    view.coverage.complete
+    view.coverage.complete &&
+    view.resources.length > 0 &&
+    !view.notices.some((n) => partialNotices.has(n.code))
     ? 0
     : 2;
 }
@@ -668,8 +679,14 @@ export class QuotaService {
     }
     const good = state.lastGood;
     const goodAge = good ? now - Date.parse(good.observedAt) : NaN;
-    if (!read.refresh && good && goodAge >= 0 && goodAge < this.ttlMs)
+    if (!read.refresh && good && goodAge >= 0 && goodAge < this.ttlMs) {
+      // A refresh that failed after this reading keeps being reported until a lookup succeeds:
+      // the held data is then stale with the failure, never a clean cached success.
+      const after = state.lastFailure;
+      if (after && Date.parse(after.failure.observedAt) >= Date.parse(good.observedAt))
+        return build(good, "stale", after.failure, embargoOf(now));
       return build(good, "cached", null, null);
+    }
     const embargo = embargoOf(now);
     if (embargo) {
       const reading = held(now);
@@ -770,7 +787,7 @@ export class QuotaService {
       let until: number | null = null;
       if (retry.seconds !== null) until = observed + retry.seconds * 1000;
       else if (retry.at !== null) until = Date.parse(retry.at);
-      if (until !== null) until = Math.min(until, observed + QUOTA_MAX_EMBARGO_MS);
+      // GitHub's own Retry-After or reset is kept as given: never shortened (no clamp).
       return {
         ok: false,
         failure: { category, observedAt: new Date(observed).toISOString(), httpStatus },
