@@ -457,52 +457,98 @@ describe("rebrief CLI/private state", () => {
       briefing: null,
     });
   });
-  it("aborts project-resolution subprocesses and does not start subsequent Git lookups", async () => {
-    let calls = 0,
-      text = "";
-    let child: ChildProcess | undefined;
-    let closed: Promise<void> = Promise.resolve();
-    const git: GitRunner = (_args, _cwd, signal) =>
-      new Promise((resolve, reject) => {
+  it("aborts setup and configuration Git subprocesses without subsequent lookups", async () => {
+    for (const phase of ["project", "configuration"]) {
+      let calls = 0,
+        text = "";
+      let child: ChildProcess | undefined;
+      let closed: Promise<void> = Promise.resolve();
+      const git: GitRunner = (args, _cwd, signal) => {
         calls++;
-        child = execFile(
-          process.execPath,
-          ["-e", "setInterval(() => {}, 1000)"],
-          { signal },
-          (error, stdout) => (error ? reject(error) : resolve(stdout)),
-        );
-        closed = new Promise<void>((done) => child!.once("close", () => done()));
-      });
-    try {
-      expect(
-        await runRebrief(
-          [
-            "init",
-            ...common,
-            "--project",
-            "/project",
-            "--state-dir",
-            join(tmpdir(), "unused-injected-state"),
-            "--deadline-ms",
-            "50",
-          ],
-          async (s) => {
-            text = s;
-          },
-          { git },
-        ),
-      ).toBe(0);
-      await closed;
-      expect(calls).toBe(1);
-      expect(JSON.parse(text)).toMatchObject({
-        decision: "stop",
-        reason: "cancelled-or-deadline",
-        briefing: null,
-      });
-      expect(child?.exitCode !== null || child?.signalCode !== null).toBe(true);
-    } finally {
-      child?.kill();
-      await closed;
+        if (phase === "configuration" && calls <= 2)
+          return Promise.resolve(
+            args[0] === "rev-parse" ? "/project\n" : "origin\thttps://github.com/o/r.git (fetch)\n",
+          );
+        return new Promise((resolve, reject) => {
+          child = execFile(
+            process.execPath,
+            ["-e", "setInterval(() => {}, 1000)"],
+            { signal },
+            (error, stdout) => (error ? reject(error) : resolve(stdout)),
+          );
+          closed = new Promise<void>((done) => child!.once("close", () => done()));
+        });
+      };
+      try {
+        expect(
+          await runRebrief(
+            [
+              phase === "project" ? "init" : "check",
+              ...common,
+              "--project",
+              "/project",
+              "--state-dir",
+              join(tmpdir(), "unused-injected-state"),
+              "--deadline-ms",
+              "100",
+              "--enabled",
+              "--event",
+              "config-cancel",
+              "--reason",
+              "natural",
+            ],
+            async (s) => {
+              text = s;
+            },
+            {
+              git,
+              state: async (_path, work) =>
+                work(initialize({ ...context, project: "/project" }), async () => {}),
+              fs: {
+                readText: async () => null,
+                writeText: async () => {
+                  throw new Error("no writes");
+                },
+                rename: async () => {
+                  throw new Error("no writes");
+                },
+                remove: async () => {
+                  throw new Error("no writes");
+                },
+                makeDirectory: async () => {
+                  throw new Error("no writes");
+                },
+              },
+              read: {
+                collect: async () => {
+                  const stamp = new Date().toISOString();
+                  return {
+                    ...snapshot([], []),
+                    repository: "o/r",
+                    startedAt: stamp,
+                    fetchedAt: stamp,
+                  };
+                },
+                dependencyReport,
+                rest: undefined,
+                query: undefined,
+                queryWith: undefined,
+              },
+            },
+          ),
+        ).toBe(0);
+        await closed;
+        expect(calls, phase).toBe(phase === "project" ? 1 : 3);
+        expect(JSON.parse(text), phase).toMatchObject({
+          decision: "stop",
+          reason: expect.stringMatching(/^cancelled/),
+          briefing: null,
+        });
+        expect(child?.exitCode !== null || child?.signalCode !== null).toBe(true);
+      } finally {
+        child?.kill();
+        await closed;
+      }
     }
   });
   it("help/error are structured and never echo private state errors", async () => {
