@@ -103,6 +103,32 @@ export const readProfiles = {
     },
   },
   /**
+   * Routine `deps N` with its direct impact (#196): the selected issue with its labels, open
+   * closing-PR identities and complete direct native edges, then the eligibility facts (labels,
+   * creation time, open closing PRs, own blockers) of at most `dependantsHydrated` open direct
+   * dependants for which it is the last open blocker, `dependantsPerRequest` to a request.
+   * No discussion, reviews, check runs or transitive edges.
+   */
+  "dependency-direct-v1": {
+    version: 1,
+    sources: [
+      "issue",
+      "labels",
+      "native-blocked-by",
+      "native-blocking",
+      "linked-pull-requests",
+      "dependant-eligibility",
+    ],
+    bounds: {
+      labels: 100,
+      nativeEdgesPerPage: 100,
+      linkedPullRequestsPerPage: 10,
+      dependantsHydrated: 50,
+      dependantsPerRequest: 25,
+      dependantBlockersListed: 20,
+    },
+  },
+  /**
    * The explicit `deps N --tree` diagnosis (#196): a breadth-first walk of native edges that
    * stops after `treeNodes` issues and reports every known identity it did not read. Never
    * implicit in a routine read; routine dependency questions use direct edges only.
