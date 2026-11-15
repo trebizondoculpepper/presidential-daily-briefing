@@ -6,6 +6,8 @@
  * versioned CLI JSON in the `serve-read` envelope with a `freshness` block. Nothing here
  * mutates GitHub; refresh changes only the server's own memory.
  */
+import { resolveReviewPolicy } from "../config/review-setting.js";
+import type { DeclaredReviewPolicy } from "../workflow/reviewpolicy.js";
 import { BriefingEngineError } from "../config/engine-setting.js";
 import { validateHarness } from "../config/harness.js";
 import type { Environment } from "../config/harness.js";
@@ -125,7 +127,9 @@ const refuseWrite = async (): Promise<never> => {
  * workflow-guide readers fall back to the process working directory, which #271 forbids: the
  * directory pdb serve was started in says nothing about the requested repository.
  */
-export function noLocalProject(repository: string): Pick<ReadRuntime, "estimation" | "guide"> {
+export function noLocalProject(
+  repository: string,
+): Pick<ReadRuntime, "estimation" | "guide" | "reviewPolicy"> {
   const git: GitRunner = async (args) =>
     args[0] === "rev-parse"
       ? `${NO_PROJECT_ROOT}\n`
@@ -138,7 +142,23 @@ export function noLocalProject(repository: string): Pick<ReadRuntime, "estimatio
     makeDirectory: refuseWrite,
   };
   const readers = { cwd: NO_PROJECT_ROOT, git, fs };
-  return { estimation: readers, guide: readers };
+  // #301: no verified project, so no declared review policy: explicitly undeclared.
+  return {
+    estimation: readers,
+    guide: readers,
+    reviewPolicy: { state: "undeclared", scope: "no-matching-project" },
+  };
+}
+
+/**
+ * The declared review policy of one served repository (#301): read from its --project's own
+ * configuration; with --repo only, explicitly undeclared. Never from the working directory (#271).
+ */
+export async function servedReviewPolicy(
+  readers: Pick<ReadRuntime, "guide" | "reviewPolicy">,
+  repository: string,
+): Promise<DeclaredReviewPolicy> {
+  return readers.reviewPolicy ?? resolveReviewPolicy(repository, readers.guide ?? {});
 }
 
 type View = "briefing" | "issue" | "dependencies" | "pull-request" | "who" | "team" | "ticket";
@@ -382,7 +402,7 @@ export const projectReaders = (
   runtime: ServeReadRuntime,
   project: string | undefined,
   repository: string,
-): Pick<ReadRuntime, "estimation" | "guide"> =>
+): Pick<ReadRuntime, "estimation" | "guide" | "reviewPolicy"> =>
   project
     ? (runtime.projectRuntime?.(project) ?? {
         estimation: { cwd: project },
@@ -419,6 +439,18 @@ export function readApi(
     now: runtime.now,
     redactDiagnostic: redactLocalText,
     ...projectReaders(runtime, project, repository),
+  });
+
+  /** Boundaries with the served repository's declared review policy (#301). */
+  const policyBoundaries = async (
+    served: { project?: string; repository: string },
+    signal: AbortSignal,
+  ): Promise<DeliveryBoundaries> => ({
+    ...boundaries(served.repository, signal),
+    reviewPolicy: await servedReviewPolicy(
+      projectReaders(runtime, served.project, served.repository),
+      served.repository,
+    ),
   });
 
   const boundaries = (repository: string, signal: AbortSignal): DeliveryBoundaries =>
@@ -698,7 +730,7 @@ export function readApi(
           const read = await readTeam(
             snapshot,
             { staleHours, now: runtime.now(), offline: false },
-            boundaries(served.repository, context.signal),
+            await policyBoundaries(served, context.signal),
           );
           return { status: read.complete ? "complete" : "incomplete", result: read.report };
         });
@@ -765,7 +797,7 @@ export function readApi(
                           }
                         : {}),
                     },
-                    boundaries(served.repository, inner),
+                    await policyBoundaries(served, inner),
                     guardedQueryWith
                       ? guardedQueryWith(inner)
                       : async () => {
@@ -842,8 +874,17 @@ export function readApi(
                               rest: (p, o) => guardedRest!(p, { ...o, signal: o?.signal ?? inner }),
                             },
                             signal: inner,
+                            reviewPolicy: await servedReviewPolicy(
+                              projectReaders(runtime, served.project, served.repository),
+                              served.repository,
+                            ),
                           }
-                        : {},
+                        : {
+                            reviewPolicy: await servedReviewPolicy(
+                              projectReaders(runtime, served.project, served.repository),
+                              served.repository,
+                            ),
+                          },
                       runtime.now,
                     ));
                 // A quota refusal inside a PR read that still answered (delivery or permission
@@ -930,7 +971,7 @@ export function readApi(
                           }
                         : {}),
                     },
-                    boundaries(served.repository, inner),
+                    await policyBoundaries(served, inner),
                     guardedQueryWith
                       ? guardedQueryWith(inner)
                       : async () => {

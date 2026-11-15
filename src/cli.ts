@@ -923,14 +923,18 @@ export async function checkpointSince(
   }
 }
 /** #192: per-run delivery boundaries; offline, or without injected ones, nothing is read. */
-const deliveryBoundaries = (runtime: Runtime, repository: string, offline: boolean) =>
-  !offline && runtime.rest && runtime.query
+const deliveryBoundaries = async (runtime: Runtime, repository: string, offline: boolean) => ({
+  ...(!offline && runtime.rest && runtime.query
     ? {
         trust: markerTrust(permissionLookup(repository, runtime.rest)),
         trustWith: (rest: Rest) => markerTrust(permissionLookup(repository, rest)),
         live: { query: runtime.query, rest: runtime.rest },
       }
-    : {};
+    : {}),
+  // #301: the declared review policy of this verified checkout (another repository's is never
+  // read: a mismatched checkout is reported as undeclared, no-matching-project).
+  reviewPolicy: await resolveReviewPolicy(repository, runtime.guide ?? {}),
+});
 
 export async function main(
   args: string[],
@@ -1508,7 +1512,7 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
     const { report, text } = await readTeam(
       snapshot,
       { staleHours, now: runtime.now?.() ?? new Date(), offline: !!values.offline },
-      deliveryBoundaries(runtime, snapshot.repository, !!values.offline),
+      await deliveryBoundaries(runtime, snapshot.repository, !!values.offline),
     );
     await output(values.json ? JSON.stringify(report, null, 2) + "\n" : text);
     return report.completeness.complete ? 0 : 2;
@@ -1534,7 +1538,7 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
           ...(values.agent ? { agent: values.agent } : {}),
           ...(values.platform ? { platform: values.platform } : {}),
         },
-        deliveryBoundaries(runtime, repository, false),
+        await deliveryBoundaries(runtime, repository, false),
         runtime.query ?? ghQuery,
         runtime.now,
         runtime.collectIssueFocus,
@@ -1583,7 +1587,7 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
         repository,
         number,
         { staleHours, now: runtime.now?.() ?? new Date() },
-        deliveryBoundaries(runtime, repository, false),
+        await deliveryBoundaries(runtime, repository, false),
         runtime.query ?? ghQuery,
         runtime.now,
         runtime.collectIssueFocus,
@@ -1605,7 +1609,7 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
       snapshot,
       number,
       { staleHours, now: runtime.now?.() ?? new Date(), offline: !!values.offline },
-      deliveryBoundaries(runtime, snapshot.repository, !!values.offline),
+      await deliveryBoundaries(runtime, snapshot.repository, !!values.offline),
     );
     await output(values.json ? JSON.stringify(report, null, 2) + "\n" : text);
     return report.completeness.complete ? 0 : 2;
@@ -1665,10 +1669,7 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
           Number(positionals[0]),
           query,
           // #192: delivery and responsibility for the issues this PR is linked to close.
-          deliveryBoundaries(runtime, repository, false),
-          undefined,
-          // #301: the repository's declared review policy, from local configuration only.
-          await resolveReviewPolicy(repository, runtime.guide ?? {}),
+          await deliveryBoundaries(runtime, repository, false),
         );
     await output(values.json ? JSON.stringify(report, null, 2) + "\n" : text);
     return report.completeness.complete ? 0 : 2;

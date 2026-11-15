@@ -405,6 +405,12 @@ export interface ReadRuntime {
   redactDiagnostic?: (text: string) => string;
   /** Filesystem, git and working directory for the workflow-guide setting (#71). */
   guide?: GuideRuntime;
+  /**
+   * The declared review policy when the front end already knows it (#301): pdb serve with only
+   * --repo states it is undeclared rather than reading any directory (#271). Absent: resolved
+   * from `guide`.
+   */
+  reviewPolicy?: DeclaredReviewPolicy;
 }
 
 /** Live read request for a briefing or one issue's intake. */
@@ -458,7 +464,8 @@ export async function readBriefing(
   const engineSetting = request.issue
     ? undefined
     : await resolveEngineSetting(request.repository, runtime.guide);
-  const reviewPolicy = await resolveReviewPolicy(request.repository, runtime.guide);
+  const reviewPolicy =
+    runtime.reviewPolicy ?? (await resolveReviewPolicy(request.repository, runtime.guide));
   const setting = await resolveGuideSetting(request.repository, undefined, runtime.guide);
   const redact = runtime.redactDiagnostic;
   const process = briefingProcess(
