@@ -47,7 +47,11 @@ export function readServices(
         return api(context);
       },
       status: {
-        cache: () => ({ ...cache.status(), mcpSessions: mcp.size }),
+        cache: () => ({
+          ...cache.status(),
+          mcpSessions: mcp.size,
+          mcpSessionsInitializing: mcp.initializing,
+        }),
         repositories: () => cache.repositories(),
       },
       // Sessions first, then in-flight collections; dropping sessions never drops entries.

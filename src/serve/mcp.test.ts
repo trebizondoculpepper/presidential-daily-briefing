@@ -3,7 +3,8 @@
  * real @modelcontextprotocol/client 2.4.0 Streamable HTTP client on an ephemeral port.
  */
 import { EventEmitter } from "node:events";
-import { request } from "node:http";
+import { createServer as createHttpServer, request } from "node:http";
+import type { AddressInfo } from "node:net";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { InMemoryTransport } from "@modelcontextprotocol/server";
 import { describe, expect, it } from "vite-plus/test";
@@ -16,7 +17,7 @@ import type { Clock } from "../mcp/polling.js";
 import { startServe } from "../serve.js";
 import type { RunningServer, ServeRuntime } from "../serve.js";
 import type { ServeReadRuntime } from "./api.js";
-import { MAX_MCP_SESSIONS, MCP_SESSION_IDLE_MS } from "./mcp.js";
+import { MAX_MCP_SESSIONS, MCP_SESSION_IDLE_MS, McpSessions } from "./mcp.js";
 import { serveArguments } from "./options.js";
 import { readServices } from "./services.js";
 
@@ -128,6 +129,8 @@ async function setup(args: string[], gated = false): Promise<Setup> {
       ],
       cycles: [],
       guidance: "",
+      // Issue 5 has a blocker in a repository the server does not serve.
+      ...(number === 5 ? { unfollowed: [{ repository: "someone/else", number: 9 }] } : {}),
     }),
     now: () => clock.now(),
     env: {},
@@ -312,6 +315,129 @@ describe("pdb serve HTTP MCP (#373)", () => {
     // The Host guard covers /mcp too.
     expect((await raw(port, "POST", { host: "evil.example" }, "{}")).status).toBe(421);
     await s.running.close();
+  });
+
+  it("reports skipped unserved dependency nodes as incomplete source evidence", async () => {
+    const s = await setup(["--repo", "example/one"]);
+    const client = await connect(s.url);
+    try {
+      const deps = envelopeOf(
+        await client.callTool({
+          name: "triage_dependencies",
+          arguments: { number: 5, tree: true },
+        }),
+      );
+      expect(deps.status).toBe("incomplete");
+      expect(deps.sourceCompleteness).toMatchObject({ complete: false });
+      expect(deps.sourceCompleteness!.warnings.join(" ")).toContain("someone/else#9");
+      const plain = envelopeOf(
+        await client.callTool({ name: "triage_dependencies", arguments: { number: 1 } }),
+      );
+      expect(plain.sourceCompleteness).toMatchObject({ complete: true, warnings: [] });
+    } finally {
+      await client.close();
+      await s.running.close();
+    }
+  });
+
+  it("concurrent initialisations never exceed the session bound, and reservations are released", async () => {
+    const s = await setup(["--repo", "example/one"]);
+    const clients: Client[] = [];
+    type Status = { cache: { mcpSessions: number; mcpSessionsInitializing: number } };
+    const status = async () =>
+      ((await (await fetch(`${s.running.facts.url}api/v1/status`)).json()) as Status).cache;
+    try {
+      const settled = await Promise.allSettled(
+        Array.from({ length: MAX_MCP_SESSIONS + 16 }, async (_, i) => {
+          const client = await connect(s.url, `burst${i}`);
+          clients.push(client);
+        }),
+      );
+      expect(settled.some((r) => r.status === "fulfilled")).toBe(true);
+      expect(await status()).toMatchObject({ mcpSessionsInitializing: 0 });
+      expect((await status()).mcpSessions).toBeLessThanOrEqual(MAX_MCP_SESSIONS);
+      // A first request that does not initialise gives its reservation back.
+      const bad = await raw(
+        s.running.port,
+        "POST",
+        { "content-type": "application/json", accept: "application/json, text/event-stream" },
+        JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+      );
+      expect(bad.status).toBeGreaterThanOrEqual(400);
+      expect(await status()).toMatchObject({ mcpSessionsInitializing: 0 });
+      expect((await status()).mcpSessions).toBeLessThanOrEqual(MAX_MCP_SESSIONS);
+    } finally {
+      await Promise.all(clients.map((c) => c.close().catch(() => undefined)));
+      await s.running.close();
+    }
+  });
+
+  it("reserves capacity before initialisation completes, even when it is slow", async () => {
+    // Drive McpSessions directly with a deliberately slow connect, so every initialisation is
+    // in progress at once: without reservations all of them would register.
+    const runtime = {
+      collect: async () => {
+        throw new Error("unused");
+      },
+      dependencyReport: async () => {
+        throw new Error("unused");
+      },
+      currentRepository: async () => "example/one",
+    } as unknown as McpRuntime;
+    const sessions = new McpSessions(
+      () => {
+        const server = createServer({ repo: "example/one" }, runtime);
+        const connect = server.connect.bind(server);
+        server.connect = async (transport) => {
+          await new Promise((done) => setTimeout(done, 50));
+          return connect(transport);
+        };
+        return server;
+      },
+      new ManualClock(),
+      () => undefined,
+    );
+    let peak = 0;
+    const http = createHttpServer((request, response) => {
+      peak = Math.max(peak, sessions.size + sessions.initializing);
+      void sessions.handle({
+        request,
+        response,
+        url: new URL(request.url ?? "/mcp", "http://127.0.0.1"),
+        signal: new AbortController().signal,
+      });
+    });
+    await new Promise<void>((done) => http.listen(0, "127.0.0.1", done));
+    const port = (http.address() as AddressInfo).port;
+    const initialize = JSON.stringify({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "initialize",
+      params: {
+        protocolVersion: "2025-06-18",
+        capabilities: {},
+        clientInfo: { name: "burst", version: "1" },
+      },
+    });
+    try {
+      const replies = await Promise.all(
+        Array.from({ length: MAX_MCP_SESSIONS + 16 }, () =>
+          raw(
+            port,
+            "POST",
+            { "content-type": "application/json", accept: "application/json, text/event-stream" },
+            initialize,
+          ),
+        ),
+      );
+      expect(replies.filter((r) => r.status === 200).length).toBeGreaterThan(0);
+      expect(sessions.size).toBeLessThanOrEqual(MAX_MCP_SESSIONS);
+      expect(sessions.initializing).toBe(0);
+      expect(peak).toBeLessThanOrEqual(MAX_MCP_SESSIONS + 1);
+    } finally {
+      await sessions.close();
+      await new Promise((done) => http.close(done));
+    }
   });
 
   it("drops idle sessions after 30 minutes without dropping cache entries", async () => {

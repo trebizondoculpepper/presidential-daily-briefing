@@ -673,8 +673,8 @@ export function createServer(
           );
           const navigation = { ...(args.repo ? { repo: args.repo } : {}), tree: args.tree };
           return {
-            // pdb serve skips dependency nodes outside its served set; that tree is not complete.
-            status: read.report.unfollowed?.length ? "incomplete" : "complete",
+            // Skipped (unserved) nodes are judged by the view, in sourceCompleteness too.
+            status: "complete",
             build: (base, redact) =>
               dependenciesView(
                 base,
