@@ -1,0 +1,3 @@
+# Native project overrides research (#499)
+
+Used the shipped engine to show trusted test bundle injection can bypass ownership/completeness/blocker gates by adding an eligible alternative. A separate native EDN priority fixture successfully reprioritizes admitted actions; the boundary sketch rejects forged kinds/subjects. English compiler and canonical hash probes passed. Report proposes strict opt-in source loading, isolated bounded evaluation, immutable admission and effective-English/hash parity, clearly separating demonstrated assertions from unimplemented protections. No live policy activated or model/network trial performed.
