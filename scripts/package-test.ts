@@ -101,6 +101,79 @@ const issues = query.includes("issues(first") ? [
 process.stdout.write(JSON.stringify({ data: { repository: { issues: page(issues), pullRequests: page([]) } } }));
 `;
 
+/** Feed a native event to the installed artifact without a shell or development loader. */
+async function nativeStopSmoke(entry: string, cwd: string, env = process.env): Promise<void> {
+  const state = await mkdtemp(join(tmpdir(), "pdb native $() & "));
+  const selection = [
+    "--state-dir",
+    state,
+    "--repo",
+    "example/parity",
+    "--agent",
+    "probe",
+    "--role",
+    "implementer",
+  ];
+  const invoke = (args: string[], input: string | null) =>
+    new Promise<string>((resolve, reject) => {
+      const child = spawn(process.execPath, [entry, "rebrief", ...args], {
+        cwd,
+        env,
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+      let text = "";
+      child.stdout.setEncoding("utf8").on("data", (value: string) => {
+        text += value;
+      });
+      child.stderr.resume();
+      child.once("error", reject);
+      child.once("close", (code) =>
+        code === 0 ? resolve(text) : reject(new Error("Native package invocation failed")),
+      );
+      if (input !== null) child.stdin.end(input);
+      child.stdin.on("error", () => {});
+    });
+  try {
+    const initialized = JSON.parse(
+      await invoke(
+        ["init", ...selection, "--json", "--session", "synthetic", "--platform", "codex"],
+        "",
+      ),
+    ) as { reason: string };
+    if (initialized.reason !== "initialized") throw new Error("Packaged native init failed");
+    const args = ["codex-stop", ...selection, "--natural-stop-confirmed"];
+    const event = JSON.stringify({
+      hook_event_name: "Stop",
+      session_id: "synthetic",
+      turn_id: "t",
+      stop_hook_active: false,
+      transcript_path: "NEVER_READ $() & path",
+    });
+    for (const [extra, raw] of [
+      [["--transport", "http-mcp"], event.replace('"turn_id":"t"', '"turn_id":"http-gap"')],
+      [[], "{"],
+      [["--agent", "literal $() & probe"], event],
+      [["--deadline-ms", "10"], null],
+    ] as const) {
+      if ((await invoke([...args, ...extra], raw)) !== "{}\n")
+        throw new Error("Packaged native framing/failure mismatch");
+    }
+    // Run the successful read only when the caller supplied the credential-free fake gh.
+    if (env !== process.env) {
+      const response = JSON.parse(await invoke(args, event)) as {
+        decision?: string;
+        reason?: string;
+      };
+      if (response.decision !== "block" || !response.reason?.includes("example/parity"))
+        throw new Error("Packaged native offer missing");
+      if ((await invoke(args, event)) !== "{}\n")
+        throw new Error("Packaged native duplicate replay");
+    }
+  } finally {
+    await rm(state, { recursive: true, force: true });
+  }
+}
+
 /**
  * Packaged `pdb serve` smoke (doc/design/serve.md, test 9): the installed bin starts on an
  * ephemeral port, prints the stable "listening on URL" line first, answers /healthz and
@@ -397,6 +470,10 @@ try {
   if (manifest?.scripts?.postinstall || manifest?.scripts?.install || manifest?.scripts?.preinstall)
     throw new Error("The package must not run install scripts on installation.");
   console.log("ok   installed globally into an isolated prefix without install scripts");
+  await nativeStopSmoke(join(packageDir, "dist", "cli.mjs"), work);
+  console.log(
+    "ok   installed native Codex adapter: stdin, literal args, framing and deadline outside checkout",
+  );
   await projectWorkerSmoke(join(packageDir, engineChunks[0]!), work);
   console.log("ok   installed evaluator runs a project-preference worker from its own chunk");
 
@@ -653,6 +730,8 @@ try {
       PATH: `${fakeDir}${delimiter}${process.env.PATH ?? ""}`,
       PDB_NO_UPDATE_CHECK: "1",
     };
+    await nativeStopSmoke(join(packageDir, "dist", "cli.mjs"), work, env);
+    console.log("ok   installed native Codex offer and duplicate guard with fake gh");
     console.log(`ok   installed pdb serve: ${await serveSmoke(bin, env, checkout)}`);
     // pdb quotas (#547): the installed command reads one /rate_limit plus one identity read
     // through the fake gh, from any directory, and its text and JSON agree.

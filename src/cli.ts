@@ -287,6 +287,7 @@ Rollback: pdb config set briefing.engine typescript.
                         the gh login: one /rate_limit read, no repository scan; secondary
                         limits are unmetered (quotas --help)
   rebrief init|check|ack --json  Shared bounded continuation core (rebrief --help); no hook installed
+  rebrief codex-stop     Experimental native stdin/JSON adapter (rebrief codex-stop --help)
   serve --repo owner/name | --project PATH [--port N]  Foreground local HTTP server: read-only
                         JSON API and HTTP MCP over a short-lived memory cache (serve --help)
   team [--stale-hours N]  Read-only: each agent's claims, linked PRs, activity and warnings

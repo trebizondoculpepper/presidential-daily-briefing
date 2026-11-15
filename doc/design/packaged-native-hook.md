@@ -1,7 +1,7 @@
 # Packaged native hook entry points (#398)
 
-Documentation-first contract, pending review. Extends shared-rebrief-core.md;
-this does not describe a command that has already shipped.
+Documentation-first contract reviewed in #571. Extends shared-rebrief-core.md;
+the implementation exposes the entry point documented in doc/rebrief.md.
 
 Native configuration invokes the installed `pdb` binary. A platform shell or
 PowerShell wrapper may forward literal arguments, stdin, stdout, stderr and exit

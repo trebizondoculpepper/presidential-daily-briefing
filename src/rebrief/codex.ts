@@ -14,6 +14,14 @@ export interface CodexOffer {
   response: { decision: "block"; reason: string } | Record<string, never>;
   result: Result | null;
 }
+/** Shared native framing; offering stdout is not a delivery acknowledgement. */
+export function codexResponse(
+  result: Pick<Result, "decision" | "briefing">,
+): CodexOffer["response"] {
+  return result.decision === "continue" && result.briefing
+    ? { decision: "block", reason: result.briefing }
+    : {};
+}
 /** Does not acknowledge delivery: stdout emission is not model-visible receipt. */
 export async function codexStop(
   event: CodexStopEvent,
@@ -38,10 +46,7 @@ export async function codexStop(
     signal,
   );
   return {
-    response:
-      !binding.userStopped && !signal?.aborted && result.decision === "continue" && result.briefing
-        ? { decision: "block", reason: result.briefing }
-        : {},
+    response: !binding.userStopped && !signal?.aborted ? codexResponse(result) : {},
     result,
   };
 }
