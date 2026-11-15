@@ -14,6 +14,7 @@ import { codexMarker, headAccepted, headCodexFindings } from "./reviewevidence.j
 export { codexMarker };
 import { ghQuery, prop, selected, SubjectUnavailable } from "../github/github.js";
 import type { Query } from "../github/github.js";
+import type { ReadMeter } from "../github/readplan.js";
 
 type Login = { login: string } | null;
 type PageInfo = { hasNextPage?: boolean; hasPreviousPage?: boolean };
@@ -499,13 +500,37 @@ export async function pullRequestStatus(
   number: number,
   q: Query = ghQuery,
   now: () => Date = () => new Date(),
+  meter?: ReadMeter,
 ): Promise<PrStatusReport> {
   const startedAt = now().toISOString();
   const [owner, name] = repository.split("/");
-  const data = await q(query, { owner, name, number });
+  const subject = `${repository}#${number}`;
+  const data = await (meter ? meter.query(q, "pull-request", subject) : q)(query, {
+    owner,
+    name,
+    number,
+  });
   const pr = selected<PullRequestNode>(prop(data, "repository", "pullRequest"));
   if (!pr) throw new SubjectUnavailable(`Pull request #${number} is unavailable in ${repository}.`);
+  if (meter) coverPullRequest(meter, subject, pr);
   return prStatus(repository, pr, { now: now(), startedAt });
+}
+
+/** Per-source coverage of one pr-status-v1 read; truncated connections are partial. */
+function coverPullRequest(meter: ReadMeter, subject: string, pr: PullRequestNode): void {
+  const rollup = pr.commits.nodes[0]?.commit.statusCheckRollup;
+  const part = (source: string, truncated: boolean | undefined, omission: string) =>
+    meter.cover(source, subject, truncated ? "partial" : "complete", truncated ? { omission } : {});
+  meter.cover("pull-request", subject, "complete");
+  part("checks", rollup?.contexts.pageInfo.hasNextPage, "check contexts beyond the first 100");
+  part("reviews", pr.reviews.pageInfo?.hasPreviousPage, "reviews before the latest 50");
+  part("review-threads", pr.reviewThreads.pageInfo.hasNextPage, "threads beyond the first 100");
+  part("comments", pr.comments.pageInfo?.hasPreviousPage, "comments before the latest 100");
+  part(
+    "closing-issues",
+    pr.closingIssuesReferences.pageInfo?.hasNextPage,
+    "linked issues beyond the first 10",
+  );
 }
 
 /** Text rendering. */
