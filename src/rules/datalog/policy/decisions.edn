@@ -213,7 +213,7 @@
    :when [[1 "role" "human"] (open-question ?t) (asks-viewer ?t)]
    :why "A trusted question record routed to you ({routedTo}) awaits answers on the ticket."
    :codes ["explicit" "addressed"]
-   :witnesses {"routedTo" [(trusted-record ?t ?r) [?r "record-to" ?value]]}}
+   :witnesses {"routedTo" [(asking-record ?t ?r) [?r "record-to" ?value]]}}
 
   {:id "D-HUMAN-ASK"
    :kind "answer-questions"
@@ -222,7 +222,7 @@
    :when [[1 "role" "human"] (open-question ?t) (not (asks-viewer ?t))]
    :why "A trusted question record routed to {routedTo} awaits answers on the ticket."
    :codes ["explicit"]
-   :witnesses {"routedTo" [(trusted-record ?t ?r) [?r "record-to" ?value]]}}
+   :witnesses {"routedTo" [(asking-record ?t ?r) [?r "record-to" ?value]]}}
 
   {:id "D-HUMAN-UNVERIFIED"
    :kind "decide"

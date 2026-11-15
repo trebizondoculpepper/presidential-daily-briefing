@@ -49,11 +49,7 @@ export function cachedMcpRuntime(
   // The same served-set confinement as the JSON API (#373 review).
   const isServed = (repository: string): boolean =>
     facts.served.some((s) => s.repository.toLowerCase() === repository.toLowerCase());
-  const {
-    guardedQueryWith: _q,
-    guardedRest: _r,
-    ...cached
-  } = cachedBoundaries(read, cache, isServed);
+  const { guardedQueryWith, guardedRest: _r, ...cached } = cachedBoundaries(read, cache, isServed);
   return {
     ...cached,
     now: read.now,
@@ -67,7 +63,15 @@ export function cachedMcpRuntime(
     served: (repo) => {
       try {
         const chosen = selectRepository(facts.served, repo);
-        return { ...chosen, runtime: projectReaders(read, chosen.project, chosen.repository) };
+        return {
+          ...chosen,
+          runtime: {
+            ...projectReaders(read, chosen.project, chosen.repository),
+            // #414: the same closed-ticket scan as the JSON API for this project and repository.
+            closedQuestions: cache.closedQuestions.slot(chosen.project, chosen.repository),
+            ...(guardedQueryWith ? { closedQueryWith: guardedQueryWith } : {}),
+          },
+        };
       } catch (error) {
         if (error instanceof HttpFailure)
           throw new SelectionRefusal(

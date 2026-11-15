@@ -1,7 +1,7 @@
 {
   "modelVersion": 2,
   "policyVersion": 1,
-  "rulesHash": "2b17293949b9ea806dba1b05ad47437f46d8417811be06db9bbe757100b3c3bd",
+  "rulesHash": "62fdc2f6976d89099a5819d5f13ed927919a6a791a128810ba90df4a723ca3b0",
   "sources": [
     "policy/schema.edn",
     "policy/rules.edn",
@@ -2329,7 +2329,7 @@
           "clauses": [
             {
               "type": "call",
-              "predicate": "trusted-record",
+              "predicate": "asking-record",
               "args": [
                 {
                   "var": "?t"
@@ -2424,7 +2424,7 @@
           "clauses": [
             {
               "type": "call",
-              "predicate": "trusted-record",
+              "predicate": "asking-record",
               "args": [
                 {
                   "var": "?t"
@@ -6886,35 +6886,6 @@
       "set": "rules"
     },
     {
-      "name": "has-trusted-record",
-      "params": ["?t"],
-      "alternatives": [
-        {
-          "params": ["?t"],
-          "clauses": [
-            {
-              "type": "call",
-              "predicate": "trusted-record",
-              "args": [
-                {
-                  "var": "?t"
-                },
-                {
-                  "var": "?r"
-                }
-              ]
-            }
-          ],
-          "source": {
-            "file": "policy/rules.edn",
-            "index": 84
-          }
-        }
-      ],
-      "calls": ["trusted-record"],
-      "set": "rules"
-    },
-    {
       "name": "unverified-record",
       "params": ["?t"],
       "alternatives": [
@@ -6950,11 +6921,207 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 85
+            "index": 84
           }
         }
       ],
       "calls": [],
+      "set": "rules"
+    },
+    {
+      "name": "record-pending",
+      "params": ["?t", "?r"],
+      "alternatives": [
+        {
+          "params": ["?t", "?r"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?r"
+              },
+              "attribute": "record-version",
+              "value": {
+                "lit": 2
+              },
+              "phrase": "question marker version",
+              "many": false
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 85
+          }
+        },
+        {
+          "params": ["?t", "?r"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?r"
+              },
+              "attribute": "record-version",
+              "value": {
+                "lit": 1
+              },
+              "phrase": "question marker version",
+              "many": false
+            },
+            {
+              "type": "call",
+              "predicate": "question-labelled",
+              "args": [
+                {
+                  "var": "?t"
+                }
+              ]
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 86
+          }
+        },
+        {
+          "params": ["?t", "?r"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "question-record",
+              "value": {
+                "var": "?r"
+              },
+              "phrase": "question record",
+              "many": true
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "fact",
+                  "scope": "entity",
+                  "entity": {
+                    "var": "?r"
+                  },
+                  "attribute": "record-version",
+                  "value": {
+                    "wild": true
+                  },
+                  "phrase": "question marker version",
+                  "many": false
+                }
+              ]
+            },
+            {
+              "type": "call",
+              "predicate": "question-labelled",
+              "args": [
+                {
+                  "var": "?t"
+                }
+              ]
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 87
+          }
+        }
+      ],
+      "calls": ["question-labelled"],
+      "set": "rules"
+    },
+    {
+      "name": "asking-record",
+      "params": ["?t", "?r"],
+      "alternatives": [
+        {
+          "params": ["?t", "?r"],
+          "clauses": [
+            {
+              "type": "call",
+              "predicate": "trusted-record",
+              "args": [
+                {
+                  "var": "?t"
+                },
+                {
+                  "var": "?r"
+                }
+              ]
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "call",
+                  "predicate": "record-settled",
+                  "args": [
+                    {
+                      "var": "?r"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "call",
+              "predicate": "record-pending",
+              "args": [
+                {
+                  "var": "?t"
+                },
+                {
+                  "var": "?r"
+                }
+              ]
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 88
+          }
+        }
+      ],
+      "calls": ["trusted-record", "record-settled", "record-pending"],
+      "set": "rules"
+    },
+    {
+      "name": "has-asking-record",
+      "params": ["?t"],
+      "alternatives": [
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
+              "type": "call",
+              "predicate": "asking-record",
+              "args": [
+                {
+                  "var": "?t"
+                },
+                {
+                  "var": "?r"
+                }
+              ]
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 89
+          }
+        }
+      ],
+      "calls": ["asking-record"],
       "set": "rules"
     },
     {
@@ -6984,16 +7151,7 @@
             },
             {
               "type": "call",
-              "predicate": "question-labelled",
-              "args": [
-                {
-                  "var": "?t"
-                }
-              ]
-            },
-            {
-              "type": "call",
-              "predicate": "has-trusted-record",
+              "predicate": "has-asking-record",
               "args": [
                 {
                   "var": "?t"
@@ -7003,11 +7161,11 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 86
+            "index": 90
           }
         }
       ],
-      "calls": ["issue", "open", "question-labelled", "has-trusted-record"],
+      "calls": ["issue", "open", "has-asking-record"],
       "set": "rules"
     },
     {
@@ -7050,7 +7208,7 @@
               "body": [
                 {
                   "type": "call",
-                  "predicate": "has-trusted-record",
+                  "predicate": "has-asking-record",
                   "args": [
                     {
                       "var": "?t"
@@ -7062,11 +7220,11 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 87
+            "index": 91
           }
         }
       ],
-      "calls": ["issue", "open", "question-labelled", "has-trusted-record"],
+      "calls": ["issue", "open", "question-labelled", "has-asking-record"],
       "set": "rules"
     },
     {
@@ -7078,7 +7236,7 @@
           "clauses": [
             {
               "type": "call",
-              "predicate": "trusted-record",
+              "predicate": "asking-record",
               "args": [
                 {
                   "var": "?t"
@@ -7117,11 +7275,11 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 88
+            "index": 92
           }
         }
       ],
-      "calls": ["trusted-record"],
+      "calls": ["asking-record"],
       "set": "rules"
     },
     {
@@ -7147,7 +7305,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 89
+            "index": 93
           }
         }
       ],
@@ -7177,7 +7335,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 90
+            "index": 94
           }
         },
         {
@@ -7199,72 +7357,11 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 91
+            "index": 95
           }
         }
       ],
       "calls": [],
-      "set": "rules"
-    },
-    {
-      "name": "record-pending",
-      "params": ["?t", "?r"],
-      "alternatives": [
-        {
-          "params": ["?t", "?r"],
-          "clauses": [
-            {
-              "type": "fact",
-              "scope": "entity",
-              "entity": {
-                "var": "?r"
-              },
-              "attribute": "record-version",
-              "value": {
-                "lit": 2
-              },
-              "phrase": "question marker version",
-              "many": false
-            }
-          ],
-          "source": {
-            "file": "policy/rules.edn",
-            "index": 92
-          }
-        },
-        {
-          "params": ["?t", "?r"],
-          "clauses": [
-            {
-              "type": "fact",
-              "scope": "entity",
-              "entity": {
-                "var": "?r"
-              },
-              "attribute": "record-version",
-              "value": {
-                "lit": 1
-              },
-              "phrase": "question marker version",
-              "many": false
-            },
-            {
-              "type": "call",
-              "predicate": "question-labelled",
-              "args": [
-                {
-                  "var": "?t"
-                }
-              ]
-            }
-          ],
-          "source": {
-            "file": "policy/rules.edn",
-            "index": 93
-          }
-        }
-      ],
-      "calls": ["question-labelled"],
       "set": "rules"
     },
     {
@@ -7332,7 +7429,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 94
+            "index": 96
           }
         }
       ],
@@ -7404,7 +7501,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 95
+            "index": 97
           }
         },
         {
@@ -7499,7 +7596,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 96
+            "index": 98
           }
         }
       ],
@@ -7535,7 +7632,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 97
+            "index": 99
           }
         }
       ],
@@ -7564,7 +7661,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 98
+            "index": 100
           }
         }
       ],
@@ -7590,7 +7687,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 99
+            "index": 101
           }
         },
         {
@@ -7608,7 +7705,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 100
+            "index": 102
           }
         }
       ],
@@ -7663,7 +7760,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 101
+            "index": 103
           }
         }
       ],
@@ -10310,8 +10407,8 @@
   ],
   "coverage": {
     "decisions": 31,
-    "predicates": 69,
-    "alternatives": 111,
+    "predicates": 70,
+    "alternatives": 113,
     "denials": 8,
     "queries": 15,
     "keyQueries": 4,
@@ -10319,6 +10416,6 @@
     "overrides": 4,
     "constants": 14,
     "attributes": 68,
-    "clauses": 595
+    "clauses": 602
   }
 }

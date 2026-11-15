@@ -47,6 +47,7 @@ import type { PickupOrder } from "./ranking.js";
 import { briefingProcess, resolveGuideSetting } from "./process.js";
 import { humanBriefing, humanText, readHumanEvidence } from "./human.js";
 import { discoverClosedQuestions } from "./closedquestions.js";
+import type { ClosedScanSlot } from "./closedquestions.js";
 import type { HumanBriefing } from "./human.js";
 import type { BriefingProcess, GuideRuntime } from "./process.js";
 
@@ -126,6 +127,10 @@ export async function presentBriefing(
     rest: Rest;
     /** Rebuilds `trust` over a metered REST boundary, so an intake counts its lookups (#367). */
     trustWith?: (rest: Rest) => TrustDecision;
+    /** `pdb serve`: the closed-ticket scan continued between requests (#414). */
+    closedQuestions?: ClosedScanSlot;
+    /** Its uncached GraphQL boundary; absent: `query`. */
+    closedQuery?: Query;
   },
 ): Promise<PresentedBriefing> {
   // #301: every engine and projection below reads the declared policy from the snapshot.
@@ -334,7 +339,13 @@ async function presentHuman(
   trust: TrustDecision | undefined,
   signal: AbortSignal | undefined,
   loadEngine: () => Promise<Pick<typeof import("../rules/datalog/datalog.js"), "evaluateDatalog">>,
-  live?: { query: Query; rest: Rest; trustWith?: (rest: Rest) => TrustDecision },
+  live?: {
+    query: Query;
+    rest: Rest;
+    trustWith?: (rest: Rest) => TrustDecision;
+    closedQuestions?: ClosedScanSlot;
+    closedQuery?: Query;
+  },
 ): Promise<PresentedBriefing> {
   const evidence = await readHumanEvidence(snapshot, trust, signal);
   // #414: a question outlives its ticket's closure. Closed sources are read live within a fixed
@@ -343,9 +354,10 @@ async function presentHuman(
     ? await discoverClosedQuestions(
         snapshot.repository,
         {
-          query: live.query,
+          query: live.closedQuery ?? live.query,
           rest: live.rest,
           ...(live.trustWith ? { trustWith: live.trustWith } : {}),
+          ...(live.closedQuestions ? { slot: live.closedQuestions } : {}),
           ...(trust ? { trust } : {}),
           ...(signal ? { signal } : {}),
         },
@@ -458,6 +470,16 @@ export interface ReadRuntime {
   queryWith?: (signal?: AbortSignal) => Query;
   /** Clock for freshness ages; defaults to the system clock. */
   now?: () => Date;
+  /**
+   * `pdb serve` (#414): this project's and repository's closed-ticket scan, continued between
+   * requests. Absent: each human briefing starts the bounded closed-ticket read afresh.
+   */
+  closedQuestions?: ClosedScanSlot;
+  /**
+   * `pdb serve`: an uncached (still confined) GraphQL boundary for that scan. Memoised pages
+   * could be older than the watermark the scan advances, so its reads bypass the cache (#414).
+   */
+  closedQueryWith?: (signal?: AbortSignal) => Query;
   /** Monotonic timer for the Datalog soft-budget diagnostic; defaults to `performance.now`. */
   engineClock?: () => number;
   /** Rewrites locally generated diagnostics (not GitHub evidence) for remote consumers. */
@@ -623,6 +645,10 @@ export async function readBriefing(
               rest(path, { ...options, signal: options?.signal ?? request.signal }),
             trustWith: (other: Rest) =>
               markerTrust(permissionLookup(request.repository, other, request.signal)),
+            ...(runtime.closedQuestions ? { closedQuestions: runtime.closedQuestions } : {}),
+            ...(runtime.closedQueryWith
+              ? { closedQuery: runtime.closedQueryWith(request.signal) }
+              : {}),
           }
         : undefined,
     );

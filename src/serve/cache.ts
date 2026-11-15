@@ -33,6 +33,7 @@ const isSubjectAnswer = (error: unknown): boolean =>
 import type { Clock } from "../mcp/polling.js";
 import type { AuthContext } from "./types.js";
 import { STALE_WINDOW_MS } from "./options.js";
+import { ClosedQuestionStore } from "../briefing/closedquestions.js";
 
 /** Most entries kept. */
 export const MAX_ENTRIES = 256;
@@ -312,9 +313,16 @@ export class ServeCache {
     return getEventListeners(this.lifetime.signal, "abort").length;
   }
 
+  /**
+   * Closed-ticket question scans (#414), one per served project and repository, kept between
+   * requests while used within the stale window. A refresh or a login change discards them.
+   */
+  readonly closedQuestions: ClosedQuestionStore;
+
   constructor(private readonly options: CacheOptions) {
     this.ttlMs = options.ttlMs;
     this.staleWindowMs = options.staleWindowMs ?? STALE_WINDOW_MS;
+    this.closedQuestions = new ClosedQuestionStore(Math.max(this.staleWindowMs, this.ttlMs));
     this.maxEntries = options.maxEntries ?? MAX_ENTRIES;
     this.maxBytes = options.maxBytes ?? MAX_BYTES;
     this.maxConcurrent = options.maxConcurrent ?? MAX_CONCURRENT_COLLECTIONS;
@@ -483,6 +491,8 @@ export class ServeCache {
    * many were dropped. Collections already running when this is called never insert.
    */
   refresh(repository?: string, collectors?: readonly string[]): number {
+    // A manual refresh restarts and revalidates closed-ticket scans (#414).
+    this.closedQuestions.reset(repository, "a manual refresh discarded the previous scan");
     let dropped = 0;
     for (const [key, entry] of this.entries)
       if (
@@ -616,6 +626,7 @@ export class ServeCache {
           this.auth = auth;
           this.cooldownUntil = 0;
           for (const key of this.entries.keys()) this.remove(key);
+          this.closedQuestions.reset(undefined, "the GitHub login changed");
           this.options.onAuthChange?.(auth);
         }
       } catch (error) {
