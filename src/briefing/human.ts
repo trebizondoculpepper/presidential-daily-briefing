@@ -133,6 +133,10 @@ export async function readHumanEvidence(
         }
         if (authority.status === "unknown") {
           evidence.counts.unverified++;
+          // Unknown authority is missing evidence, not a verdict: the view is incomplete.
+          evidence.warnings.push(
+            `${issue.url}: authority of the question record ${record.url} could not be verified (${authority.why}).`,
+          );
           if (!current) facts.push({ trust: "unverified", to: record.to });
           continue;
         }
@@ -242,6 +246,8 @@ export function humanBriefing(
   for (const decision of decisions)
     groups.set(decision.target, [...(groups.get(decision.target) ?? []), decision]);
   const items: HumanItem[] = [];
+  /** Per-item missing evidence that must also reach coverage. */
+  const evidenceGaps: string[] = [];
   for (const [target, matched] of groups) {
     const subject = subjects.get(target);
     if (!subject) continue;
@@ -254,13 +260,20 @@ export function humanBriefing(
       warnings.push(
         `${questions.length - humanPolicy.maxQuestions} more question(s) on the record`,
       );
-    if (record && !questions.length) warnings.push("the record's questions could not be read");
+    if (record && !questions.length)
+      evidenceGaps.push(`${target}: the record's questions could not be read.`);
     const requested = [
       ...questions.slice(0, humanPolicy.maxQuestions).map(shorten),
       ...kinds.flatMap((kind) => requestedFor(kind, subject, options.human)),
     ];
     const blocks = blocksOf(subject);
+    // Truncated dependent or closing evidence is missing evidence; display bounding is not.
+    for (const gap of blocks.unknown.filter((u) => !u.endsWith("omitted")))
+      evidenceGaps.push(`${target}: ${gap}; what it blocks is a lower bound.`);
     warnings.push(
+      ...evidenceGaps
+        .filter((w) => w.startsWith(`${target}:`))
+        .map((w) => w.slice(target.length + 2)),
       ...options.warnings
         .filter((w) => w.startsWith(`${target}:`))
         .map((w) => w.slice(target.length + 2)),
@@ -299,7 +312,7 @@ export function humanBriefing(
     current: evidence.counts.current - resolved,
     resolved,
   };
-  const warnings = [...options.warnings];
+  const warnings = [...options.warnings, ...evidenceGaps];
   const limit = Math.max(0, options.limit);
   return {
     schemaVersion: 1,

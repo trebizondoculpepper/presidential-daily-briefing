@@ -220,6 +220,39 @@ describe("human briefing role (#457)", () => {
     expect(clean.text).toContain("No human input is waiting.");
   });
 
+  it("puts unknown authority and truncated dependents into coverage, not only the item", async () => {
+    const unknown = withComments(issue(1, ["question"]), [
+      record("owner", ["Unknown?"], { author: "ghost" }),
+    ]);
+    const unknownView = await human([unknown], [], { trust: trustAll({ ghost: "unknown" }) });
+    expect(unknownView.complete).toBe(false);
+    expect(unknownView.view.coverage.complete).toBe(false);
+    expect(unknownView.view.coverage.warnings.join(" ")).toMatch(/could not be verified/);
+
+    const truncated = { ...issue(2, ["design:decision-needed"]), blocking: page([], true) };
+    const blocked = await human([truncated]);
+    expect(blocked.view.items[0].blocks.unknown).toEqual(["direct dependents not fully collected"]);
+    expect(blocked.complete).toBe(false);
+    expect(blocked.view.coverage.warnings).toEqual([
+      `${truncated.url}: direct dependents not fully collected; what it blocks is a lower bound.`,
+    ]);
+  });
+
+  it("puts unreadable questions and truncated closing references into coverage", async () => {
+    const empty = withComments(issue(1, ["question"]), [record("owner", [])]);
+    const accepted: PullRequest = {
+      ...pr(),
+      closingIssuesReferences: page([{ number: 7, url: issue(7).url }], true),
+      reviews: page([
+        { ...by("reviewer"), url: "r", body: "", state: "APPROVED", commit: { oid: "abc123" } },
+      ]),
+    };
+    const { view, complete } = await human([empty, issue(7, [])], [accepted]);
+    expect(complete).toBe(false);
+    expect(view.coverage.warnings.join(" ")).toMatch(/questions could not be read/);
+    expect(view.coverage.warnings.join(" ")).toMatch(/closing issue references truncated/);
+  });
+
   it("bounds the items after ranking and reports omissions", async () => {
     const issues = [1, 2, 3].map((n) => issue(n, ["design:decision-needed"]));
     const { view, text } = await human(issues, [], { limit: 2 });
