@@ -8,6 +8,7 @@ import type { AddressInfo } from "node:net";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vite-plus/test";
 import { main } from "./cli.js";
+import { AuthenticationError } from "./github/github.js";
 import type { Runtime } from "./cli.js";
 import { systemClock } from "./mcp/polling.js";
 import { runServe, startServe } from "./serve.js";
@@ -283,12 +284,23 @@ describe("pdb serve lifecycle (#373)", () => {
   it("exits 1 asking for gh auth login when the login cannot be read", async () => {
     const h = harness({
       authContext: async () => {
-        throw new Error("gh: secret-token-value-123 not logged in");
+        throw new AuthenticationError("gh: secret-token-value-123 not logged in");
       },
     });
     expect(await runServe(["--repo", "example/one", "--port", "0"], h.runtime)).toBe(1);
     expect(h.err.join("")).toContain("run gh auth login");
     expect(h.err.join("")).not.toContain("secret-token-value-123");
+    // An outage is not reported as a login problem.
+    const outage = harness({
+      authContext: async () => {
+        throw new Error(
+          "GitHub query failed. Check gh auth status, repository access and API rate limits.",
+        );
+      },
+    });
+    expect(await runServe(["--repo", "example/one", "--port", "0"], outage.runtime)).toBe(1);
+    expect(outage.err.join("")).toContain("did not answer");
+    expect(outage.err.join("")).not.toContain("run gh auth login");
   });
 
   it("resolves --project at startup and exits 2 naming a path that does not resolve", async () => {

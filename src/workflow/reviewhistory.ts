@@ -9,7 +9,7 @@
  * never judges value, and never changes scope, threads or reviews; the consuming agent
  * interprets the signals.
  */
-import { ghQuery, prop, selected } from "../github/github.js";
+import { ghQuery, prop, selected, SubjectUnavailable } from "../github/github.js";
 import type { Query } from "../github/github.js";
 import { codexMarker, excerpt, pullRequestStatus } from "./prstatus.js";
 import type { PrStatusReport } from "./prstatus.js";
@@ -551,7 +551,8 @@ export async function pullRequestReviewHistory(
     const status = await pullRequestStatus(repository, number, q, now);
     const data = await q(historyQuery, { owner, name, number });
     const pr = selected<ReviewHistoryNode>(prop(data, "repository", "pullRequest"));
-    if (!pr) throw new Error(`Pull request #${number} is unavailable in ${repository}.`);
+    if (!pr)
+      throw new SubjectUnavailable(`Pull request #${number} is unavailable in ${repository}.`);
     return { status, pr };
   };
   let { status, pr } = await collect();

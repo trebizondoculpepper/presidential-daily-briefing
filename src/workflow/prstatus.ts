@@ -12,7 +12,7 @@
 import { workflow } from "../briefing/briefing.js";
 import { codexMarker, headAccepted, headCodexFindings } from "./reviewevidence.js";
 export { codexMarker };
-import { ghQuery, prop, selected } from "../github/github.js";
+import { ghQuery, prop, selected, SubjectUnavailable } from "../github/github.js";
 import type { Query } from "../github/github.js";
 
 type Login = { login: string } | null;
@@ -504,7 +504,7 @@ export async function pullRequestStatus(
   const [owner, name] = repository.split("/");
   const data = await q(query, { owner, name, number });
   const pr = selected<PullRequestNode>(prop(data, "repository", "pullRequest"));
-  if (!pr) throw new Error(`Pull request #${number} is unavailable in ${repository}.`);
+  if (!pr) throw new SubjectUnavailable(`Pull request #${number} is unavailable in ${repository}.`);
   return prStatus(repository, pr, { now: now(), startedAt });
 }
 

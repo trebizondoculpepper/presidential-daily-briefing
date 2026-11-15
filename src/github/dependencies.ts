@@ -1,7 +1,15 @@
 /** Native dependency queries and pure facts. Contract: doc/issue-dependencies.md. */
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { ghQuery, ghQueryWith, pages, declaredDependencies, prop, selected } from "./github.js";
+import {
+  ghQuery,
+  ghQueryWith,
+  pages,
+  declaredDependencies,
+  prop,
+  selected,
+  SubjectUnavailable,
+} from "./github.js";
 import type { Query } from "./github.js";
 import type { Issue, NativeNode, Reference } from "./types.js";
 
@@ -127,7 +135,9 @@ export async function readDependencyIssue(
   );
   const item = selected<DependencyIssue>(prop(data, "repository", "issue"));
   if (!item)
-    throw new Error(`Issue #${number} unavailable; pull requests cannot be native blockers.`);
+    throw new SubjectUnavailable(
+      `Issue #${number} unavailable; pull requests cannot be native blockers.`,
+    );
   return completeNative(item, repository, query);
 }
 export interface DependencyReport {
@@ -139,6 +149,11 @@ export interface DependencyReport {
   nodes: DependencyFacts[];
   cycles: string[][];
   guidance: string;
+  /**
+   * Tree nodes in repositories the caller may not read (`pdb serve` reads only its served set,
+   * #373): known only from the edge, never walked. Absent when nothing was skipped.
+   */
+  unfollowed?: { repository: string; number: number }[];
 }
 /**
  * Read one ticket's native dependencies; with `tree`, walk upstream and downstream
@@ -147,17 +162,26 @@ export interface DependencyReport {
 export async function dependencyReport(
   repository: string,
   number: number,
-  { tree = false, signal }: { tree?: boolean; signal?: AbortSignal } = {},
+  {
+    tree = false,
+    signal,
+    follow,
+  }: { tree?: boolean; signal?: AbortSignal; follow?: (repository: string) => boolean } = {},
   query: Query = ghQueryWith(signal),
   now: () => Date = () => new Date(),
 ): Promise<DependencyReport> {
   const startedAt = now().toISOString();
   const nodes = new Map<string, DependencyFacts>();
   const pending: [string, number][] = [[repository, number]];
+  const unfollowed = new Map<string, { repository: string; number: number }>();
   for (let next = pending.shift(); next; next = pending.shift()) {
     const [repo, n] = next;
     const key = `${repo}#${n}`;
     if (nodes.has(key)) continue;
+    if (follow && !follow(repo)) {
+      unfollowed.set(key, { repository: repo, number: n });
+      continue;
+    }
     signal?.throwIfAborted();
     const item = await readDependencyIssue(repo, n, query);
     nodes.set(key, dependencyFacts(item, repo));
@@ -193,6 +217,7 @@ export async function dependencyReport(
     cycles,
     guidance:
       "Native blockers are authoritative. Closed blockers do not prove behavior was delivered. Body drift is migration context only.",
+    ...(unfollowed.size ? { unfollowed: [...unfollowed.values()] } : {}),
   };
 }
 export function dependencyText(report: DependencyReport): string {
