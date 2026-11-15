@@ -6,12 +6,19 @@ import {
   dependencyReport,
   dependencyReportIncomplete,
   dependencyText,
+  readDependencyInventory,
 } from "../github/dependencies.js";
 import type { Query } from "../github/github.js";
 import { graphQuery } from "../testing/fakegh.js";
 import { clock, repo } from "../testing/snapshots.js";
 import { depsArgumentsFor, main, ticketArgumentsFor, workflowArgumentsFor } from "../cli.js";
-import { claimTemplate, directImpact, directImpactText } from "./dependencyimpact.js";
+import {
+  claimTemplate,
+  directImpact,
+  directImpactText,
+  repositoryImpact,
+  repositoryImpactText,
+} from "./dependencyimpact.js";
 import { commandTemplates } from "../rules/datalog/commands.js";
 
 const read = async (graph: Parameters<typeof graphQuery>[0], number = 1) => {
@@ -333,5 +340,85 @@ describe("direct dependency impact (#196)", () => {
     expect(tree.impact).toBeUndefined();
     expect(tree.direct).toBeUndefined();
     expect(dependencyText(tree)).toContain("explicit, expensive diagnosis");
+  });
+});
+
+/** 1 blocks 40 heads, each a chain of 3; 2 (claimed) blocks 5; 3 (blocked by 4) blocks 20. */
+const repositoryGraph = () => {
+  const edges: [number, number][] = [];
+  for (let i = 0; i < 40; i++) {
+    const head = 10 + i * 4;
+    edges.push([head, 1], [head + 1, head], [head + 2, head + 1], [head + 3, head + 2]);
+  }
+  for (let i = 0; i < 5; i++) edges.push([300 + i, 2]);
+  for (let i = 0; i < 20; i++) edges.push([400 + i, 3]);
+  edges.push([3, 4]);
+  return {
+    states: { 2: { labels: ["status:in-progress", "agent:ana"] } },
+    edges,
+  };
+};
+
+describe("deps --top: repository direct impact (#196)", () => {
+  it("ranks what can start now and which completion unlocks most, with bounded reads", async () => {
+    const { query, calls } = graphQuery(repositoryGraph());
+    const inventory = await readDependencyInventory(repo, {}, query, clock);
+    // 189 open issues in 4 pages of 50: request volume follows the inventory, not the graph depth.
+    expect(inventory.issues).toHaveLength(189);
+    expect(calls).toHaveLength(4);
+    expect(inventory.complete).toBe(true);
+    const ranked = repositoryImpact(inventory, 5);
+    expect(ranked.provisional).toBe(false);
+    // Only 1 and 4 have no open blocker; everything else is blocked or claimed.
+    expect(ranked.startNow.map((r) => [r.number, r.unlocks.length])).toEqual([
+      [1, 40],
+      [4, 1],
+    ]);
+    // 4 is pickable and would unlock 3, which still has 20 dependants of its own.
+    expect(ranked.completionUnlocks.map((r) => r.number)).toEqual([3, 2, 10, 11, 12]);
+    expect(ranked.completionUnlocks[0].unlocks).toHaveLength(20);
+    expect(ranked.completionUnlocks[1].notPickable.join()).toContain("claimed by agent:ana");
+    // Never claim or suggest a claimed ticket as new pickup.
+    expect(ranked.startNow.map((r) => r.number)).not.toContain(2);
+    expect(ranked.nextAction).toMatch(/^Start #1: claim it \(pdb claim 1\)/);
+    const text = repositoryImpactText(ranked);
+    expect(text).toContain("Can start now (2 of 2;");
+    expect(text).toContain("Finish-first (#182)");
+    expect(text.length).toBeLessThan(5_000);
+    expect(JSON.stringify(ranked).length).toBeLessThan(20_000);
+  });
+
+  it("labels a capped inventory provisional and unread dependants unknown, never zero", async () => {
+    const { query, calls } = graphQuery(repositoryGraph());
+    const inventory = await readDependencyInventory(repo, { maxPages: 1 }, query, clock);
+    expect(calls).toHaveLength(1);
+    expect(inventory).toMatchObject({ complete: false, stoppedBy: "page-limit", totalOpen: 189 });
+    const ranked = repositoryImpact(inventory, 3);
+    expect(ranked.provisional).toBe(true);
+    expect(ranked.provisionalReasons[0]).toContain("read 50 of 189");
+    expect(ranked.nextAction).toMatch(/^Provisional: /);
+    const one = ranked.startNow.find((r) => r.number === 1)!;
+    // 1's dependants 10..49 were read on page 1; 50..166 were not, so impact is a lower bound.
+    expect(one.unknown.length).toBeGreaterThan(0);
+    expect(one.unknown[0]).toContain("not in the partial inventory read");
+    expect(repositoryImpactText(ranked)).toContain("PROVISIONAL:");
+    expect(inventory.collection.coverage[0]).toMatchObject({ state: "partial" });
+  });
+
+  it("is a deps --top command that exits 2 when provisional", async () => {
+    const { query } = graphQuery(repositoryGraph());
+    let out = "";
+    const runtime = {
+      collect: async () => {
+        throw new Error("briefing collection must not run");
+      },
+      currentRepository: async () => repo,
+      dependencyInventory: (r: string) => readDependencyInventory(r, { maxPages: 1 }, query, clock),
+    };
+    expect(
+      await main(["deps", "--top", "--limit", "2", "--json"], async (t) => void (out = t), runtime),
+    ).toBe(2);
+    expect(JSON.parse(out)).toMatchObject({ provisional: true, limit: 2 });
+    await expect(main(["deps", "--top", "7"], async () => {}, runtime)).rejects.toThrow("--top");
   });
 });

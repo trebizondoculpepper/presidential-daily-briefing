@@ -7,14 +7,20 @@
  * never walks transitively, never treats unread evidence as zero, and does not reorder work:
  * the finish-started-work rule (#182) and the blended queue keep deciding what comes first.
  */
-import type { DependantFacts, DependencyReport } from "../github/dependencies.js";
+import type {
+  DependantFacts,
+  DependencyInventory,
+  DependencyReport,
+} from "../github/dependencies.js";
 import type { Issue, NativeNode } from "../github/types.js";
 import {
   compareCreatedAt,
+  compareImpact,
   immediateUnlocks,
   otherwiseEligible,
   pickupEligibility,
   pickupPolicy,
+  rankPickup,
   urgencyBand,
 } from "./ranking.js";
 import type { Eligibility, PickupContext } from "./ranking.js";
@@ -327,4 +333,140 @@ export function directImpactText(impact: DirectImpact | null): string[] {
     lines.push(`Closed dependants (no change): ${impact.closedDependants}`);
   lines.push(`Transitive reach: ${impact.transitive.how}`, impact.policy);
   return lines;
+}
+
+/** One ranked entry of a repository-wide direct-impact answer. */
+export interface RankedImpact extends ImpactDependant {
+  /** Dependants that become pickable as soon as this completes (proven lower bound). */
+  unlocks: number[];
+  /** Why more might; empty when the count is complete. */
+  unknown: string[];
+}
+/** `deps --top`: what can start now and which completion unlocks the most (#196). */
+export interface RepositoryImpact {
+  schemaVersion: 1;
+  repository: string;
+  startedAt: string;
+  fetchedAt: string;
+  /** True when the inventory was partial: the lists rank only what was read. */
+  provisional: boolean;
+  provisionalReasons: string[];
+  limit: number;
+  /** Pickable now, in the shared impact order (urgency, unlocks, incomplete, oldest). */
+  startNow: (RankedImpact & { urgency: string })[];
+  startNowTotal: number;
+  /** Open work not pickable now, ordered by the unlocks its completion proves. */
+  completionUnlocks: (RankedImpact & { notPickable: string[] })[];
+  completionUnlocksTotal: number;
+  nextAction: string;
+  policy: string;
+  transitive: { computed: false; how: string };
+  collection: DependencyInventory["collection"];
+}
+
+/** Rank an open-issue inventory by direct impact only, reusing the shared pickup ranking. */
+export function repositoryImpact(
+  inventory: DependencyInventory,
+  limit = 10,
+  context: PickupContext = { prs: [] },
+): RepositoryImpact {
+  const issues = inventory.issues;
+  const byUrl = new Map(issues.map((issue) => [issue.url, issue]));
+  const missing = inventory.complete ? undefined : "dependant not in the partial inventory read";
+  const unknownOf = (reasons: string[]) =>
+    missing ? reasons.map((r) => r.replace("not in this snapshot", missing)) : reasons;
+  const ranked = rankPickup(issues, { ...context, order: "impact" });
+  const startNow = ranked.slice(0, limit).map((r) => ({
+    ...identity(r.issue),
+    unlocks: r.unlocks,
+    unknown: unknownOf(r.unlocksUnknown),
+    urgency: r.urgency,
+  }));
+  const eligible = new Set(ranked.map((r) => r.issue.url));
+  const blocked = issues
+    .filter((issue) => !eligible.has(issue.url))
+    .map((issue) => ({
+      issue,
+      impact: immediateUnlocks(issue, byUrl, context),
+      gate: pickupEligibility(issue, context),
+    }))
+    .filter(({ impact }) => impact.unlocks.length || impact.unknown.length)
+    .sort(
+      (a, b) =>
+        compareImpact(a.impact, b.impact) ||
+        urgencyBand(a.issue) - urgencyBand(b.issue) ||
+        compareCreatedAt(a.issue.createdAt, b.issue.createdAt) ||
+        a.issue.number - b.issue.number,
+    );
+  const completionUnlocks = blocked.slice(0, limit).map(({ issue, impact, gate }) => ({
+    ...identity(issue),
+    unlocks: impact.unlocks.map((d) => d.number),
+    unknown: unknownOf(impact.unknown),
+    notPickable: gate.reasons,
+  }));
+  const provisionalReasons = inventory.complete
+    ? []
+    : [
+        `open-issue inventory partial (${inventory.stoppedBy === "quota" ? "stopped after a GitHub quota refusal" : "page cap reached"}): read ${issues.length}${inventory.totalOpen === null ? "" : ` of ${inventory.totalOpen}`} open issues; unread work may rank higher`,
+      ];
+  const count = (r: RankedImpact) =>
+    `${r.unknown.length ? "at least " : ""}${r.unlocks.length}${r.unlocks.length ? ` (${r.unlocks.map((n) => `#${n}`).join(", ")})` : ""}`;
+  const top = startNow[0];
+  const most = completionUnlocks[0];
+  const nextAction = top
+    ? `Start #${top.number}: claim it (pdb claim ${top.number}) and implement it; completing it makes ${count(top)} dependant(s) pickable. Check it first with pdb deps ${top.number}.`
+    : most
+      ? `Nothing is pickable now. #${most.number} unlocks the most when it completes (${count(most)}); it is not pickable because ${most.notPickable.join("; ")}.`
+      : "Nothing is pickable now and no open completion is proven to unlock other work.";
+  return {
+    schemaVersion: 1,
+    repository: inventory.repository,
+    startedAt: inventory.startedAt,
+    fetchedAt: inventory.fetchedAt,
+    provisional: !inventory.complete,
+    provisionalReasons,
+    limit,
+    startNow,
+    startNowTotal: ranked.length,
+    completionUnlocks,
+    completionUnlocksTotal: blocked.length,
+    nextAction: `${inventory.complete ? "" : "Provisional: "}${nextAction}`,
+    policy: finishFirst,
+    transitive: { computed: false, how: transitiveHow },
+    collection: inventory.collection,
+  };
+}
+
+/** Text for `deps --top`. */
+export function repositoryImpactText(impact: RepositoryImpact): string {
+  const unlockText = (r: RankedImpact) =>
+    `unlocks ${r.unknown.length ? "at least " : ""}${r.unlocks.length}${r.unlocks.length ? ` (${r.unlocks.map((n) => `#${n}`).join(", ")})` : ""}${r.unknown.length ? `; unknown: ${r.unknown.join("; ")}` : ""}`;
+  const t = impact.collection.telemetry;
+  return (
+    [
+      `Direct dependency impact: ${impact.repository}`,
+      `LIVE ${impact.startedAt}–${impact.fetchedAt}`,
+      ...impact.provisionalReasons.map((r) => `PROVISIONAL: ${r}`),
+      `Next action: ${impact.nextAction}`,
+      "",
+      `Can start now (${Math.min(impact.limit, impact.startNowTotal)} of ${impact.startNowTotal}; urgency, unlocks, incomplete, oldest):`,
+      ...(impact.startNow.length
+        ? impact.startNow.map(
+            (r, i) => `${i + 1}. #${r.number} ${r.title} — ${unlockText(r)}; urgency ${r.urgency}`,
+          )
+        : ["  none"]),
+      "",
+      `Completion that unlocks the most, not pickable now (${Math.min(impact.limit, impact.completionUnlocksTotal)} of ${impact.completionUnlocksTotal}):`,
+      ...(impact.completionUnlocks.length
+        ? impact.completionUnlocks.map(
+            (r, i) =>
+              `${i + 1}. #${r.number} ${r.title} — ${unlockText(r)}; not pickable: ${r.notPickable.join("; ")}`,
+          )
+        : ["  none"]),
+      "",
+      `Transitive reach: ${impact.transitive.how}`,
+      impact.policy,
+      `Read cost: ${t.requests} request(s), ${t.bytes} bytes returned, GraphQL cost ${t.cost ?? `unknown (at least ${t.knownCost})`}, ${t.durationMs} ms.`,
+    ].join("\n") + "\n"
+  );
 }
