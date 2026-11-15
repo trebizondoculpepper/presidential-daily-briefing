@@ -72,6 +72,9 @@ export const isIdentityKey = (key: string): boolean => key.startsWith("identity.
 
 const ENTRY_PATTERN = /^[A-Za-z0-9_][A-Za-z0-9_.-]*$/;
 const NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]*$/;
+/** Whether a value is a valid agent name: the same rule configuration enforces (at most 100). */
+export const isAgentName = (value: string): boolean =>
+  NAME_PATTERN.test(value) && value.length <= 100;
 const RESERVED = new Set(["__proto__", "constructor", "prototype"]);
 
 /** Validate an `--entry` key. Dotted keys such as `ori.review` are one quoted table key. */
@@ -102,9 +105,7 @@ function identityKey(key: string): IdentityKey {
 export function validateIdentityValue(key: string, value: string): string {
   const entry = identityKey(key);
   const ok =
-    entry.validValues === "agent name"
-      ? NAME_PATTERN.test(value) && value.length <= 100
-      : entry.validValues.includes(value);
+    entry.validValues === "agent name" ? isAgentName(value) : entry.validValues.includes(value);
   if (!ok) {
     throw new ConfigError(
       "invalid-value",
