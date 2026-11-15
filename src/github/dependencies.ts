@@ -18,7 +18,7 @@ import {
   sameCommentBody,
   withCommentRecovery,
 } from "./commentwrite.js";
-import type { CommentReceipt } from "./commentwrite.js";
+import type { CommentCallOptions, CommentReceipt } from "./commentwrite.js";
 import { parseGhResponse } from "./evidence.js";
 import type { GhResponse } from "./evidence.js";
 import type { Issue, NativeNode, Page, Reference } from "./types.js";
@@ -701,11 +701,11 @@ export function dependencyText(report: DependencyReport): string {
 // "Rules for commands that change tickets".
 
 /** The only GitHub write boundary: `gh` with explicit arguments, never a shell. */
-export type GhRun = (args: string[]) => Promise<void>;
-export const ghRun: GhRun = async (args) => {
+export type GhRun = (args: string[], call?: CommentCallOptions) => Promise<void>;
+export const ghRun: GhRun = async (args, call) => {
   // Workflow comments go through the shared bounded recovery boundary (#345).
   if (commentCommand(args)) {
-    await ghCommentRun(args);
+    await ghCommentRun(args, call);
     return;
   }
   try {

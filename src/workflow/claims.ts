@@ -20,7 +20,7 @@ import { ghQuery, permissionLookup, writePermissions } from "../github/github.js
 import type { PermissionLookup } from "../github/github.js";
 import { ghRun } from "../github/dependencies.js";
 import { CommentWriteError } from "../github/commentwrite.js";
-import type { CommentRecovery } from "../github/commentwrite.js";
+import type { CommentCallOptions, CommentRecovery } from "../github/commentwrite.js";
 
 const labelColours: Record<string, string> = {
   agent: "1d76db",
@@ -152,7 +152,41 @@ export type GraphQuery = (
   variables: Record<string, string | number>,
 ) => Promise<unknown>;
 /** The injected `gh` write boundary (production: `ghRun`). */
-export type GhRun = (args: string[]) => Promise<unknown>;
+export type GhRun = (args: string[], call?: CommentCallOptions) => Promise<unknown>;
+
+/**
+ * A fresh-state guard for a throttled workflow comment (#345): the issue's state, labels,
+ * assignees and comment count, read again through the command's own query. A change between the
+ * refusal and the retry (claimed elsewhere, closed, relabelled, a record appeared) stops it.
+ */
+export function ticketGuard(
+  repository: string,
+  number: number,
+  query: GraphQuery,
+): () => Promise<string> {
+  const [owner, name] = repository.split("/");
+  return async () => {
+    const data = await query(
+      `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){state labels(first:100){totalCount nodes{name}} assignees(first:20){nodes{login}} comments{totalCount}}}}`,
+      { owner: owner ?? "", name: name ?? "", number },
+    );
+    const issue = (data as { repository?: { issue?: unknown } } | null)?.repository?.issue;
+    if (!issue || typeof issue !== "object") throw new Error("ticket unreadable");
+    const i = issue as {
+      state?: string;
+      labels?: { totalCount?: number; nodes?: { name: string }[] };
+      assignees?: { nodes?: { login: string }[] };
+      comments?: { totalCount?: number };
+    };
+    return JSON.stringify([
+      i.state,
+      i.labels?.totalCount,
+      (i.labels?.nodes ?? []).map((l) => l.name).sort(),
+      (i.assignees?.nodes ?? []).map((a) => a.login).sort(),
+      i.comments?.totalCount,
+    ]);
+  };
+}
 
 export interface ClaimRequest {
   number: number;
@@ -1872,7 +1906,7 @@ export async function applyPlan(
       continue;
     }
     try {
-      await run(step.command);
+      await run(step.command, { guard: ticketGuard(repository, plan.facts.number, query) });
       step.status = "done";
     } catch (error) {
       failStep(step, error);

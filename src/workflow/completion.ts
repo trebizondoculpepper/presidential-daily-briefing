@@ -19,7 +19,7 @@
 import { createHash } from "node:crypto";
 import { parseArgs } from "node:util";
 import { workflow } from "./definition.js";
-import { claimPolicy, failStep, retryLine, shellQuote } from "./claims.js";
+import { claimPolicy, failStep, retryLine, shellQuote, ticketGuard } from "./claims.js";
 import type { Comment, PlanStep } from "./claims.js";
 import {
   defaultBranch,
@@ -1323,7 +1323,7 @@ export async function applyComplete(
     const step: PlanStep = { ...next, status: "pending" };
     steps.push(step);
     try {
-      await rt.run(step.command);
+      await rt.run(step.command, { guard: ticketGuard(repository, request.number, rt.query) });
       step.status = "done";
       if (step.step === "record") opId = plan.record?.opId ?? plan.opId;
       if (step.step === "close") closedByRun = true;
