@@ -202,7 +202,10 @@ export async function resolveEntry(options: {
     source = "environment";
   }
   const detector = HARNESS_DETECTORS.find((d) => d.harness === harness)!;
-  const candidates = harnessEntries(await listEntryKeys(options.root, options.fs), harness);
+  const candidates = harnessEntries(
+    await listEntryKeys(options.root, options.fs, detector.entryKey ?? undefined),
+    harness,
+  );
   if (detector.entryKey === null) {
     return {
       status: "unresolved",

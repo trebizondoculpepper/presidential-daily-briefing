@@ -368,6 +368,7 @@ const identitySelection = (identity: ReadIdentity): IdentitySelection => ({
   entry: identity.entry,
   triageRole: identity.triageRole,
   identityDiagnostic: identity.diagnostic,
+  ...(identity.store ? { identityStore: identity.store } : {}),
 });
 
 /** Selection known without any lookup (error envelopes, events). */
@@ -441,7 +442,7 @@ export function createServer(
     selection.identitySource === "unresolved"
       ? `Identity: unresolved; this is an unfocused read. ${selection.identityDiagnostic ?? "Pass agent to focus it."}\n`
       : selection.entry
-        ? `Identity: ${selection.agent} from agent-inbox.toml [agents.${selection.entry}] (${selection.identitySource}).\n`
+        ? `Identity: ${selection.agent} from ${selection.identityStore === "legacy-not-imported" ? "legacy agent-inbox.toml (not imported; run pdb config set identity.triage_role ROLE --entry KEY to import it into pdb.toml)" : "pdb.toml"} [agents.${selection.entry}] (${selection.identitySource}).\n`
         : "";
 
   /**
