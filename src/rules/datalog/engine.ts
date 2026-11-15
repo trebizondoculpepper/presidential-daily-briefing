@@ -187,8 +187,19 @@ export function evaluatePolicy(input: PolicyFacts, options: PolicyOptions = {}):
   db = database();
   // Explicit deny-over-permit: unfavorable beats ordinary; easy wins beat ordinary.
   // Preference resolves overlapping boosted/default assessment rules. All matches remain auditable.
-  const overrides = ds.q(queries.q0, db);
-  for (const [t, r] of overrides) facts.push([Number(t), "overridden", r]);
+  // Declared exceptions (ordering.edn :overrides) join the generic same-kind comparison; a pair
+  // both decide is asserted once, as the single or-join query it replaces did.
+  const overridden = new Set<string>();
+  const pairs = policy.overrides.map(({ winner, loser }) => [winner, loser]);
+  for (const [t, r] of [
+    ...ds.q(queries.q0, db),
+    ...(pairs.length ? ds.q(queries["declared-overrides"], db, pairs) : []),
+  ]) {
+    const key = `${t}:${r}`;
+    if (overridden.has(key)) continue;
+    overridden.add(key);
+    facts.push([Number(t), "overridden", r]);
+  }
   db = database();
   // Native direct unlocks only: the dependent has exactly one open blocker and is otherwise ready.
   const unlockRows = query(db, queries.q1);
