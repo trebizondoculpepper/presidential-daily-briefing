@@ -464,9 +464,12 @@ const selectionCommands = (
   parsed: { repo?: string },
   resolution: Unresolved,
 ): string[] =>
-  (resolution.candidates.length > 0 ? resolution.candidates : ["KEY"]).map(
-    (key) => `${command}${flags(parsed, key)}`,
-  );
+  resolution.candidates.length === 0 && resolution.create
+    ? // #310: no entry for this harness exists; create one rather than select another's.
+      [`${resolution.create}${parsed.repo ? ` --repo ${parsed.repo}` : ""}`]
+    : (resolution.candidates.length > 0 ? resolution.candidates : ["KEY"]).map(
+        (key) => `${command}${flags(parsed, key)}`,
+      );
 
 const unresolvedText = (resolution: Unresolved): string =>
   `${resolution.message}${resolution.signals.length ? ` Signals present: ${resolution.signals.join(", ")}.` : ""}`;
@@ -475,7 +478,7 @@ const unresolved = (command: string, parsed: { repo?: string }, resolution: Unre
   new ConfigError(
     "identity-unresolved",
     unresolvedText(resolution),
-    `Select the [agents.KEY] entry explicitly:\n${selectionCommands(command, parsed, resolution).join("\n")}`,
+    `${resolution.create && !resolution.candidates.length ? "Create this agent's own entry" : "Select the [agents.KEY] entry explicitly"}:\n${selectionCommands(command, parsed, resolution).join("\n")}`,
   );
 
 /** The shared resolver over this runtime: explicit selection, then detection. */

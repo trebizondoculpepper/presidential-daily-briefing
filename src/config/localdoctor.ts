@@ -540,13 +540,18 @@ async function identityChecks(
     const choices = resolution.candidates.length > 0 ? resolution.candidates : ["<ENTRY>"];
     result.checks.push({
       id: "identity.entry",
-      status: "unknown",
+      status: resolution.create ? "missing" : "unknown",
       source:
         resolution.signals.length > 0
           ? `${resolution.reason} (signals: ${resolution.signals.join(", ")})`
           : resolution.reason,
-      detail: `${resolution.message} Select the entry explicitly.`,
-      next: choices.map((entry) => withRepo(`pdb doctor --entry ${entry}`, repository)),
+      // #310: with no entry for this harness, the next step creates one; never pick another's.
+      detail: resolution.create
+        ? resolution.message
+        : `${resolution.message} Select the entry explicitly.`,
+      next: resolution.create
+        ? [withRepo(resolution.create, repository)]
+        : choices.map((entry) => withRepo(`pdb doctor --entry ${entry}`, repository)),
     });
     unknownRest(2, "no entry selected", "No identity entry was selected.");
     return result;

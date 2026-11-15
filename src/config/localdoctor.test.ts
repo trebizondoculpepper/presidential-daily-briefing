@@ -301,7 +301,8 @@ describe("local configuration doctor (#64)", () => {
     ]);
     expect(several.text).not.toContain('"a"');
     const ori = await run({}, persisted, {}, "26.1.0", { ORI_SESSION_ID: "s" });
-    expect(ori.status["identity.entry"]).toBe("unknown");
+    // No ori entry exists at all (#310): missing, with a create step, never a borrowed entry.
+    expect(ori.status["identity.entry"]).toBe("missing");
     expect(ori.text).not.toContain("=s");
     const badEntry = await run({}, persisted, { entry: "bad key!" });
     expect(badEntry.status["identity.entry"]).toBe("invalid");
@@ -310,6 +311,44 @@ describe("local configuration doctor (#64)", () => {
       expect(r.status["identity.agent"]).toBe("unknown");
       expectParsable(r.report.checks.flatMap((c) => c.next));
     }
+  });
+
+  it("says plainly when the harness has no entry, lists keys only, and how to create one (#310)", async () => {
+    const file = '[agents.claude]\nname = "secret-a"\n[agents.codex]\nname = "secret-b"\n';
+    const missing = await run({}, file, {}, "26.1.0", { ORI_SESSION_ID: "s" });
+    const entry = check(missing.report, "identity.entry") as unknown as {
+      status: string;
+      detail: string;
+      next: string[];
+    };
+    expect(entry.status).toBe("missing");
+    expect(entry.detail).toMatch(/^No entry exists for the ori harness/);
+    expect(entry.detail).toContain(
+      "Existing entries: claude (claude harness), codex (codex harness); none of them is this agent's",
+    );
+    expect(entry.next).toEqual([
+      "pdb config set identity.triage_role ROLE --entry ori.SERVER --repo owner/name",
+    ]);
+    expect(missing.text).not.toMatch(/secret-a|secret-b/);
+    // Several ori entries: ambiguous, with the concrete candidates to choose from.
+    const several = await run(
+      {},
+      `${file}[agents."ori.review"]\nname = "c"\n[agents."ori.build"]\nname = "d"\n`,
+      {},
+      "26.1.0",
+      { ORI_SESSION_ID: "s" },
+    );
+    const choose = check(several.report, "identity.entry") as unknown as {
+      status: string;
+      detail: string;
+      next: string[];
+    };
+    expect(choose.status).toBe("unknown");
+    expect(choose.detail).toContain("Candidate entries: ori.review, ori.build");
+    expect(choose.next).toEqual([
+      "pdb doctor --entry ori.review --repo owner/name",
+      "pdb doctor --entry ori.build --repo owner/name",
+    ]);
   });
 
   it("separates missing and invalid name and triage_role; a generic role is no substitute", async () => {

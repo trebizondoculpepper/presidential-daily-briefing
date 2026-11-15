@@ -398,6 +398,15 @@ x = 1
     expect(await ori.call("list")).toBe(0);
     expect(ori.out.at(-1)).toContain("pdb config list --entry ori.review");
 
+    // #310: an Ori session whose file has no ori entry is told to create one, not to borrow.
+    const noOri = setup('[agents.claude]\nname = "c"\n', { env: { ORI_SESSION_ID: "s" } });
+    expect(await noOri.call("get", "identity.name", "--json")).toBe(1);
+    expect(noOri.json().message).toMatch(/^No entry exists for the ori harness/);
+    expect(noOri.json().recovery).toContain(
+      "Create this agent's own entry:\npdb config set identity.triage_role ROLE --entry ori.SERVER",
+    );
+    expect(noOri.json().recovery).not.toContain("--entry claude");
+
     const none = setup(undefined, { env: {} });
     expect(await none.call("set", "identity.triage_role", "designer", "--json")).toBe(1);
     expect(none.json()).toMatchObject({ code: "identity-unresolved" });
