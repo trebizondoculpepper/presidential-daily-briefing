@@ -28,6 +28,8 @@ export interface OnboardingDocument {
   repository: string | null;
   purpose: string;
   rules: { command: string; url: string | null };
+  /** The onboarding itself: the CLI command, and the served setup page when known (#391). */
+  onboarding: { command: string; url: string | null };
   identity: string[];
   examples: { purpose: string; command: string }[];
   /** Short text a person pastes into an agent: onboarding and rules first. */
@@ -55,9 +57,10 @@ export function validServerOrigin(value: string): string | null {
   return url.origin;
 }
 
-/** The read-only rules page of a served repository, with the selector properly escaped. */
-const rulesUrl = (origin: string, repository: string) =>
-  `${origin}/rules?repo=${encodeURIComponent(repository)}`;
+/** A served page of one repository, with the selector properly escaped. */
+const pageUrl = (origin: string, path: string, repository: string) =>
+  `${origin}${path}?repo=${encodeURIComponent(repository)}`;
+const rulesUrl = (origin: string, repository: string) => pageUrl(origin, "/rules", repository);
 
 /** Build the onboarding document (pure). */
 export function onboardingDocument(input: OnboardingInput): OnboardingDocument {
@@ -69,6 +72,9 @@ export function onboardingDocument(input: OnboardingInput): OnboardingDocument {
   const server = input.server ?? null;
   const url = server && repo ? rulesUrl(server, repo) : null;
   const rulesRef = `\`pdb rules\`${url ? ` (or ${url})` : ""}`;
+  // The served setup page of this project (#391), when the caller knows the server.
+  const onboardingUrl = server && repo ? pageUrl(server, "/setup", repo) : null;
+  const onboardingRef = `\`pdb onboard${repoFlag}\`${onboardingUrl ? ` (or ${onboardingUrl})` : ""}`;
   const examples = [
     { purpose: "Read the current rules", command: "pdb rules" },
     {
@@ -84,7 +90,7 @@ export function onboardingDocument(input: OnboardingInput): OnboardingDocument {
   const prompt = [
     `You are working on ${where}, which coordinates work with Presidential Daily Briefing (pdb).`,
     `Before any project work:`,
-    `1. Read the onboarding and the current rules: \`pdb onboard${repoFlag}\` and ${rulesRef}.`,
+    `1. Read the onboarding and the current rules: ${onboardingRef} and ${rulesRef}.`,
     `2. Get your own persistent name once: \`${setupCommand(role)}\`. Never reuse another agent's name.`,
     `3. Use the CLI (\`pdb${repoFlag} --agent NAME\`) or the MCP server (\`pdb-mcp${repoFlag}\`) for status and priorities; help is \`pdb --help\`.`,
     `4. If AGENTS.md has no pdb coordination section, add it: \`pdb onboard${repoFlag} --install\`.`,
@@ -98,7 +104,7 @@ export function onboardingDocument(input: OnboardingInput): OnboardingDocument {
     "",
     `- At the start of every session, read the current rules: ${rulesRef}.`,
     `- Get your own persistent identity once: \`${setupCommand("implementer|designer")}\`. Never reuse another agent's name.`,
-    `- See what to do next: \`pdb${repoFlag} --agent NAME\`. Help: \`pdb --help\`; onboarding: \`pdb onboard${repoFlag}\`.`,
+    `- See what to do next: \`pdb${repoFlag} --agent NAME\`. Help: \`pdb --help\`; onboarding: ${onboardingRef}.`,
     `- MCP clients: \`pdb-mcp${repoFlag}\`${server ? `; web: ${server}` : ""}.`,
     "- Prefer pdb over raw gh for status and priorities; use gh only for operations pdb does not support.",
     COORDINATION_END,
@@ -110,6 +116,7 @@ export function onboardingDocument(input: OnboardingInput): OnboardingDocument {
     purpose:
       "Presidential Daily Briefing (pdb) tells agents what to work on next from the project's GitHub issues, pull requests and rules, and records claims and handoffs.",
     rules: { command: "pdb rules", url },
+    onboarding: { command: `pdb onboard${repoFlag}`, url: onboardingUrl },
     identity: [
       `Run \`${setupCommand(role)}\` once in this checkout; it generates your own name and keeps it.`,
       "Use that name with --agent. Never reuse another agent's or another harness's entry.",

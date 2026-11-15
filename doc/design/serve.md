@@ -179,6 +179,16 @@ Path `/mcp`, Streamable HTTP as provided by `@modelcontextprotocol/server` 2.4.0
 
 `GET /rules?repo=R` (#392, `src/serve/rules-page.ts`) renders the same document as `pdb rules` (doc/design/rules-english-command.md): the shared `rulesDocument` built from the packaged English model, projected by the shared `rulesText` and split into its `== Section ==` parts under HTML headings. It adds no per-rule prose and never lists runtime why templates. `role` and `rule` are the `pdb rules` filters, and a filtered page says it is a subset. The selected project is resolved through the served-project allowlist; with several projects and none selected the page shows the selector and the shared policy with settings unknown. An unserved or malformed `repo` answers 403/400 with the served projects and no document, and an artifact that does not match the engine answers 500 rather than showing an older document. Effective settings are read only for a project served with `--project`, through the verified checkout resolver and the read-only settings loader; otherwise, or when that fails, they are shown as unknown, never as the defaults. Loading the page makes no GitHub request, starts no background work and writes nothing. It is static HTML with no script under the dashboard CSP, every value is escaped, and links are built on the server's own origin with encoded selection. The dashboard links to it, and the startup banner prints its URL for onboarding.
 
+`GET /setup?repo=R&role=implementer|designer` (#391, `src/serve/setup-page.ts`) renders the onboarding document of `pdb onboard` (#351, doc/design/agent-onboarding.md) for the selected served project. It is built with the origin this server bound at startup, never a request Host header, and shows:
+
+- the copyable prompt, which links this project's `/setup` and `/rules` pages first;
+- the MCP endpoint `/mcp`;
+- client configuration examples. Each is labelled `verified` only with a recorded acceptance report (Claude Code over HTTP; Codex over stdio) and `unverified` otherwise (Codex over HTTP, #397; Ori Code, #399);
+- the CLI fallback;
+- the AGENTS.md section.
+
+Selection uses the served-project allowlist like `/rules`: 403/400 for an unserved or malformed `repo`, and placeholders with the selector when several projects are served and none is chosen. Loading the page makes no GitHub request, reads no file and writes nothing. Copying never edits AGENTS.md or client settings, and the page says that connecting MCP installs no hooks. The HTML has no inline script; `/setup.js` only adds copy buttons, and every block stays selectable text without it. The dashboard links to it and the startup banner prints its URL.
+
 ## Caching
 
 ### What is cached

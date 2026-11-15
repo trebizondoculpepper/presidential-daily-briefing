@@ -38,7 +38,7 @@ export const dashboardPage = (): string => `<!doctype html>
 <button id="show" type="submit">Show</button>
 <button id="refresh" type="button">Refresh</button>
 </form>
-<p><a id="rules-link" href="/rules">Project rules</a></p>
+<p><a id="rules-link" href="/rules">Project rules</a> · <a id="setup-link" href="/setup">Agent setup</a></p>
 </header>
 <main>
 <section id="state" aria-live="polite"></section>
@@ -236,9 +236,13 @@ export function dashboardClient(render: DashboardRenderers): void {
   const actions = byId("actions");
   const rulesLink = byId("rules-link") as HTMLAnchorElement | null;
   // The rules page link follows the selected project, encoded, on this same origin.
+  const setupLink = byId("setup-link") as HTMLAnchorElement | null;
   const linkRules = () => {
     if (rulesLink && repo.value)
       rulesLink.href = `/rules?${new URLSearchParams({ repo: repo.value }).toString()}`;
+    // The agent setup page (#391) follows the same selection.
+    if (setupLink && repo.value)
+      setupLink.href = `/setup?${new URLSearchParams({ repo: repo.value }).toString()}`;
   };
   const initial = new URLSearchParams(location.search);
   let request = 0;

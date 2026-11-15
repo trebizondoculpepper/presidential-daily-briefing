@@ -112,7 +112,9 @@ the help and `triage_briefing` pointers, MCP server `instructions` from the same
 the first-use stderr hint. The hint is keyed by `--repo` or the checkout root plus the CLI
 version, stored in `onboarding-hints.json` in the per-user cache, offered only for plain-text
 briefings, and disabled by `PDB_NO_FIRST_USE_HINT` (set by the test, smoke and package runs).
-Not yet shipped: an explicit hint reset command, and the #391 web page.
+#391 added the read-only `/setup` page of `pdb serve` (doc/design/serve.md), rendering the same
+document with the server's origin; with a server, the prompt links the project's `/setup` and
+`/rules` pages first. Not yet shipped: an explicit hint reset command.
 
 ## Acceptance
 
