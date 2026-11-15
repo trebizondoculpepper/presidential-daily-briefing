@@ -23,23 +23,9 @@ import {
   planDependencyChange,
 } from "./github/dependencies.js";
 import { roleNames, roleRegistry } from "./briefing/roles.js";
-import { prStatusText, pullRequestStatus } from "./workflow/prstatus.js";
-import { pullRequestReviewHistory, reviewHistoryText } from "./workflow/reviewhistory.js";
 import { doctorStaleHours, ticketDoctor, ticketDoctorText } from "./workflow/ticketdoctor.js";
 import { diagnoseClosedDrift, diagnoseDelivery } from "./workflow/deliverydoctor.js";
-import {
-  deliveryFields,
-  deliveryLines,
-  deliveryRead,
-  prDelivery,
-  prDeliveryLines,
-  omissionLines,
-  readIssuesDelivery,
-  reportFollowUpFacts,
-  withDeliveryCompleteness,
-  teamResponsibilities,
-  teamResponsibilityLines,
-} from "./workflow/deliveryread.js";
+import { deliveryRead, withDeliveryCompleteness } from "./workflow/deliveryread.js";
 import {
   applyPlan,
   claimPolicy,
@@ -50,8 +36,7 @@ import {
 } from "./workflow/claims.js";
 import { cachedCheckForUpdate } from "./updates/updatecache.js";
 import { installedVersion, optOutEnv, legacyOptOutEnv, updateAdvisory } from "./updates/updates.js";
-import { defaultStaleHours, teamText, teamView } from "./workflow/team.js";
-import { ticketOwnership, ticketOwnershipText } from "./workflow/who.js";
+import { defaultStaleHours } from "./workflow/team.js";
 import { migrationPlanText, planMigration } from "./github/migration.js";
 import { presentBriefing, unavailableText } from "./briefing/service.js";
 import { runBriefing } from "./briefing/catchupcli.js";
@@ -102,6 +87,7 @@ import type { LocalDoctorRuntime } from "./config/localdoctor.js";
 import type { GhRun } from "./github/dependencies.js";
 import type { Query, Rest } from "./github/github.js";
 import type { Snapshot } from "./github/types.js";
+import { readPullRequest, readReviewHistory, readTeam, readWho } from "./workflow/readservices.js";
 import { runServe } from "./serve.js";
 import type { ServeRuntime } from "./serve.js";
 
@@ -596,10 +582,6 @@ const deliveryBoundaries = (runtime: Runtime, repository: string, offline: boole
       }
     : {};
 
-/** Appends lines to a text report that ends with a newline (unchanged when there are none). */
-const appendLines = (text: string, lines: string[]): string =>
-  lines.length ? `${text.replace(/\n$/, "")}\n${lines.join("\n")}\n` : text;
-
 export async function main(
   args: string[],
   output: Output = (text) =>
@@ -908,35 +890,12 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
       ? await cachedSnapshot(values.cache ?? "", values.repo)
       : await runtime.collect(values.repo ?? (await runtime.currentRepository()), {});
     if (!values.offline && values.cache) await atomicJson(values.cache, snapshot);
-    const view = teamView(snapshot, {
-      staleHours,
-      now: runtime.now?.() ?? new Date(),
-      offline: !!values.offline,
-    });
-    // #192: responsibilities per agent (S18 inventory), including agents with no claim.
-    const read = deliveryRead(
+    const { report, text } = await readTeam(
       snapshot,
-      await diagnoseDelivery(
-        snapshot,
-        deliveryBoundaries(runtime, snapshot.repository, !!values.offline),
-      ),
+      { staleHours, now: runtime.now?.() ?? new Date(), offline: !!values.offline },
+      deliveryBoundaries(runtime, snapshot.repository, !!values.offline),
     );
-    const report = withDeliveryCompleteness(
-      read.tickets.length || !read.complete
-        ? { ...view, agents: teamResponsibilities(view.agents, read), delivery: read }
-        : view,
-      read,
-    );
-    await output(
-      values.json
-        ? JSON.stringify(report, null, 2) + "\n"
-        : appendLines(teamText(view), [
-            ...(read.tickets.length
-              ? teamResponsibilityLines(report.agents, read, runtime.now?.() ?? new Date())
-              : []),
-            ...omissionLines(read),
-          ]),
-    );
+    await output(values.json ? JSON.stringify(report, null, 2) + "\n" : text);
     return report.completeness.complete ? 0 : 2;
   }
   if (args[0] === "who") {
@@ -967,35 +926,13 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
           issue: number,
         });
     if (!values.offline && values.cache) await atomicJson(values.cache, snapshot);
-    const ownership = ticketOwnership(snapshot, number, {
-      staleHours,
-      now: runtime.now?.() ?? new Date(),
-      offline: !!values.offline,
-    });
-    // #192: delivery, responsibility and closure from the shared fold and evaluator.
-    // Only the requested issue is evaluated, so the evaluation cap can never skip it.
-    const scoped = { ...snapshot, issues: snapshot.issues.filter((i) => i.number === number) };
-    const read = deliveryRead(
-      scoped,
-      await diagnoseDelivery(
-        scoped,
-        deliveryBoundaries(runtime, snapshot.repository, !!values.offline),
-      ),
+    const { report, text } = await readWho(
+      snapshot,
+      number,
+      { staleHours, now: runtime.now?.() ?? new Date(), offline: !!values.offline },
+      deliveryBoundaries(runtime, snapshot.repository, !!values.offline),
     );
-    const view = read.tickets.find((t) => t.number === number) ?? null;
-    const issue = scoped.issues[0];
-    const report = withDeliveryCompleteness(
-      issue ? { ...ownership, ...deliveryFields(issue, view) } : ownership,
-      read,
-    );
-    await output(
-      values.json
-        ? JSON.stringify(report, null, 2) + "\n"
-        : appendLines(ticketOwnershipText(ownership), [
-            ...deliveryLines(view),
-            ...omissionLines(read),
-          ]),
-    );
+    await output(values.json ? JSON.stringify(report, null, 2) + "\n" : text);
     return report.completeness.complete ? 0 : 2;
   }
   if (args[0] === "estimate") {
@@ -1045,52 +982,17 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
     if (values.repo && !/^[\w.-]+\/[\w.-]+$/.test(values.repo))
       throw new Error("--repo must be owner/name.");
     const repository = values.repo ?? (await runtime.currentRepository());
-    if (values.history) {
-      const history = await pullRequestReviewHistory(
-        repository,
-        Number(positionals[0]),
-        runtime.query ?? ghQuery,
-      );
-      await output(
-        values.json ? JSON.stringify(history, null, 2) + "\n" : reviewHistoryText(history),
-      );
-      return history.completeness.complete ? 0 : 2;
-    }
-    const status = await pullRequestStatus(
-      repository,
-      Number(positionals[0]),
-      runtime.query ?? ghQuery,
-    );
-    // #192: delivery and responsibility for the issues this PR is linked to close.
-    const live = deliveryBoundaries(runtime, repository, false);
-    // Keep each linked issue's repository: a PR may close an issue elsewhere.
-    const linked = status.linkedIssues.map((i) => {
-      const m = i.url.match(/^https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/issues\/\d+/);
-      return { number: i.number, repository: m ? m[1] : "(unknown repository)" };
-    });
-    const local = linked.filter((i) => i.repository.toLowerCase() === repository.toLowerCase());
-    const foreign = linked.filter((i) => i.repository.toLowerCase() !== repository.toLowerCase());
-    const delivery =
-      live.trust && live.live
-        ? prDelivery(
-            status.pullRequest.url,
-            reportFollowUpFacts(status),
-            status.pullRequest.state === "OPEN",
-            await readIssuesDelivery(
-              repository,
-              local.map((i) => i.number),
-              { ...live.live, trust: live.trust },
-            ),
-            repository,
-            foreign,
-          )
-        : null;
-    const report = withDeliveryCompleteness(delivery ? { ...status, delivery } : status, delivery);
-    await output(
-      values.json
-        ? JSON.stringify(report, null, 2) + "\n"
-        : appendLines(prStatusText(status), delivery ? prDeliveryLines(delivery) : []),
-    );
+    const query = runtime.query ?? ghQuery;
+    const { report, text } = values.history
+      ? await readReviewHistory(repository, Number(positionals[0]), query)
+      : await readPullRequest(
+          repository,
+          Number(positionals[0]),
+          query,
+          // #192: delivery and responsibility for the issues this PR is linked to close.
+          deliveryBoundaries(runtime, repository, false),
+        );
+    await output(values.json ? JSON.stringify(report, null, 2) + "\n" : text);
     return report.completeness.complete ? 0 : 2;
   }
   if (args[0] === "deps") {

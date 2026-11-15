@@ -11,6 +11,7 @@
 import { owners, workflow } from "../briefing/briefing.js";
 import { defaultStaleHours, latest, pullRequestState } from "./team.js";
 import type { LinkedPullRequest } from "./team.js";
+import { SubjectUnavailable } from "../github/github.js";
 import type { Comment, PullRequest, Snapshot } from "../github/types.js";
 
 /** Kinds of historical comment evidence. */
@@ -99,7 +100,7 @@ export function ticketOwnership(
   { now = new Date(), staleHours = defaultStaleHours, offline = false }: OwnershipOptions = {},
 ): TicketOwnership {
   const issue = snapshot.issues.find((i) => i.number === number);
-  if (!issue) throw new Error(`Issue #${number} is not in the snapshot.`);
+  if (!issue) throw new SubjectUnavailable(`Issue #${number} is not in the snapshot.`);
   const warnings = [...snapshot.warnings];
   const labelsComplete = !issue.labels.pageInfo.hasNextPage;
   if (!labelsComplete)
