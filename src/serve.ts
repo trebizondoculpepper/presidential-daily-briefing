@@ -14,11 +14,9 @@ import { isIP } from "node:net";
 import { promisify } from "node:util";
 import { AuthenticationError, currentRepository, ghQueryFailure } from "./github/github.js";
 import { systemClock } from "./mcp/polling.js";
-import type { Clock } from "./mcp/polling.js";
 import { installedVersion } from "./updates/updates.js";
 import { defaultReadRuntime, readServices } from "./serve/services.js";
 import { selectRepository } from "./serve/api.js";
-import type { ServeReadRuntime } from "./serve/api.js";
 import {
   allowedHostnames,
   errorDocument,
@@ -38,8 +36,18 @@ import {
   SHUTDOWN_GRACE_MS,
 } from "./serve/options.js";
 import type { ServeOptions } from "./serve/options.js";
+import type {
+  AuthContext,
+  RequestContext,
+  Routes,
+  RunningServer,
+  ServedRepository,
+  ServeExtensions,
+  ServeRuntime,
+  ServerFacts,
+  StatusSource,
+} from "./serve/types.js";
 import { defaultRulesPageRuntime, rulesPage } from "./serve/rules-page.js";
-import type { RulesPageRuntime } from "./serve/rules-page.js";
 import {
   dashboardCss,
   dashboardPage,
@@ -50,37 +58,20 @@ import { ticketPage, ticketPageParameters, ticketScript } from "./serve/ticket-p
 
 export { serveHelp } from "./serve/options.js";
 
-/** The gh account every collection runs as: host and login only, never a token. */
-export interface AuthContext {
-  host: string;
-  login: string;
-}
-
-/** Process signals the server listens to; tests pass an EventEmitter. */
-export interface SignalSource {
-  on(signal: string, listener: () => void): unknown;
-  off(signal: string, listener: () => void): unknown;
-}
-
-/** Injected boundaries of `pdb serve`. */
-export interface ServeRuntime {
-  /** Resolve a local checkout to its owner/name (startup only). */
-  currentRepository: (cwd?: string, signal?: AbortSignal) => Promise<string>;
-  /** The gh host and login (startup, and before live collections at most once per TTL). */
-  authContext: (signal?: AbortSignal) => Promise<AuthContext>;
-  clock: Clock;
-  stdout: (text: string) => void;
-  stderr: (text: string) => void;
-  signals: SignalSource;
-  /** Immediate exit for a second signal during shutdown. */
-  exit: (code: number) => void;
-  version: () => Promise<string | null>;
-  platform: NodeJS.Platform;
-  /** GitHub read boundaries for the data routes; absent means the production gh runners. */
-  read?: ServeReadRuntime;
-  /** Local read-only git/file boundaries of the rules page (#392); absent means the real ones. */
-  rulesPage?: RulesPageRuntime;
-}
+// The shared serve interfaces live in serve/types.ts (#445); re-exported for existing importers.
+export type {
+  AuthContext,
+  RequestContext,
+  Routes,
+  RunningServer,
+  ServedRepository,
+  ServeExtensions,
+  ServeRuntime,
+  ServerFacts,
+  ServeServices,
+  SignalSource,
+  StatusSource,
+} from "./serve/types.js";
 
 const execute = promisify(execFile);
 
@@ -124,45 +115,6 @@ export class ServeStartupError extends Error {
   }
 }
 
-/** One repository of the served set, with the checkout that configures it, if any. */
-export interface ServedRepository {
-  repository: string;
-  project?: string;
-}
-
-/** Facts fixed at startup, shown by /api/v1/status. */
-export interface ServerFacts {
-  version: string | null;
-  startedAt: Date;
-  url: string;
-  exposed: boolean;
-  served: ServedRepository[];
-  ttlMs: number;
-  auth: AuthContext;
-}
-
-/** Per-request context handed to routes. */
-export interface RequestContext {
-  request: IncomingMessage;
-  response: ServerResponse;
-  url: URL;
-  /** Aborted when the client disconnects or the server shuts down. */
-  signal: AbortSignal;
-  /** Set by a data route to the cache source it served ("live", "cached", "stale"). */
-  source?: string;
-}
-
-/** A route set; returns false when it does not own the path. */
-export type Routes = (context: RequestContext) => Promise<boolean>;
-
-/** Cache counters for status; the read API (PR 2 of #373) supplies the real cache. */
-export interface StatusSource {
-  cache(): Record<string, number>;
-  repositories(): Record<string, { observedAt: string | null; lastError: unknown }>;
-  /** Additive capability metadata: the read-only diagnostic URLs installed (#459). */
-  diagnostics?(): string[];
-}
-
 const emptyStatus: StatusSource = {
   cache: () => ({
     entries: 0,
@@ -175,28 +127,6 @@ const emptyStatus: StatusSource = {
   }),
   repositories: () => ({}),
 };
-
-/** Services built once the server is listening: data routes, MCP and status counters. */
-export interface ServeServices {
-  routes?: Routes;
-  status?: StatusSource;
-  /** Close long-lived resources (in-flight collections, MCP sessions) during shutdown. */
-  close?: () => Promise<void>;
-}
-
-/** Builds the services from the startup facts (bound URL, served set, auth context). */
-export type ServeExtensions = (facts: ServerFacts) => ServeServices;
-
-/** A listening server. */
-export interface RunningServer {
-  facts: ServerFacts;
-  port: number;
-  /** Graceful shutdown; resolves once every connection is closed. Idempotent. */
-  close(): Promise<void>;
-  /** Resolves when shutdown completes. */
-  closed: Promise<void>;
-  shuttingDown(): boolean;
-}
 
 /** Resolve the served set: every --repo, then each --project's repository, deduplicated. */
 async function servedSet(

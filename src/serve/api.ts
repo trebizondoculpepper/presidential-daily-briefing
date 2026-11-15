@@ -11,7 +11,6 @@ import { resolveReviewPolicy } from "../config/review-setting.js";
 import type { DeclaredReviewPolicy } from "../workflow/reviewpolicy.js";
 import { BriefingEngineError } from "../config/engine-setting.js";
 import { validateHarness } from "../config/harness.js";
-import type { Environment } from "../config/harness.js";
 import { validateEntryKey } from "../config/identity.js";
 import type { ConfigFileSystem, GitRunner } from "../config/config.js";
 import { resolveReadIdentity } from "../config/readidentity.js";
@@ -49,28 +48,21 @@ import {
 import type { DeliveryBoundaries } from "../workflow/readservices.js";
 import { defaultStaleHours } from "../workflow/team.js";
 import { readTicketStatus, ticketLimits } from "../workflow/ticketstatus.js";
-import type { RequestContext, Routes, ServedRepository, ServerFacts } from "../serve.js";
+import type {
+  RequestContext,
+  Routes,
+  ServedRepository,
+  ServeReadRuntime,
+  ServerFacts,
+} from "./types.js";
 import { CollectionError, ServeCache, UnservedRepository } from "./cache.js";
 import type { Freshness } from "./cache.js";
 import { HttpFailure, readJsonBody, sendJson } from "./http.js";
 import type { ServeError } from "./http.js";
 import type { ServeOptions } from "./options.js";
 
-/** GitHub-facing boundaries the read API uses; tests inject credential-free fakes. */
-export interface ServeReadRuntime {
-  collect: typeof Collect;
-  /** Focused `who` read (issue-detail-v1, #367); default: the gh collector over queryWith. */
-  collectIssueFocus?: typeof CollectIssueFocus;
-  dependencyReport: typeof DependencyReportFn;
-  rest?: Rest;
-  queryWith?: (signal?: AbortSignal) => Query;
-  now: () => Date;
-  env: Environment;
-  git?: GitRunner;
-  fs?: ConfigFileSystem;
-  /** Local configuration readers rooted at a project (estimation and guide settings). */
-  projectRuntime?: (project: string | undefined) => Pick<ReadRuntime, "estimation" | "guide">;
-}
+/** GitHub-facing boundaries the read API uses; defined in serve/types.ts (#445). */
+export type { ServeReadRuntime } from "./types.js";
 
 const githubUrlRepository = /^https:\/\/github\.com\/([\w.-]+\/[\w.-]+)(?:[/?#]|$)/i;
 

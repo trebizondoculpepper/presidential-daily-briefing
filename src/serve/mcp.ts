@@ -16,7 +16,7 @@ import type { McpServer } from "@modelcontextprotocol/server";
 import { createServer, SelectionRefusal } from "../mcp/server.js";
 import type { CallFreshness, McpOptions, McpRuntime } from "../mcp/server.js";
 import type { Clock } from "../mcp/polling.js";
-import type { RequestContext, ServerFacts } from "../serve.js";
+import type { RequestContext, ServerFacts } from "./types.js";
 import { cachedBoundaries, projectReaders, selectRepository } from "./api.js";
 import type { ServeReadRuntime } from "./api.js";
 import type { ServeCache } from "./cache.js";
