@@ -121,6 +121,19 @@ import {
 } from "./briefing/dependencyimpact.js";
 import { readTicketStatus, ticketLimits, ticketStatusText } from "./workflow/ticketstatus.js";
 import { runServe } from "./serve.js";
+import {
+  createIssue,
+  defaultOperationId,
+  defaultReadFile,
+  ghPost,
+  issueCreateExitCode,
+  issueCreateHelp,
+  issueCreateText,
+  issueCreateUsage,
+  IssueCreateUsageError,
+  readStdinBounded,
+} from "./workflow/issuecreate.js";
+import type { IssueCreateRuntime } from "./workflow/issuecreate.js";
 import type { ServeRuntime } from "./serve.js";
 
 /** Parsed `deps` arguments: help, a migration plan, a native change, or a read. */
@@ -195,6 +208,8 @@ export interface Runtime {
   briefingFiles?: BriefingFiles;
   /** Listener, gh login, clock, output and signals for `serve` (#373). */
   serve?: ServeRuntime;
+  /** POST, clock, operation ID, body input and stderr for `issue create` (#199). */
+  issueCreate?: Partial<IssueCreateRuntime>;
 }
 
 type Output = (text: string) => Promise<void>;
@@ -206,6 +221,9 @@ Next-action default: Datalog, implementer view; --role designer selects design w
 Rollback: pdb config set briefing.engine typescript.
   briefing [--last 24h | --since ISO | --checkpoint PATH]  Read-only repository catch-up:
                         what changed and what needs attention (briefing --help)
+  issue create --title TEXT [--body TEXT | --body-file PATH|-] [--label L]... [--dry-run]
+                        Create one issue in --repo (default: this checkout), shown before
+                        writing; one request, never retried; partial/unknown exit 2 (issue create --help)
   deps N [--tree]       Read native upstream/downstream dependencies (deps --help)
   deps add|remove N --on M --note WHY [--dry-run]  Change native dependencies
   estimate --help       Complexity sizing guidance (XS..XXL)
@@ -999,6 +1017,70 @@ async function runRules(args: string[], output: Output, runtime: Runtime): Promi
   return 0;
 }
 
+/** `pdb issue create` (#199, doc/design/issue-creation.md). */
+async function runIssue(args: string[], output: Output, runtime: Runtime): Promise<number> {
+  if (args[0] !== "create") throw new Error(issueCreateUsage);
+  const rest = args.slice(1);
+  if (rest.length === 0 || rest.includes("--help") || rest.includes("-h")) {
+    await output(issueCreateHelp);
+    return 0;
+  }
+  let values;
+  try {
+    ({ values } = parseArgs({
+      args: rest,
+      strict: true,
+      allowPositionals: false,
+      options: {
+        title: { type: "string" },
+        body: { type: "string" },
+        "body-file": { type: "string" },
+        label: { type: "string", multiple: true },
+        repo: { type: "string" },
+        agent: { type: "string" },
+        "dry-run": { type: "boolean" },
+        json: { type: "boolean" },
+      },
+    }));
+  } catch {
+    throw new Error(issueCreateUsage);
+  }
+  if (values.title === undefined) throw new Error(`--title is required. ${issueCreateUsage}`);
+  const stderr = runtime.stderr ?? ((text: string) => process.stderr.write(text));
+  const rt: IssueCreateRuntime = {
+    rest: runtime.rest ?? ghRest,
+    post: ghPost,
+    currentRepository: () => runtime.currentRepository(),
+    now: runtime.now ?? (() => new Date()),
+    operationId: defaultOperationId,
+    readFile: defaultReadFile,
+    readStdin: readStdinBounded,
+    stderr,
+    ...runtime.issueCreate,
+  };
+  let result;
+  try {
+    result = await createIssue(
+      {
+        title: values.title,
+        ...(values.body !== undefined ? { body: values.body } : {}),
+        ...(values["body-file"] !== undefined ? { bodyFile: values["body-file"] } : {}),
+        labels: values.label ?? [],
+        ...(values.repo !== undefined ? { repo: values.repo } : {}),
+        ...(values.agent !== undefined ? { agent: values.agent } : {}),
+        dryRun: !!values["dry-run"],
+        json: !!values.json,
+      },
+      rt,
+    );
+  } catch (error) {
+    if (error instanceof IssueCreateUsageError) throw new Error(error.message);
+    throw error;
+  }
+  await output(values.json ? JSON.stringify(result, null, 2) + "\n" : issueCreateText(result));
+  return issueCreateExitCode(result);
+}
+
 /** The command itself; `main` adds the version check around it. */
 async function run(args: string[], output: Output, runtime: Runtime): Promise<number> {
   if (args[0] === "rules") return runRules(args.slice(1), output, runtime);
@@ -1013,6 +1095,7 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
       files: runtime.briefingFiles ?? { atomicJson, cachedSnapshot, checkpointSince },
     });
   if (args[0] === "serve") return runServe(args.slice(1), runtime.serve);
+  if (args[0] === "issue") return runIssue(args.slice(1), output, runtime);
   if (args[0] === "config") return runConfig(args.slice(1), output, runtime.config);
   if (args[0] === "doctor") {
     const { values } = parseArgs({
