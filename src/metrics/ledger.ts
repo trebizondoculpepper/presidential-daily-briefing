@@ -106,7 +106,7 @@ export interface TicketLedger {
   repository: string;
   number: number;
   observedAt: string;
-  /** Oldest first; ties keep source order. */
+  /** Oldest first; same-instant ties by comment id, then source order. */
   events: LedgerEvent[];
   /** Both candidate first pickups, by source; the rule choosing between them is undecided. */
   firstPickup: Record<PickupSource, PickupCandidate>;
@@ -125,6 +125,14 @@ export interface TicketLedger {
 }
 
 type Candidate = { at: string; agent: string | null; key: string };
+/**
+ * Same-instant tie order: records by comment database id (numerically, as the delivery fold
+ * orders them), and events without a comment id after them.
+ */
+const tieOf = (key: string): number => {
+  const id = /^comment:(\d+)$/.exec(key)?.[1];
+  return id === undefined ? Number.MAX_SAFE_INTEGER : Number(id);
+};
 const time = (at: string | null | undefined): number | null => {
   if (typeof at !== "string" || !at) return null;
   const t = Date.parse(at);
@@ -158,7 +166,10 @@ function firstOf(
 ): PickupCandidate {
   const first =
     [...trusted].sort(
-      (a, b) => Date.parse(a.at) - Date.parse(b.at) || a.key.localeCompare(b.key),
+      (a, b) =>
+        Date.parse(a.at) - Date.parse(b.at) ||
+        tieOf(a.key) - tieOf(b.key) ||
+        a.key.localeCompare(b.key),
     )[0] ?? null;
   if (coverage === "unavailable")
     return { status: "unknown", reason: `${sourceName} not read`, observed: first };
@@ -437,7 +448,10 @@ export async function ticketLedger(
   }
   const ordered = [...unique.values()]
     .map((e, i) => ({ e, i }))
-    .sort((a, b) => Date.parse(a.e.at) - Date.parse(b.e.at) || a.i - b.i)
+    .sort(
+      (a, b) =>
+        Date.parse(a.e.at) - Date.parse(b.e.at) || tieOf(a.e.key) - tieOf(b.e.key) || a.i - b.i,
+    )
     .map(({ e }) => e);
 
   return {
