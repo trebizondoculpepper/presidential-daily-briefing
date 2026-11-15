@@ -1,7 +1,7 @@
 {
   "modelVersion": 2,
   "policyVersion": 1,
-  "rulesHash": "9e6fb71a4aa31c45e06d0495b19ea5e6443c9f8e58e4a1d08f0c4597a4f10e17",
+  "rulesHash": "cca254ae07c126f1af4b83a62e38850ba2bd680f61994335b3be2cd38d3d63e5",
   "sources": [
     "policy/schema.edn",
     "policy/rules.edn",
@@ -63,8 +63,10 @@
       "receipt-commit": "reviewed commit",
       "receipt-findings": "findings flag",
       "receipt-status": "receipt status",
+      "record-outcome": "explicit resolution outcome",
       "record-to": "addressee",
       "record-trust": "trust level",
+      "record-version": "question marker version",
       "resolved": "resolved flag",
       "responsible": "responsible agent",
       "review-coverage": "declared review coverage",
@@ -362,6 +364,15 @@
         },
         {
           "type": "call",
+          "predicate": "open",
+          "args": [
+            {
+              "var": "?t"
+            }
+          ]
+        },
+        {
+          "type": "call",
           "predicate": "addressed",
           "args": [
             {
@@ -371,7 +382,7 @@
         }
       ],
       "templateClauses": 1,
-      "calls": ["foreground", "addressed"],
+      "calls": ["foreground", "open", "addressed"],
       "evidence": [
         {
           "name": "addressedAgent",
@@ -2891,7 +2902,7 @@
           "clauses": [
             {
               "type": "call",
-              "predicate": "trusted-record",
+              "predicate": "asking-record",
               "args": [
                 {
                   "var": "?t"
@@ -2986,7 +2997,7 @@
           "clauses": [
             {
               "type": "call",
-              "predicate": "trusted-record",
+              "predicate": "asking-record",
               "args": [
                 {
                   "var": "?t"
@@ -3189,6 +3200,261 @@
       }
     },
     {
+      "id": "D-HUMAN-ORPHANED-YOU",
+      "kind": "orphaned-question",
+      "band": 1,
+      "preference": 1,
+      "codes": ["explicit", "addressed"],
+      "roles": ["human"],
+      "clauses": [
+        {
+          "type": "call",
+          "predicate": "foreground",
+          "args": [
+            {
+              "var": "?t"
+            }
+          ]
+        },
+        {
+          "type": "fact",
+          "scope": "viewer",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "role",
+          "value": {
+            "lit": "human"
+          },
+          "phrase": "role",
+          "many": false
+        },
+        {
+          "type": "call",
+          "predicate": "orphan-asks-viewer",
+          "args": [
+            {
+              "var": "?t"
+            }
+          ]
+        }
+      ],
+      "templateClauses": 1,
+      "calls": ["foreground", "orphan-asks-viewer"],
+      "evidence": [
+        {
+          "name": "routedTo",
+          "scope": "rule",
+          "clauses": [
+            {
+              "type": "call",
+              "predicate": "orphaned-record",
+              "args": [
+                {
+                  "var": "?t"
+                },
+                {
+                  "var": "?r"
+                }
+              ]
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?r"
+              },
+              "attribute": "record-to",
+              "value": {
+                "var": "?value"
+              },
+              "phrase": "addressee",
+              "many": false
+            }
+          ]
+        }
+      ],
+      "source": {
+        "file": "policy/decisions.edn",
+        "index": 33
+      }
+    },
+    {
+      "id": "D-HUMAN-ORPHANED",
+      "kind": "orphaned-question",
+      "band": 3,
+      "preference": 0,
+      "codes": ["explicit"],
+      "roles": ["human"],
+      "clauses": [
+        {
+          "type": "call",
+          "predicate": "foreground",
+          "args": [
+            {
+              "var": "?t"
+            }
+          ]
+        },
+        {
+          "type": "fact",
+          "scope": "viewer",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "role",
+          "value": {
+            "lit": "human"
+          },
+          "phrase": "role",
+          "many": false
+        },
+        {
+          "type": "call",
+          "predicate": "has-orphaned",
+          "args": [
+            {
+              "var": "?t"
+            }
+          ]
+        },
+        {
+          "type": "not",
+          "join": null,
+          "body": [
+            {
+              "type": "call",
+              "predicate": "orphan-asks-viewer",
+              "args": [
+                {
+                  "var": "?t"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "templateClauses": 1,
+      "calls": ["foreground", "has-orphaned", "orphan-asks-viewer"],
+      "evidence": [
+        {
+          "name": "routedTo",
+          "scope": "rule",
+          "clauses": [
+            {
+              "type": "call",
+              "predicate": "orphaned-record",
+              "args": [
+                {
+                  "var": "?t"
+                },
+                {
+                  "var": "?r"
+                }
+              ]
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?r"
+              },
+              "attribute": "record-to",
+              "value": {
+                "var": "?value"
+              },
+              "phrase": "addressee",
+              "many": false
+            }
+          ]
+        }
+      ],
+      "source": {
+        "file": "policy/decisions.edn",
+        "index": 34
+      }
+    },
+    {
+      "id": "D-HUMAN-ORPHANED-UNKNOWN",
+      "kind": "orphaned-question",
+      "band": 3,
+      "preference": 1,
+      "codes": ["explicit", "resolution-unknown"],
+      "roles": ["human"],
+      "clauses": [
+        {
+          "type": "call",
+          "predicate": "foreground",
+          "args": [
+            {
+              "var": "?t"
+            }
+          ]
+        },
+        {
+          "type": "fact",
+          "scope": "viewer",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "role",
+          "value": {
+            "lit": "human"
+          },
+          "phrase": "role",
+          "many": false
+        },
+        {
+          "type": "call",
+          "predicate": "has-orphan-unknown",
+          "args": [
+            {
+              "var": "?t"
+            }
+          ]
+        }
+      ],
+      "templateClauses": 1,
+      "calls": ["foreground", "has-orphan-unknown"],
+      "evidence": [
+        {
+          "name": "routedTo",
+          "scope": "rule",
+          "clauses": [
+            {
+              "type": "call",
+              "predicate": "orphan-unknown",
+              "args": [
+                {
+                  "var": "?t"
+                },
+                {
+                  "var": "?r"
+                }
+              ]
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?r"
+              },
+              "attribute": "record-to",
+              "value": {
+                "var": "?value"
+              },
+              "phrase": "addressee",
+              "many": false
+            }
+          ]
+        }
+      ],
+      "source": {
+        "file": "policy/decisions.edn",
+        "index": 35
+      }
+    },
+    {
       "id": "D-HUMAN-SIGNOFF",
       "kind": "sign-off",
       "band": 3,
@@ -3251,7 +3517,7 @@
       "evidence": [],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 33
+        "index": 36
       }
     }
   ],
@@ -3678,9 +3944,40 @@
             "file": "policy/rules.edn",
             "index": 12
           }
+        },
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "viewer",
+              "entity": {
+                "lit": 1
+              },
+              "attribute": "role",
+              "value": {
+                "lit": "human"
+              },
+              "phrase": "role",
+              "many": false
+            },
+            {
+              "type": "call",
+              "predicate": "orphan-source",
+              "args": [
+                {
+                  "var": "?t"
+                }
+              ]
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 16
+          }
         }
       ],
-      "calls": ["open", "parked", "addressed"],
+      "calls": ["open", "parked", "addressed", "orphan-source"],
       "set": "rules"
     },
     {
@@ -3864,7 +4161,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 16
+            "index": 17
           }
         },
         {
@@ -3899,7 +4196,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 17
+            "index": 18
           }
         }
       ],
@@ -3942,7 +4239,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 18
+            "index": 19
           }
         }
       ],
@@ -3972,7 +4269,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 19
+            "index": 20
           }
         },
         {
@@ -3994,7 +4291,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 20
+            "index": 21
           }
         }
       ],
@@ -4037,7 +4334,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 21
+            "index": 22
           }
         }
       ],
@@ -4067,7 +4364,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 22
+            "index": 23
           }
         },
         {
@@ -4098,7 +4395,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 23
+            "index": 24
           }
         }
       ],
@@ -4128,7 +4425,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 24
+            "index": 25
           }
         },
         {
@@ -4163,7 +4460,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 25
+            "index": 26
           }
         }
       ],
@@ -4283,7 +4580,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 26
+            "index": 27
           }
         }
       ],
@@ -4334,7 +4631,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 27
+            "index": 28
           }
         },
         {
@@ -4369,7 +4666,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 28
+            "index": 29
           }
         }
       ],
@@ -4413,7 +4710,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 29
+            "index": 30
           }
         }
       ],
@@ -4458,7 +4755,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 30
+            "index": 31
           }
         },
         {
@@ -4495,7 +4792,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 31
+            "index": 32
           }
         },
         {
@@ -4532,7 +4829,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 32
+            "index": 33
           }
         },
         {
@@ -4569,7 +4866,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 33
+            "index": 34
           }
         },
         {
@@ -4610,7 +4907,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 34
+            "index": 35
           }
         },
         {
@@ -4651,7 +4948,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 35
+            "index": 36
           }
         },
         {
@@ -4694,7 +4991,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 36
+            "index": 37
           }
         },
         {
@@ -4737,7 +5034,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 37
+            "index": 38
           }
         }
       ],
@@ -4774,7 +5071,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 38
+            "index": 39
           }
         }
       ],
@@ -4815,7 +5112,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 39
+            "index": 40
           }
         }
       ],
@@ -4943,7 +5240,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 40
+            "index": 41
           }
         }
       ],
@@ -5029,7 +5326,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 41
+            "index": 42
           }
         },
         {
@@ -5094,7 +5391,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 42
+            "index": 43
           }
         }
       ],
@@ -5124,7 +5421,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 43
+            "index": 44
           }
         },
         {
@@ -5146,7 +5443,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 44
+            "index": 45
           }
         },
         {
@@ -5183,7 +5480,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 45
+            "index": 46
           }
         },
         {
@@ -5201,7 +5498,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 46
+            "index": 47
           }
         }
       ],
@@ -5257,7 +5554,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 47
+            "index": 48
           }
         }
       ],
@@ -5313,7 +5610,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 48
+            "index": 49
           }
         }
       ],
@@ -5348,7 +5645,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 49
+            "index": 50
           }
         }
       ],
@@ -5443,7 +5740,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 50
+            "index": 51
           }
         }
       ],
@@ -5486,7 +5783,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 51
+            "index": 52
           }
         }
       ],
@@ -5529,7 +5826,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 52
+            "index": 53
           }
         }
       ],
@@ -5572,7 +5869,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 53
+            "index": 54
           }
         }
       ],
@@ -5615,7 +5912,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 54
+            "index": 55
           }
         }
       ],
@@ -5667,7 +5964,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 55
+            "index": 56
           }
         },
         {
@@ -5724,7 +6021,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 56
+            "index": 57
           }
         }
       ],
@@ -5780,7 +6077,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 57
+            "index": 58
           }
         }
       ],
@@ -5855,7 +6152,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 58
+            "index": 59
           }
         },
         {
@@ -5877,7 +6174,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 59
+            "index": 60
           }
         }
       ],
@@ -5939,7 +6236,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 60
+            "index": 61
           }
         }
       ],
@@ -5969,7 +6266,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 61
+            "index": 62
           }
         },
         {
@@ -6004,7 +6301,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 62
+            "index": 63
           }
         }
       ],
@@ -6060,7 +6357,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 63
+            "index": 64
           }
         }
       ],
@@ -6220,7 +6517,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 64
+            "index": 65
           }
         }
       ],
@@ -6288,7 +6585,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 65
+            "index": 66
           }
         }
       ],
@@ -6366,7 +6663,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 66
+            "index": 67
           }
         },
         {
@@ -6449,7 +6746,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 67
+            "index": 68
           }
         },
         {
@@ -6523,7 +6820,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 68
+            "index": 69
           }
         }
       ],
@@ -6601,7 +6898,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 69
+            "index": 70
           }
         },
         {
@@ -6662,7 +6959,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 70
+            "index": 71
           }
         }
       ],
@@ -6817,7 +7114,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 71
+            "index": 72
           }
         }
       ],
@@ -6868,7 +7165,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 72
+            "index": 73
           }
         },
         {
@@ -6903,7 +7200,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 73
+            "index": 74
           }
         }
       ],
@@ -6938,7 +7235,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 74
+            "index": 75
           }
         }
       ],
@@ -6964,7 +7261,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 75
+            "index": 76
           }
         },
         {
@@ -6982,7 +7279,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 76
+            "index": 77
           }
         },
         {
@@ -7013,7 +7310,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 77
+            "index": 78
           }
         },
         {
@@ -7031,7 +7328,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 78
+            "index": 79
           }
         },
         {
@@ -7049,7 +7346,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 79
+            "index": 80
           }
         }
       ],
@@ -7084,7 +7381,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 80
+            "index": 81
           }
         }
       ],
@@ -7123,7 +7420,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 81
+            "index": 82
           }
         },
         {
@@ -7163,7 +7460,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 82
+            "index": 83
           }
         }
       ],
@@ -7206,7 +7503,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 83
+            "index": 84
           }
         }
       ],
@@ -7249,40 +7546,11 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 84
-          }
-        }
-      ],
-      "calls": [],
-      "set": "rules"
-    },
-    {
-      "name": "has-trusted-record",
-      "params": ["?t"],
-      "alternatives": [
-        {
-          "params": ["?t"],
-          "clauses": [
-            {
-              "type": "call",
-              "predicate": "trusted-record",
-              "args": [
-                {
-                  "var": "?t"
-                },
-                {
-                  "var": "?r"
-                }
-              ]
-            }
-          ],
-          "source": {
-            "file": "policy/rules.edn",
             "index": 85
           }
         }
       ],
-      "calls": ["trusted-record"],
+      "calls": [],
       "set": "rules"
     },
     {
@@ -7329,6 +7597,202 @@
       "set": "rules"
     },
     {
+      "name": "record-pending",
+      "params": ["?t", "?r"],
+      "alternatives": [
+        {
+          "params": ["?t", "?r"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?r"
+              },
+              "attribute": "record-version",
+              "value": {
+                "lit": 2
+              },
+              "phrase": "question marker version",
+              "many": false
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 87
+          }
+        },
+        {
+          "params": ["?t", "?r"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?r"
+              },
+              "attribute": "record-version",
+              "value": {
+                "lit": 1
+              },
+              "phrase": "question marker version",
+              "many": false
+            },
+            {
+              "type": "call",
+              "predicate": "question-labelled",
+              "args": [
+                {
+                  "var": "?t"
+                }
+              ]
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 88
+          }
+        },
+        {
+          "params": ["?t", "?r"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "question-record",
+              "value": {
+                "var": "?r"
+              },
+              "phrase": "question record",
+              "many": true
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "fact",
+                  "scope": "entity",
+                  "entity": {
+                    "var": "?r"
+                  },
+                  "attribute": "record-version",
+                  "value": {
+                    "wild": true
+                  },
+                  "phrase": "question marker version",
+                  "many": false
+                }
+              ]
+            },
+            {
+              "type": "call",
+              "predicate": "question-labelled",
+              "args": [
+                {
+                  "var": "?t"
+                }
+              ]
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 89
+          }
+        }
+      ],
+      "calls": ["question-labelled"],
+      "set": "rules"
+    },
+    {
+      "name": "asking-record",
+      "params": ["?t", "?r"],
+      "alternatives": [
+        {
+          "params": ["?t", "?r"],
+          "clauses": [
+            {
+              "type": "call",
+              "predicate": "trusted-record",
+              "args": [
+                {
+                  "var": "?t"
+                },
+                {
+                  "var": "?r"
+                }
+              ]
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "call",
+                  "predicate": "record-settled",
+                  "args": [
+                    {
+                      "var": "?r"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "call",
+              "predicate": "record-pending",
+              "args": [
+                {
+                  "var": "?t"
+                },
+                {
+                  "var": "?r"
+                }
+              ]
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 90
+          }
+        }
+      ],
+      "calls": ["trusted-record", "record-settled", "record-pending"],
+      "set": "rules"
+    },
+    {
+      "name": "has-asking-record",
+      "params": ["?t"],
+      "alternatives": [
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
+              "type": "call",
+              "predicate": "asking-record",
+              "args": [
+                {
+                  "var": "?t"
+                },
+                {
+                  "var": "?r"
+                }
+              ]
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 91
+          }
+        }
+      ],
+      "calls": ["asking-record"],
+      "set": "rules"
+    },
+    {
       "name": "open-question",
       "params": ["?t"],
       "alternatives": [
@@ -7355,16 +7819,7 @@
             },
             {
               "type": "call",
-              "predicate": "question-labelled",
-              "args": [
-                {
-                  "var": "?t"
-                }
-              ]
-            },
-            {
-              "type": "call",
-              "predicate": "has-trusted-record",
+              "predicate": "has-asking-record",
               "args": [
                 {
                   "var": "?t"
@@ -7374,11 +7829,11 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 87
+            "index": 92
           }
         }
       ],
-      "calls": ["issue", "open", "question-labelled", "has-trusted-record"],
+      "calls": ["issue", "open", "has-asking-record"],
       "set": "rules"
     },
     {
@@ -7421,7 +7876,7 @@
               "body": [
                 {
                   "type": "call",
-                  "predicate": "has-trusted-record",
+                  "predicate": "has-asking-record",
                   "args": [
                     {
                       "var": "?t"
@@ -7433,11 +7888,11 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 88
+            "index": 93
           }
         }
       ],
-      "calls": ["issue", "open", "question-labelled", "has-trusted-record"],
+      "calls": ["issue", "open", "question-labelled", "has-asking-record"],
       "set": "rules"
     },
     {
@@ -7449,7 +7904,7 @@
           "clauses": [
             {
               "type": "call",
-              "predicate": "trusted-record",
+              "predicate": "asking-record",
               "args": [
                 {
                   "var": "?t"
@@ -7488,11 +7943,496 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 89
+            "index": 94
           }
         }
       ],
-      "calls": ["trusted-record"],
+      "calls": ["asking-record"],
+      "set": "rules"
+    },
+    {
+      "name": "closed",
+      "params": ["?t"],
+      "alternatives": [
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "state",
+              "value": {
+                "lit": "CLOSED"
+              },
+              "phrase": "state",
+              "many": false
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 95
+          }
+        }
+      ],
+      "calls": [],
+      "set": "rules"
+    },
+    {
+      "name": "record-settled",
+      "params": ["?r"],
+      "alternatives": [
+        {
+          "params": ["?r"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?r"
+              },
+              "attribute": "record-outcome",
+              "value": {
+                "lit": "resolved"
+              },
+              "phrase": "explicit resolution outcome",
+              "many": false
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 96
+          }
+        },
+        {
+          "params": ["?r"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?r"
+              },
+              "attribute": "record-outcome",
+              "value": {
+                "lit": "withdrawn"
+              },
+              "phrase": "explicit resolution outcome",
+              "many": false
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 97
+          }
+        }
+      ],
+      "calls": [],
+      "set": "rules"
+    },
+    {
+      "name": "orphaned-record",
+      "params": ["?t", "?r"],
+      "alternatives": [
+        {
+          "params": ["?t", "?r"],
+          "clauses": [
+            {
+              "type": "call",
+              "predicate": "issue",
+              "args": [
+                {
+                  "var": "?t"
+                }
+              ]
+            },
+            {
+              "type": "call",
+              "predicate": "closed",
+              "args": [
+                {
+                  "var": "?t"
+                }
+              ]
+            },
+            {
+              "type": "call",
+              "predicate": "trusted-record",
+              "args": [
+                {
+                  "var": "?t"
+                },
+                {
+                  "var": "?r"
+                }
+              ]
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?r"
+              },
+              "attribute": "record-outcome",
+              "value": {
+                "lit": "none"
+              },
+              "phrase": "explicit resolution outcome",
+              "many": false
+            },
+            {
+              "type": "call",
+              "predicate": "record-pending",
+              "args": [
+                {
+                  "var": "?t"
+                },
+                {
+                  "var": "?r"
+                }
+              ]
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 98
+          }
+        }
+      ],
+      "calls": ["issue", "closed", "trusted-record", "record-pending"],
+      "set": "rules"
+    },
+    {
+      "name": "orphan-unknown",
+      "params": ["?t", "?r"],
+      "alternatives": [
+        {
+          "params": ["?t", "?r"],
+          "clauses": [
+            {
+              "type": "call",
+              "predicate": "issue",
+              "args": [
+                {
+                  "var": "?t"
+                }
+              ]
+            },
+            {
+              "type": "call",
+              "predicate": "closed",
+              "args": [
+                {
+                  "var": "?t"
+                }
+              ]
+            },
+            {
+              "type": "call",
+              "predicate": "trusted-record",
+              "args": [
+                {
+                  "var": "?t"
+                },
+                {
+                  "var": "?r"
+                }
+              ]
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?r"
+              },
+              "attribute": "record-outcome",
+              "value": {
+                "lit": "unknown"
+              },
+              "phrase": "explicit resolution outcome",
+              "many": false
+            },
+            {
+              "type": "call",
+              "predicate": "record-pending",
+              "args": [
+                {
+                  "var": "?t"
+                },
+                {
+                  "var": "?r"
+                }
+              ]
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 99
+          }
+        },
+        {
+          "params": ["?t", "?r"],
+          "clauses": [
+            {
+              "type": "call",
+              "predicate": "issue",
+              "args": [
+                {
+                  "var": "?t"
+                }
+              ]
+            },
+            {
+              "type": "call",
+              "predicate": "closed",
+              "args": [
+                {
+                  "var": "?t"
+                }
+              ]
+            },
+            {
+              "type": "call",
+              "predicate": "trusted-record",
+              "args": [
+                {
+                  "var": "?t"
+                },
+                {
+                  "var": "?r"
+                }
+              ]
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?r"
+              },
+              "attribute": "record-version",
+              "value": {
+                "lit": 1
+              },
+              "phrase": "question marker version",
+              "many": false
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "call",
+                  "predicate": "record-settled",
+                  "args": [
+                    {
+                      "var": "?r"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "labels-complete",
+              "value": {
+                "lit": false
+              },
+              "phrase": "completeness of label evidence",
+              "many": false
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "call",
+                  "predicate": "question-labelled",
+                  "args": [
+                    {
+                      "var": "?t"
+                    }
+                  ]
+                }
+              ]
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 100
+          }
+        }
+      ],
+      "calls": [
+        "issue",
+        "closed",
+        "trusted-record",
+        "record-pending",
+        "record-settled",
+        "question-labelled"
+      ],
+      "set": "rules"
+    },
+    {
+      "name": "has-orphaned",
+      "params": ["?t"],
+      "alternatives": [
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
+              "type": "call",
+              "predicate": "orphaned-record",
+              "args": [
+                {
+                  "var": "?t"
+                },
+                {
+                  "var": "?r"
+                }
+              ]
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 101
+          }
+        }
+      ],
+      "calls": ["orphaned-record"],
+      "set": "rules"
+    },
+    {
+      "name": "has-orphan-unknown",
+      "params": ["?t"],
+      "alternatives": [
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
+              "type": "call",
+              "predicate": "orphan-unknown",
+              "args": [
+                {
+                  "var": "?t"
+                },
+                {
+                  "var": "?r"
+                }
+              ]
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 102
+          }
+        }
+      ],
+      "calls": ["orphan-unknown"],
+      "set": "rules"
+    },
+    {
+      "name": "orphan-source",
+      "params": ["?t"],
+      "alternatives": [
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
+              "type": "call",
+              "predicate": "has-orphaned",
+              "args": [
+                {
+                  "var": "?t"
+                }
+              ]
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 103
+          }
+        },
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
+              "type": "call",
+              "predicate": "has-orphan-unknown",
+              "args": [
+                {
+                  "var": "?t"
+                }
+              ]
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 104
+          }
+        }
+      ],
+      "calls": ["has-orphaned", "has-orphan-unknown"],
+      "set": "rules"
+    },
+    {
+      "name": "orphan-asks-viewer",
+      "params": ["?t"],
+      "alternatives": [
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
+              "type": "call",
+              "predicate": "orphaned-record",
+              "args": [
+                {
+                  "var": "?t"
+                },
+                {
+                  "var": "?r"
+                }
+              ]
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?r"
+              },
+              "attribute": "record-to",
+              "value": {
+                "var": "?a"
+              },
+              "phrase": "addressee",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "viewer",
+              "entity": {
+                "lit": 1
+              },
+              "attribute": "agent",
+              "value": {
+                "var": "?a"
+              },
+              "phrase": "agent name",
+              "many": false
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 105
+          }
+        }
+      ],
+      "calls": ["orphaned-record"],
       "set": "rules"
     },
     {
@@ -10153,16 +11093,16 @@
     }
   ],
   "coverage": {
-    "decisions": 34,
-    "predicates": 61,
-    "alternatives": 99,
+    "decisions": 37,
+    "predicates": 71,
+    "alternatives": 115,
     "denials": 8,
     "queries": 15,
     "keyQueries": 4,
-    "evidence": 36,
+    "evidence": 39,
     "overrides": 4,
     "constants": 14,
-    "attributes": 71,
-    "clauses": 590
+    "attributes": 73,
+    "clauses": 643
   }
 }

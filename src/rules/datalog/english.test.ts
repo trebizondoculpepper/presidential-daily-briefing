@@ -236,6 +236,7 @@ describe("English policy compiler (#416)", () => {
       ),
     ).toEqual([
       'policy/rules.edn[27] blocked[0]: attribute "open-blockers" has no phrase in schema.edn :lexicon',
+
       'policy/schema.edn :eligibility-witnesses "openBlockers"[0]: attribute "open-blockers" has no phrase in schema.edn :lexicon',
       'policy/queries.edn :q1 where[3]: attribute "open-blockers" has no phrase in schema.edn :lexicon',
     ]);
@@ -388,7 +389,9 @@ describe("English policy compiler (#416)", () => {
     }
     const attention = model.decisions.find((d) => d.id === "D-ATTENTION");
     expect(attention?.templateClauses).toBe(1);
-    expect(conjunctionText(attention?.clauses ?? [])).toBe("foreground(?t) and addressed(?t)");
+    expect(conjunctionText(attention?.clauses ?? [])).toBe(
+      "foreground(?t) and open(?t) and addressed(?t)",
+    );
   });
 
   it("delimits nested groups and keeps a single-alternative or-join's variables (CodeRabbit, #478)", () => {

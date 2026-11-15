@@ -13,6 +13,8 @@ instructions, briefing/help examples, a short copyable prompt and the persistent
 guidance section. No issue body/comment or arbitrary external content can insert
 instructions into this document. Transport projections reuse the builder.
 
+**Owner decision (#391, 2026-11-15), superseding the next paragraph and any mandatory AGENTS.md edit:** the copyable prompt is at most ten lines. It explains PDB and basic use, tells the agent to read the project rules at the start of every session, links onboarding/help and identity setup, and says to use PDB for coordination, status and priorities in preference to equivalent `gh` operations. It may suggest recording useful guidance for future sessions; it does not prescribe AGENTS.md contents or instruct an edit. The shipped prompt (`onboardingDocument` in `src/briefing/onboarding.ts`) still has the step "If AGENTS.md has no pdb coordination section, add it"; removing it is an implementation follow-up. `pdb onboard --install` remains an explicit user command.
+
 The copied prompt starts by asking the agent to read onboarding/current rules,
 then explains obtaining its own name, choosing CLI or MCP, getting help and updating
 AGENTS.md before project work if needed. Require a current-rules check at the start

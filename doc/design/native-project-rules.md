@@ -195,9 +195,34 @@ reporting to distinguish decision assertions from loader/worker failures.
 #514 supplies source/format/static validation and canonical identities; no activation.
 #515 supplies the worker, immutable admission and native preference/reason evaluation.
 #516 supplies program-mediated enablement, generation/caches, effective English and
-installed CLI/MCP/web parity. All three depend on this reviewed contract and their
-native predecessors. #75 remains open until its full default/override/output/test
-requirements are verified; a schema or worker alone does not complete it.
+installed CLI/MCP/web parity.
+
+**#516 delivery status.** Part 1 (enablement and briefing integration) is implemented:
+
+- `rules.project.enabled` is registered in `CONFIG_KEYS` and resolved per briefing by `resolveProjectRulesSetting` (`src/config/project-rules-setting.ts`) from the matching verified checkout only.
+- `effectivePolicy` (`src/rules/datalog/project/effective.ts`) applies an enabled policy to the Datalog queue in `presentBriefing`.
+- `decisionEngine.effectivePolicy` carries the manifest above, plus `matchedIds`, `reason` and `next`. `rulesHash` is the composite hash only while the policy is active.
+- A failed or unknown policy, or the TypeScript rollback engine with the policy enabled, gives `state: error` and an incomplete briefing whose rows stay in the default order.
+- The human role and full issue intake carry no project ranking.
+- The EDN reader (`edn-data`) is now a runtime dependency, and the loader, projection and worker load with the evaluator chunk.
+
+Part 2 (effective English and `pdb rules init`) is also implemented:
+
+- `rulesDocument` takes the project's state (`ProjectRulesView`) and renders `effectivePolicy` plus a `project` section: preferences with their conditions, priority and witness bindings, helpers, protected bands, limits, the age-order statement and the projection lexicon. Each is compiled with the shared structural renderer, never merged into the default lexicon.
+- `--rule` accepts active project preference and helper IDs.
+- `pdb rules` and the serve rules page resolve that state through `projectRulesContext` (`src/rules/project-context.ts`), using the same setting and loader as the briefing, so they name the same effective hash.
+- A missing checkout, or a `--repo`-only served project, is `unknown`. It is never shown as the effective policy.
+- `pdb rules init` writes a validated starter bound to the shipped hash into the verified checkout with an exclusive create, refuses an existing file or symlink, and enables nothing.
+
+Part 3 completes #516:
+
+- **Selections without a local checkout.** A remote CLI read, `pdb serve --repo` and `pdb-mcp` without `--project` cannot read the repository's committed configuration, so whether its project rules are enabled is not knowable there. The manifest reports the explicit state `unavailable` (`effectiveRulesHash: null`, `appliedOrderMode: disabled`), with a reason naming the cause and the `--project` remedy. `/rules` and the diagnostics rules view show it as unknown.
+- **Why the briefing stays complete in that case.** This matches the review policy and the other repository settings such a selection cannot read. Marking every `--repo`-only briefing incomplete would permanently degrade serve, MCP and rebrief for repositories that use no project rules at all. The state is still explicit, and it is never presented as `disabled` or as the effective policy. An enabled policy that fails stays `error` and incomplete, as above.
+- **Reads and caching.** `pdb serve` caches collected GitHub facts, not presented briefings. Each request therefore re-reads its own project's setting and `pdb.rules.edn` and evaluates in its own generation, so a changed or broken file takes effect on the next request and no project or client sees another's policy.
+- **Diagnostics.** `/api/v1/diagnostics/config` lists `rules.project.enabled` as unknown, and the rules view reports `projectPolicy` as `per-request` or `unknown`.
+- **Installed package.** `scripts/package-test.ts` checks that the installed CLI briefing, `pdb rules`, the MCP briefing, a `pdb serve --project` briefing and its `/rules` page name one effective revision. All three depend on this reviewed contract and their
+  native predecessors. #75 remains open until its full default/override/output/test
+  requirements are verified; a schema or worker alone does not complete it.
 
 Required fixtures include valid native conditional/key/reason, multiple matches,
 no-match/default parity, old/new age-order parity, protected-band invariance,

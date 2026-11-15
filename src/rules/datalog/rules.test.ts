@@ -100,6 +100,9 @@ const audience: Record<
   "D-HUMAN-UNVERIFIED": { role: "human", kind: "issue" },
   "D-HUMAN-DECIDE": { role: "human", kind: "issue" },
   "D-HUMAN-SIGNOFF": { role: "human", kind: "pr" },
+  "D-HUMAN-ORPHANED-YOU": { role: "human", kind: "issue" },
+  "D-HUMAN-ORPHANED": { role: "human", kind: "issue" },
+  "D-HUMAN-ORPHANED-UNKNOWN": { role: "human", kind: "issue" },
 };
 const roles = ["implementer", "designer", "human"] as const;
 

@@ -265,6 +265,21 @@ async function cliJson(args: string[]): Promise<Record<string, unknown>> {
   return JSON.parse(out) as Record<string, unknown>;
 }
 
+/**
+ * #516: a served --repo-only repository cannot read its project configuration, so its effective
+ * policy is "unavailable", while a checkout without configuration reports "disabled". Everything
+ * else must be identical; this removes only that manifest and returns the states it held.
+ */
+const splitPolicy = (value: unknown): { rest: unknown; states: string[] } => {
+  const states: string[] = [];
+  const rest = JSON.parse(JSON.stringify(value), (key: string, v: unknown) => {
+    if (key !== "effectivePolicy") return v;
+    states.push((v as { state: string }).state);
+    return undefined;
+  }) as unknown;
+  return { rest, states };
+};
+
 const envelopeKeys = [
   "schemaVersion",
   "kind",
@@ -297,7 +312,9 @@ describe("pdb serve read API (#373)", () => {
           schemaVersion: 1,
           kind: "serve-read",
           view: "briefing",
-          status: "complete",
+          // #414: with no live REST/GraphQL boundary closed sources are not read, which the
+          // human view reports as incomplete rather than as no orphaned question.
+          status: role === "human" ? "incomplete" : "complete",
           selection: { repository: repo, agent: "me", identitySource: "tool" },
           error: null,
         });
@@ -311,7 +328,13 @@ describe("pdb serve read API (#373)", () => {
           "--limit",
           "10",
         ]);
-        expect(reply.json.result).toEqual(cli);
+        const served = splitPolicy(reply.json.result);
+        const local = splitPolicy(cli);
+        expect(served.rest).toEqual(local.rest);
+        if (role !== "human") {
+          expect(served.states).toEqual(["unavailable"]);
+          expect(local.states).toEqual(["disabled"]);
+        }
       }
     } finally {
       await s.close();
@@ -861,11 +884,11 @@ describe("pdb serve cache (#373)", () => {
       const designer = await call(s.running.port, "/api/v1/briefing?agent=other&role=designer");
       expect(s.calls.collect).toHaveLength(1);
       expect(designer.json.freshness.source).toBe("cached");
-      expect(implementer.json.result).toEqual(
-        await cliJson(["--agent", "me", "--role", "implementer"]),
+      expect(splitPolicy(implementer.json.result).rest).toEqual(
+        splitPolicy(await cliJson(["--agent", "me", "--role", "implementer"])).rest,
       );
-      expect(designer.json.result).toEqual(
-        await cliJson(["--agent", "other", "--role", "designer"]),
+      expect(splitPolicy(designer.json.result).rest).toEqual(
+        splitPolicy(await cliJson(["--agent", "other", "--role", "designer"])).rest,
       );
       expect(implementer.json.result).not.toEqual(designer.json.result);
     } finally {
@@ -1110,11 +1133,16 @@ describe("pdb serve cache races (#373)", () => {
     const cache = makeCache(clock, () => "old");
     let finish!: (value: string) => void;
     const key = { repository: "o/r", collector: "c", coverage: {} };
-    const pending = cache.read(key, () => new Promise<string>((done) => (finish = done)));
+    const pending = cache.track(false, () =>
+      cache.read(key, () => new Promise<string>((done) => (finish = done))),
+    );
     await until(() => finish !== undefined);
     expect(cache.refresh("o/r")).toBe(0);
     finish("before-refresh");
-    expect(await pending).toBe("before-refresh");
+    expect(await pending).toMatchObject({
+      value: "before-refresh",
+      freshness: [{ source: "stale", stale: true, refreshError: { code: "CACHE_INVALIDATED" } }],
+    });
     expect(cache.status().entries).toBe(0);
     cache.close();
   });

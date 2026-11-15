@@ -89,6 +89,8 @@ that does not make a prior success fresh. A refresh during an observed retry emb
 returns held evidence plus the known embargo rather than sending early. Exhausted
 GraphQL primary allowance alone does not forbid the separate REST quota lookup.
 
+**Owner clarification for the serve page (#548, 2026-11-15), superseding the next paragraph for the page only:** when a page refresh fails, clear the prior quota numbers and show the error; do not leave an older reading visible as if current. The CLI and service may keep the last-good behaviour below. Fetch only on explicit Refresh; the page does not fetch on open.
+
 If refresh fails, retain a matching last-good observation at most five minutes for
 explicit stale display, alongside the current failure and its category. After that,
 show unavailable/unknown numeric state. Age is measured from the actual observation,
@@ -141,11 +143,10 @@ browser caching. Wrong methods return 405. Authentication/access failures remain
 safe typed failures/partial views. Preserve existing Host/Origin/loopback handling,
 redaction and error conventions; no capability/session ID becomes authentication.
 
-The HTML shell itself makes no GitHub request. When a human opens the page, request
-its visible quota view once. Show loading, manual Refresh, observation time/age and
+The HTML shell itself makes no GitHub request, and opening the page fetches nothing (owner decision on #548): the quota view is requested only when the human presses Refresh, and before that the page says no reading has been taken. Show loading, manual Refresh, observation time/age and
 one card per resource. For valid known limits use a native accessible meter/progress
 presentation with text used/remaining/limit, percentage and reset time/countdown.
-Default presentation thresholds are 80% used for warning and 95% for critical;
+Default presentation thresholds (owner-confirmed on #548): warning at 20% remaining (80% used) and critical **below** 5% remaining (more than 95% used). The shipped classifier (`rowState` in `src/github/quotas.ts`) rounds usage to one decimal and marks critical at `percentUsed >= 95`, so exactly 5% remaining is critical today. #548 compares unrounded counts instead (`remaining * 100 < limit * 5` for critical, `remaining * 100 <= limit * 20` for warning), because a strict comparison on the rounded value would classify 9,501 of 10,000 used as warning. The rounded percentage remains for display only. Otherwise as before:
 100%/zero remaining is exhausted. Label these as PDB display heuristics, not GitHub
 limits on burst behavior, forecasts or guaranteed remaining requests.
 
@@ -174,8 +175,7 @@ no live exhausted-quota tests or credential changes. Cover:
   coalescing, independent abort, deadline and no unrequested/polling API calls;
 - CLI text/JSON/status parity, deterministic narration, invalid flags, secret/path/
   raw-error sentinels, existing telemetry/parser compatibility and packaged help;
-- serve route/selection security, no fetch from existing passive diagnostics, one
-  visible-view request, manual refresh, accessible normal/warning/critical/exhausted/
+- serve route/selection security, no fetch from existing passive diagnostics, no request on page open, one request per explicit Refresh, prior numbers cleared on refresh failure, accessible normal/warning/critical/exhausted/
   unknown/stale/error rendering, mobile layout and API/CLI parity.
 
 Record request counts: quota collection makes one quota request plus at most one

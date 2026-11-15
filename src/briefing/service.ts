@@ -6,6 +6,13 @@ import {
 } from "../config/engine-setting.js";
 import type { EngineSetting, DecisionEngineMetadata } from "../config/engine-setting.js";
 import { resolveReviewPolicy } from "../config/review-setting.js";
+import { resolveProjectRulesSetting } from "../config/project-rules-setting.js";
+import type { ProjectRulesSetting } from "../config/project-rules-setting.js";
+import { effectivePolicy } from "../rules/datalog/project/effective.js";
+import type {
+  EffectivePolicyManifest,
+  ProjectPolicyRuntime,
+} from "../rules/datalog/project/effective.js";
 import { datalogReviewFacts } from "../workflow/reviewpolicy.js";
 import type { DeclaredReviewPolicy } from "../workflow/reviewpolicy.js";
 /**
@@ -53,6 +60,8 @@ import type { Snapshot } from "../github/types.js";
 import type { PickupOrder } from "./ranking.js";
 import { briefingProcess, resolveGuideSetting } from "./process.js";
 import { humanBriefing, humanText, readHumanEvidence } from "./human.js";
+import { discoverClosedQuestions } from "./closedquestions.js";
+import type { ClosedScanSlot } from "./closedquestions.js";
 import type { HumanBriefing } from "./human.js";
 import type { BriefingProcess, GuideRuntime } from "./process.js";
 
@@ -75,6 +84,13 @@ export interface PresentOptions extends Omit<BriefingOptions, "estimation" | "as
   context?: boolean;
   /** Registered role view (#1) shaping the compact briefing. */
   role?: string;
+  /**
+   * #516: whether the repository's native project preferences are enabled, and its verified
+   * checkout root. Absent: not read (front ends without a project), reported as disabled.
+   */
+  projectRules?: ProjectRulesSetting;
+  /** #516 test seam: the project policy loader and evaluator. */
+  projectRuntime?: ProjectPolicyRuntime;
   /** One registered section of the role view with its row cap lifted (#311). */
   section?: string;
   /** Canonical, already-resolved labels every candidate must carry (#312, AND). */
@@ -96,7 +112,7 @@ export interface PresentOptions extends Omit<BriefingOptions, "estimation" | "as
 /** The versioned briefing report and its text rendering. */
 export interface PresentedBriefing {
   report: (ReturnType<typeof compactBriefing> | ReturnType<typeof briefing>) & {
-    decisionEngine: DecisionEngineMetadata;
+    decisionEngine: DecisionEngineMetadata & { effectivePolicy?: EffectivePolicyManifest };
     /**
      * #192: delivery, responsibility and closure, present only when a collected ticket carries a
      * delivery or v1 release record (or its history is truncated). Absent means none in scope.
@@ -132,12 +148,16 @@ export async function presentBriefing(
     rest: Rest;
     /** Rebuilds `trust` over a metered REST boundary, so an intake counts its lookups (#367). */
     trustWith?: (rest: Rest) => TrustDecision;
+    /** `pdb serve`: the closed-ticket scan continued between requests (#414). */
+    closedQuestions?: ClosedScanSlot;
+    /** Its uncached GraphQL boundary; absent: `query`. */
+    closedQuery?: Query;
   },
 ): Promise<PresentedBriefing> {
   // #301: every engine and projection below reads the declared policy from the snapshot.
   if (options.reviewPolicy) snapshot = { ...snapshot, reviewPolicy: options.reviewPolicy };
   if (options.role === humanRole && !options.full && !options.issue)
-    return presentHuman(snapshot, options, now, trust, signal, loadEngine);
+    return presentHuman(snapshot, options, now, trust, signal, loadEngine, live);
   // #367: an issue intake's cost is the whole command's, so the reads made while presenting it
   // (permission lookups and delivery evidence) are metered after its snapshot read.
   const intakeMeter =
@@ -258,6 +278,63 @@ export async function presentBriefing(
       throw engineFailure(error, "Experimental evaluator failed; no fallback was run.");
     }
   }
+  // #516: the project's native preferences, applied to the default-admitted queue, or the
+  // explicit reason they are not in force. Never a silent fallback to the defaults.
+  let effective: { manifest: EffectivePolicyManifest; warnings: string[] } | undefined;
+  if (experimental) {
+    const applied = await effectivePolicy(
+      options.projectRules ?? {
+        enabled: "unavailable",
+        reason: "project configuration was not read for this briefing",
+      },
+      experimental.items,
+      (await import("../rules/datalog/datalog.js")).projectionSubjects(snapshot),
+      {
+        base: {
+          policyVersion: experimental.decisionEngine.policyVersion,
+          rulesHash: experimental.decisionEngine.rulesHash,
+        },
+        role: options.role ?? defaultEngineRole,
+        order: options.order ?? "impact",
+        signal,
+        ...(options.projectRuntime ? { runtime: options.projectRuntime } : {}),
+      },
+    );
+    experimental = { ...experimental, items: applied.items as typeof experimental.items };
+    effective = applied;
+  } else if (
+    !options.full &&
+    !options.issue &&
+    options.projectRules &&
+    (options.projectRules.enabled === true || options.projectRules.enabled === "unknown")
+  ) {
+    // Enabled project rules are native Datalog: the TypeScript rollback cannot honour them.
+    const reason =
+      "project preferences need briefing.engine datalog; the TypeScript rollback engine is in use";
+    effective = {
+      manifest: {
+        schemaVersion: 1,
+        state: "error",
+        formatVersion: null,
+        projectionVersion: null,
+        basePolicyVersion: null,
+        defaultRulesHash: "",
+        projectRulesHash: null,
+        effectiveRulesHash: null,
+        appliedOrderMode: "error",
+        source: "pdb.rules.edn",
+        matchedIds: [],
+        reason,
+        next: [
+          "pdb config set briefing.engine datalog",
+          "pdb config set rules.project.enabled false",
+        ],
+      },
+      warnings: [
+        `Project policy error: ${reason}. The briefing is not the project's effective policy. Run pdb config set briefing.engine datalog, or pdb config set rules.project.enabled false.`,
+      ],
+    };
+  }
   const expanded = briefing(
     snapshot,
     options.full
@@ -278,8 +355,13 @@ export async function presentBriefing(
   const decisionEngine = experimental
     ? {
         ...experimental.decisionEngine,
+        // #516: an active project policy reports the composite effective hash.
+        ...(effective?.manifest.state === "active"
+          ? { rulesHash: effective.manifest.effectiveRulesHash! }
+          : {}),
         source: selection.source,
         role: { used: options.role ?? defaultEngineRole, source: roleSource },
+        ...(effective ? { effectivePolicy: effective.manifest } : {}),
       }
     : {
         requested: selection.requested,
@@ -289,6 +371,7 @@ export async function presentBriefing(
         rulesHash: null,
         coverage: { scope: options.full || options.issue ? "intake" : "next-actions" },
         diagnostics: [],
+        ...(effective ? { effectivePolicy: effective.manifest } : {}),
       };
   // #192: one shared fold/evaluator read for CLI and MCP; an issue intake shows its own ticket.
   // An explicit intake evaluates only its own ticket, so the evaluation cap never skips it.
@@ -310,14 +393,20 @@ export async function presentBriefing(
   const base = compact ?? expanded;
   const report = {
     ...base,
-    // Delivery omissions (the evaluation cap) make the briefing incomplete, never silently clean.
-    completeness: delivery.complete
-      ? base.completeness
-      : {
-          ...base.completeness,
-          complete: false,
-          warnings: [...base.completeness.warnings, ...delivery.omissions],
-        },
+    // Delivery omissions (the evaluation cap) and a failed project policy (#516) make the
+    // briefing incomplete, never silently clean.
+    completeness:
+      delivery.complete && !effective?.warnings.length
+        ? base.completeness
+        : {
+            ...base.completeness,
+            complete: false,
+            warnings: [
+              ...base.completeness.warnings,
+              ...(effective?.warnings ?? []),
+              ...delivery.omissions,
+            ],
+          },
     decisionEngine,
     ...(delivery.tickets.length || !delivery.complete ? { delivery } : {}),
     // #367: an issue intake reports its compatibility-full-v1 profile, coverage and cost.
@@ -328,7 +417,8 @@ export async function presentBriefing(
   // The engine banner is evaluator metadata: context only, or the expanded --full report (#355).
   const engineHeader =
     experimental && (options.context || !compact)
-      ? `Decision engine: Datalog (policy ${experimental.decisionEngine.policyVersion}; ${experimental.decisionEngine.rulesHash.slice(0, 12)})\n`
+      ? // #516: the same resolved identity as the JSON, the composite hash when a project policy ranks.
+        `Decision engine: Datalog (policy ${experimental.decisionEngine.policyVersion}; ${(decisionEngine.rulesHash ?? "").slice(0, 12)}${effective?.manifest.state === "active" ? `; project preferences from ${effective.manifest.source}` : effective?.manifest.state === "error" ? "; project policy error, default order" : ""})\n`
       : "";
   // Delivery omissions reach the text through the renderers' own bounded INCOMPLETE warnings
   // (a few lines plus "N more warning(s) omitted; use --json"), inside the same budget as the
@@ -363,18 +453,58 @@ async function presentHuman(
   trust: TrustDecision | undefined,
   signal: AbortSignal | undefined,
   loadEngine: () => Promise<Pick<typeof import("../rules/datalog/datalog.js"), "evaluateDatalog">>,
+  live?: {
+    query: Query;
+    rest: Rest;
+    trustWith?: (rest: Rest) => TrustDecision;
+    closedQuestions?: ClosedScanSlot;
+    closedQuery?: Query;
+  },
 ): Promise<PresentedBriefing> {
   const evidence = await readHumanEvidence(snapshot, trust, signal);
+  // #414: a question outlives its ticket's closure. Closed sources are read live within a fixed
+  // budget; offline or cached reads say they were not read rather than show none.
+  evidence.closed = live
+    ? await discoverClosedQuestions(
+        snapshot.repository,
+        {
+          query: live.closedQuery ?? live.query,
+          rest: live.rest,
+          ...(live.trustWith ? { trustWith: live.trustWith } : {}),
+          ...(live.closedQuestions ? { slot: live.closedQuestions } : {}),
+          ...(trust ? { trust } : {}),
+          ...(signal ? { signal } : {}),
+        },
+        new Set(snapshot.issues.filter((i) => i.state === "OPEN").map((i) => i.url)),
+      )
+    : {
+        read: false,
+        complete: false,
+        why: options.offline ? "offline or cached read" : "no live GitHub read",
+      };
+  const closedSources = evidence.closed.read ? evidence.closed.sources : [];
+  const records = new Map(evidence.records);
+  for (const source of closedSources) records.set(source.issue.url, source.facts);
+  const evaluated: Snapshot = closedSources.length
+    ? {
+        ...snapshot,
+        issues: [
+          // A closed issue already in the snapshot (a dependency stub) is replaced by its read.
+          ...snapshot.issues.filter((i) => !closedSources.some((c) => c.issue.url === i.url)),
+          ...closedSources.map((c) => c.issue),
+        ],
+      }
+    : snapshot;
   const human = options.agent ?? null;
   let result: Awaited<
     ReturnType<(typeof import("../rules/datalog/datalog.js"))["evaluateDatalog"]>
   >;
   try {
     const { evaluateDatalog } = await loadEngine();
-    result = evaluateDatalog(snapshot, new Map(), {
+    result = evaluateDatalog(evaluated, new Map(), {
       role: humanRole,
       agent: human ?? undefined,
-      questionRecords: evidence.records,
+      questionRecords: records,
       ...datalogReviewFacts(snapshot),
       checkRequiredness: datalogCheckFacts(snapshot),
       limit: Number.MAX_SAFE_INTEGER,
@@ -456,12 +586,28 @@ export interface ReadRuntime {
   queryWith?: (signal?: AbortSignal) => Query;
   /** Clock for freshness ages; defaults to the system clock. */
   now?: () => Date;
+  /**
+   * `pdb serve` (#414): this project's and repository's closed-ticket scan, continued between
+   * requests. Absent: each human briefing starts the bounded closed-ticket read afresh.
+   */
+  closedQuestions?: ClosedScanSlot;
+  /**
+   * `pdb serve`: an uncached (still confined) GraphQL boundary for that scan. Memoised pages
+   * could be older than the watermark the scan advances, so its reads bypass the cache (#414).
+   */
+  closedQueryWith?: (signal?: AbortSignal) => Query;
   /** Monotonic timer for the Datalog soft-budget diagnostic; defaults to `performance.now`. */
   engineClock?: () => number;
   /** Rewrites locally generated diagnostics (not GitHub evidence) for remote consumers. */
   redactDiagnostic?: (text: string) => string;
   /** Filesystem, git and working directory for the workflow-guide setting (#71). */
   guide?: GuideRuntime;
+  /**
+   * #516: the project-rules setting when the front end already knows it (`pdb serve --repo`
+   * states that no local checkout is selected). Absent: resolved from `guide`, and without one
+   * reported as unavailable, never read from the working directory.
+   */
+  projectRules?: ProjectRulesSetting;
   /**
    * The declared review policy when the front end already knows it (#301): pdb serve with only
    * --repo states it is undeclared rather than reading any directory (#271). Absent: resolved
@@ -564,6 +710,11 @@ export async function readBriefing(
   const engineSetting = request.issue
     ? undefined
     : await resolveEngineSetting(request.repository, runtime.guide);
+  // #516: program-mediated enablement and the verified checkout the policy file is read from.
+  const projectRules = request.issue
+    ? undefined
+    : (runtime.projectRules ??
+      (await resolveProjectRulesSetting(request.repository, runtime.guide)));
   const reviewPolicy =
     runtime.reviewPolicy ?? (await resolveReviewPolicy(request.repository, runtime.guide));
   const setting = await resolveGuideSetting(request.repository, undefined, runtime.guide);
@@ -584,6 +735,7 @@ export async function readBriefing(
     ...(request.order ? { order: request.order } : {}),
     process,
     engineSetting,
+    ...(projectRules ? { projectRules } : {}),
     reviewPolicy,
     ...(runtime.engineClock ? { engineClock: runtime.engineClock } : {}),
   };
@@ -653,6 +805,10 @@ export async function readBriefing(
               rest(path, { ...options, signal: options?.signal ?? request.signal }),
             trustWith: (other: Rest) =>
               markerTrust(permissionLookup(request.repository, other, request.signal)),
+            ...(runtime.closedQuestions ? { closedQuestions: runtime.closedQuestions } : {}),
+            ...(runtime.closedQueryWith
+              ? { closedQuery: runtime.closedQueryWith(request.signal) }
+              : {}),
           }
         : undefined,
     );

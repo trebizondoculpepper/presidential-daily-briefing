@@ -36,6 +36,12 @@ export interface QuestionRecordFact {
   trust: "trusted" | "unverified";
   /** The record's `Designer:` routing name; "" when it could not be read. */
   to: string;
+  /**
+   * Closed sources only (#414): the marker version and the explicit resolve/withdraw outcome
+   * the host folded; `unknown` when unverifiable records or unread history leave it open.
+   */
+  version?: 1 | 2;
+  outcome?: "none" | "resolved" | "withdrawn" | "unknown";
 }
 export interface DatalogOptions {
   /** `human` is the human briefing role (#457); its decisions are not agent actions. */
@@ -242,6 +248,8 @@ function normalize(
       put(id, "question-record", r);
       put(r, "record-trust", record.trust);
       put(r, "record-to", record.to);
+      if (record.version !== undefined) put(r, "record-version", record.version);
+      if (record.outcome !== undefined) put(r, "record-outcome", record.outcome);
     }
     if (pr) {
       const rollup = pr.commits?.nodes?.[0]?.commit.statusCheckRollup;

@@ -48,6 +48,41 @@ export interface RulesContext {
    * serve rules page, #392). Absent means unknown: defaults are never presented as effective.
    */
   effective?: EffectiveSettings;
+  /**
+   * The selected project's native preferences (#516), when a caller resolved them. Absent means
+   * unknown: a default-only listing is never presented as the effective policy.
+   */
+  project?: ProjectRulesView;
+}
+
+/** The parts of a validated project policy the English document renders (#514 models). */
+export interface ProjectPolicyEnglish {
+  formatVersion: number;
+  projectionVersion: number;
+  basePolicyVersion: number;
+  projectRulesHash: string;
+  effectiveRulesHash: string;
+  preferences: {
+    id: string;
+    why: string;
+    english: { when: Clause[]; priority: Clause[]; witnesses: Record<string, Clause[]> };
+  }[];
+  helpers: { name: string; params: string[]; clauses: Clause[] }[];
+}
+/** What is known about the selected project's native preferences. */
+export type ProjectRulesView =
+  | { state: "disabled"; reason: string }
+  | { state: "unknown"; reason: string }
+  | { state: "error"; reason: string; next: string[] }
+  | { state: "active"; policy: ProjectPolicyEnglish };
+/** Fixed facts about how project preferences apply; from projection.ts and worker.ts. */
+export interface ProjectLimits {
+  protectedBands: number[];
+  actions: number;
+  datoms: number;
+  evaluationMs: number;
+  startupMs: number;
+  lexicon: { viewer: Record<string, string>; attributes: Record<string, string> };
 }
 
 /** One effective repository setting as read from a verified local checkout. */
@@ -170,15 +205,24 @@ export function rulesDocument(
   context: RulesContext,
   filters: RulesFilters = {},
   model: EnglishPolicy = shippedModel(),
+  projectLimits?: ProjectLimits,
 ) {
+  const active = context.project?.state === "active" ? context.project.policy : null;
+  const projectIds = active
+    ? [...active.preferences.map((p) => p.id), ...active.helpers.map((h) => h.name)]
+    : [];
   if (filters.role !== undefined && !(rulesRoles as readonly string[]).includes(filters.role))
     throw new RulesArgumentError(
       `--role must be ${rulesRoles.join(" or ")}, not "${filters.role}"`,
     );
-  if (filters.rule !== undefined && !ruleIds(model).includes(filters.rule)) {
-    const near = suggestions(model, filters.rule);
+  const projectSelected = filters.rule !== undefined && projectIds.includes(filters.rule);
+  if (filters.rule !== undefined && !projectSelected && !ruleIds(model).includes(filters.rule)) {
+    const near = [
+      ...projectIds.filter((id) => id.includes(filters.rule!.toLowerCase())),
+      ...suggestions(model, filters.rule),
+    ].slice(0, 8);
     throw new RulesArgumentError(
-      `unknown rule or predicate "${filters.rule}".${near.length ? ` Did you mean: ${near.join(", ")}?` : ""} Decision IDs, denial IDs and predicate names are accepted; ${RULES_COMMAND} --json lists them all.`,
+      `unknown rule or predicate "${filters.rule}".${near.length ? ` Did you mean: ${near.join(", ")}?` : ""} Decision IDs, denial IDs, predicate names and, for an active project policy, its preference and helper names are accepted; ${RULES_COMMAND} --json lists them all.`,
     );
   }
   const usedBy = usedByIndex(model);
@@ -194,9 +238,20 @@ export function rulesDocument(
   let queries: CompiledQuery[] = model.queries;
   let keyQueries: CompiledQuery[] = model.ordering.keyQueries;
   let overrides = model.ordering.overrides;
-  let selected: { id: string; type: "decision" | "denial" | "predicate" } | null = null;
+  let selected: {
+    id: string;
+    type: "decision" | "denial" | "predicate";
+  } | null = null;
 
-  if (filters.rule !== undefined) {
+  if (projectSelected) {
+    // A project preference or helper: no default rule is selected, only the project's own.
+    decisions = [];
+    denials = [];
+    predicates = [];
+    queries = [];
+    keyQueries = [];
+    overrides = [];
+  } else if (filters.rule !== undefined) {
     const id = filters.rule;
     const decision = decisions.find((d) => d.id === id);
     const denial = model.denials.find((d) => d.id === id);
@@ -263,6 +318,87 @@ export function rulesDocument(
   }));
   const queryOut = (q: CompiledQuery) => ({ ...q, english: conjunctionText(q.clauses) });
 
+  // #516: the project's preferences, rendered with the same structural renderer and their own
+  // projection lexicon, never merged into the default policy's.
+  const project = active
+    ? (() => {
+        let preferences = active.preferences;
+        let helpers = active.helpers;
+        if (projectSelected) {
+          const id = filters.rule as string;
+          preferences = preferences.filter((p) => p.id === id);
+          const roots = preferences.length
+            ? preferences.flatMap((p) => [
+                ...callsIn(p.english.when),
+                ...callsIn(p.english.priority),
+                ...Object.values(p.english.witnesses).flatMap(callsIn),
+              ])
+            : [id];
+          const byName = new Map(active.helpers.map((h) => [h.name, h]));
+          const needed = new Set<string>();
+          const queue = [...roots];
+          while (queue.length) {
+            const name = queue.shift() as string;
+            if (needed.has(name)) continue;
+            needed.add(name);
+            for (const h of active.helpers.filter((x) => x.name === name))
+              queue.push(...callsIn(h.clauses));
+          }
+          helpers = active.helpers.filter((h) => needed.has(h.name) && byName.has(h.name));
+        } else if (filters.rule !== undefined) {
+          preferences = [];
+          helpers = [];
+        }
+        return {
+          source: "pdb.rules.edn",
+          preferences: preferences.map((p) => ({
+            id: p.id,
+            why: p.why,
+            when: conjunctionText(p.english.when),
+            priority: conjunctionText(p.english.priority),
+            witnesses: Object.fromEntries(
+              Object.entries(p.english.witnesses).map(([name, cs]) => [name, conjunctionText(cs)]),
+            ),
+            clauses: p.english,
+          })),
+          helpers: helpers.map((h) => ({
+            name: h.name,
+            params: h.params,
+            english: conjunctionText(h.clauses),
+            clauses: h.clauses,
+          })),
+          ...(projectLimits ? { limits: projectLimits } : {}),
+          statements: [
+            "Project preferences only reorder actions the shipped policy already admitted, within each adjustable band; they never add, remove or re-band an action, or change its kind, role, target or next command.",
+            `Protected bands ${projectLimits?.protectedBands.join(" and ") ?? "1 and 2"} (addressed attention and concrete PR follow-up) are never seen or reordered by project rules.`,
+            "Within a band, the highest matched project priority sorts first; equal or no priority keeps the shipped order. Default reasons and warnings stay; project reasons are added beside them.",
+            "Under an explicit oldest or newest order, project preferences are not applied and the shipped order is kept exactly.",
+          ],
+        };
+      })()
+    : null;
+  const view = context.project ?? {
+    state: "unknown" as const,
+    reason:
+      "pdb rules was not given a project, so whether project preferences are in force is unknown; this listing is the shipped default policy only.",
+  };
+  const effectivePolicy = {
+    state: view.state,
+    source: "pdb.rules.edn",
+    defaultRulesHash: model.rulesHash,
+    projectRulesHash: active?.projectRulesHash ?? null,
+    effectiveRulesHash: active
+      ? active.effectiveRulesHash
+      : view.state === "disabled"
+        ? model.rulesHash
+        : null,
+    formatVersion: active?.formatVersion ?? null,
+    projectionVersion: active?.projectionVersion ?? null,
+    basePolicyVersion: active?.basePolicyVersion ?? null,
+    reason: view.state === "active" ? null : view.reason,
+    next: view.state === "error" ? view.next : [],
+  };
+
   return {
     schemaVersion: RULES_SCHEMA_VERSION,
     command: RULES_COMMAND,
@@ -272,13 +408,22 @@ export function rulesDocument(
       englishModelVersion: model.modelVersion,
       sources: model.sources,
     },
+    effectivePolicy,
+    project,
     scope: {
       complete: !filtered,
       filters: {
         ...(filters.rule !== undefined ? { rule: filters.rule } : {}),
         ...(filters.role !== undefined ? { role: filters.role } : {}),
       },
-      selected,
+      selected: projectSelected
+        ? {
+            id: filters.rule as string,
+            type: active!.preferences.some((p) => p.id === filters.rule)
+              ? ("project-preference" as const)
+              : ("project-helper" as const),
+          }
+        : selected,
       note: filtered
         ? "Filtered subset of the policy, not the complete rules. Run pdb rules without filters for every rule."
         : "Complete represented policy: every decision rule, denial, ordering rule, query and predicate in the bundled artifact.",
@@ -358,6 +503,18 @@ export function rulesText(doc: RulesDocument): string {
         .map(([k, v]) => `--${k} ${v}`)
         .join(" ")}). ${doc.scope.note}`,
     );
+  const ep = doc.effectivePolicy;
+  if (ep.state === "active")
+    push(
+      `Effective policy: shipped default plus project preferences from ${ep.source} (effectiveRulesHash ${ep.effectiveRulesHash}; projectRulesHash ${ep.projectRulesHash})`,
+    );
+  else if (ep.state === "disabled")
+    push(`Effective policy: the shipped default only (project preferences disabled: ${ep.reason})`);
+  else if (ep.state === "error")
+    push(
+      `Effective policy: ERROR. ${ep.reason}. The project preferences are enabled but not in force; briefings are incomplete until this is fixed. ${ep.next.join("; ")}`,
+    );
+  else push(`Effective policy: unknown. ${ep.reason}`);
   push(`See also: ${doc.related.process}`);
   push(
     'Reading: ?t is the ticket or pull request, ?r a decision rule; name(?x) is a predicate defined in the glossary; "no match for" means no fact matches, which is not proof of the opposite.',
@@ -434,6 +591,34 @@ export function rulesText(doc: RulesDocument): string {
   for (const q of doc.ordering.keyQueries)
     push(`Sort key query ${queryHeader(q)}`, ...clauseLines(q.clauses, "    "));
 
+  if (doc.project) {
+    const p = doc.project;
+    push("", `== Project preferences (${p.preferences.length}) ==`);
+    push(`From ${p.source}. ${p.statements.join(" ")}`);
+    for (const pref of p.preferences) {
+      push(
+        `  ${pref.id}: reason "${pref.why}"`,
+        "    Matches an admitted action ?a when all of:",
+        ...clauseLines(pref.clauses.when, "      "),
+        "    Priority (?value, higher sorts first) when all of:",
+        ...clauseLines(pref.clauses.priority, "      "),
+      );
+      for (const [name, cs] of Object.entries(pref.clauses.witnesses))
+        push(`    Witness ${name} (?value) when all of:`, ...clauseLines(cs, "      "));
+    }
+    if (p.helpers.length) {
+      push("Project helpers:");
+      for (const h of p.helpers)
+        push(`  ${predicateHead(h.name, h.params)} all of:`, ...clauseLines(h.clauses, "      "));
+    }
+    if (p.limits)
+      push(
+        `Limits: at most ${p.limits.actions} adjustable actions and ${p.limits.datoms} projected facts; evaluation within ${p.limits.evaluationMs} ms after a ${p.limits.startupMs} ms worker start. Excess is an error, never a partial ranking.`,
+        "Project inputs (projection lexicon, read-only):",
+        ...Object.entries(p.limits.lexicon.attributes).map(([k, v]) => `  ${k}: ${v}`),
+      );
+  }
+
   if (doc.queries.length) {
     push("", `== Other engine queries (${doc.queries.length}) ==`);
     for (const q of doc.queries) push(`  ${queryHeader(q)}`, ...clauseLines(q.clauses, "      "));
@@ -489,15 +674,20 @@ export function rulesText(doc: RulesDocument): string {
 }
 
 export const rulesHelp = `Usage: pdb rules [--json] [--rule ID] [--role implementer|designer]
-Prints the represented policy in English, compiled from the bundled Datalog clauses: policy
+Prints the effective policy in English, compiled from the bundled Datalog clauses: policy
 identity, declared defaults, decision rules by band, eligibility and denials, ordering and
-declared overrides, other engine queries, the predicate glossary, constants, inputs and what is
-not formalized here. Local: no GitHub calls, credentials or repository configuration.
+declared overrides, the project's native preferences when they are enabled in this checkout
+(pdb config set rules.project.enabled true), other engine queries, the predicate glossary,
+constants, inputs and what is not formalized here. Local: no GitHub calls or credentials; it
+reads only this checkout's configuration and pdb.rules.edn.
   --rule ID     One decision rule, denial or predicate, with the predicates it needs and its
-                precedence context (rules of the same kind and declared overrides)
+                precedence context (rules of the same kind and declared overrides), or one
+                project preference or helper of an active project policy
   --role R      Rules for implementer or designer; rules without a top-level role fact stay
   --json        Versioned document (schemaVersion ${RULES_SCHEMA_VERSION}); the text is the same document
   --help        Show usage
+pdb rules init writes a starter pdb.rules.edn bound to the shipped policy into this checkout,
+never overwriting a file and enabling nothing.
 Filtered output says so and is never the complete policy. pdb process is the short workflow
 guide. Exit: 0 printed; 2 invalid arguments or unknown rule; 1 missing or mismatched artifact.
 `;

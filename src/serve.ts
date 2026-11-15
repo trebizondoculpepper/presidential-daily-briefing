@@ -56,6 +56,7 @@ import {
   dashboardSecurityPolicy,
 } from "./serve/dashboard.js";
 import { ticketPage, ticketPageParameters, ticketScript } from "./serve/ticket-page.js";
+import { humanPage, humanScript } from "./serve/human-page.js";
 
 export { serveHelp } from "./serve/options.js";
 
@@ -179,6 +180,8 @@ const dashboardFiles = (): Map<string, { type: string; body: string }> =>
     ["/ticket.js", { type: "text/javascript; charset=utf-8", body: ticketScript() }],
     // Copy buttons of the agent setup page (#391); the page works without it.
     ["/setup.js", { type: "text/javascript; charset=utf-8", body: setupScript() }],
+    // The human attention view (#458): its page is rendered per request, its script is static.
+    ["/human.js", { type: "text/javascript; charset=utf-8", body: humanScript() }],
   ]);
 
 /**
@@ -362,6 +365,23 @@ export async function startServe(
           runtime.rulesPage ?? defaultRulesPageRuntime(),
           selectRepository,
         );
+        response.writeHead(page.status, {
+          "content-type": "text/html; charset=utf-8",
+          "cache-control": "no-store",
+          "x-content-type-options": "nosniff",
+          "referrer-policy": "no-referrer",
+          "content-security-policy": dashboardSecurityPolicy,
+        });
+        response.end(request.method === "HEAD" ? undefined : page.html);
+        return;
+      }
+      if (path === "/human") {
+        // The human mode of the Work page (#458): validated server-side, read by its script.
+        if (request.method !== "GET" && request.method !== "HEAD")
+          throw new HttpFailure(405, "METHOD_NOT_ALLOWED", "Use GET.", [], {
+            allow: "GET, HEAD",
+          });
+        const page = humanPage(context.url.searchParams, served, selectRepository);
         response.writeHead(page.status, {
           "content-type": "text/html; charset=utf-8",
           "cache-control": "no-store",

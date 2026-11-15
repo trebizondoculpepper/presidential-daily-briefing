@@ -6,7 +6,10 @@ import { describe, expect, it } from "vite-plus/test";
 import { presentBriefing } from "./service.js";
 import type { HumanBriefing } from "./human.js";
 import { parseQuestionRecord } from "./human.js";
-import { parseQuestionRecordBody, questionRecordBody } from "../workflow/claims.js";
+import { parseQuestionRecordBody, questionMarker, questionRecordBody } from "../workflow/claims.js";
+import { resolutionMarker } from "../workflow/claimactivity.js";
+import { discoverClosedQuestions } from "./closedquestions.js";
+import type { Query, Rest } from "../github/github.js";
 import { markerTrust } from "../workflow/delivery.js";
 import type { TrustDecision } from "../workflow/delivery.js";
 import type { Comment, Issue, PullRequest } from "../github/types.js";
@@ -19,12 +22,21 @@ let commentId = 0;
 function record(
   designer: string,
   questions: string[],
-  options: { author?: string; marker?: string; why?: string; createdAt?: string } = {},
+  options: {
+    author?: string;
+    marker?: string;
+    why?: string;
+    createdAt?: string;
+    /** Write the v2 marker bound to this issue (#412), as `pdb needs-human` now does. */
+    v2?: number;
+  } = {},
 ): Comment {
   commentId++;
+  const opId = options.marker ?? String(commentId).padStart(16, "0");
   return {
     ...by(options.author ?? "agent-account"),
-    url: `https://github.com/${repo}/issues/1#issuecomment-${commentId}`,
+    databaseId: commentId,
+    url: `https://github.com/${repo}/issues/${options.v2 ?? 1}#issuecomment-${commentId}`,
     createdAt: options.createdAt ?? time,
     body: [
       "### Questions for the designer",
@@ -35,9 +47,75 @@ function record(
       "",
       ...questions.map((q, i) => `${i + 1}. ${q}`),
       "",
-      `<!-- github-triage:needs-human:${options.marker ?? String(commentId).padStart(16, "0")} -->`,
+      options.v2 === undefined
+        ? `<!-- github-triage:needs-human:${opId} -->`
+        : questionMarker(opId, repo, options.v2),
     ].join("\n"),
   };
+}
+/** An explicit `pdb question resolve|withdraw` record answering `question` on issue `n`. */
+function outcome(
+  n: number,
+  question: Comment,
+  op: "resolve" | "withdraw",
+  options: { author?: string; createdAt?: string } = {},
+): Comment {
+  commentId++;
+  const opId = /needs-human:([0-9a-f]{16})/.exec(question.body)![1]!;
+  return {
+    ...by(options.author ?? "agent-account"),
+    databaseId: commentId,
+    url: `https://github.com/${repo}/issues/${n}#issuecomment-${commentId}`,
+    createdAt: options.createdAt ?? "2026-11-12T11:00:00Z",
+    body: `Question ${op}d.\n\n${resolutionMarker({
+      v: 1,
+      op,
+      opId: String(commentId).padStart(32, "0"),
+      repository: repo,
+      issue: n,
+      questionCommentId: String(question.databaseId),
+      questionOpId: opId,
+      agent: "kavya",
+      reason: "Answered on the ticket.",
+    })}`,
+  };
+}
+const closedIssue = (n: number, labels: string[], comments: Comment[], more = false): Issue => ({
+  ...issue(n, labels),
+  state: "CLOSED",
+  stateReason: "COMPLETED",
+  comments: page(comments, more, more ? "c0" : null),
+});
+/**
+ * An injected gh for the closed-source read (#414): the closed-issue inventory, paged by `first`,
+ * and further comment pages per issue (`later[n]`, one array per page). Records every request.
+ */
+function closedGh(closed: Issue[], later: Record<number, Comment[][]> = {}) {
+  const calls: string[] = [];
+  const query: Query = async (source, variables) => {
+    const size = Number(/first:(\d+)/.exec(source)![1]);
+    if (source.includes("states:CLOSED")) {
+      calls.push(`inventory ${variables.cursor ?? "start"}`);
+      const start = variables.cursor === undefined ? 0 : Number(variables.cursor);
+      const more = start + size < closed.length;
+      return {
+        repository: {
+          issues: page(closed.slice(start, start + size), more, more ? String(start + size) : null),
+        },
+      } as never;
+    }
+    const n = Number(variables.number);
+    const at = Number(String(variables.cursor).slice(1));
+    calls.push(`comments #${n} ${String(variables.cursor)}`);
+    const pages = later[n] ?? [];
+    const more = at + 1 < pages.length;
+    return {
+      repository: {
+        issueOrPullRequest: { comments: page(pages[at] ?? [], more, more ? `c${at + 1}` : null) },
+      },
+    } as never;
+  };
+  return { query, calls };
 }
 const withComments = (item: Issue, comments: Comment[], more = false): Issue => ({
   ...item,
@@ -49,8 +127,17 @@ const trustAll = (table: Record<string, RepositoryPermission> = {}): TrustDecisi
 async function human(
   issues: Issue[],
   prs: PullRequest[] = [],
-  options: { agent?: string; trust?: TrustDecision | null; limit?: number } = {},
+  options: {
+    agent?: string;
+    trust?: TrustDecision | null;
+    limit?: number;
+    /** Closed issues behind the injected gh (#414); null: no live read, as offline. */
+    closed?: Issue[] | null;
+  } = {},
 ) {
+  const trust = options.trust === null ? undefined : (options.trust ?? trustAll());
+  const gh = options.closed === null ? null : closedGh(options.closed ?? []);
+  const rest: Rest = async () => ({ status: 200, body: {} });
   const presented = await presentBriefing(
     snapshot(issues, prs),
     {
@@ -66,7 +153,10 @@ async function human(
     undefined,
     new Date(time),
     undefined,
-    options.trust === null ? undefined : (options.trust ?? trustAll()),
+    trust,
+    undefined,
+    undefined,
+    gh && trust ? { query: gh.query, rest, trustWith: () => trust } : undefined,
   );
   const report = presented.report as unknown as {
     human: HumanBriefing;
@@ -281,7 +371,7 @@ describe("human briefing role (#457)", () => {
     };
     const { view, complete } = await human([empty, issue(7, [])], [accepted]);
     expect(complete).toBe(false);
-    expect(view.coverage.warnings.join(" ")).toMatch(/questions could not be read/);
+    expect(view.coverage.warnings.join(" ")).toMatch(/its questions could not be read/);
     expect(view.coverage.warnings.join(" ")).toMatch(/closing issue references truncated/);
   });
 
@@ -346,6 +436,308 @@ describe("human briefing role (#457)", () => {
       expect(malformed.view.coverage.warnings.join(" ")).toMatch(/has a malformed marker/);
       const bound = await human([ticket(withMarker(v2(repo, 1)))]);
       expect(bound.view.coverage.records.current).toBe(1);
+    });
+  });
+
+  describe("questions on closed sources (#414)", () => {
+    it("keeps an unanswered question visible when its ticket closes, labelled closed", async () => {
+      const asked = record("owner", ["Which account model?"], { v2: 21 });
+      const closed = closedIssue(21, [], [asked]);
+      const { view, text, complete } = await human([issue(3)], [], { closed: [closed] });
+      expect(rows(view)).toEqual(["orphaned-question#21:to-you"]);
+      const item = view.items[0];
+      expect(item).toMatchObject({
+        sourceState: "closed",
+        resolution: "unresolved",
+        requested: ["Which account model?"],
+        routedTo: ["owner"],
+        source: asked.url,
+        ruleIds: ["D-HUMAN-ORPHANED-YOU"],
+        blocks: { subjects: [closed.url], unknown: [] },
+      });
+      expect(text).toContain("[explicit, to you, ticket closed, unanswered] orphaned-question");
+      expect(view.coverage.closedSources).toMatchObject({
+        read: true,
+        complete: true,
+        requests: 1,
+        records: { noOutcome: 1, resolved: 0, withdrawn: 0 },
+      });
+      expect(complete).toBe(true);
+    });
+
+    it("drops a question resolved or withdrawn before closing, and only that question", async () => {
+      const resolvedQ = record("owner", ["Resolved?"], { v2: 22 });
+      const withdrawnQ = record("owner", ["Withdrawn?"], { v2: 23 });
+      const keptQ = record("designer-a", ["Still open?"], { v2: 23 });
+      const resolved = closedIssue(22, [], [resolvedQ, outcome(22, resolvedQ, "resolve")]);
+      // A withdrawal answers exactly the question it names, never its neighbour.
+      const withdrawn = closedIssue(
+        23,
+        [],
+        [withdrawnQ, keptQ, outcome(23, withdrawnQ, "withdraw")],
+      );
+      const { view } = await human([], [], { closed: [resolved, withdrawn] });
+      expect(rows(view)).toEqual(["orphaned-question#23:explicit"]);
+      expect(view.items[0].requested).toEqual(["Still open?"]);
+      expect(view.coverage.closedSources).toMatchObject({
+        records: { noOutcome: 1, resolved: 1, withdrawn: 1 },
+      });
+    });
+
+    it("never takes an untrusted resolution, a copied record or closure as an answer", async () => {
+      const asked = record("owner", ["Answered by a stranger?"], { v2: 24 });
+      const forged = outcome(24, asked, "resolve", { author: "stranger" });
+      const copied = record("owner", ["Copied?"], { v2: 99 });
+      const source = closedIssue(24, [], [asked, forged, copied]);
+      const { view } = await human([], [], {
+        closed: [source],
+        trust: trustAll({ stranger: "read" }),
+      });
+      expect(rows(view)).toEqual(["orphaned-question#24:to-you"]);
+      expect(view.coverage.warnings.join(" ")).toMatch(/bound to example\/project#99; ignored/);
+    });
+
+    it("never lets an untrusted copy of a genuine marker hide the original (Codex, #607)", async () => {
+      const asked = record("owner", ["Original?"], { v2: 27, marker: "bbbbbbbbbbbbbbbb" });
+      const copy = record("owner", ["Original?"], {
+        v2: 27,
+        marker: "bbbbbbbbbbbbbbbb",
+        author: "stranger",
+      });
+      const { view } = await human([], [], {
+        closed: [closedIssue(27, [], [asked, copy])],
+        trust: trustAll({ stranger: "read" }),
+      });
+      expect(rows(view)).toEqual(["orphaned-question#27:to-you"]);
+      expect(view.items[0].source).toBe(asked.url);
+    });
+
+    it("lists only questions still open: a label-resolved v1 beside a v2 is not shown (Codex, #607)", async () => {
+      const legacy = record("designer-a", ["Legacy, answered by labels?"]);
+      const current = record("owner", ["Current?"], { v2: 28 });
+      const { view } = await human([], [], { closed: [closedIssue(28, [], [legacy, current])] });
+      expect(rows(view)).toEqual(["orphaned-question#28:to-you"]);
+      expect(view.items[0]).toMatchObject({
+        requested: ["Current?"],
+        routedTo: ["owner"],
+        source: current.url,
+      });
+    });
+
+    it("reports truncated labels on a closed legacy source as incomplete (Codex, #607)", async () => {
+      const truncated = {
+        ...closedIssue(29, [], [record("owner", ["Truncated?"])]),
+        labels: page([{ name: "status:ready" }], true),
+      };
+      const { view, complete } = await human([], [], { closed: [truncated] });
+      expect(rows(view)).toEqual(["orphaned-question#29:explicit"]);
+      expect(view.items[0].resolution).toBe("unknown");
+      expect(complete).toBe(false);
+      expect(view.coverage.closedSources).toMatchObject({ complete: false });
+      expect(view.coverage.warnings.join(" ")).toMatch(
+        /are truncated; whether its legacy question/,
+      );
+    });
+
+    it("binds an outcome to the question, whichever trusted copy it names (Codex, #607)", async () => {
+      const original = record("owner", ["Copied?"], { v2: 33, marker: "cccccccccccccccc" });
+      const copy = record("owner", ["Copied?"], { v2: 33, marker: "cccccccccccccccc" });
+      const answered = closedIssue(33, [], [original, copy, outcome(33, original, "resolve")]);
+      const { view } = await human([], [], { closed: [answered] });
+      expect(view.total).toBe(0);
+      const open = closedIssue(
+        34,
+        [],
+        [
+          record("owner", ["Open?"], { v2: 34, marker: "dddddddddddddddd" }),
+          record("owner", ["Open?"], { v2: 34, marker: "dddddddddddddddd" }),
+        ],
+      );
+      const shown = await human([], [], { closed: [open] });
+      expect(shown.view.items[0].source).toBe(open.comments.nodes[0].url);
+      expect(shown.view.items[0].requested).toEqual(["Open?"]);
+    });
+
+    it("reports each unreadable record on a closed source, even beside a readable one (Codex, #607)", async () => {
+      const blank = record("owner", [], { v2: 35 });
+      const readable = record("owner", ["Readable?"], { v2: 35 });
+      const { view, complete } = await human([], [], {
+        closed: [closedIssue(35, [], [blank, readable])],
+      });
+      expect(view.items[0].requested).toEqual(["Readable?"]);
+      expect(complete).toBe(false);
+      expect(view.coverage.warnings.join(" ")).toContain(
+        `record ${blank.url}: its questions could not be read`,
+      );
+    });
+
+    it("treats an arbitrary reply as no answer, and an edited or unknown-author outcome as unverified", async () => {
+      const asked = record("owner", ["Answered by chat?"], { v2: 36 });
+      const reply: Comment = {
+        ...by("owner"),
+        databaseId: 99036,
+        url: `https://github.com/${repo}/issues/36#issuecomment-99036`,
+        createdAt: "2026-11-12T12:00:00Z",
+        body: "Yes, go with the first option.",
+      };
+      const chat = await human([], [], { closed: [closedIssue(36, [], [asked, reply])] });
+      expect(chat.view.items[0]).toMatchObject({ resolution: "unresolved" });
+
+      const q = record("owner", ["Edited answer?"], { v2: 37 });
+      const edited: Comment = {
+        ...outcome(37, q, "resolve"),
+        lastEditedAt: "2026-11-12T13:00:00Z",
+        editor: { __typename: "User", login: "outsider" },
+      };
+      const ghostQ = record("owner", ["Ghost answer?"], { v2: 38 });
+      const ghost = outcome(38, ghostQ, "resolve", { author: "ghost" });
+      const { view } = await human([], [], {
+        closed: [closedIssue(37, [], [q, edited]), closedIssue(38, [], [ghostQ, ghost])],
+        trust: trustAll({ outsider: "read", ghost: "unknown" }),
+      });
+      // Neither outcome is trusted: both questions stay visible, and coverage says why.
+      expect(rows(view).sort()).toEqual([
+        "orphaned-question#37:to-you",
+        "orphaned-question#38:explicit",
+      ]);
+      expect(view.coverage.complete).toBe(false);
+    });
+
+    it("keeps legacy v1 label resolution: labelled stays, labels removed is answered", async () => {
+      const labelled = closedIssue(25, ["question"], [record("designer-a", ["Legacy?"])]);
+      const cleared = closedIssue(26, [], [record("designer-a", ["Cleared?"])]);
+      const { view } = await human([], [], { closed: [labelled, cleared] });
+      expect(rows(view)).toEqual(["orphaned-question#25:explicit"]);
+      expect(view.items[0].ruleIds).toEqual(["D-HUMAN-ORPHANED"]);
+    });
+
+    it("says closed sources were not read rather than show none", async () => {
+      const { view, complete, text } = await human([issue(3)], [], { closed: null, trust: null });
+      expect(complete).toBe(false);
+      expect(view.coverage.closedSources).toMatchObject({ read: false, complete: false });
+      expect(view.coverage.warnings.join(" ")).toMatch(/questions on closed tickets were not read/);
+      expect(text).not.toContain("No human input is waiting.");
+    });
+
+    it("bounds the read and reports what the limit left unread, never as answered", async () => {
+      const asked = record("owner", ["Answer beyond the bound?"], { v2: 31 });
+      const long = closedIssue(31, [], [asked], true);
+      const resolvedLater = [
+        [record("owner", ["Another?"], { v2: 31 })],
+        [outcome(31, asked, "resolve")],
+      ];
+      const other = closedIssue(32, [], []);
+      const gh = closedGh([long, other], { 31: resolvedLater });
+      const rest: Rest = async () => {
+        return { status: 200, body: { role_name: "write", user: { login: "agent-account" } } };
+      };
+      // Each permission lookup goes through the budgeted REST boundary it is handed.
+      const runtime = {
+        query: gh.query,
+        rest,
+        trustWith: (r: Rest) =>
+          markerTrust(async (login) => {
+            const answer = await r(`repos/${repo}/collaborators/${login}/permission`);
+            return answer.status === 200 ? "write" : "unknown";
+          }),
+        now: () => new Date(time),
+      };
+      const bounded = await discoverClosedQuestions(repo, {
+        ...runtime,
+        bounds: { requests: 3, inventoryPages: 1, commentPages: 1, pageSize: 1 },
+      });
+      // One inventory page of one row, one comment page, one permission lookup: the bound.
+      expect(bounded.coverage).toMatchObject({
+        complete: false,
+        requests: 3,
+        inventory: { pages: 1, rows: 1, complete: false },
+        discovered: 1,
+        hydrated: 0,
+        pending: [long.url],
+      });
+      // The resolution sits on the unread page: the question read is unknown, never answered;
+      // the one whose permission lookup the bound refused is unverified, and said so.
+      expect(bounded.sources[0].facts).toEqual([
+        { trust: "trusted", to: "owner", version: 2, outcome: "unknown" },
+      ]);
+      expect(bounded.coverage.records).toMatchObject({ unknown: 1, unverified: 1, resolved: 0 });
+      const warnings = bounded.warnings.join(" ");
+      expect(warnings).toMatch(/closed tickets beyond the 1 read so far were not read/);
+      expect(warnings).toMatch(/comment history was not fully read within the bound/);
+      expect(warnings).toMatch(/exceeded the request bound/);
+      expect(bounded.coverage.permissionGaps).toBeGreaterThan(0);
+
+      // Within the default bound the same history is read whole and the resolution counts.
+      const found = await discoverClosedQuestions(repo, runtime);
+      expect(found.coverage).toMatchObject({ complete: true, hydrated: 2, pending: [] });
+      expect(found.coverage.records).toMatchObject({ resolved: 1, noOutcome: 1, unknown: 0 });
+    });
+
+    it("rotates comment pages across sources so one long history cannot take the budget", async () => {
+      const a = closedIssue(41, [], [record("owner", ["A?"], { v2: 41 })], true);
+      const b = closedIssue(42, [], [record("owner", ["B?"], { v2: 42 })], true);
+      const filler = (n: number) => [record("owner", [`${n}?`], { v2: n })];
+      const gh = closedGh([a, b], { 41: [filler(41), filler(41), filler(41)], 42: [filler(42)] });
+      await discoverClosedQuestions(repo, {
+        query: gh.query,
+        trust: trustAll(),
+        bounds: { commentPages: 2 },
+      });
+      expect(gh.calls).toEqual(["inventory start", "comments #41 c0", "comments #42 c0"]);
+    });
+  });
+
+  describe("v2 questions on open tickets (#414)", () => {
+    it("keeps asking after the labels are removed: only an explicit outcome answers", async () => {
+      const asked = record("owner", ["Still unanswered?"], { v2: 51 });
+      const unlabelled = withComments(issue(51, ["status:ready"]), [asked]);
+      const { view } = await human([unlabelled]);
+      expect(rows(view)).toEqual(["answer-questions#51:to-you"]);
+      expect(view.items[0]).toMatchObject({
+        sourceState: "open",
+        requested: ["Still unanswered?"],
+        source: asked.url,
+      });
+    });
+
+    it("answers a v2 question by resolve or withdraw, even while a label remains", async () => {
+      const resolvedQ = record("owner", ["Resolved?"], { v2: 52 });
+      const withdrawnQ = record("owner", ["Withdrawn?"], { v2: 53 });
+      const resolved = withComments(issue(52, ["status:ready"]), [
+        resolvedQ,
+        outcome(52, resolvedQ, "resolve"),
+      ]);
+      // A lingering label is at most an inferred decision, never the answered question.
+      const labelled = withComments(issue(53, ["question"]), [
+        withdrawnQ,
+        outcome(53, withdrawnQ, "withdraw"),
+      ]);
+      const { view } = await human([resolved, labelled]);
+      expect(rows(view)).toEqual(["decide#53:inferred"]);
+      expect(view.coverage.records).toMatchObject({ resolved: 2, current: 0 });
+    });
+
+    it("never takes an untrusted resolution, and keeps each v2 question separate", async () => {
+      const first = record("owner", ["First?"], { v2: 54 });
+      const second = record("designer-a", ["Second?"], { v2: 54 });
+      const ticket = withComments(issue(54, []), [
+        first,
+        second,
+        outcome(54, second, "resolve", { author: "stranger" }),
+        outcome(54, first, "resolve"),
+      ]);
+      const { view } = await human([ticket], [], { trust: trustAll({ stranger: "read" }) });
+      expect(rows(view)).toEqual(["answer-questions#54:explicit"]);
+      expect(view.items[0].requested).toEqual(["Second?"]);
+    });
+
+    it("shows a v2 question whose history was truncated, and says so", async () => {
+      const asked = record("owner", ["Answered on a later page?"], { v2: 55 });
+      const truncated = withComments(issue(55, []), [asked], true);
+      const { view, complete } = await human([truncated]);
+      expect(rows(view)).toEqual(["answer-questions#55:to-you"]);
+      expect(complete).toBe(false);
+      expect(view.coverage.records).toMatchObject({ unknown: 1 });
     });
   });
 });

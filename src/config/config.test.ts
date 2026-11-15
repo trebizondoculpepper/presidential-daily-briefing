@@ -66,6 +66,7 @@ describe("repository configuration service (#116, doc/design/repository-configur
       { key: "complexity.enabled", value: true, source: "default" },
       { key: "impact.enabled", value: true, source: "default" },
       { key: "review.policy", value: null, source: "default" },
+      { key: "rules.project.enabled", value: false, source: "default" },
       { key: "processGuide", value: false, source: "default" },
     ]);
     expect(config.retired).toEqual([]);
@@ -912,6 +913,7 @@ describe("config get/set/list/help commands (#117)", () => {
       expect.objectContaining({ key: "complexity.enabled", value: false, source: "explicit" }),
       expect.objectContaining({ key: "impact.enabled", value: true, source: "default" }),
       expect.objectContaining({ key: "review.policy", value: null, source: "default" }),
+      expect.objectContaining({ key: "rules.project.enabled", value: false, source: "default" }),
       expect.objectContaining({ key: "processGuide", value: false, source: "explicit" }),
     ]);
     expect(await t.call("list")).toBe(0);

@@ -221,6 +221,10 @@ the human view, so that v2 questions stop resolving by label removal, is part of
 facts and projections of #413/#414; until then v2 questions keep v1's label-based
 resolution, so none becomes unanswerable.
 
+Implementation note (#414): the human view now consumes these records. A v2 question, on an open
+or closed ticket, is answered only by a trusted resolve or withdraw bound to it; label removal no
+longer resolves it there. Legacy v1 questions keep label resolution. See doc/design/human-briefing.md.
+
 Implementation note (#412, slice 2c, `src/workflow/retained.ts`): `claim wait` and `claim
 resume` append the activity records; `claim` takes an injected admission guard that re-reads
 each other retained claim (ownership, label generation, activity fold, and for a wait its bound
