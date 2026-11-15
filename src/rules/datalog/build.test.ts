@@ -10,6 +10,7 @@ import {
   policyDir,
   PolicyBuildError,
   queryInputs,
+  overrideProblems,
 } from "./build.js";
 import { readOne, printEdn, EdnSourceError } from "./edn.js";
 
@@ -127,6 +128,7 @@ describe("rules build (#348)", () => {
     ]);
     expect(inputs("[:find ?t :where [?t _ _]]")).toEqual(["$"]);
     expect(inputs("{:find [?t] :in [$ %] :where [[?t _ _]]}")).toEqual(["$", "%"]);
+    expect(inputs("[:find ?t :in $ [[?w ?l]] :where [?t _ ?w]]")).toEqual(["$", "[[?w ?l]]"]);
   });
 
   it("builds sources whose :in spans lines and comments, to the same artifact", () => {
@@ -181,5 +183,59 @@ describe("rules build (#348)", () => {
       "queries.edn: missing :denials, which the engine runs",
       'queries.edn :key-queries: need exactly one "urgency-key", which ordering.edn reads',
     ]);
+  });
+
+  it("reads the declared ordering exceptions as data, not as rule IDs inside a query (#416)", () => {
+    const bundle = buildPolicy();
+    expect(bundle.overrides).toEqual([
+      { winner: "D-EASY", loser: "D-ORDINARY" },
+      { winner: "D-UNFAVORABLE", loser: "D-ORDINARY" },
+      { winner: "D-OWN-EASY", loser: "D-OWN" },
+      { winner: "D-OWN-UNFAVORABLE", loser: "D-OWN" },
+    ]);
+    for (const q of [...Object.values(bundle.queries), bundle.sortClauses])
+      expect(q).not.toMatch(/"D-[A-Z-]+"/);
+  });
+
+  it("validates declared overrides: IDs, kinds, duplicates, contradictions and cycles", () => {
+    const bundle = readSources();
+    const kind = (id: string, k: string) => ({ ...bundle.definitions[0], id, kind: k });
+    const definitions = [kind("D-A", "x"), kind("D-B", "x"), kind("D-C", "x"), kind("D-Z", "y")];
+    const check = (overrides: { winner: string; loser: string }[]) =>
+      overrideProblems({ definitions, overrides });
+    expect(check([{ winner: "D-A", loser: "D-B" }])).toEqual([]);
+    expect(check([{ winner: "D-A", loser: "D-NOPE" }])).toEqual([
+      "ordering.edn :overrides[0] D-A over D-NOPE: unknown rule ID D-NOPE",
+    ]);
+    expect(check([{ winner: "D-A", loser: "D-A" }])).toEqual([
+      "ordering.edn :overrides[0] D-A over D-A: a rule cannot override itself",
+    ]);
+    expect(check([{ winner: "D-A", loser: "D-Z" }])).toEqual([
+      "ordering.edn :overrides[0] D-A over D-Z: kinds differ (x, y), so it would never apply",
+    ]);
+    expect(
+      check([
+        { winner: "D-A", loser: "D-B" },
+        { winner: "D-A", loser: "D-B" },
+        { winner: "D-B", loser: "D-A" },
+      ]),
+    ).toEqual([
+      "ordering.edn :overrides[1] D-A over D-B: duplicate pair",
+      "ordering.edn :overrides[2] D-B over D-A: contradicts an earlier pair",
+    ]);
+    expect(
+      check([
+        { winner: "D-A", loser: "D-B" },
+        { winner: "D-B", loser: "D-C" },
+        { winner: "D-C", loser: "D-A" },
+      ]),
+    ).toEqual(["ordering.edn :overrides: cycle D-A over D-B over D-C over D-A"]);
+    expect(
+      problemsOf(() =>
+        readSources(
+          editing("ordering.edn", (t) => t.replace(':winner "D-EASY"', ':winer "D-EASY"')),
+        ),
+      ),
+    ).toEqual(["policy/ordering.edn :overrides[0]: unknown key :winer"]);
   });
 });
