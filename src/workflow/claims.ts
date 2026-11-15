@@ -19,6 +19,8 @@ import { workflow } from "./definition.js";
 import { ghQuery, permissionLookup, writePermissions } from "../github/github.js";
 import type { PermissionLookup } from "../github/github.js";
 import { ghRun } from "../github/dependencies.js";
+import { CommentWriteError } from "../github/commentwrite.js";
+import type { CommentRecovery } from "../github/commentwrite.js";
 
 const labelColours: Record<string, string> = {
   agent: "1d76db",
@@ -56,6 +58,29 @@ export interface PlanStep {
   command: string[];
   status?: string;
   reason?: string;
+  /** A comment write that did not end posted: its bounded recovery details (#345). */
+  recovery?: CommentRecovery;
+}
+
+/** Record a failed write on its step, keeping a comment write's recovery details (#345). */
+export function failStep(step: PlanStep, error: unknown): void {
+  step.status = "failed";
+  step.reason = error instanceof Error ? error.message : undefined;
+  if (error instanceof CommentWriteError) step.recovery = error.recovery;
+}
+
+/**
+ * The retry line for a partial result: when a comment was throttled, say so and when to retry
+ * (#345) instead of the generic re-run hint; otherwise the command's own hint.
+ */
+export function retryLine(steps: readonly PlanStep[], generic: string, retry: string): string {
+  const throttled = steps.find((s) => s.recovery?.status === "throttled")?.recovery;
+  if (throttled?.retryAt)
+    return `Throttled by GitHub: re-run after ${throttled.retryAt}${throttled.defaultDelay ? " (default delay; no retry time was reported)" : ""}; it completes only the missing steps: ${retry}`;
+  const uncertain = steps.find((s) => s.recovery?.acceptance === "unknown");
+  if (uncertain)
+    return `The comment may already be posted: inspect the ticket before re-running: ${retry}`;
+  return `${generic}: ${retry}`;
 }
 /** Facts reported with a plan or refusal; which fields are present depends on the outcome. */
 export interface ClaimFacts {
@@ -1850,8 +1875,7 @@ export async function applyPlan(
       await run(step.command);
       step.status = "done";
     } catch (error) {
-      step.status = "failed";
-      step.reason = errorMessage(error);
+      failStep(step, error);
       failed = true;
     }
   }
@@ -1949,7 +1973,13 @@ export function claimText(result: ClaimPlan | ClaimResult, dryRun = false): stri
   if ("conflict" in result && result.conflict) lines.push(`CONFLICT: ${result.conflict}`);
   if ("unverified" in result && result.unverified) lines.push(`UNVERIFIED: ${result.unverified}`);
   if (result.retry && "exitCode" in result && result.exitCode !== 0)
-    lines.push(`Retry (safe; completes only the missing steps): ${result.retry}`);
+    lines.push(
+      retryLine(
+        "steps" in result ? (result.steps ?? []) : [],
+        "Retry (safe; completes only the missing steps)",
+        result.retry,
+      ),
+    );
   return lines.join("\n") + "\n";
 }
 

@@ -42,6 +42,8 @@ import {
 import type { ConfigFileSystem, GitRunner } from "../config/config.js";
 import { ghGraphqlApi, isRecord, prop } from "../github/github.js";
 import type { GraphqlAnswer, GraphqlApi } from "../github/github.js";
+import { classifyAddComment, postCommentWithRecovery } from "../github/commentwrite.js";
+import type { CommentRecoveryPolicy } from "../github/commentwrite.js";
 
 export const estimateUsage = `Usage: pdb estimate N [--metric complexity|impact] --size SIZE --rationale TEXT
          [--assumption TEXT]... [--reference REF]... [--agent NAME] [--replace SIZE]
@@ -85,6 +87,11 @@ export interface EstimateRuntime {
   /** The authenticated gh GraphQL boundary (production: gh api graphql). */
   readonly api?: GraphqlApi;
   readonly now?: () => Date;
+  /** Comment-write recovery (#345): millisecond clock, abortable wait, cancellation and budget. */
+  readonly clock?: () => number;
+  readonly sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
+  readonly signal?: AbortSignal;
+  readonly commentPolicy?: Partial<CommentRecoveryPolicy>;
   /**
    * Provenance authority (#215 rule) for the resolved repository: only a comment whose author and
    * any editor are trusted counts as a recorded estimate of either metric (#269). The CLI supplies
@@ -788,22 +795,61 @@ export async function runEstimate(
       return await finish("conflict", 2);
     }
 
-    const comment = await safely(
-      api.mutate(ADD_COMMENT, { issue: latest.issueId, body: provenanceComment(provenance) }),
-    );
-    const url = prop(comment.data, "addComment", "commentEdge", "node", "url");
-    if (typeof url !== "string") {
+    // The frozen record: the same body (and recordedAt) for every attempt (#345).
+    const body = provenanceComment(provenance);
+    const written = await postCommentWithRecovery({
+      post: async () => {
+        const comment = await safely(api.mutate(ADD_COMMENT, { issue: latest.issueId, body }));
+        return classifyAddComment(
+          comment,
+          prop(comment.data, "addComment", "commentEdge", "node", "url"),
+        );
+      },
+      // The semantic receipt: a trusted record of this same assessment on this ticket.
+      readBack: async () => {
+        try {
+          const state = await read();
+          return isThisAssessment(state.provenance, state)
+            ? { status: "found", url: null }
+            : { status: "absent" };
+        } catch {
+          return { status: "unreadable" };
+        }
+      },
+      // Fresh guards after a wait: the size alone, and no other estimate recorded meanwhile.
+      stillApplicable: async () => {
+        const state = await read();
+        if (!onlyTarget(state.sizes) || state.invalid.length)
+          return `#${number} no longer carries ${size} alone`;
+        if (JSON.stringify(state.provenance ?? null) !== JSON.stringify(recorded ?? null))
+          return `another estimate was recorded on #${number}`;
+        return null;
+      },
+      ...(runtime.clock ? { now: runtime.clock } : {}),
+      ...(runtime.sleep ? { sleep: runtime.sleep } : {}),
+      ...(runtime.signal ? { signal: runtime.signal } : {}),
+      ...(runtime.commentPolicy ? { policy: runtime.commentPolicy } : {}),
+    });
+    result.commentRecovery = written;
+    if (written.status !== "posted") {
       result.provenanceWritten = false;
-      result.recovery = `Re-run the same command${retryHint}; the label is kept and only provenance is added.`;
+      result.recovery =
+        written.status === "throttled" && written.retryAt
+          ? `Re-run the same command${retryHint} after ${written.retryAt}${written.defaultDelay ? " (default delay; GitHub reported no retry time)" : ""}; the label is kept and only provenance is added.`
+          : written.acceptance === "unknown"
+            ? `Re-run the same command${retryHint}; the label is kept and provenance is added only if no trusted record of this assessment is found on #${number}, so a re-run does not duplicate it.`
+            : `Re-run the same command${retryHint}; the label is kept and only provenance is added.`;
       lines.push(
-        `Partial: #${number} carries ${label} but the provenance comment failed (${denied(comment) ?? "no result"}).`,
+        `Partial: #${number} carries ${label} but the provenance comment ${written.acceptance === "unknown" ? "is unconfirmed" : "was not written"} (${written.message})`,
         String(result.recovery),
       );
-      return await finish("partial", 2);
+      return await finish(written.status === "conflict" ? "conflict" : "partial", 2);
     }
     result.provenanceWritten = true;
-    result.provenanceUrl = url;
-    lines.push(`Provenance: ${url}`);
+    result.provenanceUrl = written.url;
+    lines.push(
+      written.url ? `Provenance: ${written.url}` : "Provenance: recorded (found on the ticket).",
+    );
     return await finish("recorded", 0);
   } catch (caught) {
     if (caught instanceof ConfigError) {

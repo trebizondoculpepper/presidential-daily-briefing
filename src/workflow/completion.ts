@@ -19,7 +19,7 @@
 import { createHash } from "node:crypto";
 import { parseArgs } from "node:util";
 import { workflow } from "./definition.js";
-import { claimPolicy, shellQuote } from "./claims.js";
+import { claimPolicy, failStep, retryLine, shellQuote } from "./claims.js";
 import type { Comment, PlanStep } from "./claims.js";
 import {
   defaultBranch,
@@ -1328,8 +1328,7 @@ export async function applyComplete(
       if (step.step === "record") opId = plan.record?.opId ?? plan.opId;
       if (step.step === "close") closedByRun = true;
     } catch (error) {
-      step.status = "failed";
-      step.reason = error instanceof Error ? error.message : undefined;
+      failStep(step, error);
       return {
         ...plan,
         steps,
@@ -1380,7 +1379,13 @@ export function completeText(result: CompletePlan | CompleteResult, dryRun = fal
   if (result.closeSkipped) lines.push(`CLOSE SKIPPED: ${result.closeSkipped}`);
   if (result.unverified) lines.push(`UNVERIFIED: ${result.unverified}`);
   if ("exitCode" in result && result.exitCode !== 0)
-    lines.push(`Retry (safe; re-evaluates and completes only the missing steps): ${result.retry}`);
+    lines.push(
+      retryLine(
+        "steps" in result ? (result.steps ?? []) : [],
+        "Retry (safe; re-evaluates and completes only the missing steps)",
+        result.retry,
+      ),
+    );
   return lines.join("\n") + "\n";
 }
 
