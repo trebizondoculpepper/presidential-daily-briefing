@@ -40,6 +40,11 @@ export const read = (): Read => ({
           kind: "implement",
           target: "https://github.com/o/r/issues/1",
           role: "implementer",
+          band: 6,
+          complexity: { state: "current", size: "S" },
+          impact: { state: "current", size: "M" },
+          unlocks: 0,
+          unlocksUnknown: [],
           reasonCodes: ["ordinary"],
           evidence: ["evidence"],
           nextCommand: "pdb claim 1 --agent agent --repo o/r",
@@ -73,6 +78,8 @@ interface FixtureReport {
     omitted: number;
     items: {
       kind: string;
+      unlocks: number;
+      unlocksUnknown: string[];
       reasonCodes: string[];
       nextCommand: string | null;
       inspection: string | null;
@@ -145,6 +152,24 @@ describe("shared rebrief decision", () => {
     }
     expect(hash({ a: 1, b: 2 })).toBe(hash({ b: 2, a: 1 }));
     expect(hash({ a: 1, b: undefined })).toBe(hash({ a: 1 }));
+  });
+  it("offers changed native unlock evidence after an acknowledged briefing", async () => {
+    for (const field of ["unlocks", "unlocksUnknown"] as const) {
+      const t = setup();
+      const first = await t.session.evaluate(input, t.runtime);
+      expect(t.session.acknowledge(input, input.eventId, first.fingerprint!)).toBe(true);
+      const changed = read();
+      if (field === "unlocks") obj(changed).rankedActions.items[0].unlocks = 2;
+      else
+        obj(changed).rankedActions.items[0].unlocksUnknown = ["native edge coverage is incomplete"];
+      const second = await t.session.evaluate(
+        { ...input, eventId: "unlock-change" },
+        setup(changed).runtime,
+      );
+      expect(second.decision, field).toBe("continue");
+      expect(second.fingerprint, field).not.toBe(first.fingerprint);
+      expect(second.actionIds).toEqual(first.actionIds);
+    }
   });
   it("stops before reading for disabled, non-natural, missing context/state, cancelled, cap and unsupported transport", async () => {
     for (const override of [
