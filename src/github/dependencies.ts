@@ -12,7 +12,7 @@ import {
 } from "./github.js";
 import type { Query } from "./github.js";
 import type { Issue, NativeNode, Reference } from "./types.js";
-import { ReadMeter } from "./readplan.js";
+import { QuotaStopped, quotaRefusal, ReadMeter, readProfiles } from "./readplan.js";
 import type { ReadCollection } from "./readplan.js";
 
 const execute = promisify(execFile);
@@ -161,10 +161,38 @@ export interface DependencyReport {
    * pull requests are `not-requested`: the report says nothing about them.
    */
   collection?: ReadCollection;
+  /**
+   * How far an explicit `--tree` walk got (#196). Absent for a direct read. `complete` is true
+   * only when every reachable issue was read; a walk stopped by its node limit or a quota
+   * refusal is partial, and its cycles are only those among the issues read.
+   */
+  treeBounds?: TreeBounds;
 }
+/** The bound and outcome of one `deps --tree` walk. */
+export interface TreeBounds {
+  complete: boolean;
+  /** Effective node limit for this walk. */
+  nodeLimit: number;
+  nodesRead: number;
+  /** Why the walk stopped early; null when it read everything reachable. */
+  stoppedBy: "node-limit" | "quota" | null;
+  /**
+   * Distinct issues known from an edge but not read. A lower bound: their own edges were never
+   * read, so more issues beyond them may exist ("more not read").
+   */
+  notRead: number;
+  /** The first of those identities in walk order, at most `notReadListed`. */
+  notReadSample: { repository: string; number: number }[];
+  /** False when the walk is partial: a cycle through an unread issue would not be seen. */
+  cyclesComplete: boolean;
+}
+/** Default and maximum `--tree` node limits. */
+export const treeNodeLimit = readProfiles["dependency-tree-v1"].bounds.treeNodes;
+export const treeNodeMaximum = 500;
 /**
  * Read one ticket's native dependencies; with `tree`, walk upstream and downstream
- * transitively, reading each ticket once, and report upstream (blocked-by) cycles.
+ * transitively, breadth first, reading each ticket once up to `maxNodes` tickets, and report
+ * upstream (blocked-by) cycles among the tickets read. A stopped walk says what it did not read.
  */
 export async function dependencyReport(
   repository: string,
@@ -173,13 +201,21 @@ export async function dependencyReport(
     tree = false,
     signal,
     follow,
-  }: { tree?: boolean; signal?: AbortSignal; follow?: (repository: string) => boolean } = {},
+    maxNodes = treeNodeLimit,
+  }: {
+    tree?: boolean;
+    signal?: AbortSignal;
+    follow?: (repository: string) => boolean;
+    maxNodes?: number;
+  } = {},
   query: Query = ghQueryWith(signal),
   now: () => Date = () => new Date(),
 ): Promise<DependencyReport> {
   const startedAt = now().toISOString();
+  if (!Number.isSafeInteger(maxNodes) || maxNodes < 1 || maxNodes > treeNodeMaximum)
+    throw new Error(`The tree node limit must be 1–${treeNodeMaximum}.`);
   const meter = new ReadMeter(
-    "issue-detail-v1",
+    tree ? "dependency-tree-v1" : "issue-detail-v1",
     tree ? "deps-tree" : "deps",
     now,
     undefined,
@@ -188,17 +224,34 @@ export async function dependencyReport(
   const nodes = new Map<string, DependencyFacts>();
   const pending: [string, number][] = [[repository, number]];
   const unfollowed = new Map<string, { repository: string; number: number }>();
+  let stoppedBy: TreeBounds["stoppedBy"] = null;
   for (let next = pending.shift(); next; next = pending.shift()) {
     const [repo, n] = next;
     const key = `${repo}#${n}`;
-    if (nodes.has(key)) continue;
+    if (nodes.has(key) || unfollowed.has(key)) continue;
     if (follow && !follow(repo)) {
       unfollowed.set(key, { repository: repo, number: n });
       meter.cover("issue", key, "not-requested", { omission: "repository not served; not read" });
       continue;
     }
+    if (nodes.size >= maxNodes) {
+      // Bounded expansion: keep this identity (and the rest) as "not read", never drop it.
+      pending.unshift(next);
+      stoppedBy = "node-limit";
+      break;
+    }
     signal?.throwIfAborted();
-    const item = await readDependencyIssue(repo, n, meter.query(query, "issue", key));
+    let item: Awaited<ReturnType<typeof readDependencyIssue>>;
+    try {
+      item = await readDependencyIssue(repo, n, meter.query(query, "issue", key));
+    } catch (error) {
+      // The selected ticket must be read; a later quota refusal stops the walk, keeping what
+      // was read and reporting the rest as not read rather than failing the whole diagnosis.
+      if (!nodes.size || !(error instanceof QuotaStopped || quotaRefusal(error))) throw error;
+      pending.unshift(next);
+      stoppedBy = "quota";
+      break;
+    }
     nodes.set(key, dependencyFacts(item, repo));
     // completeNative throws unless both edge lists match their totals, so they are complete.
     meter.cover("issue", key, "complete");
@@ -236,6 +289,31 @@ export async function dependencyReport(
     done.add(url);
   }
   if (tree) for (const url of byUrl.keys()) detect(url);
+  let treeBounds: TreeBounds | undefined;
+  if (tree) {
+    const notRead = new Map<string, { repository: string; number: number }>();
+    for (const [repo, n] of pending) {
+      const key = `${repo}#${n}`;
+      if (nodes.has(key) || unfollowed.has(key) || notRead.has(key)) continue;
+      notRead.set(key, { repository: repo, number: n });
+      meter.cover("issue", key, "not-requested", {
+        omission: stoppedBy === "quota" ? "not read: quota refusal" : "not read: tree node limit",
+      });
+    }
+    const complete = stoppedBy === null && !notRead.size;
+    treeBounds = {
+      complete,
+      nodeLimit: maxNodes,
+      nodesRead: nodes.size,
+      stoppedBy: complete ? null : (stoppedBy ?? "node-limit"),
+      notRead: notRead.size,
+      notReadSample: [...notRead.values()].slice(
+        0,
+        readProfiles["dependency-tree-v1"].bounds.notReadListed,
+      ),
+      cyclesComplete: complete,
+    };
+  }
   return {
     schemaVersion: 1,
     repository,
@@ -248,7 +326,28 @@ export async function dependencyReport(
       "Native blockers are authoritative. Closed blockers do not prove behavior was delivered. Body drift is migration context only.",
     ...(unfollowed.size ? { unfollowed: [...unfollowed.values()] } : {}),
     collection: meter.collection(),
+    ...(treeBounds ? { treeBounds } : {}),
   };
+}
+/** One line of read cost, from the report's own telemetry; unknown cost is never zero. */
+export function readCostText(report: Pick<DependencyReport, "collection">): string {
+  const t = report.collection?.telemetry;
+  if (!t) return "Read cost: unknown (no telemetry).";
+  return `Read cost: ${t.requests} request(s), ${t.bytes} bytes returned, GraphQL cost ${t.cost ?? `unknown (at least ${t.knownCost})`}, ${t.durationMs} ms.`;
+}
+/** The truncation notice of a stopped tree; empty for a complete tree or a direct read. */
+export function treeNotice(report: Pick<DependencyReport, "treeBounds">): string[] {
+  const b = report.treeBounds;
+  if (!b) return [];
+  if (b.complete)
+    return [`Tree complete: ${b.nodesRead} issue(s) read (node limit ${b.nodeLimit}).`];
+  const why =
+    b.stoppedBy === "quota" ? "stopped after a GitHub quota refusal" : `node limit ${b.nodeLimit}`;
+  const listed = b.notReadSample.map((r) => `${r.repository}#${r.number}`);
+  return [
+    `TREE INCOMPLETE (${why}): read ${b.nodesRead} issue(s); ${b.notRead} known issue(s) not read, and more not read beyond them. This is not a complete graph; cycles are only those among the issues read.`,
+    `  Not read: ${listed.join(", ")}${b.notRead > listed.length ? `, … ${b.notRead - listed.length} more` : ""}`,
+  ];
 }
 export function dependencyText(report: DependencyReport): string {
   return (
@@ -256,6 +355,13 @@ export function dependencyText(report: DependencyReport): string {
       `Native issue dependencies: ${report.repository}`,
       `LIVE ${report.startedAt}–${report.fetchedAt}`,
       report.guidance,
+      ...(report.tree
+        ? [
+            "--tree is an explicit, expensive diagnosis: one request per issue read. Routine questions use deps N.",
+          ]
+        : []),
+      ...treeNotice(report),
+      readCostText(report),
       ...report.nodes.flatMap((node) => [
         `\n#${node.number} ${node.title} ${node.url}`,
         node.verdict,
