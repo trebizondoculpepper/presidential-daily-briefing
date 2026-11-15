@@ -125,6 +125,19 @@ Required fixtures:
   unknown evidence does not. Human closure remains authoritative.
 - Both roles/engines and installed CLI/MCP agree on order, state, reason and counts.
 
+Implementation note (#502): the briefing engines already treated an observed failed check
+as follow-up regardless of completeness (Datalog `D-PR-FAIL`; the TypeScript rollback's
+`pr-failed-checks`). The briefing's report-level warnings carry the evidence gap. Only the
+delivery classifier (`classifyFollowUp`, used by team/who/pr/Ticket Doctor and completion)
+answered `unknown` first. It now returns `actionable` for a non-draft with an observed
+current-head failure and incomplete evidence. Its reason names both facts and says acceptance
+stays unknown. Every other incomplete case is still `unknown`, and drafts are unchanged until
+#377. Both of its fact sources read checks from the head commit only, so a failure on an
+earlier head cannot trigger this. The tests are the native scenario
+`observed-failure-is-actionable-with-incomplete-evidence` (coverage-gaps.edn) and
+`src/workflow/followupparity.test.ts`, which compares the classifier with the Datalog
+engine on the same snapshot PR.
+
 This does not implement retained active claims (#412/#413), resume transitions,
 external question discovery (#491/#414), new review-provider policy (#301) or a new
 completion definition. Reuse their shared facts where available without coupling

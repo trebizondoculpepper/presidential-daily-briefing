@@ -102,7 +102,16 @@ export interface FollowUpFacts {
  */
 export function classifyFollowUp(f: FollowUpFacts): [FollowUp, string] {
   if (f.draft) return ["actionable", "draft: the responsible agent finishes it"];
-  if (!f.complete) return ["unknown", "check, thread or review evidence is incomplete"];
+  // #502 (doc/design/delivery-follow-up-alignment.md, precedence 1): a positively observed
+  // failed check on the current head of a non-draft PR is actionable even when other evidence
+  // is incomplete, as the briefing's D-PR-FAIL. Both facts are said; it is never acceptance.
+  if (!f.complete)
+    return f.failing
+      ? [
+          "actionable",
+          "failing checks on the current head; other check, thread or review evidence is incomplete, so acceptance stays unknown",
+        ]
+      : ["unknown", "check, thread or review evidence is incomplete"];
   if (f.failing) return ["actionable", "failing checks on the current head"];
   if (f.changesRequested) return ["actionable", "changes requested"];
   if (f.unresolvedThreads) return ["actionable", "unresolved review threads"];
