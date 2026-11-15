@@ -318,3 +318,40 @@ describe("both engines decide the same way (#343)", () => {
     }
   });
 });
+
+describe("delivery follow-up and metering use the same model (#343)", () => {
+  it("delivery follow-up waits only for required, unknown or missing checks", async () => {
+    const { snapshotFollowUpFacts } = await import("../workflow/deliveryread.js");
+    const freebsd = { name: "test (freebsd)", status: "IN_PROGRESS", conclusion: null };
+    const verifyPassed = { name: "verify", status: "COMPLETED", conclusion: "SUCCESS" };
+    const advisory = withChecks([verifyPassed, freebsd], {
+      checks: [run("verify", "required"), run("test (freebsd)", "advisory")],
+      expected: [{ context: "verify", appId: ACTIONS }],
+    });
+    expect(snapshotFollowUpFacts(advisory, []).pending).toBe(false);
+    expect(snapshotFollowUpFacts(withChecks([verifyPassed, freebsd], null), []).pending).toBe(true);
+  });
+
+  it("the rules read goes through the collector's meter, and a quota refusal is a named gap", async () => {
+    const { collect } = await import("./github.js");
+    const open = withChecks([{ name: "test", status: "IN_PROGRESS", conclusion: null }], null);
+    delete open.requiredChecks;
+    const query = async (source: string) => {
+      if (source.includes("isRequired") || source.includes("branchProtectionRule"))
+        return { repository: { ref: { branchProtectionRule: null }, pullRequest: null } };
+      return {
+        repository: {
+          issues: page([]),
+          pullRequests: page(source.includes("pullRequests(first") ? [open] : []),
+        },
+      };
+    };
+    const rest = async () => ({ status: 429, body: { message: "rate limited" } });
+    const data = await collect("o/r", { rest }, query as never, () => new Date(time));
+    const calls = data.collection!.telemetry.calls.filter((c) => c.source === "required-checks");
+    expect(calls).toEqual([
+      expect.objectContaining({ route: "rest", outcome: "rate-limited", status: 429 }),
+    ]);
+    expect(data.warnings.join(" ")).toMatch(/required-check evidence incomplete .*answered 429/);
+  });
+});

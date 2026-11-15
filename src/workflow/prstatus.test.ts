@@ -136,6 +136,25 @@ describe("pr status: why is a PR not progressing (#59)", () => {
     );
     expect(pending.blockers[0]).toMatch(/not reported yet .*other checks still pending/);
   });
+  it("a running job GitHub reports as not required is shown, never a waiting blocker (#343)", async () => {
+    const { prStatus } = await import("./prstatus.js");
+    const running = { status: "IN_PROGRESS", conclusion: null };
+    const advisory = prStatus(
+      repo,
+      pull({ checks: [run("verify"), run("test (freebsd)", { ...running, isRequired: false })] }),
+    );
+    expect(advisory.checks.counts).toMatchObject({ "advisory-pending": 1, pending: 0 });
+    expect(advisory.blockers.join(" ")).not.toMatch(/still pending/);
+    // Unknown (absent) or required stays a waiting blocker.
+    for (const isRequired of [undefined, null, true]) {
+      const r = prStatus(
+        repo,
+        pull({ checks: [run("verify"), run("test (freebsd)", { ...running, isRequired })] }),
+      );
+      expect(r.blockers, String(isRequired)).toContain("1 check(s) still pending: waiting");
+    }
+  });
+
   it("tracks which commit each reviewer reviewed and whether Codex covered the head", async () => {
     const { prStatus } = await import("./prstatus.js");
     const reviews = [

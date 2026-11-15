@@ -965,14 +965,18 @@ export async function collect(
   }
   // #343: required-check evidence for the PRs where it decides waiting (open, non-draft, with an
   // unfinished check); bounded to one shared base-policy read per base and one read per PR.
-  const restBoundary = options.rest ?? (injected ? undefined : ghRestWith(options.signal));
-  if (restBoundary)
+  const unmetered = options.rest ?? (injected ? undefined : ghRestWith(options.signal));
+  if (unmetered) {
+    // Through the shared meter: a quota refusal on either route stops the rest of the read, and
+    // the requests count in the collection's telemetry.
+    const restBoundary = meter.rest(unmetered, "required-checks", repository);
     warnings.push(
       ...(await hydrateRequiredChecks(repository, pullRequests, {
         query: (q, v) => query(q, v),
         rest: (path) => restBoundary(path, { signal: options.signal }),
       })),
     );
+  }
   meter.cover("open-issues", repository, "complete");
   meter.cover("open-pull-requests", repository, "complete");
   // History is a separate source (doc/design/read-degradation.md): its failure keeps the
