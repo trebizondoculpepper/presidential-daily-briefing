@@ -204,9 +204,15 @@ async function closingReferences(
   let cursor: string | null = null;
   let more = true;
   let pagesRead = 0;
+  let quotaStopped = false;
   try {
     while (more && pagesRead < bounds.linkedPullRequestPages) {
       signal?.throwIfAborted();
+      // The shared quota stop is checked before every page: nothing is requested after it.
+      if (meter.refused) {
+        quotaStopped = true;
+        break;
+      }
       const data = await q(
         `query($owner:String!,$name:String!,$number:Int!,$cursor:String){repository(owner:$owner,name:$name){issue(number:$number){closedByPullRequestsReferences(first:${bounds.linkedPullRequestsPerPage},includeClosedPrs:true,after:$cursor){nodes{number url state} pageInfo{hasNextPage endCursor}}}}}`,
         { owner, name, number, ...(cursor ? { cursor } : {}) },
@@ -228,9 +234,10 @@ async function closingReferences(
     meter.cover("linked-pull-requests", `${subject} (closed included)`, "failed", { failure });
     return { refs, complete: false };
   }
+  if (quotaStopped) meter.notAttempted.push(`linked-pull-requests ${subject} (closed included)`);
   if (more)
     meter.cover("linked-pull-requests", `${subject} (closed included)`, "partial", {
-      omission: `closing references beyond ${refs.length} (${pagesRead} pages of ${bounds.linkedPullRequestsPerPage}) not read`,
+      omission: `closing references beyond ${refs.length} (${pagesRead} pages of ${bounds.linkedPullRequestsPerPage}) not read${quotaStopped ? " after a quota refusal" : ""}`,
     });
   else meter.cover("linked-pull-requests", `${subject} (closed included)`, "complete");
   return { refs, complete: !more };
@@ -401,7 +408,9 @@ export async function readTicketStatus(
       member: m,
     });
   }
-  for (const ref of linkage.refs) {
+  // References already known from the issue read count too, even when a later list was not
+  // read (quota stop): a known PR is listed as unknown evidence, never dropped.
+  for (const ref of [...linkage.refs, ...(issue.closedByPullRequestsReferences?.nodes ?? [])]) {
     const match = prUrl.exec(ref.url);
     if (!match) continue;
     const key = identityOf(match[1], ref.number);
