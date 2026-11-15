@@ -7,7 +7,8 @@
  * there is no presence source, so availability is always reported as unknown. Nothing here
  * releases a claim or infers abandonment.
  */
-import { owners, prChecks, workflow } from "../briefing/briefing.js";
+import { owners, prChecks } from "../briefing/briefing.js";
+import { workflow } from "./definition.js";
 import type { PullRequest, Snapshot } from "../github/types.js";
 
 export interface LinkedPullRequest {

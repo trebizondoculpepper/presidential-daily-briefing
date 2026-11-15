@@ -9,7 +9,8 @@
  * attribution stays separate from the GitHub account actor; waiting is not failure; incomplete
  * or unavailable history is never presented as "no changes".
  */
-import { analysisRules, excerpt, owners, prChecks, workflow } from "./briefing.js";
+import { analysisRules, excerpt, owners, prChecks } from "./briefing.js";
+import { workflow } from "../workflow/definition.js";
 import type { Bounded } from "./briefing.js";
 import { inWindow, parseOperationMarker, snapshotChangeEvidence } from "../github/changes.js";
 import type {

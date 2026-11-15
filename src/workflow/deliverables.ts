@@ -11,7 +11,7 @@
  * only ever made on fresh evidence and a retry completes only what is missing.
  */
 import { parseArgs } from "node:util";
-import { workflow } from "../briefing/briefing.js";
+import { workflow } from "./definition.js";
 import { claimPolicy, shellQuote } from "./claims.js";
 import type { Comment, GhRun, GraphQuery, PlanStep, ReworkAuthority } from "./claims.js";
 import {

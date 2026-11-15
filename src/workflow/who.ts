@@ -8,7 +8,8 @@
  * an authoritative claim parser. Recorded ownership, recent activity and presence are separate;
  * with no presence source, availability is unknown. Nothing is claimed, released or notified.
  */
-import { owners, workflow } from "../briefing/briefing.js";
+import { owners } from "../briefing/briefing.js";
+import { workflow } from "./definition.js";
 import { defaultStaleHours, latest, pullRequestState } from "./team.js";
 import type { LinkedPullRequest } from "./team.js";
 import { SubjectUnavailable } from "../github/github.js";

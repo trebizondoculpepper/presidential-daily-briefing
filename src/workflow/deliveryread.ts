@@ -17,7 +17,8 @@ import type { Query, Rest } from "../github/github.js";
 import type { Closure, DeliveryDiagnosis, IssueDeliveryDiagnosis } from "./deliverydoctor.js";
 import type { MemberState, TicketDelivery } from "./completion.js";
 import type { Issue, PullRequest, Snapshot } from "../github/types.js";
-import { prChecks, workflow } from "../briefing/briefing.js";
+import { prChecks } from "../briefing/briefing.js";
+import { workflow } from "./definition.js";
 import type { PrStatusReport } from "./prstatus.js";
 import { codexMarker, headCodexFindings, headReviewed } from "./reviewevidence.js";
 
