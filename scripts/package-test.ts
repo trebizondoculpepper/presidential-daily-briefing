@@ -462,8 +462,10 @@ async function packagedCrash(
   env: NodeJS.ProcessEnv,
   cwd: string,
   work: string,
+  /** Extra process environment, for example NODE_OPTIONS=--enable-source-maps. */
+  extra: NodeJS.ProcessEnv = {},
 ): Promise<string> {
-  const capture = join(work, `crash-${kind}.txt`);
+  const capture = join(work, `crash-${kind}-${Object.keys(extra).length}.txt`);
   const preload = pathToFileURL(join(root, "scripts", "crash-preload.ts")).href;
   const entry = join(packageDir, "dist", kind === "serve" ? "cli.mjs" : "mcp.mjs");
   const args =
@@ -482,6 +484,7 @@ async function packagedCrash(
       http_proxy: "",
       PDB_CRASH_CAPTURE: capture,
       PDB_CRASH_TRIGGER: kind === "serve" ? "^GET /healthz " : "exit",
+      ...extra,
     },
     stdio: ["pipe", "pipe", "pipe"],
   });
@@ -618,13 +621,18 @@ try {
       sources?: unknown[];
       sourcesContent?: unknown;
     };
+    const bundle = await readFile(join(packageDir, file.slice(0, -".map".length)), "utf8");
+    if (/\/\/# sourceMappingURL=/.test(bundle))
+      throw new Error(`Installed ${file} is referenced by its bundle; Node would discover it.`);
     if (
       map.sourcesContent !== undefined ||
       !map.sources?.every((s) => typeof s === "string" && s.startsWith("../src/"))
     )
       throw new Error(`Installed ${file} embeds source text or names a non-public path.`);
   }
-  console.log("ok   installed source maps name only public ../src/ paths and embed no source");
+  console.log(
+    "ok   installed source maps name only public ../src/ paths, embed no source and are not referenced",
+  );
   await nativeStopSmoke(join(packageDir, "dist", "cli.mjs"), work);
   console.log(
     "ok   installed native Codex adapter: stdin, literal args, framing and deadline outside checkout",
@@ -926,6 +934,10 @@ try {
       console.log(
         `ok   installed ${kind} unhandled fault reports mapped public frames only: ${await packagedCrash(kind, packageDir, env, checkout, work)}`,
       );
+    // Node's own source-map support must not rewrite installed frames to unpackaged src/ paths.
+    console.log(
+      `ok   installed serve fault with NODE_OPTIONS=--enable-source-maps keeps the same frames: ${await packagedCrash("serve", packageDir, env, checkout, work, { NODE_OPTIONS: "--enable-source-maps" })}`,
+    );
     // pdb quotas (#547): the installed command reads one /rate_limit plus one identity read
     // through the fake gh, from any directory, and its text and JSON agree.
     const quotasJson = await run(bin, ["quotas", "--json"], { cwd: work, env });

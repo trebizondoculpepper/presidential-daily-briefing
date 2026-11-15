@@ -102,6 +102,7 @@ Three options were considered. The choice is the third.
    - Node rewrites stacks to `<install>/src/*.ts` paths that don't exist on disk, which the sanitiser's containment check drops.
 3. **Shipped maps, read by the sanitiser.** Chosen. Its properties:
    - The build emits a map beside each bundle (`--sourcemap`). `scripts/sourcemaps.ts` then fails the build if any map names a source outside `../src/` (for example a home or build directory), and it strips `sourcesContent`, so the archive holds positions and public file names only. Together the maps add about 1.2 MB to the unpacked package.
+   - `scripts/sourcemaps.ts` also removes each bundle's `//# sourceMappingURL=` comment, so nothing discovers the maps automatically. Otherwise a user running with `NODE_OPTIONS=--enable-source-maps` would get stacks rewritten to unpackaged `<install>/src/*.ts` paths, which the sanitiser drops. The package test repeats the serve fault with that option and expects the same frames.
    - At report time, inside `beforeSend`, `mappedFrame` in `src/telemetry/crashes.ts` maps each verified built frame through the map beside that file (`<root>/dist/X.mjs.map`, never a `sourceMappingURL` the file names). It uses Node's `module.SourceMap`.
    - A frame is mapped only on an exact generated-line hit whose origin normalises to the existing `src/` allowlist. Otherwise the built location is kept unchanged.
    - Maps are read only when a fatal event is being reported, at most 32 MB per map, parsed once.
