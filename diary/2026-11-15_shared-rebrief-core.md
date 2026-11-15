@@ -1,0 +1,23 @@
+# Shared rebrief core (#506)
+
+Claimed as priya_xu at the owner's request in the fresh feat/506-shared-rebrief-core worktree. Implemented the merged #507 contract: explicit opt-in and context, live shared-service role/platform read, validated actionable changed shortlist, semantic fingerprint, bounded deadline/cancellation, acknowledged delivery and per-session cap. Added a process-per-hook CLI with private temporary hash-only state and exclusive atomic updates. No native hook, model run or repository configuration is installed.
+
+HTTP MCP currently cannot request force-refresh or explicit platform, so that transport reports its capability gap and stops without a request; it does not fake fresh-read parity. Native Codex continuation/receipt remains #398. CLI and core tests use injected facts, time, transport and state, with real temporary-file concurrency/privacy checks. Added doc/rebrief.md for exact setup, acknowledgement, removal and unsupported boundaries. No TODO.md exists in this checkout.
+
+Caught and corrected an initial workspace routing mistake before commit: moved only the new files/service edit from the original checkout to this worktree, restoring the original checkout clean.
+
+Validation: full suite 1,945 passed with one existing skip; focused rebrief cases, check, build, built smoke and installed-archive package test passed. Check reports 45 pre-existing warnings and zero errors. The private state and Codex platform path were exercised without credentials, model calls, hooks or live mutations.
+
+Codex review found that validation stripped native unlock fields before fingerprinting. Preserved unlock counts/unknown evidence, assessment fields and band in the validated semantic action; added an acknowledged-session regression for changed native unlock evidence while action identity/order and subject metadata stay fixed.
+
+Final compatibility check preserved the canonical/legacy identity resolver notice in CLI JSON, including bounded legacy-not-imported recovery, without importing or writing configuration. Added a legacy-read regression.
+
+Added a final pre-emission cancellation check and injected regression for a user stop arriving while the state store releases its lock, after a continue result was prepared. The offer is discarded from stdout.
+
+The same total-deadline cancellation race now wraps state-store waits as well as setup/read; a nonresponsive injected store returns a normal stop instead of delaying the CLI outcome indefinitely. Lock recovery remains explicit, never age-based.
+
+Addressed Codex review of project-resolution cleanup by adding an optional AbortSignal to the shared Git boundary and binding all rebrief project/identity/config Git lookups to the total-deadline controller. A portable child-process regression verifies termination and no follow-up Git lookup. Additional highly parallel full runs exposed existing soft-budget parity diagnostics under host load; verification is repeated with a controlled worker count without changing unrelated tests.
+
+Addressed TypeScript fallback fingerprint review by retaining the effective role reason used by the renderer and semantic PR checks/review counts/linked issues. A real shared-service TypeScript regression acknowledges failed CI, changes it to passing on the same head, and verifies a new offer with the same action IDs but updated briefing.
+
+The shared-service transport also binds configuration Git readers directly to each read signal, so memory-owned native adapters receive the same cancellation cleanup as the CLI wrapper. A direct-adapter regression covers this path.

@@ -223,3 +223,5 @@ pdb --help
 ```
 
 Old executable names remain compatibility aliases in the new package. Existing `triage_*` MCP tool names, repository settings, `triage_role` and hidden workflow-receipt identifiers remain compatible. `PDB_NO_UPDATE_CHECK=1` is the primary update-check opt-out; `GITHUB_TRIAGE_NO_UPDATE_CHECK=1` is still accepted. Historical reports retain their original names and references.
+
+For opt-in native continuation prototypes, see [the shared rebrief core](doc/rebrief.md) (`pdb rebrief --help`). It does not install a hook or start a model.
