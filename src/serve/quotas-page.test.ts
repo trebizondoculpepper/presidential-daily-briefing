@@ -77,7 +77,7 @@ async function setup(
   };
   const options = serveArguments(["--port", "0", "--repo", "example/one"]);
   const running = await startServe(options, serve, readServices(options, serve, read));
-  return { running, calls, collects: () => collects };
+  return { running, calls, collects: () => collects, authReads: () => authReads };
 }
 const get = (
   port: number,
@@ -198,6 +198,21 @@ describe("quota page and API (#548)", () => {
       expect(switched.freshness).toBe("live");
       // The page names the login the server now verifies.
       expect((await get(s.running.port, "/quotas")).body).toContain("<strong>other-login</strong>");
+    } finally {
+      await s.running.close();
+    }
+  });
+
+  it("offline makes no request, not even an identity read", async () => {
+    const s = await setup(() => ok(), ["octo"]);
+    try {
+      const before = s.calls.length;
+      const startupReads = s.authReads();
+      const offline = (await get(s.running.port, "/api/v1/quotas?offline=true")).json;
+      expect(offline.freshness).toBe("unavailable");
+      expect(offline.requests).toEqual({ quota: 0, context: 0 });
+      expect(s.calls.length).toBe(before);
+      expect(s.authReads()).toBe(startupReads);
     } finally {
       await s.running.close();
     }
@@ -329,6 +344,7 @@ describe("quota browser script (#548)", () => {
       ["refresh", "state", "meters", "secondary", "notes"].map((id) => [id, element(id)]),
     );
     const fetched: { path: string; signal: AbortSignal }[] = [];
+    const timers: (() => void)[] = [];
     const pending: ((v: { ok: boolean; status: number; json: () => Promise<unknown> }) => void)[] =
       [];
     const sandbox = {
@@ -342,13 +358,16 @@ describe("quota browser script (#548)", () => {
           return T0;
         }
       },
-      setInterval: () => 0,
+      setInterval: (fn: () => void) => {
+        timers.push(fn);
+        return 0;
+      },
       fetch: (path: string, init: { signal: AbortSignal }) => {
         fetched.push({ path, signal: init.signal });
         return new Promise((done) => pending.push(done));
       },
     };
-    return { sandbox, elements, fetched, pending, listeners };
+    return { sandbox, elements, fetched, pending, listeners, timers };
   }
   const settle = () => new Promise((done) => setTimeout(done, 0));
 
@@ -368,9 +387,11 @@ describe("quota browser script (#548)", () => {
     b.pending[1]!({ ok: true, status: 200, json: async () => viewOf(body().resources) });
     await settle();
     expect(b.elements.get("meters")!.innerHTML).toContain("<meter ");
-    // A server error clears every number.
+    // A server error clears every number, and the local redraw never brings old ones back.
     b.listeners.get("refresh:click")!();
     await settle();
+    expect(b.elements.get("meters")!.innerHTML).toBe("");
+    b.timers.forEach((tick) => tick());
     expect(b.elements.get("meters")!.innerHTML).toBe("");
     b.pending[2]!({
       ok: false,

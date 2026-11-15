@@ -27,8 +27,13 @@ export const quotasApiParameters = ["refresh", "offline"] as const;
 /** `GET /api/v1/quotas[?refresh=true|offline=true]`: the shared view, never cached by browsers. */
 export function quotasApi(
   service: QuotaService,
-  /** The verified gh context; a refresh re-reads the login first (a switched login is noticed). */
-  context: (refresh: boolean) => Promise<{ context: QuotaContext; contextRequests: number }>,
+  /**
+   * The verified gh context. A refresh re-reads the login first (a switched login is noticed);
+   * an offline read uses only the held context and makes no request at all.
+   */
+  context: (
+    mode: "refresh" | "read" | "offline",
+  ) => Promise<{ context: QuotaContext; contextRequests: number }>,
 ) {
   return async (request: RequestContext): Promise<boolean> => {
     if (request.url.pathname !== "/api/v1/quotas") return false;
@@ -52,7 +57,9 @@ export function quotasApi(
       throw new HttpFailure(400, "INVALID_ARGUMENT", "refresh and offline are mutually exclusive.");
     let view;
     try {
-      const selected = await context(!!flags.refresh);
+      const selected = await context(
+        flags.refresh ? "refresh" : flags.offline ? "offline" : "read",
+      );
       view = await service.view(selected.context, {
         refresh: !!flags.refresh,
         offline: !!flags.offline,
@@ -334,7 +341,9 @@ export function quotasClient(view: QuotaRenderers): void {
     controller = mine;
     const current = ++generation;
     button.disabled = true;
-    // Earlier numbers are cleared while reading, so nothing old looks current.
+    // Earlier numbers are cleared while reading, so nothing old looks current; the local redraw
+    // timer must not bring them back either.
+    shown = null;
     show({ state: "<p>Reading GitHub's /rate_limit…</p>", meters: "", secondary: "", notes: "" });
     let body: unknown;
     let failure: string | null = null;
