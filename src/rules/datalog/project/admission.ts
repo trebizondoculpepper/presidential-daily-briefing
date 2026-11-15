@@ -34,7 +34,11 @@ export interface ProjectQueryResult {
   generation: string;
   effectiveRulesHash: string;
   projectRulesHash: string;
-  preferences: { id: string; rows: ProjectRow[] }[];
+  /**
+   * Per preference: `matched` is every admitted entity satisfying `:when` alone; `rows` are the
+   * priority-bound matches. A `:when` match with no priority row is an error, never "no match".
+   */
+  preferences: { id: string; matched: number[]; rows: ProjectRow[] }[];
 }
 export interface ProjectReason {
   id: string;
@@ -126,9 +130,24 @@ export function admitProjectResult(
   let tuples = 0;
   for (const [index, pref] of policy.preferences.entries()) {
     const got = prefs[index];
-    if (!isRecord(got) || !exactKeys(got, ["id", "rows"]) || !Array.isArray(got.rows))
+    if (
+      !isRecord(got) ||
+      !exactKeys(got, ["id", "matched", "rows"]) ||
+      !Array.isArray(got.rows) ||
+      !Array.isArray(got.matched)
+    )
       return invalid("invalid-result", `preference ${pref.id} has an unexpected shape`);
     if (got.id !== pref.id) invalid("invalid-result", `preference ${index} is not ${pref.id}`);
+    const matched = new Set<number>();
+    for (const entity of got.matched as unknown[]) {
+      if (++tuples > resultLimits.tuples)
+        invalid("result-limit", `more than ${resultLimits.tuples} result tuples`);
+      if (typeof entity !== "number" || !projection.identities.has(entity))
+        return invalid("forged-action", `preference ${pref.id} matched an unadmitted action`);
+      if (matched.has(entity))
+        invalid("duplicate-result", `preference ${pref.id} matched one action twice`);
+      matched.add(entity);
+    }
     const names = Object.keys(pref.witnesses);
     const seen = new Map<number, number>();
     for (const row of got.rows as unknown[]) {
@@ -203,6 +222,16 @@ export function admitProjectResult(
       });
       perAction.set(identity, list);
     }
+    for (const entity of seen.keys())
+      if (!matched.has(entity))
+        invalid("invalid-result", `preference ${pref.id} priced an action its :when did not match`);
+    for (const entity of matched)
+      if (!seen.has(entity))
+        invalid(
+          "missing-priority",
+          `preference ${pref.id} matched ${projection.identities.get(entity)} ` +
+            "but its :priority clauses bound no ?value",
+        );
   }
   const matches = new Map<string, ProjectMatch>();
   for (const [identity, list] of perAction) {

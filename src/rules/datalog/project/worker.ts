@@ -33,7 +33,12 @@ export interface WorkerJob {
   datoms: readonly Datom[];
   schema: Schema;
   rules: string;
-  preferences: { id: string; query: string; witnesses: [string, string][] }[];
+  preferences: {
+    id: string;
+    matchQuery: string;
+    query: string;
+    witnesses: [string, string][];
+  }[];
 }
 export interface WorkerOptions {
   signal?: AbortSignal;
@@ -59,10 +64,12 @@ parentPort.once("message", (job) => {
       if (tuples > workerData.tuples) throw Object.assign(new Error("too many tuples"), { code: "result-limit" });
     };
     const preferences = job.preferences.map((p) => {
+      const matched = ds.q(p.matchQuery, db, job.rules).map(([a]) => a);
       const found = ds.q(p.query, db, job.rules);
-      count(found.length);
+      count(matched.length + found.length);
       return {
         id: p.id,
+        matched,
         rows: found.map(([a, value]) => {
           const witnesses = p.witnesses.map(([name, q]) => {
             const values = ds.q(q, db, job.rules, a).flat();

@@ -9,6 +9,8 @@ import type { BaseIdentity, ProjectSourceIO } from "./source.js";
 import type { ProjectGrammar, ProjectPreference } from "./grammar.js";
 export interface CompiledProjectPreference {
   id: string;
+  /** The admitted actions satisfying `:when` alone; each must then bind exactly one priority. */
+  matchQuery: string;
   query: string;
   why: string;
   witnesses: Record<string, string>;
@@ -52,6 +54,7 @@ export function compileProjectPolicy(text: string, base: BaseIdentity): Compiled
     preferences: grammar.preferences.map((p) => ({
       id: p.id,
       why: p.why,
+      matchQuery: `[:find ?a :in $ % :where [?a "pdb.action-id" _] ${body(p.when)}]`,
       // Fix the initial action domain; #515 must still validate every returned action identity.
       query: `[:find ?a ?value :in $ % :where [?a "pdb.action-id" _] ${body(p.when)} ${body(p.priority)}]`,
       witnesses: Object.fromEntries(

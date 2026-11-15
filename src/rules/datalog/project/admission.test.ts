@@ -125,6 +125,7 @@ function evaluateInline(
     projectRulesHash: policy.projectRulesHash,
     preferences: policy.preferences.map((p) => ({
       id: p.id,
+      matched: ds.q(p.matchQuery, db, policy.rules).map(([a]) => Number(a)),
       rows: ds.q(p.query, db, policy.rules).map(([a, value]): ProjectRow => {
         // Object.fromEntries, like the worker: a witness named __proto__ stays an own key.
         const witnesses: Record<string, Value[]> = Object.fromEntries(
@@ -219,7 +220,7 @@ describe("immutable exact-action admission (#515)", () => {
     const entity5 = [...projection.identities].find(([, id]) => id.includes("/issues/5 "))![0];
     const withRows = (rows: unknown[]) => ({
       ...good(),
-      preferences: [{ id: "project-hotfix", rows }],
+      preferences: [{ id: "project-hotfix", matched: [entity5], rows }],
     });
     const row = (over: Partial<Record<0 | 1 | 2 | 3, unknown>> = {}) => {
       const r: unknown[] = [
@@ -248,6 +249,27 @@ describe("immutable exact-action admission (#515)", () => {
       rejects(withRows([row({ 0: 99 })]), "forged-action");
       rejects(withRows([row({ 0: 1 })]), "forged-action");
       rejects(withRows([row({ 0: String(entity5) })]), "forged-action");
+    });
+    it("a :when match whose :priority binds nothing, or a priced action :when did not match", () => {
+      rejects(withRows([]), "missing-priority");
+      rejects(
+        { ...good(), preferences: [{ id: "project-hotfix", matched: [], rows: [row()] }] },
+        "invalid-result",
+      );
+      rejects(
+        { ...good(), preferences: [{ id: "project-hotfix", matched: [99], rows: [] }] },
+        "forged-action",
+      );
+      // Through real DataScript: the priority is bound only for a label no action carries.
+      const unpriced = compile((t) =>
+        t.replace(
+          "[(+ 0 10) ?value] [(not= ?value 0)]",
+          '[?a "pdb.action-label" "never"] [(+ 0 10) ?value]',
+        ),
+      );
+      expect(() =>
+        admitProjectResult(evaluateInline(unpriced, projection), unpriced, projection, "g1"),
+      ).toThrow(expect.objectContaining({ code: "missing-priority" }));
     });
     it("duplicate, conflicting and out-of-range priorities", () => {
       rejects(withRows([row(), row()]), "duplicate-result");
