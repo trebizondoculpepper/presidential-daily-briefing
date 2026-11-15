@@ -28,6 +28,7 @@ import {
 } from "./config.js";
 import {
   IDENTITY_FILE,
+  LEGACY_IDENTITY_FILE,
   IDENTITY_KEYS,
   identityValue,
   isIdentityKey,
@@ -67,7 +68,7 @@ export const configUsage = `Usage: pdb config get KEY [--entry KEY | --harness N
        pdb config list [--entry KEY | --harness NAME] [--json] [--repo owner/name]
        pdb config convert [--prefer toml|json] [--json] [--repo owner/name]
        pdb config help [KEY] [--json]
-identity.* keys use the [agents.KEY] entry of the root agent-inbox.toml selected by --entry KEY,
+identity.* keys use the [agents.KEY] entry of the root pdb.toml selected by --entry KEY,
 else by --harness ${SUPPORTED_HARNESSES.join("|")}, else by the detected harness.`;
 
 type Parsed =
@@ -281,8 +282,10 @@ ${keys}
 Per-agent identity keys, stored in the [agents.KEY] table selected by --entry KEY in
 ${IDENTITY_FILE} at the Git working-tree root (local, Git-ignored, never committed). Writes
 preserve other agents and unknown values but normalise formatting and drop comments.
-get/list never create the file; setting identity.triage_role initialises a missing entry
-with a generated name once:
+get/list never create the file. Until an entry is in ${IDENTITY_FILE}, get/list show a
+matching legacy ${LEGACY_IDENTITY_FILE} entry as legacy-not-imported. Setting an identity key
+on a missing entry imports that legacy entry's name and valid triage_role once (the legacy
+file is never changed); otherwise setting identity.triage_role generates a name once:
 ${identity}
 Exit: 0 success (including an unchanged set); 1 invalid arguments, unsupported scope,
 unknown key, invalid value, unreadable file, write conflict, both settings files present,

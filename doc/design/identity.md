@@ -1,10 +1,10 @@
 # Persistent repository-local agent identity
 
 The later PDB-owned store and one-time import contract is
-[pdb-owned-identity.md](pdb-owned-identity.md) (#319). It supersedes this document's
-filename/write destination when implemented. This document records the existing
-Agent Inbox-compatible behavior and the shared resolver/write safeguards; do not
-claim the new filename is installed before #319 ships.
+[pdb-owned-identity.md](pdb-owned-identity.md) (#319), now implemented: it supersedes
+this document's filename/write destination (`pdb.toml`, read-only legacy
+`agent-inbox.toml` import) and its age-based lock breaking (#382). This document still
+records the shared resolver and write safeguards.
 
 ## Owner decision and why
 

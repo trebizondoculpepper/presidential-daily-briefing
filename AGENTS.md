@@ -12,7 +12,7 @@ Follow [the TypeScript architecture and migration contract](doc/design/typescrip
 
 ## Configuration and identity
 
-Prefer TOML for project-owned configuration. The local root-level `agent-inbox.toml` persists per-agent names and triage_role and must remain Git-ignored/non-versioned. Reuse existing entries and preserve unrelated keys; no service or communications check-in is required. Use config/setup commands rather than edit identity/settings directly. Shared repository settings live in `.github/triage.toml`; an earlier `.github/triage.json` stays readable until `pdb config convert` (#160). npm manifests and workflow YAML retain their required formats. Follow doc/design/identity.md and doc/design/configuration-formats.md.
+Prefer TOML for project-owned configuration. The local root-level `pdb.toml` persists per-agent names and triage_role and must remain Git-ignored/non-versioned. A legacy `agent-inbox.toml` entry is imported into it once by the first `pdb config set identity.…` for that entry and is never written by pdb. Reuse existing entries and preserve unrelated keys; no service or communications check-in is required. Use config/setup commands rather than edit identity/settings directly. Shared repository settings live in `.github/triage.toml`; an earlier `.github/triage.json` stays readable until `pdb config convert` (#160). npm manifests and workflow YAML retain their required formats. Follow doc/design/pdb-owned-identity.md, doc/design/identity.md and doc/design/configuration-formats.md.
 
 ## Architecture and scope
 
