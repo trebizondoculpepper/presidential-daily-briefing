@@ -11,13 +11,22 @@
 import type { Comment, Issue, PullRequest, Snapshot } from "../github/types.js";
 import type { TrustDecision } from "../workflow/delivery.js";
 import { cacheWord } from "./briefing.js";
-import { parseQuestionMarker, parseQuestionRecordBody } from "../workflow/claims.js";
+import { parseQuestionMarker } from "../workflow/claims.js";
+import { parseQuestionRecord, recordMarker } from "./questionrecord.js";
+import type { HumanRecord } from "./questionrecord.js";
+export { parseQuestionRecord } from "./questionrecord.js";
+export type { HumanRecord } from "./questionrecord.js";
 import type { Comment as MarkerComment } from "../workflow/claims.js";
 import type { DatalogAction, QuestionRecordFact } from "../rules/datalog/datalog.js";
+import type {
+  ClosedQuestions,
+  ClosedSourceCoverage,
+  ClosedSourceNotRead,
+} from "./closedquestions.js";
 
 export const humanPolicy = {
   /** Prefix of the hidden marker `pdb needs-human` writes (src/workflow/claims.ts). */
-  recordMarker: "<!-- github-triage:needs-human:",
+  recordMarker,
   /** Questions shown per item; the rest are counted in the item's warnings. */
   maxQuestions: 5,
   /** Longest question, reason or routing text shown. */
@@ -27,54 +36,14 @@ export const humanPolicy = {
   /** Codes on the policy's decisions (D-HUMAN-*, and D-ATTENTION's `addressed`). */
   explicitCodes: ["explicit", "addressed"],
   addressedCode: "addressed",
-  excluded: ["closed tickets (#414)", "GitHub review requests (not collected)"],
+  /** Kind of the D-HUMAN-ORPHANED* decisions: a question on a closed source (#414). */
+  orphanedKind: "orphaned-question",
+  unknownResolutionCode: "resolution-unknown",
+  excluded: ["GitHub review requests (not collected)"],
 } as const;
-
-/** One parsed needs-human record. */
-export interface HumanRecord {
-  /** The record comment's URL: the focused source link. */
-  url: string;
-  createdAt: string;
-  marker: string;
-  /** `Designer:` routing name, "" when unreadable. */
-  to: string;
-  raisedBy: string;
-  why: string;
-  questions: string[];
-  /**
-   * Marker version (#412): 1 legacy, 2 bound to its repository/issue with explicit-resolution
-   * semantics. Until the explicit resolve/withdraw commands ship, both resolve by labels here.
-   */
-  version: 1 | 2;
-  /** The needs-human operation id that identifies this question. */
-  opId: string;
-}
 
 const shorten = (text: string): string =>
   text.length > humanPolicy.maxText ? `${text.slice(0, humanPolicy.maxText - 1)}…` : text;
-
-/** Parse a needs-human record comment; null when it carries no record marker. */
-export function parseQuestionRecord(comment: Comment): HumanRecord | null {
-  const body = comment.body ?? "";
-  const at = body.indexOf(humanPolicy.recordMarker);
-  if (at < 0) return null;
-  const end = body.indexOf("-->", at);
-  const marker = body.slice(at, end < 0 ? undefined : end + 3);
-  // The same format `pdb needs-human` writes (workflow/claims.ts), multiline values included.
-  const parts = parseQuestionRecordBody(body.slice(0, at));
-  const parsed = parseQuestionMarker(body);
-  return {
-    version: parsed?.version === 2 ? 2 : 1,
-    opId: parsed?.opId ?? "",
-    url: comment.url,
-    createdAt: comment.createdAt ?? "",
-    marker,
-    to: parts?.designer ?? "",
-    raisedBy: parts?.agent ?? "",
-    why: parts?.why ?? "",
-    questions: parts?.questions ?? [],
-  };
-}
 
 /** Record counts reported in coverage. `resolved` is filled in by the projection. */
 export interface RecordCounts {
@@ -94,6 +63,8 @@ export interface HumanEvidence {
   current: Map<string, HumanRecord>;
   counts: RecordCounts;
   warnings: string[];
+  /** Questions on closed sources (#414); absent: closed sources were not read. */
+  closed?: ClosedQuestions | ClosedSourceNotRead;
 }
 
 /**
@@ -208,6 +179,13 @@ export interface HumanItem {
   why: string;
   nextCommand: string;
   warnings: string[];
+  /** Whether the source ticket or pull request is open or closed (#414). */
+  sourceState: "open" | "closed";
+  /**
+   * Closed sources only: `unresolved` (no explicit resolve or withdraw recorded) or `unknown`
+   * (the outcome could not be established). A closed source is never shown as answered.
+   */
+  resolution?: "unresolved" | "unknown";
 }
 export interface HumanBriefing {
   schemaVersion: 1;
@@ -222,6 +200,8 @@ export interface HumanBriefing {
     warnings: string[];
     records: RecordCounts;
     excluded: string[];
+    /** The bounded closed-source read (#414), or why it did not run. */
+    closedSources: ClosedSourceCoverage | ClosedSourceNotRead;
   };
 }
 
@@ -276,8 +256,14 @@ export function humanBriefing(
   evidence: HumanEvidence,
   options: { human: string | null; limit: number; complete: boolean; warnings: string[] },
 ): HumanBriefing {
+  const closed = evidence.closed?.read ? evidence.closed : null;
+  const closedSources = new Map((closed?.sources ?? []).map((c) => [c.issue.url, c]));
   const subjects = new Map<string, Issue | PullRequest>(
-    [...snapshot.issues, ...snapshot.pullRequests].map((s) => [s.url, s]),
+    [
+      ...snapshot.issues,
+      ...snapshot.pullRequests,
+      ...[...closedSources.values()].map((c) => c.issue),
+    ].map((s) => [s.url, s]),
   );
   const groups = new Map<string, DatalogAction[]>();
   for (const decision of decisions)
@@ -290,9 +276,15 @@ export function humanBriefing(
     if (!subject) continue;
     const codes = matched.flatMap((d) => d.reasonCodes);
     const kinds = [...new Set(matched.map((d) => d.kind as string))];
-    const record = kinds.includes("answer-questions") ? evidence.current.get(target) : undefined;
+    const orphaned = kinds.includes(humanPolicy.orphanedKind)
+      ? (closedSources.get(target)?.records ?? [])
+      : [];
+    const record = kinds.includes("answer-questions") ? evidence.current.get(target) : orphaned[0];
     const warnings: string[] = [];
-    const questions = record?.questions ?? [];
+    // Every unsettled question on a closed source is its own obligation (#414): list them all.
+    const questions = orphaned.length
+      ? orphaned.flatMap((r) => r.questions)
+      : (record?.questions ?? []);
     if (questions.length > humanPolicy.maxQuestions)
       warnings.push(
         `${questions.length - humanPolicy.maxQuestions} more question(s) on the record`,
@@ -303,7 +295,9 @@ export function humanBriefing(
       ...questions.slice(0, humanPolicy.maxQuestions).map(shorten),
       ...kinds.flatMap((kind) => requestedFor(kind, subject, options.human)),
     ];
-    const blocks = blocksOf(subject);
+    const sourceClosed = closedSources.has(target);
+    // A closed source blocks nothing GitHub counts; its dependents are not read (#414).
+    const blocks = sourceClosed ? { subjects: [target], unknown: [] } : blocksOf(subject);
     // Truncated dependent or closing evidence is missing evidence; display bounding is not.
     for (const gap of blocks.unknown.filter((u) => !u.endsWith("omitted")))
       evidenceGaps.push(`${target}: ${gap}; what it blocks is a lower bound.`);
@@ -324,11 +318,18 @@ export function humanBriefing(
       addressed: codes.includes(humanPolicy.addressedCode),
       routedTo: [
         ...new Set([
+          ...(orphaned.length ? orphaned.map((r) => r.to).filter(Boolean) : []),
           ...(record?.to ? [record.to] : []),
           ...(kinds.includes("addressed-response") && options.human ? [options.human] : []),
         ]),
       ],
-      raisedBy: record?.raisedBy ? [record.raisedBy] : [],
+      raisedBy: [
+        ...new Set(
+          (orphaned.length ? orphaned : record ? [record] : [])
+            .map((r) => r.raisedBy)
+            .filter(Boolean),
+        ),
+      ],
       requested,
       reason: shorten(record?.why || matched[0].why.text),
       blocks,
@@ -339,6 +340,14 @@ export function humanBriefing(
         ? `pdb pr ${subject.number} --repo ${snapshot.repository}`
         : `pdb --repo ${snapshot.repository} --issue ${subject.number}`,
       warnings,
+      sourceState: sourceClosed || subject.state !== "OPEN" ? "closed" : "open",
+      ...(sourceClosed
+        ? {
+            resolution: codes.includes(humanPolicy.unknownResolutionCode)
+              ? ("unknown" as const)
+              : ("unresolved" as const),
+          }
+        : {}),
     });
   }
   // A current trusted record on a ticket the policy did not ask about is resolved (labels removed).
@@ -360,7 +369,17 @@ export function humanBriefing(
     resolved,
     unknown: unknownState.length,
   };
-  const warnings = [...options.warnings, ...evidenceGaps];
+  const closedCoverage: ClosedSourceCoverage | ClosedSourceNotRead = closed
+    ? closed.coverage
+    : evidence.closed?.read === false
+      ? evidence.closed
+      : { read: false, complete: false, why: "closed sources were not read" };
+  const closedWarnings = closed
+    ? closed.warnings
+    : [
+        `${snapshot.repository}: questions on closed tickets were not read (${closedCoverage.read ? "" : closedCoverage.why}); one whose ticket closed may be unseen.`,
+      ];
+  const warnings = [...options.warnings, ...evidenceGaps, ...closedWarnings];
   const limit = Math.max(0, options.limit);
   return {
     schemaVersion: 1,
@@ -379,6 +398,7 @@ export function humanBriefing(
       warnings,
       records,
       excluded: [...humanPolicy.excluded],
+      closedSources: closedCoverage,
     },
   };
 }
@@ -415,7 +435,16 @@ export function humanText(
     );
   human.items.forEach((item, i) => {
     lines.push(
-      `${i + 1}. [${item.explicit ? (item.addressed ? "explicit, to you" : "explicit") : "inferred"}] ${item.kind} ${item.target} — ${item.title}`,
+      `${i + 1}. [${[
+        item.explicit ? (item.addressed ? "explicit, to you" : "explicit") : "inferred",
+        ...(item.resolution
+          ? [
+              item.resolution === "unknown"
+                ? "ticket closed, resolution unknown"
+                : "ticket closed, unanswered",
+            ]
+          : []),
+      ].join(", ")}] ${item.kind} ${item.target} — ${item.title}`,
       `   Why: ${item.reason}`,
       ...item.requested.map((r) => `   Requested: ${r}`),
       `   Blocks: ${item.blocks.subjects.join(", ") || "nothing known"}${item.blocks.unknown.length ? ` (${item.blocks.unknown.join("; ")})` : ""}`,

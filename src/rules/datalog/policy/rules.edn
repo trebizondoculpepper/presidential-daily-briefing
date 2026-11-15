@@ -17,6 +17,8 @@
 [(foreground ?t) (open ?t) (addressed ?t)]
 ;; Human input is waiting whatever the ticket's parking: the human view sees parked work (#457).
 [(foreground ?t) (open ?t) [1 "role" "human"]]
+;; A closed source stays in the human view while a trusted question on it is unsettled (#414).
+[(foreground ?t) [1 "role" "human"] (orphan-source ?t)]
 [(own-issue ?t) (issue ?t) (open ?t) (mine ?t)]
 [(platform-ok ?t) [?t "labels-complete" true] (not [?t "platform" _])]
 [(platform-ok ?t) [1 "platform" ?p] [?t "platform" ?p]]
@@ -95,4 +97,20 @@
 [(open-question ?t) (issue ?t) (open ?t) (question-labelled ?t) (has-trusted-record ?t)]
 [(open-unrecorded ?t) (issue ?t) (open ?t) (question-labelled ?t) (not (has-trusted-record ?t))]
 [(asks-viewer ?t) (trusted-record ?t ?r) [?r "record-to" ?a] [1 "agent" ?a]]
+;; Questions on closed sources (#414, doc/reports/closed-question-discovery.md). Closure, merge
+;; and label removal never settle a v2 question: only an explicit resolve or withdraw does. A
+;; legacy v1 question keeps label removal as its resolution. An unknown outcome is never settled.
+[(closed ?t) [?t "state" "CLOSED"]]
+[(record-settled ?r) [?r "record-outcome" "resolved"]]
+[(record-settled ?r) [?r "record-outcome" "withdrawn"]]
+[(record-pending ?t ?r) [?r "record-version" 2]]
+[(record-pending ?t ?r) [?r "record-version" 1] (question-labelled ?t)]
+[(orphaned-record ?t ?r) (issue ?t) (closed ?t) (trusted-record ?t ?r) [?r "record-outcome" "none"] (record-pending ?t ?r)]
+[(orphan-unknown ?t ?r) (issue ?t) (closed ?t) (trusted-record ?t ?r) [?r "record-outcome" "unknown"] (record-pending ?t ?r)]
+[(orphan-unknown ?t ?r) (issue ?t) (closed ?t) (trusted-record ?t ?r) [?r "record-version" 1] (not (record-settled ?r)) [?t "labels-complete" false] (not (question-labelled ?t))]
+[(has-orphaned ?t) (orphaned-record ?t ?r)]
+[(has-orphan-unknown ?t) (orphan-unknown ?t ?r)]
+[(orphan-source ?t) (has-orphaned ?t)]
+[(orphan-source ?t) (has-orphan-unknown ?t)]
+[(orphan-asks-viewer ?t) (orphaned-record ?t ?r) [?r "record-to" ?a] [1 "agent" ?a]]
 ]
