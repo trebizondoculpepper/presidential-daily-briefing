@@ -12,6 +12,15 @@ import {
   SubjectUnavailable,
 } from "./github.js";
 import type { Query } from "./github.js";
+import {
+  classifyCommentResponse,
+  commentCommand,
+  sameCommentBody,
+  withCommentRecovery,
+} from "./commentwrite.js";
+import type { CommentCallOptions, CommentReceipt } from "./commentwrite.js";
+import { parseGhResponse } from "./evidence.js";
+import type { GhResponse } from "./evidence.js";
 import type { Issue, NativeNode, Page, Reference } from "./types.js";
 import { QuotaStopped, quotaRefusal, ReadMeter, readProfiles } from "./readplan.js";
 import type { ReadCollection } from "./readplan.js";
@@ -692,8 +701,13 @@ export function dependencyText(report: DependencyReport): string {
 // "Rules for commands that change tickets".
 
 /** The only GitHub write boundary: `gh` with explicit arguments, never a shell. */
-export type GhRun = (args: string[]) => Promise<void>;
-export const ghRun: GhRun = async (args) => {
+export type GhRun = (args: string[], call?: CommentCallOptions) => Promise<void>;
+export const ghRun: GhRun = async (args, call) => {
+  // Workflow comments go through the shared bounded recovery boundary (#345).
+  if (commentCommand(args)) {
+    await ghCommentRun(args, call);
+    return;
+  }
   try {
     await execute("gh", args, { timeout: 60_000 });
   } catch (error) {
@@ -703,6 +717,95 @@ export const ghRun: GhRun = async (args) => {
     throw new Error(`gh ${args[0]} ${args[1]} failed. Check gh auth status and rate limits.`);
   }
 };
+/**
+ * One REST comment POST through gh with `--include`, so the refusal is classified from that same
+ * response's status, headers and error fields (#293, #345). Resolves with the created URL.
+ */
+async function ghCommentPost(args: string[]): Promise<{ url: string | null }> {
+  const target = commentCommand(args)!;
+  let stdout: unknown;
+  try {
+    ({ stdout } = await execute(
+      "gh",
+      [
+        "api",
+        "--include",
+        "--method",
+        "POST",
+        `repos/${target.repository}/issues/${target.number}/comments`,
+        "-f",
+        `body=${target.body}`,
+      ],
+      { timeout: 60_000 },
+    ));
+  } catch (error) {
+    let response: GhResponse | null = null;
+    try {
+      const out = outputText(prop(error, "stdout"));
+      response = out ? parseGhResponse(out) : null;
+    } catch {
+      response = null;
+    }
+    const timedOut = prop(error, "killed") === true && prop(error, "signal") === "SIGTERM";
+    throw Object.assign(new Error("gh issue comment failed."), {
+      commentAttempt: classifyCommentResponse(response, {
+        exitCode: prop(error, "code"),
+        timedOut,
+      }),
+    });
+  }
+  try {
+    const url = prop(JSON.parse(parseGhResponse(outputText(stdout)).body), "html_url");
+    return { url: typeof url === "string" ? url : null };
+  } catch {
+    // gh exited 0, so GitHub answered 2xx: posted, URL unknown.
+    return { url: null };
+  }
+}
+
+/**
+ * Read back the newest comments on the target for this exact frozen body written by the
+ * authenticated viewer. Another author's copy, a substring or another ticket never counts.
+ */
+export async function ghCommentReceipt(
+  target: { repository: string; number: number; body: string },
+  since: Date,
+  query: Query = ghQuery,
+): Promise<CommentReceipt> {
+  const [owner, name] = target.repository.split("/");
+  const data = await query(
+    `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){comments(last:100){pageInfo{hasPreviousPage} nodes{url body viewerDidAuthor createdAt}}}}}`,
+    { owner: owner ?? "", name: name ?? "", number: target.number },
+  );
+  const comments = prop(data, "repository", "issue", "comments");
+  const nodes = prop(comments, "nodes");
+  if (!Array.isArray(nodes)) return { status: "unreadable" };
+  const matches = nodes.filter(
+    (n) =>
+      prop(n, "viewerDidAuthor") === true &&
+      // Bound to this attempt: created no earlier than its first dispatch (allowing 5s of
+      // clock skew), so an identical earlier comment never counts as this write's receipt.
+      Date.parse(String(prop(n, "createdAt"))) >= since.getTime() - RECEIPT_SKEW_MS &&
+      typeof prop(n, "body") === "string" &&
+      sameCommentBody(prop(n, "body") as string, target.body),
+  );
+  if (matches.length > 1) return { status: "duplicate", count: matches.length };
+  if (matches.length === 1) {
+    const url = prop(matches[0], "url");
+    return { status: "found", url: typeof url === "string" ? url : null };
+  }
+  // A just-sent comment is among the newest 100; older history is irrelevant to this receipt.
+  return { status: "absent" };
+}
+
+const RECEIPT_SKEW_MS = 5_000;
+
+/** Production comment boundary: bounded recovery over the REST POST and its read-back. */
+export const ghCommentRun = withCommentRecovery({
+  dispatch: ghCommentPost,
+  readBack: ghCommentReceipt,
+});
+
 /** A write refused because of a GitHub (secondary) rate limit: stop all further writes. */
 import type { FailureClassification } from "./evidence.js";
 
@@ -947,7 +1050,13 @@ export async function applyDependencyChange(
       await run(commentCommand);
       commentStatus = "posted";
     } catch (error) {
-      commentStatus = prop(error, "rateLimited") ? "failed: rate limited" : "failed";
+      // A comment write's bounded recovery says what happened and when to retry (#345).
+      const recovery = prop(error, "recovery");
+      commentStatus = isRecord(recovery)
+        ? `${recovery.acceptance === "unknown" ? "unknown" : "failed"}: ${String(recovery.message)}`
+        : prop(error, "rateLimited")
+          ? "failed: rate limited"
+          : "failed";
     }
   const unfinished = results.some((c) => c.status !== "done" && c.status !== "noop");
   const exitCode = !applied.length

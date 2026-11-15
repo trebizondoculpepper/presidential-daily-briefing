@@ -81,6 +81,8 @@ function harness(
     failAdd?: boolean;
     failComment?: boolean;
     trust?: TrustDecision;
+    /** #345: throttle the first comment, applying this change to the ticket during the wait. */
+    throttleThen?: (o: { edited?: string | null }) => void;
   } = {},
 ) {
   const files = new Map<string, string>();
@@ -117,6 +119,7 @@ function harness(
   const queries: string[] = [];
   const mutations: { query: string; vars: Record<string, string> }[] = [];
   const trustCalls: string[] = [];
+  let throttled = false;
   const ok = (data: unknown): Answer => ({ data, errors: [] });
   const out: string[] = [];
   const call = (...args: string[]) =>
@@ -125,6 +128,9 @@ function harness(
       git,
       cwd: "/repo",
       now: () => new Date(NOW),
+      sleep: async () => {
+        options.throttleThen?.(options);
+      },
       trust: (repository) => async (c) => {
         expect(repository).toBe("owner/name");
         trustCalls.push(c.author?.login ?? "?");
@@ -177,6 +183,13 @@ function harness(
             return ok({ removeLabelsFromLabelable: { clientMutationId: null } });
           }
           if (options.failComment) throw new Error("network down");
+          if (options.throttleThen && !throttled) {
+            throttled = true;
+            return {
+              data: { addComment: null },
+              errors: [{ type: "UNPROCESSABLE", message: "was submitted too quickly" }],
+            };
+          }
           remote.comments.push(comment(vars.body!));
           return ok({
             addComment: { commentEdge: { node: { url: `https://c/${remote.comments.length}` } } },
@@ -841,5 +854,24 @@ describe("Ticket Doctor impact findings (#245)", () => {
     }).tickets[0]!.findings.map((f) => f.kind);
     expect(kinds).toContain("complexity-label-invalid");
     expect(findings(issues).map((f) => f.kind)).toEqual(["impact-label-invalid"]);
+  });
+});
+
+describe("impact provenance retry after a throttle (#345)", () => {
+  it("retries when the description is unchanged during the wait", async () => {
+    const t = harness({ labels: ["bug"], throttleThen: () => {} });
+    expect(await t.call(...impactArgs, "--json")).toBe(0);
+    expect(t.json().commentRecovery).toMatchObject({ status: "posted", attempts: 2 });
+    expect(t.kinds().filter((k) => k === "addComment")).toHaveLength(2);
+  });
+  it("stops when the description was edited during the wait", async () => {
+    const t = harness({
+      labels: ["bug"],
+      throttleThen: (o) => void (o.edited = "2026-11-13T12:30:00.000Z"),
+    });
+    expect(await t.call(...impactArgs, "--json")).toBe(2);
+    expect(t.json().commentRecovery).toMatchObject({ status: "conflict", attempts: 1 });
+    expect(t.json().commentRecovery.message).toContain("edited during the wait");
+    expect(t.kinds().filter((k) => k === "addComment")).toHaveLength(1);
   });
 });
