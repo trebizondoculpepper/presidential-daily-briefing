@@ -797,6 +797,8 @@ export async function runEstimate(
 
     // The frozen record: the same body (and recordedAt) for every attempt (#345).
     const body = provenanceComment(provenance);
+    // The description edit time this record was judged against (impact only).
+    const editedBefore = final.edited;
     const written = await postCommentWithRecovery({
       post: async () => {
         const comment = await safely(api.mutate(ADD_COMMENT, { issue: latest.issueId, body }));
@@ -809,9 +811,15 @@ export async function runEstimate(
       readBack: async () => {
         try {
           const state = await read();
-          return isThisAssessment(state.provenance, state)
-            ? { status: "found", url: null }
-            : { status: "absent" };
+          if (!isThisAssessment(state.provenance, state)) return { status: "absent" };
+          // The receipt alone is not success: the labels read with it must still be this size.
+          if (!onlyTarget(state.sizes) || state.invalid.length)
+            return {
+              status: "conflict",
+              url: null,
+              why: `#${number} now carries ${[...state.sizes, ...invalidNames(state)].join(", ") || "no size label"}, not ${size} alone (a concurrent change?)`,
+            };
+          return { status: "found", url: null };
         } catch {
           return { status: "unreadable" };
         }
@@ -823,6 +831,9 @@ export async function runEstimate(
           return `#${number} no longer carries ${size} alone`;
         if (JSON.stringify(state.provenance ?? null) !== JSON.stringify(recorded ?? null))
           return `another estimate was recorded on #${number}`;
+        // Impact records judge the description: an edit during the wait makes this one stale.
+        if (impact && state.edited !== editedBefore)
+          return `the description of #${number} was edited during the wait`;
         return null;
       },
       ...(runtime.clock ? { now: runtime.clock } : {}),
@@ -831,6 +842,13 @@ export async function runEstimate(
       ...(runtime.commentPolicy ? { policy: runtime.commentPolicy } : {}),
     });
     result.commentRecovery = written;
+    if (written.status === "conflict" && written.acceptance === "confirmed") {
+      // Provenance landed, but the size it records was changed by another writer meanwhile.
+      result.provenanceWritten = true;
+      result.recovery = `Read the current size and provenance on #${number}, then decide whether to estimate again.`;
+      lines.push(`Conflict: ${written.message}`, String(result.recovery));
+      return await finish("conflict", 2);
+    }
     if (written.status !== "posted") {
       result.provenanceWritten = false;
       result.recovery =

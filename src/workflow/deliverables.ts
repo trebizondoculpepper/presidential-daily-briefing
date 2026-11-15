@@ -1636,7 +1636,20 @@ export async function applyDeliverables(
     const step: PlanStep = { ...next, status: "pending" };
     steps.push(step);
     try {
-      await rt.run(step.command, { guard: ticketGuard(repository, request.number, rt.query) });
+      await rt.run(step.command, {
+        guard: ticketGuard(repository, request.number, rt.query),
+        // After a throttle wait, re-run this command's own prerequisite reads (PR states, the
+        // delivery fold, readiness): retry only if the fresh plan still makes this exact write.
+        stillApplicable: async () => {
+          const again = await planDeliverables(repository, request, rt);
+          const next = again.ok ? again.changes[0] : undefined;
+          // The record body carries its issue time, so compare the write without its body.
+          const shape = (c: string[]) => JSON.stringify(c.filter((_, i) => c[i - 1] !== "--body"));
+          return next && next.step === step.step && shape(next.command) === shape(step.command)
+            ? null
+            : "the delivery prerequisites changed during the wait";
+        },
+      });
       step.status = "done";
       if (step.step === "record" && plan.record) posted = { plan, record: plan.record };
     } catch (error) {

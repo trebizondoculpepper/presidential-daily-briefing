@@ -207,6 +207,28 @@ describe("postCommentWithRecovery (#345)", () => {
     expect(r.message).toContain("within the deadline");
     expect(t.posts()).toBe(1);
   });
+  it("takes the guard baseline before the first POST, so a change while it is pending counts", async () => {
+    let state = "unclaimed";
+    let posts = 0;
+    const reads: string[] = [];
+    const r = await postCommentWithRecovery({
+      post: async () => {
+        posts += 1;
+        // A competing claim lands while the first POST is in flight, then GitHub throttles it.
+        if (posts === 1) state = "claimed by bob";
+        return posts === 1 ? secondary({ retryAfterSeconds: 1 }) : { kind: "posted", url: "u" };
+      },
+      readBack: async () => ({ status: "absent" }),
+      guard: async () => {
+        reads.push(state);
+        return state;
+      },
+      sleep: async () => {},
+    });
+    expect(reads[0]).toBe("unclaimed");
+    expect(r).toMatchObject({ status: "conflict", attempts: 1 });
+    expect(posts).toBe(1);
+  });
   it("finds a lost-reply comment by read-back and never posts it again", async () => {
     const t = scripted(["lost"]);
     const r = await postCommentWithRecovery(t.boundaries);
@@ -453,7 +475,11 @@ describe("the shared gh write boundary (#345)", () => {
   it("retries a throttled comment with the same frozen arguments", async () => {
     const b = boundary([throttle()]);
     await b.run(comment, { guard: async () => "same" });
-    expect(b.calls).toEqual([comment, comment]);
+    // Both attempts send the same frozen arguments, the body carrying one per-run nonce.
+    expect(b.calls[0]).toEqual(b.calls[1]);
+    expect(b.calls[0]!.at(-1)).toMatch(
+      /^hello <!-- op:1 -->\n\n<!-- github-triage:write:[\w-]+ -->$/,
+    );
     expect(b.sleeps).toEqual([2000]);
     expect(b.landed).toHaveLength(1);
   });
@@ -533,7 +559,7 @@ describe("the shared gh write boundary (#345)", () => {
     });
     const steps = "steps" in result ? result.steps! : [];
     expect(steps[0]!.status).toBe("done");
-    expect(b.landed.filter((x) => x === comment.at(-1))).toHaveLength(1);
+    expect(b.landed.filter((x) => x.startsWith(comment.at(-1)!))).toHaveLength(1);
     expect(b.sleeps).toEqual([2000]);
   });
   it("applyPlan reports a still-throttled comment as partial with when to retry", async () => {
@@ -611,15 +637,16 @@ describe("the shared gh write boundary (#345)", () => {
       });
       let posts = 0;
       const run = withCommentRecovery({
-        dispatch: async () => {
+        dispatch: async (args) => {
           posts += 1;
           const failure = failures.shift();
+          const body = args.at(-1)!;
           if (failure === "lost") {
-            comments.push({ body: claimBody, createdAt: new Date(clock).toISOString() });
+            comments.push({ body, createdAt: new Date(clock).toISOString() });
             throw new Error("socket hang up");
           }
           if (failure) throw failure;
-          comments.push({ body: claimBody, createdAt: new Date(clock).toISOString() });
+          comments.push({ body, createdAt: new Date(clock).toISOString() });
           return { url: `https://c/${comments.length - 1}` };
         },
         readBack: (target, since) => ghCommentReceipt(target, since, query),
@@ -651,6 +678,20 @@ describe("the shared gh write boundary (#345)", () => {
       });
       expect(t.posts()).toBe(1);
       expect(t.comments).toHaveLength(2);
+    });
+    it("ignores an identical earlier comment even inside the clock-skew window", async () => {
+      const t = reclaim(["lost"]);
+      // The earlier claim landed one second before this run: the time check alone would match it.
+      t.comments[0]!.createdAt = new Date(T0 - 1_000).toISOString();
+      t.comments[0]!.body = `${claimBody}\n\n<!-- github-triage:write:earlier-run -->`;
+      expect(await t.run(claim, { guard: async () => "same" })).toMatchObject({
+        status: "posted",
+        url: "https://c/1",
+      });
+      const bare = reclaim([new Error("socket hang up")]);
+      bare.comments[0]!.createdAt = new Date(T0 - 1_000).toISOString();
+      const error = await bare.run(claim).catch((e: unknown) => e);
+      expect((error as CommentWriteError).recovery).toMatchObject({ status: "unknown" });
     });
     it("reports a lost reply as unknown when only the earlier claim exists", async () => {
       const t = reclaim([new Error("socket hang up")]);
