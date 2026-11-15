@@ -186,4 +186,22 @@ describe("pdb rules command (#416)", () => {
     const process = await cli(["process"]);
     expect(process.stdout).toContain("pdb rules");
   });
+
+  it("shows a predicate alternative over different head variables with its own head", () => {
+    const base = shippedModel();
+    const blocked = base.predicates.find((p) => p.name === "blocked");
+    if (!blocked) throw new Error("blocked predicate missing");
+    const renamed = {
+      ...blocked,
+      alternatives: [blocked.alternatives[0], { ...blocked.alternatives[1], params: ["?x"] }],
+    };
+    const doc = rulesDocument(
+      context,
+      { rule: "blocked" },
+      { ...base, predicates: base.predicates.map((p) => (p === blocked ? renamed : p)) },
+    );
+    const out = rulesText(doc);
+    expect(out).toContain("    (1) all of:");
+    expect(out).toContain("    (2) blocked(?x) all of:");
+  });
 });
