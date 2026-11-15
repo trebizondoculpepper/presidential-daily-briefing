@@ -270,6 +270,40 @@ esac
   );
 });
 
+describe("gh GraphQL variables (#312 review)", () => {
+  it.skipIf(process.platform === "win32")(
+    "sends strings raw with -f, so numeric, boolean or @-prefixed values stay literal; numbers use -F",
+    async () => {
+      const dir = await mkdtemp(join(tmpdir(), "triage-gh-args-"));
+      const path = process.env.PATH;
+      try {
+        const log = join(dir, "args");
+        await writeFile(
+          join(dir, "gh"),
+          `#!/bin/sh\nfor a in "$@"; do printf '%s\\n' "$a" >> "${log}"; done\nprintf '%s\\n' '{"data":{"repository":null}}'\n`,
+          { mode: 0o700 },
+        );
+        process.env.PATH = `${dir}:${path}`;
+        await ghQueryWith()("query{viewer{login}}", {
+          l0: "123",
+          l1: "true",
+          l2: "@etc/passwd",
+          n: 5,
+        });
+        const args = (await readFile(log, "utf8")).trim().split("\n");
+        const flagOf = (value: string) => args[args.indexOf(value) - 1];
+        expect(flagOf("l0=123")).toBe("-f");
+        expect(flagOf("l1=true")).toBe("-f");
+        expect(flagOf("l2=@etc/passwd")).toBe("-f");
+        expect(flagOf("n=5")).toBe("-F");
+      } finally {
+        process.env.PATH = path;
+        await rm(dir, { recursive: true });
+      }
+    },
+  );
+});
+
 describe("GraphQL NOT_FOUND answers", () => {
   it("treats NOT_FOUND-only errors as a valid null answer and anything else as failure", () => {
     const missing = JSON.stringify({
