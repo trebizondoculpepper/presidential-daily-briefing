@@ -1,5 +1,6 @@
 import {
   BriefingEngineError,
+  engineFailure,
   resolveEngineSetting,
   defaultEngine,
 } from "../config/engine-setting.js";
@@ -223,12 +224,7 @@ export async function presentBriefing(
       });
     } catch (error) {
       if (signal?.aborted) throw error;
-      throw new BriefingEngineError(
-        "decision-engine-failed",
-        error instanceof Error
-          ? error.message
-          : "Experimental evaluator failed; no fallback was run.",
-      );
+      throw engineFailure(error, "Experimental evaluator failed; no fallback was run.");
     }
   }
   const expanded = briefing(
@@ -356,12 +352,7 @@ async function presentHuman(
     });
   } catch (error) {
     if (signal?.aborted) throw error;
-    throw new BriefingEngineError(
-      "decision-engine-failed",
-      error instanceof Error
-        ? error.message
-        : "Human briefing evaluator failed; no fallback was run.",
-    );
+    throw engineFailure(error, "Human briefing evaluator failed; no fallback was run.");
   }
   // Freshness and snapshot completeness come from the shared facts, as in every briefing.
   const facts = briefing(
