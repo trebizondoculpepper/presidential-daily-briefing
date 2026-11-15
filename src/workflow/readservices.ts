@@ -195,8 +195,7 @@ export async function readWhoLive(
   // A definitive quota refusal while hydrating linked PRs stops the read: no delivery, permission
   // or legacy-release request is sent after it. Those sources are reported not read, and the
   // answer is incomplete rather than evaluated from a partial read.
-  const refused =
-    meter.notAttempted.length > 0 || meter.calls.some((c) => c.outcome === "rate-limited");
+  const refused = meter.refused || meter.notAttempted.length > 0;
   const metered = refused ? {} : meteredBoundaries(boundaries, meter, subject);
   let diagnosis: DeliveryDiagnosis | undefined;
   if (!refused && metered.trust && metered.live) {
@@ -225,7 +224,8 @@ export async function readWhoLive(
     metered,
     diagnosis,
   );
-  const quotaLater = !refused && meter.calls.some((c) => c.outcome === "rate-limited");
+  // A refusal during the delivery diagnosis or the member reads: the meter sent nothing after it.
+  const quotaLater = !refused && meter.refused;
   if (refused || quotaLater) {
     const omission = "not read: GitHub refused a request for quota earlier in this read";
     if (refused) {
@@ -234,7 +234,7 @@ export async function readWhoLive(
     } else coverDelivery(meter, subject, metered, read.delivery);
     const warning = refused
       ? `Delivery and permission evidence for #${number} was not read after a rate-limit refusal; delivery is unknown.`
-      : `A delivery member of #${number} was not read after a rate-limit refusal; its follow-up is unknown.`;
+      : `GitHub refused a request of this read of #${number} for quota; delivery, permission or member evidence after it was not read and is unknown.`;
     const report = {
       ...read.report,
       completeness: {
@@ -288,6 +288,19 @@ async function hydrateMembers(
       targets.set(n, { number: n, url: `https://github.com/${match[1]}/pull/${n}` });
   });
   if (!targets.size) return [];
+  // A refusal during the delivery diagnosis stops here: no member is read after it.
+  if (meter.refused) {
+    for (const t of targets.values()) {
+      meter.notAttempted.push(t.url);
+      meter.cover("pull-request", `${repository}#${t.number}`, "not-requested", {
+        omission: "not attempted after a quota refusal",
+      });
+      snapshot.warnings.push(
+        `${t.url}: delivery member pull request not read after a rate-limit refusal; its evidence is unknown.`,
+      );
+    }
+    return [];
+  }
   return hydratePullRequests(
     repository,
     [...targets.values()],

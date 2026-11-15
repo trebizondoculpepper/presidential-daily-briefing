@@ -318,6 +318,31 @@ describe("who N reads only the ticket and its linked open PRs (#367)", () => {
     expect(read.text).toMatch(/INCOMPLETE: Delivery and permission evidence for #1 was not read/);
   });
 
+  it("a refused issue read sends no location diagnosis", async () => {
+    let located = 0;
+    const meter = new ReadMeter("issue-detail-v1", "who", clock);
+    const refused: Query = async () => {
+      throw new RateLimitError("rate limited", { retryAfterSeconds: 30 });
+    };
+    await expect(
+      collectIssueFocus(
+        repo,
+        1,
+        {
+          meter,
+          locate: async () => {
+            located++;
+            throw new Error("must not be called");
+          },
+        },
+        refused,
+        clock,
+      ),
+    ).rejects.toBeInstanceOf(RateLimitError);
+    expect(located).toBe(0);
+    expect(meter.collection().quota).toEqual({ retryAfterSeconds: 30, resetAt: null });
+  });
+
   it("incomplete labels make ownership unknown on the focused path too", async () => {
     const w = world();
     const one = w.issues.get(1)!;

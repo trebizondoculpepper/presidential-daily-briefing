@@ -3,6 +3,7 @@ import { RateLimitError } from "./dependencies.js";
 import { AuthenticationError } from "./github.js";
 import {
   hydrate,
+  QuotaStopped,
   quotaRefusal,
   ReadMeter,
   readProfiles,
@@ -256,5 +257,67 @@ describe("read profiles, coverage and telemetry (#367, collection-profiles.md)",
       )("query{x}", {})
       .catch(() => undefined);
     expect(auth.collection().quota).toBeNull();
+  });
+
+  it("keeps an answered REST refusal's retry evidence in quota", async () => {
+    const refused = (category: string, observation: object) =>
+      ({ status: 403, body: {}, evidence: { category, observation } }) as never;
+    const a = new ReadMeter("pr-status-v1", "pr", clock);
+    await a.rest(
+      async () => refused("rate-limited", { retryAfterSeconds: 60, resetAt: null, retryAt: null }),
+      "permissions",
+      "o/r#1",
+    )("repos/o/r/collaborators/x/permission");
+    expect(a.collection().quota).toEqual({ retryAfterSeconds: 60, resetAt: null });
+    const b = new ReadMeter("pr-status-v1", "pr", clock);
+    await b.rest(
+      async () =>
+        refused("secondary-rate-limit", {
+          retryAfterSeconds: null,
+          retryAt: null,
+          resetAt: "2026-11-15T02:00:00.000Z",
+        }),
+      "permissions",
+      "o/r#1",
+    )("repos/o/r/collaborators/x/permission");
+    expect(b.collection().quota).toEqual({
+      retryAfterSeconds: null,
+      resetAt: "2026-11-15T02:00:00.000Z",
+    });
+    expect(b.collection().telemetry.failures).toEqual({ "rate-limited": 1 });
+  });
+
+  it("sends nothing through any boundary after a quota refusal", async () => {
+    const meter = new ReadMeter("issue-detail-v1", "who", clock);
+    let sent = 0;
+    const refuse = meter.rest(
+      async () => {
+        sent++;
+        return { status: 429, body: {} };
+      },
+      "permissions",
+      "o/r#1",
+    );
+    await refuse("repos/o/r/collaborators/a/permission");
+    const later = meter.query(
+      async () => {
+        sent++;
+        return {};
+      },
+      "pull-request",
+      "o/r#2",
+    );
+    const err = await later("query{x}", {}).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(QuotaStopped);
+    expect(quotaRefusal(err)).toBe(true);
+    await expect(refuse("repos/o/r/collaborators/b/permission")).rejects.toBeInstanceOf(
+      QuotaStopped,
+    );
+    expect(sent).toBe(1);
+    expect(meter.refused).toBe(true);
+    const { notAttempted, telemetry } = meter.collection();
+    expect(notAttempted).toEqual(["pull-request o/r#2", "permissions o/r#1"]);
+    // Only the one request actually sent is counted.
+    expect(telemetry.requests).toBe(1);
   });
 });
