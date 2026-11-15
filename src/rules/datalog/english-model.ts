@@ -47,9 +47,13 @@ export interface SourceRef {
 
 export interface CompiledPredicate {
   name: string;
+  /** The first definition's head variables; each alternative keeps its own in `params`. */
   params: string[];
-  /** Each alternative definition is a conjunction; the alternatives are a disjunction. */
-  alternatives: { clauses: Clause[]; source: SourceRef }[];
+  /**
+   * Each alternative definition is a conjunction over its own head variables (which may be
+   * named differently from another alternative's); the alternatives are a disjunction.
+   */
+  alternatives: { params: string[]; clauses: Clause[]; source: SourceRef }[];
   /** Predicates this one calls, in first-call order. */
   calls: string[];
   /** rules.edn predicates are shared; ordering.edn predicates are passed only to sorting. */

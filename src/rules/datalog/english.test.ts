@@ -16,7 +16,7 @@ import {
 } from "./build.js";
 import { readOne } from "./edn.js";
 import { compileEnglish, EnglishCompileError } from "./english.js";
-import { clauseLines, clauseText, conjunctionText } from "./english-render.js";
+import { clauseLines, clauseText, conjunctionText, predicateHead } from "./english-render.js";
 import type { EnglishPolicy } from "./english-model.js";
 
 const source = (file: string) => readFileSync(join(policyDir, file), "utf8");
@@ -279,5 +279,60 @@ describe("English policy compiler (#416)", () => {
       ),
     );
     expect(overrides.ordering.overrides).toHaveLength(3);
+  });
+
+  it("keeps each predicate alternative's own head variables (Codex, #478)", () => {
+    const extra = '[(linked ?t) [?t "closes" ?i]] [(linked ?x) [?x "responsible" ?a]]';
+    const m = compileEnglish({ ...bundle, clauses: bundle.clauses.replace(/\]$/, ` ${extra}]`) });
+    const linked = m.predicates.find((p) => p.name === "linked");
+    expect(linked?.alternatives.map((a) => predicateHead("linked", a.params))).toEqual([
+      "linked(?t)",
+      "linked(?x)",
+    ]);
+    expect(conjunctionText(linked?.alternatives[1].clauses ?? [])).toBe(
+      "?x has responsible agent ?a",
+    );
+    for (const p of model.predicates)
+      for (const a of p.alternatives) expect(a.params).toHaveLength(p.params.length);
+  });
+
+  it("renders every comparison operand and rejects arities it cannot state (Codex, #478)", () => {
+    const q3 =
+      '[:find ?t :where [?t "number" ?n] [?t "created" ?c] [(< 0 ?n ?c)] [(= ?n ?c 3)] [(not= ?n ?c 5)] [(>= ?c ?n 1)]]';
+    const m = compileEnglish({ ...bundle, queries: { ...bundle.queries, q3 } });
+    expect(
+      m.queries
+        .find((q) => q.name === "q3")
+        ?.clauses.slice(2)
+        .map(clauseText),
+    ).toEqual(["0 < ?n < ?c", "?n = ?c = 3", "not all of ?n, ?c, 5 are equal", "?c ≥ ?n ≥ 1"]);
+    const rejected = (where: string) =>
+      problemsOf(() =>
+        compileEnglish({
+          ...bundle,
+          queries: {
+            ...bundle.queries,
+            q3: `[:find ?t :where [?t "number" ?n] ${where}]`,
+          },
+        }),
+      );
+    expect(rejected("[(> ?n)]")).toEqual([
+      "policy/queries.edn :q3 where[1]: > needs at least two operands",
+    ]);
+    expect(rejected("[(- ?n) ?m]")).toEqual([
+      "policy/queries.edn :q3 where[1]: - with 1 operand(s) is not supported",
+    ]);
+    expect(rejected("[(str) ?m]")).toEqual([
+      "policy/queries.edn :q3 where[1]: str with 0 operand(s) is not supported",
+    ]);
+    expect(rejected("(not)")).toEqual(["policy/queries.edn :q3 where[1]: empty not"]);
+    expect(rejected("(or-join [?n])")).toEqual(["policy/queries.edn :q3 where[1]: empty or-join"]);
+    // The renderer refuses rather than print a partial condition if a bad shape ever reaches it.
+    expect(() => clauseText({ type: "compare", op: "<", args: [{ var: "?n" }] })).toThrow(
+      "cannot render comparison",
+    );
+    expect(() =>
+      clauseText({ type: "bind", fn: "-", args: [{ var: "?n" }], result: "?m" }),
+    ).toThrow("cannot render -");
   });
 });
