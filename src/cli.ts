@@ -23,6 +23,7 @@ import {
   dependencyReport,
   dependencyReportIncomplete,
   dependencyText,
+  readDependencyInventory,
   treeNodeLimit,
   treeNodeMaximum,
   ghRun,
@@ -112,7 +113,12 @@ import {
   readWho,
   readWhoLive,
 } from "./workflow/readservices.js";
-import { directImpact, directImpactText } from "./briefing/dependencyimpact.js";
+import {
+  directImpact,
+  directImpactText,
+  repositoryImpact,
+  repositoryImpactText,
+} from "./briefing/dependencyimpact.js";
 import { readTicketStatus, ticketLimits, ticketStatusText } from "./workflow/ticketstatus.js";
 import { runServe } from "./serve.js";
 import type { ServeRuntime } from "./serve.js";
@@ -133,6 +139,17 @@ export type DepsArguments =
     }
   | {
       help?: undefined;
+      top: true;
+      limit: number;
+      repo?: string;
+      json?: boolean;
+      /** Fills the suggested claim command (NAME otherwise). */
+      agent?: string;
+      /** The viewer's platform for platform-restricted pickup, as the briefing's --platform. */
+      platform?: string;
+    }
+  | {
+      help?: undefined;
       number: number;
       repo?: string;
       json?: boolean;
@@ -141,6 +158,8 @@ export type DepsArguments =
       maxNodes?: number;
       /** Fills the suggested claim command (NAME otherwise). */
       agent?: string;
+      /** The viewer's platform for platform-restricted pickup, as the briefing's --platform. */
+      platform?: string;
     };
 
 /** Injected services for `main`; tests replace the GitHub-facing ones. */
@@ -150,6 +169,8 @@ export interface Runtime {
   collectIssueFocus?: typeof collectIssueFocus;
   currentRepository: typeof currentRepository;
   dependencyReport?: typeof dependencyReport;
+  /** Open-issue inventory for `deps --top` (dependency-discovery-v1, #196). */
+  dependencyInventory?: typeof readDependencyInventory;
   planDependencyChange?: typeof planDependencyChange;
   ghRun?: GhRun;
   planMigration?: typeof planMigration;
@@ -328,12 +349,17 @@ Exit 0: complete evidence. 2: useful but incomplete evidence. 1: invalid argumen
 read (including an unavailable issue). The full intake stays: pdb --issue N --json.
 `;
 
-export const depsHelp = `Usage: pdb deps N [--tree [--max-nodes K]] [--agent NAME] [--json] [--repo owner/name]
+export const depsHelp = `Usage: pdb deps N [--tree [--max-nodes K]] [--agent NAME] [--platform P] [--json] [--repo owner/name]
+       pdb deps --top [--limit K] [--agent NAME] [--platform P] [--json] [--repo owner/name]
        pdb deps add N --on M [--on K] --note WHY [--dry-run] [--json]
        pdb deps remove N --on M [--on K] --note WHY [--dry-run] [--json]
        pdb deps migrate --plan FILE [--repo owner/name] [--json]
 (From a source checkout, use npm run pdb -- deps ...)
-deps N reads native GitHub issue dependencies for issue N (read-only).
+deps N reads native GitHub issue dependencies for issue N (read-only), and answers from direct
+edges whether N can start now, which dependants become pickable when it completes, which stay
+blocked by other blockers, and one concrete next action. Unknown evidence is a lower bound.
+deps --top ranks the repository's open issues by direct edges only (no discussion): what can
+start now, and which work that is not pickable now would unlock the most on completion.
 deps add/remove make N blocked (or no longer blocked) by each M, after fresh live checks:
 refuses self-dependencies, pull requests, missing issues and cycles; an edge that already
 exists (add) or is absent (remove) is a no-op. Posts one comment on N with the note.
@@ -344,6 +370,9 @@ Changes no labels.
                         A walk stopped by its node limit says so and lists what it did not
                         read; it is never reported as a complete graph
   --agent NAME          Your agent name, filled into the suggested claim command (else NAME)
+  --platform P          Your platform, for platform-restricted pickup (as the briefing's)
+  --top                 Repository-wide direct-impact ranking (read-only, bounded)
+  --limit K             Entries per --top list (default 10, at most 50)
   --max-nodes K         Tree node limit (default ${treeNodeLimit}, at most ${treeNodeMaximum}; --tree only)
   --on M                Blocker issue number (repeatable; add/remove only)
   --note WHY            Reason recorded in the comment (required for add/remove)
@@ -409,6 +438,9 @@ export function depsArgumentsFor(args: string[]): DepsArguments {
       tree: { type: "boolean" },
       "max-nodes": { type: "string" },
       agent: { type: "string" },
+      platform: { type: "string" },
+      top: { type: "boolean" },
+      limit: { type: "string" },
       help: { type: "boolean" },
       on: { type: "string", multiple: true },
       note: { type: "string" },
@@ -426,6 +458,12 @@ export function depsArgumentsFor(args: string[]): DepsArguments {
       throw new Error("--agent applies only to deps N and deps --top.");
     if (!/^[A-Za-z0-9][\w.-]*$/.test(values.agent))
       throw new Error("--agent must be an agent name such as kavya_sabbagh.");
+  }
+  if (values.platform !== undefined) {
+    if (["migrate", "add", "remove"].includes(positionals[0] ?? "") || values.tree)
+      throw new Error("--platform applies only to deps N and deps --top.");
+    if (!/^[\w.-]+$/.test(values.platform))
+      throw new Error("--platform must be a platform name such as claude-code.");
   }
   // --max-nodes belongs to deps N --tree alone: refuse it everywhere else, before any branch.
   if (values["max-nodes"] !== undefined) {
@@ -470,6 +508,21 @@ export function depsArgumentsFor(args: string[]): DepsArguments {
   }
   if (values.on || values.note || values["dry-run"])
     throw new Error("--on, --note and --dry-run apply only to deps add/remove.");
+  if (values.top) {
+    if (positionals.length || values.tree || values["max-nodes"])
+      throw new Error("Usage: deps --top [--limit K] [--json] [--repo owner/name]");
+    const limit = values.limit === undefined ? 10 : number(values.limit);
+    if (limit === null || limit > 50) throw new Error("--limit must be 1–50.");
+    return {
+      top: true,
+      limit,
+      repo: values.repo,
+      json: values.json,
+      ...(values.agent ? { agent: values.agent } : {}),
+      ...(values.platform ? { platform: values.platform } : {}),
+    };
+  }
+  if (values.limit) throw new Error("--limit applies only to deps --top.");
   if (
     positionals.length !== 1 ||
     !/^[1-9]\d*$/.test(positionals[0]) ||
@@ -490,6 +543,7 @@ export function depsArgumentsFor(args: string[]): DepsArguments {
     number: Number(positionals[0]),
     ...(limit !== undefined ? { maxNodes: Number(limit) } : {}),
     ...(values.agent ? { agent: values.agent } : {}),
+    ...(values.platform ? { platform: values.platform } : {}),
   };
 }
 /** Dry runs report the exit code the real run would give if every apply succeeded. */
@@ -1525,6 +1579,19 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
       await output(values.json ? JSON.stringify(plan, null, 2) + "\n" : migrationPlanText(plan));
       return 0;
     }
+    if ("top" in values) {
+      const inventory = await (runtime.dependencyInventory ?? readDependencyInventory)(repository);
+      const ranked = repositoryImpact(
+        inventory,
+        values.limit,
+        { prs: [], ...(values.platform ? { platform: values.platform } : {}) },
+        values.agent,
+      );
+      await output(
+        values.json ? JSON.stringify(ranked, null, 2) + "\n" : repositoryImpactText(ranked),
+      );
+      return ranked.provisional ? 2 : 0;
+    }
     if ("action" in values) {
       // Read live immediately before changing; never act on a cached snapshot.
       const plan = await (runtime.planDependencyChange ?? planDependencyChange)(repository, {
@@ -1551,7 +1618,11 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
       // Routine reads answer the direct-impact question; --tree stays a diagnosis (#196).
       ...(values.tree ? {} : { impact: true }),
     });
-    const impact = directImpact(report, { prs: [] }, values.agent);
+    const impact = directImpact(
+      report,
+      { prs: [], ...(values.platform ? { platform: values.platform } : {}) },
+      values.agent,
+    );
     await output(
       values.json
         ? JSON.stringify(impact ? { ...report, impact } : report, null, 2) + "\n"

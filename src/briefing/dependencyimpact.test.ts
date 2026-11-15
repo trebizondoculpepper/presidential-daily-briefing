@@ -6,12 +6,19 @@ import {
   dependencyReport,
   dependencyReportIncomplete,
   dependencyText,
+  readDependencyInventory,
 } from "../github/dependencies.js";
 import type { Query } from "../github/github.js";
 import { graphQuery } from "../testing/fakegh.js";
 import { clock, repo } from "../testing/snapshots.js";
 import { depsArgumentsFor, main, ticketArgumentsFor, workflowArgumentsFor } from "../cli.js";
-import { claimTemplate, directImpact, directImpactText } from "./dependencyimpact.js";
+import {
+  claimTemplate,
+  directImpact,
+  directImpactText,
+  repositoryImpact,
+  repositoryImpactText,
+} from "./dependencyimpact.js";
 import { commandTemplates } from "../rules/datalog/commands.js";
 
 const read = async (graph: Parameters<typeof graphQuery>[0], number = 1) => {
@@ -187,7 +194,7 @@ describe("direct dependency impact (#196)", () => {
         },
         edges: [[1, 9]],
       },
-      { states: { 1: { labels: ["platform:x", "status:ready"] } }, edges: [[2, 1]] },
+      { states: { 1: { labels: ["platform:codex", "status:ready"] } }, edges: [[2, 1]] },
     ];
     const parse = (command: string) => {
       const [pdb, name, ...rest] = command.split(" ");
@@ -202,19 +209,75 @@ describe("direct dependency impact (#196)", () => {
       throw new Error(`unexpected suggested command ${command}`);
     };
     let checked = 0;
-    for (const agent of [undefined, "kavya_sabbagh"])
-      for (const graph of graphs) {
-        const { query } = graphQuery(graph);
-        const report = await dependencyReport(repo, 1, { impact: true }, query, clock);
-        const impact = directImpact(report, { prs: [] }, agent)!;
-        for (const [command] of impact.nextAction.matchAll(/pdb [a-z]+ [^)]*/g)) {
-          expect(() => parse(command), command).not.toThrow();
-          if (command.startsWith("pdb claim"))
-            expect(command).toContain(`--agent ${agent ?? "NAME"}`);
-          checked++;
+    const claims: string[] = [];
+    for (const platform of [undefined, "codex"])
+      for (const agent of [undefined, "kavya_sabbagh"])
+        for (const graph of graphs) {
+          const { query } = graphQuery(graph);
+          const report = await dependencyReport(repo, 1, { impact: true }, query, clock);
+          const context = { prs: [], ...(platform ? { platform } : {}) };
+          const impact = directImpact(report, context, agent)!;
+          for (const [command] of impact.nextAction.matchAll(/pdb [a-z]+ [^)]*/g)) {
+            expect(() => parse(command), command).not.toThrow();
+            if (command.startsWith("pdb claim")) {
+              claims.push(command);
+              expect(command).toContain(`--agent ${agent ?? "NAME"}`);
+              if (platform) expect(command).toMatch(new RegExp(`--platform ${platform}$`));
+              else expect(command).not.toContain("--platform");
+              expect(workflowArgumentsFor("claim", command.split(" ").slice(2))).toMatchObject(
+                platform ? { platform } : {},
+              );
+            }
+            checked++;
+          }
         }
-      }
-    expect(checked).toBeGreaterThanOrEqual(8);
+    expect(checked).toBeGreaterThanOrEqual(16);
+    // The platform-restricted ticket is suggested for claim only with its platform stated.
+    expect(claims).toContain(
+      "pdb claim 1 --repo example/project --agent kavya_sabbagh --platform codex",
+    );
+    // deps --top suggestions parse too.
+    for (const agent of [undefined, "kavya_sabbagh"]) {
+      const { query } = graphQuery({
+        states: { 1: { labels: ["status:ready"] } },
+        edges: [[2, 1]],
+      });
+      const top = repositoryImpact(
+        await readDependencyInventory(repo, {}, query, clock),
+        10,
+        { prs: [] },
+        agent,
+      );
+      const commands = [...top.nextAction.matchAll(/pdb [a-z]+ [^).]*/g)].map(([c]) => c.trim());
+      expect(commands).toHaveLength(2);
+      for (const command of commands) expect(() => parse(command), command).not.toThrow();
+      expect(commands[0]).toBe(`pdb claim 1 --repo example/project --agent ${agent ?? "NAME"}`);
+    }
+    // deps --top --platform P: a platform-restricted ticket's claim carries --platform P.
+    {
+      const { query } = graphQuery({
+        states: { 1: { labels: ["status:ready", "platform:codex"] } },
+        edges: [[2, 1]],
+      });
+      const top = repositoryImpact(
+        await readDependencyInventory(repo, {}, query, clock),
+        10,
+        { prs: [], platform: "codex" },
+        "kavya_sabbagh",
+      );
+      const commands = [...top.nextAction.matchAll(/pdb [a-z]+ [^).]*/g)].map(([c]) => c.trim());
+      expect(commands[0]).toBe(
+        "pdb claim 1 --repo example/project --agent kavya_sabbagh --platform codex",
+      );
+      for (const command of commands) expect(() => parse(command), command).not.toThrow();
+      expect(workflowArgumentsFor("claim", commands[0].split(" ").slice(2))).toMatchObject({
+        platform: "codex",
+      });
+    }
+    expect(depsArgumentsFor(["--top", "--agent", "kavya_sabbagh"])).toMatchObject({
+      top: true,
+      agent: "kavya_sabbagh",
+    });
   });
 
   it("marks a read with a truncated dependant blocker list partial and exits 2", async () => {
@@ -234,7 +297,7 @@ describe("direct dependency impact (#196)", () => {
     ]);
     const coverage = report.collection!.coverage.find((c) => c.source === "dependant-eligibility");
     expect(coverage).toMatchObject({ state: "partial" });
-    expect(coverage?.omission).toContain("truncated blocker lists");
+    expect(coverage?.omission).toContain("truncated dependant connection(s)");
     expect(dependencyReportIncomplete(report)).toBe(true);
     expect(directImpact(report)!.unknown.join()).toContain("blocker list truncated");
     const runtime = {
@@ -333,5 +396,258 @@ describe("direct dependency impact (#196)", () => {
     expect(tree.impact).toBeUndefined();
     expect(tree.direct).toBeUndefined();
     expect(dependencyText(tree)).toContain("explicit, expensive diagnosis");
+  });
+});
+
+/** 1 blocks 40 heads, each a chain of 3; 2 (claimed) blocks 5; 3 (blocked by 4) blocks 20. */
+const repositoryGraph = () => {
+  const edges: [number, number][] = [];
+  for (let i = 0; i < 40; i++) {
+    const head = 10 + i * 4;
+    edges.push([head, 1], [head + 1, head], [head + 2, head + 1], [head + 3, head + 2]);
+  }
+  for (let i = 0; i < 5; i++) edges.push([300 + i, 2]);
+  for (let i = 0; i < 20; i++) edges.push([400 + i, 3]);
+  edges.push([3, 4]);
+  return {
+    states: { 2: { labels: ["status:in-progress", "agent:ana"] } },
+    edges,
+  };
+};
+
+describe("deps --top: repository direct impact (#196)", () => {
+  it("ranks what can start now and which completion unlocks most, with bounded reads", async () => {
+    const { query, calls } = graphQuery(repositoryGraph());
+    const inventory = await readDependencyInventory(repo, {}, query, clock);
+    // 189 open issues in 4 pages of 50: request volume follows the inventory, not the graph depth.
+    expect(inventory.issues).toHaveLength(189);
+    expect(calls).toHaveLength(4);
+    expect(inventory.complete).toBe(true);
+    const ranked = repositoryImpact(inventory, 5);
+    expect(ranked.provisional).toBe(false);
+    // Only 1 and 4 have no open blocker; everything else is blocked or claimed.
+    expect(ranked.startNow.map((r) => [r.number, r.unlocks.length])).toEqual([
+      [1, 40],
+      [4, 1],
+    ]);
+    // 4 is pickable and would unlock 3, which still has 20 dependants of its own.
+    expect(ranked.completionUnlocks.map((r) => r.number)).toEqual([3, 2, 10, 11, 12]);
+    expect(ranked.completionUnlocks[0].unlocks).toHaveLength(20);
+    expect(ranked.completionUnlocks[1].notPickable.join()).toContain("claimed by agent:ana");
+    // Never claim or suggest a claimed ticket as new pickup.
+    expect(ranked.startNow.map((r) => r.number)).not.toContain(2);
+    expect(ranked.nextAction).toMatch(
+      /^Start #1: claim it \(pdb claim 1 --repo example\/project --agent NAME\)/,
+    );
+    const text = repositoryImpactText(ranked);
+    expect(text).toContain("Can start now (2 of 2;");
+    expect(text).toContain("Finish-first (#182)");
+    expect(text.length).toBeLessThan(5_000);
+    expect(JSON.stringify(ranked).length).toBeLessThan(20_000);
+  });
+
+  it("never offers pickup or proves unlocks past a not-planned blocker or truncated labels", async () => {
+    const { query } = graphQuery({
+      states: {
+        1: { labels: ["status:ready"] },
+        5: { labels: ["status:ready"] },
+        9: { state: "CLOSED", stateReason: "NOT_PLANNED" },
+        6: { labels: ["status:ready"] },
+        7: { labels: ["status:ready"] },
+        8: { labels: ["status:in-progress", "agent:ana"] },
+        3: { labels: ["status:ready"] },
+      },
+      // 1 has only a not-planned blocker and unlocks 6; 7 waits on 8 (claimed); 3 waits on 7.
+      edges: [
+        [1, 9],
+        [6, 1],
+        [7, 8],
+        [3, 7],
+      ],
+    });
+    const ranked = repositoryImpact(await readDependencyInventory(repo, {}, query, clock), 10);
+    expect(ranked.startNow.map((r) => r.number)).toEqual([5]);
+    expect(ranked.undecided).toMatchObject([{ number: 1 }]);
+    expect(ranked.undecided[0].reason).toContain("closed as not planned");
+    // An undecided issue is never ranked as a proven completion either.
+    expect(ranked.completionUnlocks.map((r) => r.number)).not.toContain(1);
+    expect(repositoryImpactText(ranked)).toContain("Undecided, inspect before pickup (1 of 1):");
+    // Truncated labels: its partial labels never reach the gates, as a subject or a dependant.
+    const truncate = (numbers: number[]) => async () => {
+      const inventory = await readDependencyInventory(repo, {}, query, clock);
+      inventory.issues = inventory.issues.map((issue) =>
+        numbers.includes(issue.number)
+          ? {
+              ...issue,
+              labels: { ...issue.labels, pageInfo: { hasNextPage: true, endCursor: "c" } },
+            }
+          : issue,
+      );
+      return inventory;
+    };
+    const asSubject = repositoryImpact(await truncate([5, 8])(), 10);
+    expect(asSubject.startNow.map((r) => r.number)).toEqual([]);
+    expect(asSubject.undecided.map((r) => r.number).sort((a, b) => a - b)).toEqual([1, 5, 8]);
+    expect(asSubject.completionUnlocks.map((r) => r.number)).not.toContain(8);
+    const asDependant = repositoryImpact(await truncate([3])(), 10);
+    const seven = asDependant.completionUnlocks.find((r) => r.number === 7)!;
+    expect(seven.unlocks).toEqual([]);
+    expect(seven.unknown.join()).toContain("pickup unknown (labels beyond the first 100");
+  });
+
+  it("lists unknown-gate work as undecided and honours --platform as the briefing does", async () => {
+    const { query } = graphQuery({
+      states: {
+        1: { labels: ["status:ready", "platform:codex"] },
+        2: { labels: ["status:ready"] },
+      },
+      edges: [],
+    });
+    const inventory = await readDependencyInventory(repo, {}, query, clock);
+    const unknown = repositoryImpact(inventory, 10);
+    expect(unknown.startNow.map((r) => r.number)).toEqual([2]);
+    expect(unknown.undecided).toMatchObject([{ number: 1 }]);
+    expect(unknown.undecided[0].reason).toContain("viewer platform unknown");
+    const codex = repositoryImpact(inventory, 10, { prs: [], platform: "codex" });
+    expect(codex.startNow.map((r) => r.number).sort((a, b) => a - b)).toEqual([1, 2]);
+    expect(codex.undecided).toEqual([]);
+    const other = repositoryImpact(inventory, 10, { prs: [], platform: "claude-code" });
+    expect(other.startNow.map((r) => r.number)).toEqual([2]);
+    expect(other.undecided).toEqual([]);
+    // The CLI passes --platform through for deps --top and deps N.
+    let out = "";
+    const runtime = {
+      collect: async () => {
+        throw new Error("briefing collection must not run");
+      },
+      currentRepository: async () => repo,
+      dependencyInventory: (r: string) => readDependencyInventory(r, {}, query, clock),
+      dependencyReport: (r: string, n: number, o?: Parameters<typeof dependencyReport>[2]) =>
+        dependencyReport(r, n, o, query, clock),
+    };
+    await main(
+      ["deps", "--top", "--platform", "codex", "--json"],
+      async (t) => void (out = t),
+      runtime,
+    );
+    expect(JSON.parse(out).startNow).toHaveLength(2);
+    await main(
+      ["deps", "1", "--platform", "codex", "--json"],
+      async (t) => void (out = t),
+      runtime,
+    );
+    expect(JSON.parse(out).impact.subject.startNow.status).toBe("eligible");
+    await main(["deps", "1", "--json"], async (t) => void (out = t), runtime);
+    expect(JSON.parse(out).impact.subject.startNow.status).toBe("unknown");
+    expect(() => depsArgumentsFor(["1", "--tree", "--platform", "x"])).toThrow("--platform");
+    expect(() => depsArgumentsFor(["1", "--platform", "a b"])).toThrow("--platform");
+  });
+
+  it("deps N with truncated labels is partial and exits 2, for the subject or a dependant", async () => {
+    const labels = ["status:ready", ...Array.from({ length: 100 }, (_, i) => `l${i}`)];
+    const runFor = async (truncated: number) => {
+      const { query: base } = graphQuery({
+        states: { 1: { labels: ["status:ready"] }, 2: { labels: ["status:ready"] } },
+        edges: [[2, 1]],
+      });
+      const query: Query = async (source, variables) => {
+        const data = (await base(source, variables)) as Record<string, unknown>;
+        const truncate = (issue: Record<string, unknown> | null | undefined) => {
+          if (issue && issue.number === truncated)
+            issue.labels = {
+              nodes: labels.slice(0, 100).map((name) => ({ name })),
+              pageInfo: { hasNextPage: true, endCursor: "c" },
+            };
+        };
+        truncate((data.repository as { issue?: Record<string, unknown> } | undefined)?.issue);
+        for (const [key, value] of Object.entries(data))
+          if (/^d\d+$/.test(key)) truncate((value as { issue: Record<string, unknown> }).issue);
+        return data;
+      };
+      const runtime = {
+        collect: async () => {
+          throw new Error("briefing collection must not run");
+        },
+        currentRepository: async () => repo,
+        dependencyReport: (r: string, n: number, o?: Parameters<typeof dependencyReport>[2]) =>
+          dependencyReport(r, n, o, query, clock),
+      };
+      let out = "";
+      const code = await main(["deps", "1", "--json"], async (t) => void (out = t), runtime);
+      return { code, report: JSON.parse(out) };
+    };
+    const subject = await runFor(1);
+    expect(subject.code).toBe(2);
+    expect(subject.report.impact.subject.startNow.status).toBe("unknown");
+    expect(
+      subject.report.collection.coverage.find((c: { source: string }) => c.source === "labels")
+        .state,
+    ).toBe("partial");
+    const dependant = await runFor(2);
+    expect(dependant.code).toBe(2);
+    expect(dependant.report.direct.partial).toMatchObject([
+      { reason: "labels beyond the first 100 not read" },
+    ]);
+    expect(
+      dependant.report.collection.coverage.find(
+        (c: { source: string }) => c.source === "dependant-eligibility",
+      ).state,
+    ).toBe("partial");
+    const clean = await (async () => {
+      const { query } = graphQuery({
+        states: { 1: { labels: ["status:ready"] }, 2: { labels: ["status:ready"] } },
+        edges: [[2, 1]],
+      });
+      return main(["deps", "1"], async () => {}, {
+        collect: async () => {
+          throw new Error("unused");
+        },
+        currentRepository: async () => repo,
+        dependencyReport: (r: string, n: number, o?: Parameters<typeof dependencyReport>[2]) =>
+          dependencyReport(r, n, o, query, clock),
+      });
+    })();
+    expect(clean).toBe(0);
+  });
+
+  it("labels a capped inventory provisional and unread dependants unknown, never zero", async () => {
+    const { query, calls } = graphQuery(repositoryGraph());
+    const inventory = await readDependencyInventory(repo, { maxPages: 1 }, query, clock);
+    expect(calls).toHaveLength(1);
+    expect(inventory).toMatchObject({ complete: false, stoppedBy: "page-limit", totalOpen: 189 });
+    const ranked = repositoryImpact(inventory, 3);
+    expect(ranked.provisional).toBe(true);
+    expect(ranked.provisionalReasons[0]).toContain("read 50 of 189");
+    expect(ranked.nextAction).toMatch(/^Provisional: /);
+    const one = ranked.startNow.find((r) => r.number === 1)!;
+    // 1's dependants 10..49 were read on page 1; 50..166 were not, so impact is a lower bound.
+    expect(one.unknown.length).toBeGreaterThan(0);
+    expect(one.unknown[0]).toContain("not in the partial inventory read");
+    expect(repositoryImpactText(ranked)).toContain("PROVISIONAL:");
+    expect(inventory.collection.coverage[0]).toMatchObject({ state: "partial" });
+  });
+
+  it("is a deps --top command that exits 2 when provisional", async () => {
+    const { query } = graphQuery(repositoryGraph());
+    let out = "";
+    const runtime = {
+      collect: async () => {
+        throw new Error("briefing collection must not run");
+      },
+      currentRepository: async () => repo,
+      dependencyInventory: (r: string) => readDependencyInventory(r, { maxPages: 1 }, query, clock),
+    };
+    expect(
+      await main(["deps", "--top", "--limit", "2", "--json"], async (t) => void (out = t), runtime),
+    ).toBe(2);
+    expect(JSON.parse(out)).toMatchObject({ provisional: true, limit: 2 });
+    // A complete inventory exits 0.
+    expect(
+      await main(["deps", "--top"], async () => {}, {
+        ...runtime,
+        dependencyInventory: (r: string) => readDependencyInventory(r, {}, query, clock),
+      }),
+    ).toBe(0);
+    await expect(main(["deps", "--top", "7"], async () => {}, runtime)).rejects.toThrow("--top");
   });
 });

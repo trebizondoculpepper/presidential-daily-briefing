@@ -4,6 +4,7 @@ import { promisify } from "node:util";
 import {
   ghQuery,
   ghQueryWith,
+  isRecord,
   pages,
   declaredDependencies,
   prop,
@@ -405,7 +406,117 @@ export function dependencyReportIncomplete(report: DependencyReport): boolean {
   if (report.collection?.quota || report.collection?.notAttempted.length) return true;
   if (report.unfollowed?.length) return true;
   if (report.direct?.notRead.length || report.direct?.partial?.length) return true;
+  // Any partial or failed source (truncated labels, partial dependant evidence) is incomplete.
+  if (report.collection?.coverage.some((c) => c.state === "partial" || c.state === "failed"))
+    return true;
   return report.nodes.some((node) => !node.known);
+}
+/** The open-issue inventory a `deps --top` answer ranks (dependency-discovery-v1, #196). */
+export interface DependencyInventory {
+  schemaVersion: 1;
+  repository: string;
+  startedAt: string;
+  fetchedAt: string;
+  /** Open issues read, oldest first. Comments and bodies were not read. */
+  issues: Issue[];
+  /** False when the page cap or a quota refusal stopped the inventory early. */
+  complete: boolean;
+  /** Why the inventory is partial; null when complete. */
+  stoppedBy: "page-limit" | "quota" | null;
+  /** GitHub's open-issue count, when reported. */
+  totalOpen: number | null;
+  collection: ReadCollection;
+}
+/**
+ * Read the repository's open issues for a direct-edge ranking: labels, creation time, open
+ * closing-PR identities, native summaries and bounded direct edges with their summaries. Pages
+ * oldest first with GitHub's cursor; stops at the profile's page cap or a quota refusal and
+ * says so. Never reads discussion, reviews or transitive edges.
+ */
+export async function readDependencyInventory(
+  repository: string,
+  { signal, maxPages }: { signal?: AbortSignal; maxPages?: number } = {},
+  query: Query = ghQueryWith(signal),
+  now: () => Date = () => new Date(),
+): Promise<DependencyInventory> {
+  const bounds = readProfiles["dependency-discovery-v1"].bounds;
+  const pageLimit = maxPages ?? bounds.pages;
+  const startedAt = now().toISOString();
+  const meter = new ReadMeter("dependency-discovery-v1", "deps-top", now, undefined, signal);
+  const [owner, name] = repository.split("/");
+  const fields = `number title url state stateReason createdAt updatedAt labels(first:${bounds.labels}){nodes{name} ${pageInfo}} closedByPullRequestsReferences(first:${bounds.linkedPullRequestsPerIssue},includeClosedPrs:false){nodes{number url state} ${pageInfo}} ${summaryFields} blockedBy(first:${bounds.blockedByPerIssue}){nodes{${nodeFields}} ${pageInfo}} blocking(first:${bounds.blockingPerIssue}){nodes{${nodeFields}} ${pageInfo}}`;
+  const source = `query($owner:String!,$name:String!,$cursor:String){repository(owner:$owner,name:$name){issues(first:${bounds.pageSize},after:$cursor,states:OPEN,orderBy:{field:CREATED_AT,direction:ASC}){totalCount nodes{${fields}} ${pageInfo}}}}`;
+  const byUrl = new Map<string, Issue>();
+  let cursor: string | undefined;
+  let totalOpen: number | null = null;
+  let stoppedBy: DependencyInventory["stoppedBy"] = null;
+  for (let read = 0; ; read++) {
+    if (read >= pageLimit) {
+      stoppedBy = "page-limit";
+      break;
+    }
+    signal?.throwIfAborted();
+    let connection: unknown;
+    try {
+      const data = await meter.query(
+        query,
+        "open-issues",
+        `${repository} page ${read + 1}`,
+      )(source, { owner, name, ...(cursor ? { cursor } : {}) });
+      connection = prop(data, "repository", "issues");
+    } catch (error) {
+      if (!byUrl.size || !(error instanceof QuotaStopped || quotaRefusal(error))) throw error;
+      stoppedBy = "quota";
+      break;
+    }
+    const nodes = prop(connection, "nodes");
+    const info = prop(connection, "pageInfo");
+    const total = prop(connection, "totalCount");
+    if (typeof total === "number") totalOpen = total;
+    if (!Array.isArray(nodes) || !isRecord(info)) throw new Error("Malformed GitHub connection.");
+    for (const node of nodes) {
+      const issue = selected<Issue>(node);
+      if (issue)
+        byUrl.set(issue.url, {
+          ...issue,
+          body: "",
+          comments: { nodes: [], pageInfo: { hasNextPage: true, endCursor: null } },
+        });
+    }
+    if (!info.hasNextPage) break;
+    const next = info.endCursor;
+    if (typeof next !== "string" || !next || next === cursor)
+      throw new Error("GitHub pagination did not advance.");
+    cursor = next;
+  }
+  const complete = stoppedBy === null;
+  meter.cover(
+    "open-issues",
+    repository,
+    complete ? "complete" : "partial",
+    complete
+      ? {}
+      : {
+          omission:
+            stoppedBy === "quota"
+              ? "stopped after a quota refusal"
+              : `page cap ${pageLimit} × ${bounds.pageSize} reached`,
+        },
+  );
+  meter.cover("comments", repository, "not-requested", {
+    omission: "not read by a dependency ranking",
+  });
+  return {
+    schemaVersion: 1,
+    repository,
+    startedAt,
+    fetchedAt: now().toISOString(),
+    issues: [...byUrl.values()],
+    complete,
+    stoppedBy,
+    totalOpen,
+    collection: meter.collection(),
+  };
 }
 const dependantFields = (blockers: number) =>
   `number title url state stateReason createdAt repository{nameWithOwner} labels(first:100){nodes{name} ${pageInfo}} closedByPullRequestsReferences(first:10,includeClosedPrs:false){nodes{number url state} ${pageInfo}} ${summaryFields} blockedBy(first:${blockers}){nodes{number url state stateReason} ${pageInfo}}`;
@@ -486,6 +597,11 @@ async function readDependants(
             url: facts.url,
             reason: `blockers beyond the first ${bounds.dependantBlockersListed} not read`,
           });
+        if (facts.labels.pageInfo.hasNextPage)
+          (evidence.partial ??= []).push({
+            url: facts.url,
+            reason: `labels beyond the first ${bounds.labels} not read`,
+          });
       } else evidence.notRead.push({ url: node.url, reason: "unavailable" });
     });
   }
@@ -501,7 +617,9 @@ async function readDependants(
               ? [`${evidence.notRead.length} dependant(s) not read`]
               : []),
             ...(evidence.partial?.length
-              ? [`${evidence.partial.length} dependant(s) with truncated blocker lists`]
+              ? [
+                  `${evidence.partial.length} truncated dependant connection(s) (blockers or labels)`,
+                ]
               : []),
           ].join("; "),
         }

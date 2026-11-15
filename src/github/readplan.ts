@@ -129,6 +129,29 @@ export const readProfiles = {
     },
   },
   /**
+   * `deps --top` (#196): discovery of open issues with labels, creation time, open closing-PR
+   * identities, native summaries and bounded direct edges; no bodies, comments, reviews or
+   * checks. At most `pages` pages of `pageSize`; a capped inventory is reported as partial.
+   */
+  "dependency-discovery-v1": {
+    version: 1,
+    sources: [
+      "open-issues",
+      "labels",
+      "native-blocked-by",
+      "native-blocking",
+      "linked-pull-requests",
+    ],
+    bounds: {
+      pageSize: 50,
+      pages: 10,
+      labels: 100,
+      blockedByPerIssue: 10,
+      blockingPerIssue: 50,
+      linkedPullRequestsPerIssue: 10,
+    },
+  },
+  /**
    * The explicit `deps N --tree` diagnosis (#196): a breadth-first walk of native edges that
    * stops after `treeNodes` issues and reports every known identity it did not read. Never
    * implicit in a routine read; routine dependency questions use direct edges only.
