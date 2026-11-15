@@ -190,7 +190,10 @@ async function ghQueryAttempt(
   // --include keeps the response's own status and headers, so a failure is classified from
   // the same response's evidence (#293), never from a separate /rate_limit reading.
   const args = ["api", "graphql", "--include", "-f", `query=${query}`];
-  for (const [key, value] of Object.entries(variables)) args.push("-F", `${key}=${value}`);
+  // Strings go raw (-f): -F would turn "123" or "true" into JSON numbers/booleans and read a
+  // value starting with @ as a local file. Only numbers use -F, so Int variables stay typed.
+  for (const [key, value] of Object.entries(variables))
+    args.push(typeof value === "number" ? "-F" : "-f", `${key}=${value}`);
   let stdout: string;
   try {
     ({ stdout } = await execute("gh", args, {

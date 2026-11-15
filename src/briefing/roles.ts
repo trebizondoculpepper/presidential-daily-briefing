@@ -432,7 +432,14 @@ export function roleView(
   name: string,
   context: RoleContext,
   /** Lift this one section's fixed row cap (#311 `--section`); budgets are otherwise unchanged. */
-  { expand }: { expand?: string } = {},
+  {
+    expand,
+    keep = () => true,
+  }: {
+    expand?: string;
+    /** Candidate scope (#312 `--label`): rows outside it are dropped before section budgets. */
+    keep?: (url: string) => boolean;
+  } = {},
 ): RoleView {
   const policy = roleRegistry.get(name);
   if (!policy) throw new Error(`--role must be one of ${roleNames().join(", ")}.`);
@@ -443,8 +450,9 @@ export function roleView(
     items: rows.slice(0, budget),
   });
   const sections = roleSectionRows(name, context).map(
-    ({ section: { section, title, budget, background = false, unbounded = false }, rows }) => {
-      for (const row of rows) seen.add(row.url);
+    ({ section: { section, title, budget, background = false, unbounded = false }, rows: all }) => {
+      for (const row of all) seen.add(row.url);
+      const rows = all.filter((row) => keep(row.url));
       return {
         name: section,
         title,
@@ -454,7 +462,7 @@ export function roleView(
     },
   );
   const rest = [...context.baseline]
-    .filter(([url]) => !seen.has(url))
+    .filter(([url]) => !seen.has(url) && keep(url))
     .sort(([a], [b]) => urlNumber(a) - urlNumber(b) || a.localeCompare(b))
     .map(([url, reason]) => ({ url, reason: `Not in a ${name} section: ${reason}` }));
   sections.push({

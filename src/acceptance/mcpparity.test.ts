@@ -385,3 +385,89 @@ describe("--section and the MCP section input report the same section (#311)", (
     }
   });
 });
+
+describe("--label and the MCP label input filter identically (#312)", () => {
+  const labelled = (): Issue[] => [
+    issue(30, ["status:ready", "sfx"], "2026-10-01T00:00:00Z"),
+    issue(31, ["status:ready"], "2026-10-02T00:00:00Z"),
+    issue(32, ["status:ready", "sfx"], "2026-10-03T00:00:00Z"),
+  ];
+  const repoLabels = ["status:ready", "sfx"];
+  /** Collection and label resolution through the same fake gh boundary. */
+  const labelQuery =
+    (fail = false): Query =>
+    async (source, vars) => {
+      if (source.includes("label(name:")) {
+        if (fail) throw Object.assign(new Error("boom"), { evidence: { category: "timeout" } });
+        const repository: Record<string, unknown> = {};
+        for (const [key, value] of Object.entries(vars))
+          if (/^l\d$/.test(key)) {
+            repository[key] = repoLabels.includes(String(value)) ? { name: value } : null;
+            repository[`s${key.slice(1)}`] = { nodes: [], pageInfo: { hasNextPage: false } };
+          }
+        return { repository };
+      }
+      return {
+        repository: {
+          issues: page(source.includes("issues(first") ? labelled() : []),
+          pullRequests: page([]),
+        },
+      };
+    };
+  const runtime = (fail = false): McpRuntime => ({
+    ...runtimeFor(null),
+    query: labelQuery(fail),
+    collect: (repository, options) => collect(repository, options, labelQuery(), clock),
+  });
+  const mcp = async (args: Record<string, unknown>, fail = false) => {
+    const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+    await createServer({ repo }, runtime(fail)).connect(serverSide);
+    const client = new Client({ name: "parity", version: "1.0.0" });
+    await client.connect(clientSide);
+    try {
+      return boundedEnvelope.parse(
+        (await client.callTool({ name: "triage_briefing", arguments: args })).structuredContent,
+      );
+    } finally {
+      await client.close();
+    }
+  };
+
+  it("reports the same scoped actions and filter object", async () => {
+    let out = "";
+    const code = await main(
+      [
+        "--repo",
+        repo,
+        "--agent",
+        "me",
+        "--role",
+        "implementer",
+        "--label",
+        "sfx",
+        "--json",
+        "--no-update-check",
+      ],
+      async (text) => void (out += text),
+      { ...runtime(), updateCheck: async () => ({ status: "disabled" }) as never },
+    );
+    expect(code).toBe(0);
+    const cli = JSON.parse(out) as { filter: unknown; actions: { items: string[] } };
+    expect(cli.actions.items.map((u) => u.split("/").pop())).toEqual(["30", "32"]);
+    const envelope = await mcp({ agent: "me", role: "implementer", label: ["sfx"] });
+    const data = envelope.data as { filter: unknown; actions: { items: string[] } };
+    expect(data.filter).toEqual(cli.filter);
+    expect(data.actions.items).toEqual(cli.actions.items);
+  });
+
+  it("an unknown label is an argument error; a failed lookup is an unresolved filter", async () => {
+    expect((await mcp({ role: "implementer", label: ["nope"] })).error).toMatchObject({
+      code: "invalid-argument",
+      message: expect.stringMatching(/Unknown label\(s\) in example\/parity: nope/),
+    });
+    expect((await mcp({ role: "implementer", label: ["sfx"] }, true)).error).toMatchObject({
+      code: "label-filter-unresolved",
+      message: expect.stringMatching(/not proof the label is absent/),
+    });
+  });
+});

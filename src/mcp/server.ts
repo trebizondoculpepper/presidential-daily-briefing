@@ -1,5 +1,6 @@
 import { BriefingEngineError } from "../config/engine-setting.js";
-import { BriefingArgumentError } from "../briefing/compact.js";
+import { BriefingArgumentError, LabelFilterUnresolved } from "../briefing/compact.js";
+import { normalizeLabelRequest } from "../github/labels.js";
 /**
  * Read-only MCP adapter (doc/design/mcp.md, #25): the server factory and its tools over the
  * shared read service; no mutation, shell, file-path, cache or checkpoint routes are
@@ -242,6 +243,13 @@ export const briefingInput = z
       .regex(/^[a-z][a-z-]{0,40}$/, "section must be a registered section ID")
       .optional(),
     /**
+     * Label filter (#312): same as repeated CLI --label. A candidate must carry every label
+     * (AND); names are resolved against the repository; at most eight distinct.
+     */
+    // Distinct labels are bounded after case-insensitive deduplication (normalizeLabelRequest),
+    // so repeated copies of one label stay idempotent.
+    label: z.array(z.string()).min(1).optional(),
+    /**
      * Expanded text (#355, doc/design/next-steps-only.md): same as CLI --context. Text only; the
      * structured result is the same either way.
      */
@@ -260,7 +268,18 @@ export const briefingInput = z
           message: `section for role ${role} must be one of: ${ids.join(", ")}`,
         });
     }
-    for (const key of ["role", "order", "section"] as const)
+    if (args.label !== undefined) {
+      const normalized = normalizeLabelRequest(args.label);
+      if (!normalized.ok)
+        ctx.addIssue({ code: "custom", path: ["label"], message: normalized.why });
+      if (args.role === "human")
+        ctx.addIssue({
+          code: "custom",
+          path: ["label"],
+          message: "role human takes no label filter",
+        });
+    }
+    for (const key of ["role", "order", "section", "label"] as const)
       if (args.mode === "briefing" && args[key] !== undefined)
         ctx.addIssue({
           code: "custom",
@@ -537,6 +556,9 @@ export function createServer(
       // default role) is the caller's to fix, with the supported choices; not a GitHub failure.
       if (error instanceof BriefingArgumentError && !signal.aborted)
         return errorResult(tool, view, selection, args.number, "invalid-argument", error.message);
+      // #312: a label lookup that failed is not "no such label" and not a collection failure.
+      if (error instanceof LabelFilterUnresolved && !signal.aborted)
+        return errorResult(tool, view, selection, args.number, error.code, error.message);
       const code: FailureCode =
         error instanceof Failure || error instanceof BriefingEngineError
           ? error.code
@@ -613,6 +635,7 @@ export function createServer(
                 maxChars: args.maxChars,
                 role: args.role,
                 ...(args.section ? { section: args.section } : {}),
+                ...(args.label ? { labels: args.label } : {}),
                 order: args.order ?? "impact",
                 context: args.context,
                 signal: ctx.mcpReq.signal,
