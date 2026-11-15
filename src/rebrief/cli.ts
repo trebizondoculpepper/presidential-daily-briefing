@@ -8,6 +8,7 @@ import { validateHarness } from "../config/harness.js";
 import { validateEntryKey } from "../config/identity.js";
 import type { ReadIdentity } from "../config/readidentity.js";
 import { resolveReadIdentity } from "../config/readidentity.js";
+import { nodeGit } from "../config/config.js";
 import type { ConfigFileSystem, GitRunner } from "../config/config.js";
 import { noLocalProject } from "../serve/api.js";
 import { contextKey, defaults, initialize, RebriefSession, stopped } from "./core.js";
@@ -86,6 +87,10 @@ export async function runRebrief(
     } finally {
       controller.signal.removeEventListener("abort", cancel);
     }
+  };
+  const git: GitRunner = (args, cwd) => {
+    controller.signal.throwIfAborted();
+    return (runtime.git ?? nodeGit)(args, cwd, controller.signal);
   };
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
@@ -185,9 +190,7 @@ export async function runRebrief(
         values.repo ??
         (await (runtime.currentRepository ?? currentRepository)(values.project, controller.signal));
       if (values.project)
-        input.project = (
-          await resolveIdentityTarget(values.project, input.repository, runtime.git)
-        ).root;
+        input.project = (await resolveIdentityTarget(values.project, input.repository, git)).root;
       const identity = await resolveReadIdentity({
         toolAgent: values.agent,
         project: input.project,
@@ -196,7 +199,7 @@ export async function runRebrief(
         harness: values.harness,
         env: runtime.env ?? process.env,
         fs: runtime.fs,
-        git: runtime.git,
+        git,
       });
       const bounded = (value: string | null) =>
         value === null || value.length <= 512 ? value : `${value.slice(0, 498)}… [truncated]`;

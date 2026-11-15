@@ -15,3 +15,5 @@ Final compatibility check preserved the canonical/legacy identity resolver notic
 Added a final pre-emission cancellation check and injected regression for a user stop arriving while the state store releases its lock, after a continue result was prepared. The offer is discarded from stdout.
 
 The same total-deadline cancellation race now wraps state-store waits as well as setup/read; a nonresponsive injected store returns a normal stop instead of delaying the CLI outcome indefinitely. Lock recovery remains explicit, never age-based.
+
+Addressed Codex review of project-resolution cleanup by adding an optional AbortSignal to the shared Git boundary and binding all rebrief project/identity/config Git lookups to the total-deadline controller. A portable child-process regression verifies termination and no follow-up Git lookup. Additional highly parallel full runs exposed existing soft-budget parity diagnostics under host load; verification is repeated with a controlled worker count without changing unrelated tests.

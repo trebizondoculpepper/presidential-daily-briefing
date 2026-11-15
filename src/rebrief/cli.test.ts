@@ -1,3 +1,6 @@
+import { execFile } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
+import type { GitRunner } from "../config/config.js";
 import { describe, expect, it } from "vite-plus/test";
 import { chmod, lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -453,6 +456,54 @@ describe("rebrief CLI/private state", () => {
       reason: "cancelled-or-deadline",
       briefing: null,
     });
+  });
+  it("aborts project-resolution subprocesses and does not start subsequent Git lookups", async () => {
+    let calls = 0,
+      text = "";
+    let child: ChildProcess | undefined;
+    let closed: Promise<void> = Promise.resolve();
+    const git: GitRunner = (_args, _cwd, signal) =>
+      new Promise((resolve, reject) => {
+        calls++;
+        child = execFile(
+          process.execPath,
+          ["-e", "setInterval(() => {}, 1000)"],
+          { signal },
+          (error, stdout) => (error ? reject(error) : resolve(stdout)),
+        );
+        closed = new Promise<void>((done) => child!.once("close", () => done()));
+      });
+    try {
+      expect(
+        await runRebrief(
+          [
+            "init",
+            ...common,
+            "--project",
+            "/project",
+            "--state-dir",
+            join(tmpdir(), "unused-injected-state"),
+            "--deadline-ms",
+            "50",
+          ],
+          async (s) => {
+            text = s;
+          },
+          { git },
+        ),
+      ).toBe(0);
+      await closed;
+      expect(calls).toBe(1);
+      expect(JSON.parse(text)).toMatchObject({
+        decision: "stop",
+        reason: "cancelled-or-deadline",
+        briefing: null,
+      });
+      expect(child?.exitCode !== null || child?.signalCode !== null).toBe(true);
+    } finally {
+      child?.kill();
+      await closed;
+    }
   });
   it("help/error are structured and never echo private state errors", async () => {
     let text = "";

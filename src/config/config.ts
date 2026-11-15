@@ -626,11 +626,15 @@ export interface RepositoryTarget {
 }
 
 /** Git boundary: runs `git` with arguments in a directory and returns stdout. */
-export type GitRunner = (args: readonly string[], cwd: string) => Promise<string>;
+export type GitRunner = (
+  args: readonly string[],
+  cwd: string,
+  signal?: AbortSignal,
+) => Promise<string>;
 
 const run = promisify(execFile);
-export const nodeGit: GitRunner = async (args, cwd) =>
-  (await run("git", [...args], { cwd, windowsHide: true })).stdout;
+export const nodeGit: GitRunner = async (args, cwd, signal) =>
+  (await run("git", [...args], { cwd, signal, windowsHide: true })).stdout;
 
 /** Parse one remote URL; returns `owner/name` only when the host is exactly github.com. */
 export function githubRepositoryFromUrl(url: string): string | null {
