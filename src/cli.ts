@@ -87,6 +87,13 @@ import { complexityGuidanceJson, complexityGuidanceText } from "./estimation/com
 import { impactGuidanceJson, impactGuidanceText } from "./estimation/impact.js";
 import { declaredRulesContext } from "./rules/declared-context.js";
 import { runConfig, runSetup } from "./config/configcli.js";
+import { nodeGit } from "./config/config.js";
+import {
+  firstUseHint,
+  firstUseHintOptOutEnv,
+  firstUseHintText,
+  runOnboard,
+} from "./briefing/onboardcli.js";
 import { advanceCheckpoint, overwriteJson, writeSnapshotCache } from "./config/safejson.js";
 import type { WriteOutcome } from "./config/safejson.js";
 import type { ConfigRuntime } from "./config/configcli.js";
@@ -210,6 +217,8 @@ export interface Runtime {
   updateCheck?: typeof cachedCheckForUpdate;
   /** Local-Git freshness of a source checkout (#309). */
   checkoutCheck?: typeof checkoutFreshness;
+  /** First-use onboarding hint store (#351); tests inject it so no real cache is touched. */
+  firstUseHint?: (project: string, version: string) => Promise<boolean>;
   stderr?: (text: string) => void;
   /** Filesystem, git and working directory for `config`; tests never touch the real checkout. */
   config?: ConfigRuntime;
@@ -319,6 +328,9 @@ Rollback: pdb config set briefing.engine typescript.
                         How a new agent gets its own identity: a locally unique generated name
                         kept in local pdb.toml (a rerun keeps it; another harness's entry is
                         never reused; nothing is reserved remotely), then the --agent to use
+  onboard [--repo owner/name] [--role implementer|designer] [--server URL] [--install] [--json]
+                        New here? How an agent starts with pdb: rules, identity, commands and
+                        a prompt to give it; --install adds the pdb section to AGENTS.md
   --repo owner/name     Repository (default: current gh checkout)
   --json                Versioned structured output (from a checkout: npm run --silent pdb)
   --issue N             Include full issue body/history, even if closed; diagnoses
@@ -1075,9 +1087,20 @@ export async function main(
         .then((i) => checkoutCheck({ root: i.root ?? null, installed: i.installed, optOut }))
         .catch(() => null)
     : Promise.resolve(null);
+  // First-use pointer (#351): ordinary briefing text only, once per project and version.
+  const briefingText =
+    (rest[0] === undefined || rest[0].startsWith("-")) &&
+    !rest.includes("--json") &&
+    !rest.includes("--help") &&
+    !rest.includes("-h");
+  const hintPending = briefingText
+    ? showFirstUseHint(rest, runtime).catch(() => false)
+    : Promise.resolve(false);
   try {
     return await run(rest, output, runtime);
   } finally {
+    if (await hintPending)
+      (runtime.stderr ?? ((t) => process.stderr.write(t)))(`${firstUseHintText}\n`);
     const advisory = updateAdvisory(
       (await pending) ?? { status: "unknown", reason: "", installed: null, channel: "" },
     );
@@ -1089,6 +1112,24 @@ export async function main(
     const stale = checkout && checkoutAdvisory(checkout);
     if (stale) (runtime.stderr ?? ((t) => process.stderr.write(t)))(`${stale}\n`);
   }
+}
+
+/** The project key (--repo, else this checkout's root) and version for the first-use hint. */
+async function showFirstUseHint(args: string[], runtime: Runtime): Promise<boolean> {
+  if (!runtime.firstUseHint && process.env[firstUseHintOptOutEnv]) return false;
+  const at = args.indexOf("--repo");
+  let project = at >= 0 ? args[at + 1] : undefined;
+  if (!project) {
+    const runGit = runtime.config?.git ?? nodeGit;
+    const top = await runGit(
+      ["rev-parse", "--show-toplevel"],
+      runtime.config?.cwd ?? process.cwd(),
+    );
+    project = top.trim();
+  }
+  if (!project) return false;
+  const version = (await installedVersion()).version ?? "unknown";
+  return (runtime.firstUseHint ?? firstUseHint)(project, version);
 }
 
 /**
@@ -1244,6 +1285,7 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
     });
   if (args[0] === "config") return runConfig(args.slice(1), output, runtime.config);
   if (args[0] === "setup") return runSetup(args.slice(1), output, runtime.config);
+  if (args[0] === "onboard") return runOnboard(args.slice(1), output, runtime.config);
   if (args[0] === "doctor") {
     const { values } = parseArgs({
       args: args.slice(1),

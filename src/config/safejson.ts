@@ -92,6 +92,12 @@ export interface UpdateOptions {
   lockWaitMs?: number;
   sleep?: (ms: number) => Promise<void>;
   now?: () => number;
+  /**
+   * Re-read the target just before the commit and refuse if it changed since it was read (#351):
+   * for files that people and tools edit without honouring the lock, such as AGENTS.md. This
+   * narrows, but cannot portably close, the window between that re-read and the rename.
+   */
+  checkUnchanged?: boolean;
 }
 
 /** Serialize exactly as the files have always been written. */
@@ -101,9 +107,42 @@ const serialize = (value: unknown) => JSON.stringify(value, null, 2) + "\n";
  * Locked, durable read-modify-write of one JSON file. `decide` sees the current state read under
  * the lock and returns what to do; the outcome says whether the target changed.
  */
-export async function updateJsonFile(
+export const updateJsonFile = (
   target: string,
   decide: (current: CurrentState) => Decision,
+  options: UpdateOptions = {},
+): Promise<WriteOutcome> =>
+  updateTextFile(
+    target,
+    (current) => {
+      let state: CurrentState;
+      if (current.state !== "text") state = current;
+      else
+        try {
+          state = { state: "value", value: JSON.parse(current.text) };
+        } catch {
+          state = { state: "unreadable", why: "the existing file is not valid JSON" };
+        }
+      const decision = decide(state);
+      return "write" in decision ? { write: serialize(decision.write) } : decision;
+    },
+    options,
+  );
+
+/** The current text of a file, read under its lock. */
+export type TextState =
+  | { state: "absent" }
+  | { state: "text"; text: string }
+  | { state: "unreadable"; why: string };
+export type TextDecision = { write: string } | { keep: string } | { refuse: string };
+
+/**
+ * Locked, durable read-modify-write of one text file (#382): the same sequence for JSON stores
+ * and for managed sections of text files such as AGENTS.md (#351).
+ */
+export async function updateTextFile(
+  target: string,
+  decide: (current: TextState) => TextDecision,
   options: UpdateOptions = {},
 ): Promise<WriteOutcome> {
   const fs = options.fs ?? nodeSafeFs;
@@ -131,15 +170,10 @@ export async function updateJsonFile(
     return problem ? { ...outcome, cleanup: [...outcome.cleanup, problem] } : outcome;
   };
 
-  // 1. Current state: absent, a value, or unreadable (never treated as empty).
-  let current: CurrentState;
+  // 1. Current state: absent, text, or unreadable (never treated as empty).
+  let current: TextState;
   try {
-    const text = await fs.readFile(path);
-    try {
-      current = { state: "value", value: JSON.parse(text) };
-    } catch {
-      current = { state: "unreadable", why: "the existing file is not valid JSON" };
-    }
+    current = { state: "text", text: await fs.readFile(path) };
   } catch (error) {
     current =
       code(error) === "ENOENT"
@@ -152,7 +186,7 @@ export async function updateJsonFile(
   if ("keep" in decision) return finish({ status: "kept", reason: decision.keep, cleanup });
   if ("refuse" in decision)
     return finish({ status: "not-written", reason: decision.refuse, cleanup });
-  const text = serialize(decision.write);
+  const text = decision.write;
 
   // 3-4. A fresh private temporary file, written, synced and verified.
   const temporary = join(dir, `.${basename(path)}.${randomBytes(8).toString("hex")}.tmp`);
@@ -185,6 +219,25 @@ export async function updateJsonFile(
         "this writer no longer holds the lock (it was removed or replaced) before the commit; nothing was replaced",
       cleanup,
     });
+  }
+  if (options.checkUnchanged) {
+    let now: TextState;
+    try {
+      now = { state: "text", text: await fs.readFile(path) };
+    } catch (error) {
+      now = code(error) === "ENOENT" ? { state: "absent" } : { state: "unreadable", why: "" };
+    }
+    const same =
+      now.state === current.state &&
+      (now.state !== "text" || (current.state === "text" && now.text === current.text));
+    if (!same || now.state === "unreadable") {
+      await dropTemporary();
+      return finish({
+        status: "not-written",
+        reason: "the file changed while it was being updated; nothing was replaced, so retry",
+        cleanup,
+      });
+    }
   }
   for (let attempt = 0; ; attempt++) {
     try {
