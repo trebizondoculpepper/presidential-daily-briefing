@@ -189,3 +189,45 @@ SENTRY_DISABLED=1 pdb serve
    This follows the #623 rule: the trigger is a disposable external preload that is never committed. `pdb serve` needs the maintainer's normal `gh` login to start. Expect a new event under the issue titled `Error: Unhandled PDB exception (details withheld)` with tag `mode: serve`, release `pdb@<version>` and in-app frames `src/serve.ts` lines 264 and 102 (as of this commit). No source-map upload or Sentry CLI step is involved.
 
 2. **Rollout approval.** Approval to publish a release whose package contains the `.mjs.map` files, and to mark Sentry onboarding complete. Neither happens automatically. Reporting stays opt-in per process, with no public telemetry default.
+
+## Default-on rollout amendment (#635)
+
+Owner decision, 2026-11-15: reporting is enabled by default for every installation,
+with the same fatal-only allowlist above. This amendment supersedes the opt-in,
+no-embedded-DSN and rollout-approval paragraphs above. The owner has approved a new
+release including the shipped maps; publication still follows the explicit release gate.
+
+The package embeds only the agreed public OSI PDB ingestion DSN, never an account or
+administration token. `SENTRY_DSN` may explicitly override it; an empty or invalid override
+turns reporting off. `SENTRY_DISABLED=1` takes precedence over every setting and must be
+checked before configuration I/O, SDK import or handler registration.
+
+The process-wide user configuration is `crash-reporting.toml` in
+`envPaths("presidential-daily-briefing").config` (the same application path convention as
+the update cache). Its entire version-1 schema is:
+
+```toml
+[telemetry.crashes]
+enabled = false
+```
+
+Missing file or missing enabled setting means true. Invalid TOML, unknown fields,
+non-boolean enabled, symlinks, unreadable or oversized files disable reporting for that
+process. No configuration is created or rewritten automatically. Resolve this before
+SDK loading. Configuration failure must not break PDB or itself be reported. A restart
+applies changes. This is user/process scope only: repository content and remote MCP
+requests cannot enable reporting or override the user's opt-out. A multi-project server
+has exactly one reporting choice. This deliberately does not invent global scope for
+`pdb config`, whose current contract is repository-only. CLI help and README name the
+actual OS-specific configuration path and explain how to opt out. A future global
+settings command/page may edit this same file through a reviewed extension.
+
+A concise README and help disclosure describes fixed error text, public PDB stack
+locations, mode/version, and that the receiving service sees transport-derived metadata
+such as source IP; do not promise anonymity. No extra signal is authorized.
+
+Credential-free verification explicitly sets `SENTRY_DISABLED=1` for ordinary CI,
+release, package checks and their children. Tests exercising default-on or opt-out use
+injected filesystem and SDK boundaries, assert load-call counts and no output, and use
+only a fake transport for fatal subprocesses. Disabled initialization must register no
+handlers and send no events. Packaged tests retain real sanitizer/source-map assertions.
