@@ -20,7 +20,7 @@ Status: proposed contract for #573. Nothing in this document is implemented by i
 
 ## Scope and owner decisions
 
-The owner approved five main pages (Overview/News, Work, Pipeline health, Timing, Agents) and three utility pages (Quotas, Rules, Setup), all sharing one project selection, one navigation, one freshness model and the existing ticket/PR drill-downs, with no separate collector or ranker per page. The owner then fixed these page defaults in comments on #573, #574–#576 and #456, which this contract adopts without reopening:
+The owner approved five main pages (Overview/News, Work, Pipeline health, Timing, Agents) and utility pages (Quotas, Rules, Setup, and since #589 Settings and Diagnostics), all sharing one project selection, one navigation, one freshness model and the existing ticket/PR drill-downs, with no separate collector or ranker per page. The owner then fixed these page defaults in comments on #573, #574–#576 and #456, which this contract adopts without reopening:
 
 - Overview news windows: 6 hours by default, 1 hour as the alternative.
 - Throughput windows: 7 days by default, 30 days as the alternative.
@@ -83,17 +83,19 @@ What does not exist: any per-ticket history ledger across tickets, any day-bucke
 
 Proposed. One shell (#605) renders the toolbar on every HTML page; pages differ only in their main region.
 
-| Page             | Route                                                            | Data                                      | Ticket               |
-| ---------------- | ---------------------------------------------------------------- | ----------------------------------------- | -------------------- |
-| Overview / News  | `/overview?repo=R&news=6h&days=7d`                               | Event ledger, window aggregates           | #574                 |
-| Work             | `/?repo=R&role=…&agent=…` (existing), human view `/human?repo=R` | Existing briefing projections             | #374 (shipped), #458 |
-| Pipeline health  | `/pipeline?repo=R&from=YYYY-MM-DD&through=YYYY-MM-DD`            | Ledger cohort flow plus current inventory | #575                 |
-| Timing           | `/timing?repo=R&days=7d`                                         | Ledger durations                          | #576                 |
-| Agents           | `/activity?repo=R&window=1d`                                     | `/api/v1/team` plus ledger activity       | #456                 |
-| Quotas (utility) | `/quotas` (account-scoped, no `repo`)                            | Quota service                             | #548                 |
-| Rules (utility)  | `/rules?repo=R` (existing)                                       | Compiled policy                           | shipped              |
-| Setup (utility)  | `/setup?repo=R` (existing)                                       | Local only                                | shipped              |
-| Ticket detail    | `/ticket?repo=R&n=N` (existing)                                  | Ticket read                               | shipped              |
+| Page                  | Route                                                            | Data                                      | Ticket                                      |
+| --------------------- | ---------------------------------------------------------------- | ----------------------------------------- | ------------------------------------------- |
+| Overview / News       | `/overview?repo=R&news=6h&days=7d`                               | Event ledger, window aggregates           | #574                                        |
+| Work                  | `/?repo=R&role=…&agent=…` (existing), human view `/human?repo=R` | Existing briefing projections             | #374 (shipped), #458                        |
+| Pipeline health       | `/pipeline?repo=R&from=YYYY-MM-DD&through=YYYY-MM-DD`            | Ledger cohort flow plus current inventory | #575                                        |
+| Timing                | `/timing?repo=R&days=7d`                                         | Ledger durations                          | #576                                        |
+| Agents                | `/activity?repo=R&window=1d`                                     | `/api/v1/team` plus ledger activity       | #456                                        |
+| Quotas (utility)      | `/quotas` (account-scoped, no `repo`)                            | Quota service                             | #548                                        |
+| Rules (utility)       | `/rules?repo=R` (existing)                                       | Compiled policy                           | shipped                                     |
+| Setup (utility)       | `/setup?repo=R` (existing)                                       | Local only                                | shipped                                     |
+| Settings (utility)    | `/settings?repo=R`; no `repo` means Global                       | Settings service                          | #584, [contract](serve-settings-page.md)    |
+| Diagnostics (utility) | `/diagnostics?repo=R&tab=doctor\|ticket-doctor`                  | Doctor and Ticket Doctor runs             | #585, [contract](serve-diagnostics-page.md) |
+| Ticket detail         | `/ticket?repo=R&n=N` (existing)                                  | Ticket read                               | shipped                                     |
 
 Shell rules that #605 implements and the page tickets consume:
 
@@ -196,7 +198,6 @@ All examples are synthetic.
 - **Daily series** per UTC day: verified deliveries (tickets), closed-as-completed-unverified (tickets), closed not planned (tickets), PR merges (PRs). Four separate series, never stacked into one total.
 - **7-/30-day daily average** per series over complete days only, with N of 7 days known.
 - **Breakdown by complexity** of verified deliveries, using size at the delivery instant, with "unassessed" and "unknown at event" as their own bars.
-- **No recorded progress** (owner default 24h, configurable): claimed tickets with no ledger event in the window, split into "known wait" (claim-activity `waiting`), "blocked" (native) and "no recorded event". The heading says "no recorded progress", never "stalled" or "inactive".
 
 Example: on 2026-11-10 (UTC) tickets #1 and #2 reach `delivered`, #3 closes `COMPLETED` with verdict `none`, and PRs #10, #11 and #12 merge (#10 and #11 both belong to #1). The day shows deliveries 2, closed-as-completed-unverified 1, not planned 0, PR merges 3. Clicking deliveries lists #1 (members #10, #11) and #2.
 
@@ -210,6 +211,7 @@ Reuses the existing briefing projections unchanged; no new metric. The shell add
 - **Backlog by impact**: open unclaimed tickets by current impact, split ready versus blocked/not-ready, with unassessed separate. Current inventory uses current labels; this is not historical.
 - **Assessment queue**, per metric: count unassessed, median and oldest age, first-assessment latency (created to earliest trusted record) for the cohort, revision count (records with non-empty `previous`), and counts in `stale`, `conflict`, `invalid`, `unknown`. Incoming (created in window) versus first-assessed (in window) per day reveals growth without any deadline.
 - **Flow**: see the Sankey contract.
+- **Stalled work** (owner default 24h, configurable; placed here by the owner's #456 clarification, not on Overview): claimed tickets with no ledger event in the window, split into "known wait" (claim-activity `waiting`), "blocked" (native) and "no recorded event". This section, not the Agents page, is where owners without recent participation appear. Text says "no recorded progress", never "inactive" or "abandoned".
 
 ### Timing (#576)
 
@@ -277,8 +279,8 @@ Each slice is one focused PR, after this document merges.
 3. **Closure and claim timeline read.** Extend the bounded per-ticket timeline read with `ClosedEvent`/`ReopenedEvent`. Checks: bounds respected, `complete: false` on cut-off, reopen counts unknown before this slice and known after.
 4. **Windows and aggregates.** `src/metrics/windows.ts`, `src/metrics/aggregate.ts`. Checks: UTC boundaries at 23:59:59.999 and 00:00, partial day excluded from averages, zero-event versus unknown days, percentile threshold, conservation for every flow fixture, size-at-event grouping with "unknown at event".
 5. **Metrics API.** `GET /api/v1/metrics` with cache key, cancellation, refresh and budgets. Checks: envelope shape, figures agree with members, unserved repo refused, quota-stopped result not cached, coalescing of identical reads, no background requests.
-6. **Overview page (#574).** Checks: four separate series, 6h/1h news, 7d/30d averages, no-recorded-progress split, drill-downs, empty/partial/error states.
-7. **Pipeline health page (#575).** Checks: inventory versus cohort separation, Sankey plus table, conservation visible, assessment queue states.
+6. **Overview page (#574).** Checks: four separate series, 6h/1h news, 7d/30d averages, drill-downs, empty/partial/error states.
+7. **Pipeline health page (#575).** Checks: inventory versus cohort separation, Sankey plus table, conservation visible, assessment queue states, stalled-work split.
 8. **Timing page (#576).** Checks: median-first display with mean and counts, open and unknown counts, handoff does not restart, impact/complexity at event.
 9. **Agents page (#456)** and **Human page (#458)** proceed under [serve-dashboard-read-views.md](serve-dashboard-read-views.md), adopting the shell from slice 1 and the 1–7 day window. **Quotas page (#548)** proceeds under [github-quotas.md](github-quotas.md).
 
