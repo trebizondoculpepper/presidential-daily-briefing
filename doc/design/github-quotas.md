@@ -89,6 +89,8 @@ that does not make a prior success fresh. A refresh during an observed retry emb
 returns held evidence plus the known embargo rather than sending early. Exhausted
 GraphQL primary allowance alone does not forbid the separate REST quota lookup.
 
+**Owner clarification for the serve page (#548, 2026-11-15), superseding the next paragraph for the page only:** when a page refresh fails, clear the prior quota numbers and show the error; do not leave an older reading visible as if current. The CLI and service may keep the last-good behaviour below. Fetch only on explicit Refresh; the page does not fetch on open.
+
 If refresh fails, retain a matching last-good observation at most five minutes for
 explicit stale display, alongside the current failure and its category. After that,
 show unavailable/unknown numeric state. Age is measured from the actual observation,
@@ -145,7 +147,7 @@ The HTML shell itself makes no GitHub request. When a human opens the page, requ
 its visible quota view once. Show loading, manual Refresh, observation time/age and
 one card per resource. For valid known limits use a native accessible meter/progress
 presentation with text used/remaining/limit, percentage and reset time/countdown.
-Default presentation thresholds are 80% used for warning and 95% for critical;
+Default presentation thresholds (owner-confirmed on #548): warning at 20% remaining (80% used) and critical **below** 5% remaining (more than 95% used). The shipped classifier (`src/github/quotas.ts`) marks critical at `percentUsed >= 95`, so exactly 5% remaining is critical today; #548 changes that comparison to strict. Otherwise as before:
 100%/zero remaining is exhausted. Label these as PDB display heuristics, not GitHub
 limits on burst behavior, forecasts or guaranteed remaining requests.
 

@@ -40,6 +40,8 @@ discussion or agent names into executable HTML.
 
 ## Agent activity: #456
 
+**Owner clarification (#456, 2026-11-15), superseding conflicting text below.** This is the **Agents** page of the [shared page map](dashboard-pipeline-metrics.md#page-map-and-shared-shell), at `/activity?repo=R&window=1d`. It lists agents with recorded participation (evidenced events) in a selectable window of one to seven days, default one day. An agent that owns unfinished work but has no evidenced event in the window is **not** listed here; that work appears in the Stalled work section of Pipeline health (#575). Participation is evidenced events, never inferred presence.
+
 Read `GET /api/v1/team?repo=R`, reusing `doc/design/diagnostics.md` and the shared
 delivery/ownership model. The browser does not independently parse comments or
 infer agent identity from the PR's shared GitHub author. For each recorded agent,
@@ -68,6 +70,8 @@ does not imply availability. The page never releases, reassigns, closes or creat
 work; explicit editing and claim controls are outside this ticket.
 
 ## Human attention: #458
+
+**Owner clarification (#458, 2026-11-15), superseding conflicting text below.** This is the human mode of the **Work** page, selected in the same Work navigation as the designer and implementer views, with direct human-attention links retained. Show actionable next steps first, then a separate **Waiting** section below them. Waiting items remain responsibilities until their definition of done is met but are not presented as immediately executable actions. The shared ranking and evidence rules are unchanged. Human-only Unassign is a separate mutation slice ([human-unassign.md](human-unassign.md)); this read-only view does not wait for it.
 
 Read `GET /api/v1/briefing?repo=R&role=human`, with an optional explicit `agent=NAME`
 human-routing focus. Reuse the exact `human` projection and ordering in
