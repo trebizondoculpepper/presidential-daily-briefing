@@ -120,7 +120,9 @@ import {
   repositoryImpactText,
 } from "./briefing/dependencyimpact.js";
 import { readTicketStatus, ticketLimits, ticketStatusText } from "./workflow/ticketstatus.js";
-import { runServe } from "./serve.js";
+import { ghAuthContext, runServe } from "./serve.js";
+import { runQuotas } from "./github/quotascli.js";
+import type { QuotasRuntime } from "./github/quotascli.js";
 import {
   createIssue,
   defaultOperationId,
@@ -210,6 +212,8 @@ export interface Runtime {
   serve?: ServeRuntime;
   /** POST, clock, operation ID, body input and stderr for `issue create` (#199). */
   issueCreate?: Partial<IssueCreateRuntime>;
+  /** gh REST, login resolver, host and clock for `quotas` (#547). */
+  quotas?: Partial<QuotasRuntime>;
 }
 
 type Output = (text: string) => Promise<void>;
@@ -262,6 +266,9 @@ Rollback: pdb config set briefing.engine typescript.
   question resolve|withdraw N --agent NAME --question URL --why TEXT [--dry-run]
                         Record that a needs-human question was answered or withdrawn (explicit,
                         with a reason; never inferred from replies, labels or closure)
+  quotas [--json] [--refresh | --offline]  Read-only GitHub API allowance per resource for
+                        the gh login: one /rate_limit read, no repository scan; secondary
+                        limits are unmetered (quotas --help)
   serve --repo owner/name | --project PATH [--port N]  Foreground local HTTP server: read-only
                         JSON API and HTTP MCP over a short-lived memory cache (serve --help)
   team [--stale-hours N]  Read-only: each agent's claims, linked PRs, activity and warnings
@@ -1096,6 +1103,14 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
     });
   if (args[0] === "serve") return runServe(args.slice(1), runtime.serve);
   if (args[0] === "issue") return runIssue(args.slice(1), output, runtime);
+  if (args[0] === "quotas")
+    return runQuotas(args.slice(1), output, {
+      rest: runtime.rest ?? ghRest,
+      authContext: ghAuthContext,
+      host: () => process.env.GH_HOST?.trim() || "github.com",
+      now: runtime.now,
+      ...runtime.quotas,
+    });
   if (args[0] === "config") return runConfig(args.slice(1), output, runtime.config);
   if (args[0] === "doctor") {
     const { values } = parseArgs({
