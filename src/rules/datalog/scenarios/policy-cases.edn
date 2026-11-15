@@ -349,4 +349,12 @@
               :why "Eligibility is unproven: inspect incomplete evidence or state the required platform."
               :facts {"impact" "unknown" "complexity" "unknown" "impactState" "unknown" "complexityState" "unknown" "head" "not-a-pr" "labelsComplete" true "nativeComplete" false "openBlockers" 0 "readiness" "status:ready" "uncertainty" "native dependencies incomplete"}
               :overridden [] :unlocks 0 :unknown [] :other-claims []}]
-           :denials #{[100 "D-DENY-NATIVE-UNKNOWN"]}}}]}
+           :denials #{[100 "D-DENY-NATIVE-UNKNOWN"]}}}
+
+ {:id "empty-owner-label-is-never-an-unknown-viewers-claim"
+  :doc "With no viewer agent, a bare agent: label (empty owner) is someone else's claim, not the viewer's (#449)."
+  :viewer {:role "implementer"}
+  :facts [{:e 1 "forward-complete" true}
+          {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" ["status:ready" "agent:" "attention:"] "owner" "" "attention" ""}]
+  :expect {:actions []
+           :denials #{[100 "D-DENY-CLAIM"]}}}]}

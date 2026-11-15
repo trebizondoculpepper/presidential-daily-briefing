@@ -125,7 +125,9 @@ export function evaluatePolicy(input: PolicyFacts, options: PolicyOptions = {}):
     );
   const facts: Datom[] = [
     [1, "role", input.viewer.role],
-    [1, "agent", input.viewer.agent],
+    // An unknown viewer (empty agent) asserts no agent, so no owner, attention or responsibility
+    // fact can match it: an empty `agent:` label stays someone's claim, never the viewer's (#449).
+    ...(input.viewer.agent ? [[1, "agent", input.viewer.agent] as Datom] : []),
     [1, "platform", input.viewer.platform],
     [1, "order", input.viewer.order],
   ];
