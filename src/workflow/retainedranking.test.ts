@@ -316,4 +316,75 @@ describe("shortlist selection sees retained-claim activity (#413)", () => {
       .report;
     expect(report.rankedActions.items[0]?.kind).toBe("resume-claim");
   });
+
+  it("reads activity for a claim first revealed during hydration, never as active legacy work", async () => {
+    const { readBriefing } = await import("../briefing/service.js");
+    const claim = ticket(1, [`agent:${me}`, "impact:M", "complexity:M"]);
+    const other = ticket(2, ["impact:L", "complexity:S"]);
+    // Discovery knows only the stub: the claim's ownership label appears after hydration.
+    const discovered = {
+      ...snapshot([other], []),
+      shortlist: {
+        schemaVersion: 1 as const,
+        profile: "briefing-shortlist-v1" as const,
+        discovered: { issues: 2, pullRequests: 0, complete: true },
+        hydrated: [other.url],
+        notHydrated: [
+          { number: 1, url: claim.url, kind: "issue" as const, reason: "not-shortlisted" as const },
+        ],
+        rounds: 1,
+        provisional: true,
+        notice: null,
+      },
+    };
+    const hydrated = snapshot([claim, other], []);
+    const reads: string[] = [];
+    const presented = await readBriefing(
+      {
+        collect: async () => {
+          throw new Error("not used");
+        },
+        collectShortlist: async (
+          _repository: string,
+          options: { select: (s: Snapshot) => Promise<string[]> },
+        ) => {
+          // First pass sees the discovery snapshot (claim absent); final returns hydrated.
+          await options.select(discovered);
+          return hydrated;
+        },
+        claimActivityReader: async (_repo: string, n: number) => {
+          reads.push(String(n));
+          return read({
+            state: "resume-required",
+            blocker: { kind: "dependency", repository: "o/r", issue: 9 },
+            reason: "parser",
+            lastActivity: "1",
+            cleared: "o/r#9 no longer blocks #1",
+          });
+        },
+        dependencyReport: async () => {
+          throw new Error("not used");
+        },
+        rest: async () => ({ status: 200, body: { permission: "write" } }),
+        query: async () => ({ repository: {} }),
+        now: () => new Date(Date.UTC(2026, 5, 1)),
+        guide: local(),
+        estimation: local(),
+        env: {},
+      } as never,
+      {
+        repository: hydrated.repository,
+        agent: me,
+        role: "implementer",
+        limit: 10,
+        maxChars: 100_000,
+      },
+    );
+    // The claim first revealed by hydration had its activity read, not treated as active.
+    expect(reads).toContain("1");
+    const report = (presented as { report: { rankedActions: { items: { kind: string }[] } } })
+      .report;
+    expect(report.rankedActions.items[0]?.kind).toBe("resume-claim");
+    expect(report.rankedActions.items.map((i) => i.kind)).not.toContain("continue-implementation");
+  });
 });
