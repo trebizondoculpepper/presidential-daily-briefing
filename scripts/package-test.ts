@@ -84,6 +84,12 @@ const issue = (number, labels, createdAt) => ({
 const args = process.argv.slice(2);
 // pdb serve reads the login once at startup (doc/design/serve.md); no token is involved.
 if (args[0] === "api" && args[1] === "user") { process.stdout.write(JSON.stringify({ login: "package-test" })); process.exit(0); }
+// pdb quotas (#547): one REST GET /rate_limit with --include; synthetic counts, no token.
+if (args[0] === "api" && args[1] === "--include" && args[2] === "rate_limit") {
+  const reset = Math.floor(Date.now() / 1000) + 1800;
+  process.stdout.write("HTTP/2.0 200 OK\\r\\nContent-Type: application/json\\r\\n\\r\\n" + JSON.stringify({ resources: { core: { limit: 5000, used: 10, remaining: 4990, reset }, graphql: { limit: 5000, used: 4900, remaining: 100, reset }, search: { limit: 30, used: 0, remaining: 30, reset } } }));
+  process.exit(0);
+}
 if (args[0] !== "api" || args[1] !== "graphql") { process.stderr.write("unsupported"); process.exit(1); }
 const query = (args.find((a) => a.startsWith("query=")) || "");
 const issues = query.includes("issues(first") ? [
@@ -474,6 +480,15 @@ try {
       ].every((term) => deliverablesHelp.stdout.includes(term))
     )
       throw new Error(`Installed bin does not document deliverables commands in ${cwd}.`);
+    // pdb quotas (#547): the installed help documents the command and its flags.
+    const quotasHelp = await cli(["quotas", "--help"]);
+    if (
+      !help.stdout.includes("quotas [--json] [--refresh | --offline]") ||
+      !["--json", "--refresh", "--offline", "unmetered", "/rate_limit"].every((term) =>
+        quotasHelp.stdout.includes(term),
+      )
+    )
+      throw new Error(`Installed bin does not document pdb quotas in ${cwd}.`);
     const invalid = await cli(["--no-such-option"]).then(
       () => null,
       (error: { code?: unknown }) => error,
@@ -639,6 +654,34 @@ try {
       PDB_NO_UPDATE_CHECK: "1",
     };
     console.log(`ok   installed pdb serve: ${await serveSmoke(bin, env, checkout)}`);
+    // pdb quotas (#547): the installed command reads one /rate_limit plus one identity read
+    // through the fake gh, from any directory, and its text and JSON agree.
+    const quotasJson = await run(bin, ["quotas", "--json"], { cwd: work, env });
+    const quotaView = JSON.parse(quotasJson.stdout) as {
+      kind?: string;
+      account?: string;
+      requests?: { quota: number; context: number };
+      resources?: { resource: string; state: string }[];
+      secondary?: { statement?: string };
+    };
+    if (
+      quotaView.kind !== "quota-view" ||
+      quotaView.account !== "package-test" ||
+      quotaView.requests?.quota !== 1 ||
+      quotaView.requests.context !== 1 ||
+      quotaView.resources?.find((r) => r.resource === "graphql")?.state !== "critical" ||
+      quotaView.secondary?.statement !== "Secondary limits: unmetered"
+    )
+      throw new Error(`Installed pdb quotas --json is wrong: ${quotasJson.stdout.slice(0, 400)}`);
+    const quotasText = await run(bin, ["quotas"], { cwd: work, env });
+    if (
+      !quotasText.stdout.includes("GraphQL: 4900 / 5000 points used (98%)") ||
+      !quotasText.stdout.includes("Secondary limits: unmetered")
+    )
+      throw new Error(`Installed pdb quotas text is wrong: ${quotasText.stdout.slice(0, 400)}`);
+    console.log(
+      "ok   installed pdb quotas: text and JSON from one /rate_limit and one identity read",
+    );
     const want: Record<string, string> = {
       implementer: "estimate-complexity",
       designer: "assess-impact",
