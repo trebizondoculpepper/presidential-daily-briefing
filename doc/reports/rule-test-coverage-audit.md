@@ -102,8 +102,17 @@ Recommendation:
 
 The script is about 60 lines over `buildPolicy` and `runScenario`, and could become an opt-in `npm run rules:mutate` if the owner wants it maintained. I didn't add it here, because a manual rerun gives the same evidence until the policy grows.
 
+## Update: #469 closes the surviving mutants
+
+#469 adds two things:
+
+- `rules.test.ts` pins each rule's audience: its role (`pr-action` is implementers, plus a designer on a design PR they are responsible for) and its subject kind. It checks the policy's guards against that table, and reruns every scenario under each role and with each subject's kind flipped. A weakened role or kind guard now fails without needing a hand-written scenario.
+- `scenarios/guard-negatives.edn` pins the last three guards: a designer's own linked documentation PR, an already assessed impact, and someone else's uncertain ticket.
+
+Rerunning the mutation run against both gives 107 mutants, all killed.
+
 ## Follow-ups
 
-- #469: cross-role and cross-kind negatives (the 26 surviving mutants).
+- #469: cross-role and cross-kind negatives (the 26 surviving mutants); done, see the update above.
 - The precedence combinations among band-2 PR rules fit #469 as well.
 - Host-boundary gaps are tracked from #339: #448, #449 and #450 (fixed), plus that report's completeness-flag table and derived-attribute check.

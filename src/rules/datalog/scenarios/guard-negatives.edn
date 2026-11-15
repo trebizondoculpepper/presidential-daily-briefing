@@ -1,0 +1,33 @@
+;; Negative scenarios from #469: each pins one guard that the clause-drop mutation run in
+;; doc/reports/rule-test-coverage-audit.md found unexercised. Role and subject-kind guards are
+;; covered by the metamorphic audience test in rules.test.ts instead.
+{:suite "guard-negatives"
+ :scenarios
+ [
+ {:id "own-documentation-pr-needing-follow-up-is-not-a-review-request"
+  :doc "A designer's own linked documentation PR with a failing check is follow-up for them, never a design review they owe (D-DESIGN-REVIEW's own-follow-up guard)."
+  :viewer {:role "designer" :agent "me"}
+  :facts [{:e 1 "forward-complete" true}
+          {:e 100 "kind" "pr" "state" "OPEN" "number" 2 "target" "https://github.com/o/r/pull/2" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "head2" "draft" false "pr-complete" true "review-decision" "" "mergeable" "MERGEABLE" "merge-state" "CLEAN" "label" "documentation" "responsible" "me" "check" 101}
+          {:e 101 "name" "verify" "outcome" "FAILURE"}]
+  :expect {:actions [{:subject 100 :rule "D-PR-FAIL" :kind "pr-follow-up" :band 2
+              :why "PR checks failed at head head2; inspect and repair before merge."
+              :facts {"impact" "unknown" "complexity" "unknown" "impactState" "unknown" "complexityState" "unknown" "head" "head2" "responsible" "me" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "failedChecks" "verify:FAILURE"}
+              :overridden [] :unlocks 0 :unknown [] :other-claims []}]
+           :denials #{}}}
+
+ {:id "assessed-impact-is-not-boosted-again"
+  :doc "A ticket whose impact is already current is not offered for impact assessment, even with small complexity (D-IMPACT-BOOST's needs-impact guard)."
+  :viewer {:role "designer"}
+  :facts [{:e 1 "forward-complete" true}
+          {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "head" "not-a-pr" "labels-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "S" "label" "status:ready"}]
+  :expect {:actions []
+           :denials #{}}}
+
+ {:id "someone-elses-uncertain-ticket-is-not-inspected"
+  :doc "Incomplete evidence on a ticket another agent claims is not offered for inspection: it is not possible work (D-INSPECT's possible guard)."
+  :viewer {:role "implementer" :agent "me"}
+  :facts [{:e 1 "forward-complete" true}
+          {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "head" "not-a-pr" "labels-complete" false "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "label" ["status:ready" "agent:other"] "owner" "other"}]
+  :expect {:actions []
+           :denials #{[100 "D-DENY-CLAIM"] [100 "D-DENY-LABELS-UNKNOWN"] [100 "D-DENY-PLATFORM"]}}}]}
