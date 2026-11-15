@@ -92,19 +92,24 @@
 [(pr-action ?t) [1 "role" "designer"] (design-pr ?t) (mine-linked ?t)]
 [(question-labelled ?t) [?t "label" ?l] [1 "question-label" ?l]]
 [(trusted-record ?t ?r) [?t "question-record" ?r] [?r "record-trust" "trusted"]]
-[(has-trusted-record ?t) (trusted-record ?t ?r)]
 [(unverified-record ?t) [?t "question-record" ?r] [?r "record-trust" "unverified"]]
-[(open-question ?t) (issue ?t) (open ?t) (question-labelled ?t) (has-trusted-record ?t)]
-[(open-unrecorded ?t) (issue ?t) (open ?t) (question-labelled ?t) (not (has-trusted-record ?t))]
-[(asks-viewer ?t) (trusted-record ?t ?r) [?r "record-to" ?a] [1 "agent" ?a]]
+;; A record asks while it is pending and not explicitly settled (#414). A v2 question ignores
+;; labels: only an explicit resolve or withdraw settles it. A legacy record (v1, or a fact with no
+;; version) asks only while a question label remains.
+[(record-pending ?t ?r) [?r "record-version" 2]]
+[(record-pending ?t ?r) [?r "record-version" 1] (question-labelled ?t)]
+[(record-pending ?t ?r) [?t "question-record" ?r] (not [?r "record-version" _]) (question-labelled ?t)]
+[(asking-record ?t ?r) (trusted-record ?t ?r) (not (record-settled ?r)) (record-pending ?t ?r)]
+[(has-asking-record ?t) (asking-record ?t ?r)]
+[(open-question ?t) (issue ?t) (open ?t) (has-asking-record ?t)]
+[(open-unrecorded ?t) (issue ?t) (open ?t) (question-labelled ?t) (not (has-asking-record ?t))]
+[(asks-viewer ?t) (asking-record ?t ?r) [?r "record-to" ?a] [1 "agent" ?a]]
 ;; Questions on closed sources (#414, doc/reports/closed-question-discovery.md). Closure, merge
 ;; and label removal never settle a v2 question: only an explicit resolve or withdraw does. A
 ;; legacy v1 question keeps label removal as its resolution. An unknown outcome is never settled.
 [(closed ?t) [?t "state" "CLOSED"]]
 [(record-settled ?r) [?r "record-outcome" "resolved"]]
 [(record-settled ?r) [?r "record-outcome" "withdrawn"]]
-[(record-pending ?t ?r) [?r "record-version" 2]]
-[(record-pending ?t ?r) [?r "record-version" 1] (question-labelled ?t)]
 [(orphaned-record ?t ?r) (issue ?t) (closed ?t) (trusted-record ?t ?r) [?r "record-outcome" "none"] (record-pending ?t ?r)]
 [(orphan-unknown ?t ?r) (issue ?t) (closed ?t) (trusted-record ?t ?r) [?r "record-outcome" "unknown"] (record-pending ?t ?r)]
 [(orphan-unknown ?t ?r) (issue ?t) (closed ?t) (trusted-record ?t ?r) [?r "record-version" 1] (not (record-settled ?r)) [?t "labels-complete" false] (not (question-labelled ?t))]

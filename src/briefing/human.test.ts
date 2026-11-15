@@ -371,7 +371,7 @@ describe("human briefing role (#457)", () => {
     };
     const { view, complete } = await human([empty, issue(7, [])], [accepted]);
     expect(complete).toBe(false);
-    expect(view.coverage.warnings.join(" ")).toMatch(/questions could not be read/);
+    expect(view.coverage.warnings.join(" ")).toMatch(/its questions could not be read/);
     expect(view.coverage.warnings.join(" ")).toMatch(/closing issue references truncated/);
   });
 
@@ -534,7 +534,9 @@ describe("human briefing role (#457)", () => {
       expect(view.items[0].resolution).toBe("unknown");
       expect(complete).toBe(false);
       expect(view.coverage.closedSources).toMatchObject({ complete: false });
-      expect(view.coverage.warnings.join(" ")).toMatch(/labels are truncated/);
+      expect(view.coverage.warnings.join(" ")).toMatch(
+        /are truncated; whether its legacy question/,
+      );
     });
 
     it("binds an outcome to the question, whichever trusted copy it names (Codex, #607)", async () => {
@@ -565,7 +567,7 @@ describe("human briefing role (#457)", () => {
       expect(view.items[0].requested).toEqual(["Readable?"]);
       expect(complete).toBe(false);
       expect(view.coverage.warnings.join(" ")).toContain(
-        `questions of record ${blank.url} could not be read`,
+        `record ${blank.url}: its questions could not be read`,
       );
     });
 
@@ -628,7 +630,7 @@ describe("human briefing role (#457)", () => {
       ]);
       expect(bounded.coverage.records).toMatchObject({ unknown: 1, unverified: 1, resolved: 0 });
       const warnings = bounded.warnings.join(" ");
-      expect(warnings).toMatch(/closed tickets beyond the 1 most recently updated were not read/);
+      expect(warnings).toMatch(/closed tickets beyond the 1 read so far were not read/);
       expect(warnings).toMatch(/comment history was not fully read within the bound/);
       expect(warnings).toMatch(/exceeded the request bound/);
       expect(bounded.coverage.permissionGaps).toBeGreaterThan(0);
@@ -650,6 +652,60 @@ describe("human briefing role (#457)", () => {
         bounds: { commentPages: 2 },
       });
       expect(gh.calls).toEqual(["inventory start", "comments #41 c0", "comments #42 c0"]);
+    });
+  });
+
+  describe("v2 questions on open tickets (#414)", () => {
+    it("keeps asking after the labels are removed: only an explicit outcome answers", async () => {
+      const asked = record("owner", ["Still unanswered?"], { v2: 51 });
+      const unlabelled = withComments(issue(51, ["status:ready"]), [asked]);
+      const { view } = await human([unlabelled]);
+      expect(rows(view)).toEqual(["answer-questions#51:to-you"]);
+      expect(view.items[0]).toMatchObject({
+        sourceState: "open",
+        requested: ["Still unanswered?"],
+        source: asked.url,
+      });
+    });
+
+    it("answers a v2 question by resolve or withdraw, even while a label remains", async () => {
+      const resolvedQ = record("owner", ["Resolved?"], { v2: 52 });
+      const withdrawnQ = record("owner", ["Withdrawn?"], { v2: 53 });
+      const resolved = withComments(issue(52, ["status:ready"]), [
+        resolvedQ,
+        outcome(52, resolvedQ, "resolve"),
+      ]);
+      // A lingering label is at most an inferred decision, never the answered question.
+      const labelled = withComments(issue(53, ["question"]), [
+        withdrawnQ,
+        outcome(53, withdrawnQ, "withdraw"),
+      ]);
+      const { view } = await human([resolved, labelled]);
+      expect(rows(view)).toEqual(["decide#53:inferred"]);
+      expect(view.coverage.records).toMatchObject({ resolved: 2, current: 0 });
+    });
+
+    it("never takes an untrusted resolution, and keeps each v2 question separate", async () => {
+      const first = record("owner", ["First?"], { v2: 54 });
+      const second = record("designer-a", ["Second?"], { v2: 54 });
+      const ticket = withComments(issue(54, []), [
+        first,
+        second,
+        outcome(54, second, "resolve", { author: "stranger" }),
+        outcome(54, first, "resolve"),
+      ]);
+      const { view } = await human([ticket], [], { trust: trustAll({ stranger: "read" }) });
+      expect(rows(view)).toEqual(["answer-questions#54:explicit"]);
+      expect(view.items[0].requested).toEqual(["Second?"]);
+    });
+
+    it("shows a v2 question whose history was truncated, and says so", async () => {
+      const asked = record("owner", ["Answered on a later page?"], { v2: 55 });
+      const truncated = withComments(issue(55, []), [asked], true);
+      const { view, complete } = await human([truncated]);
+      expect(rows(view)).toEqual(["answer-questions#55:to-you"]);
+      expect(complete).toBe(false);
+      expect(view.coverage.records).toMatchObject({ unknown: 1 });
     });
   });
 });
