@@ -11,7 +11,7 @@ import {
   policyVersion,
 } from "./process.js";
 import { pickupPolicy } from "./ranking.js";
-import { repo, snapshot } from "../testing/snapshots.js";
+import { clock, repo, snapshot } from "../testing/snapshots.js";
 
 describe("workflow guide in help and briefings (#71, doc/design/workflow-guide.md)", () => {
   const root = "/checkout";
@@ -43,6 +43,8 @@ describe("workflow guide in help and briefings (#71, doc/design/workflow-guide.m
     const code = await main(["--no-update-check", ...args], async (t) => void (out = t), {
       collect: async () => snapshot(),
       currentRepository: async () => repo,
+      // A fixed clock keeps freshness.ageSeconds identical across runs that are compared (#422).
+      now: clock,
       estimation: { fs: fsWith(null), git: gitFor(remote), cwd: root },
       guide: { fs: fsWith(guideConfig), git: gitFor(remote), cwd: root },
     });
@@ -73,13 +75,14 @@ describe("workflow guide in help and briefings (#71, doc/design/workflow-guide.m
       for (const match of line.matchAll(/pdb (\S+)/g)) expect(templates).toContain(match[1]);
   });
 
-  // Skipped until #422: freshness.ageSeconds comes from the wall clock, so the two runs differ
-  // by a second when they straddle a boundary. Re-enable once both runs share a fixed clock.
-  it.skip("honours the processGuide opt-out without changing the briefing evidence", async () => {
+  it("honours the processGuide opt-out without changing the briefing evidence", async () => {
     const on = JSON.parse((await run(["--json"], null)).out);
     const off = JSON.parse((await run(["--json"], '{"schemaVersion":1,"processGuide":false}')).out);
     expect(off.process).toMatchObject({ enabled: false, source: "config", guide: null });
     expect(off.process.pointer).toContain(off.process.policyVersion);
+    // Both runs read the injected clock, not the wall clock, so their freshness is identical.
+    expect(on.freshness.ageSeconds).toBe(off.freshness.ageSeconds);
+    expect(on.freshness.ageSeconds).toBe(0);
     const { process: _a, ...restOn } = on;
     const { process: _b, ...restOff } = off;
     expect(restOff).toEqual(restOn);
