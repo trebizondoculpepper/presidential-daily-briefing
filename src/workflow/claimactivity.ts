@@ -204,6 +204,8 @@ export function activityOpId(intent: {
   agent: string;
   op: "wait" | "resume";
   claimStartedAt: string;
+  /** The predecessor this transition follows: a later wait/resume cycle gets a new id. */
+  previousActivity: string | null;
   blocker?: WaitBlocker;
 }): string {
   const blocker = intent.blocker
@@ -220,6 +222,7 @@ export function activityOpId(intent: {
         intent.agent,
         intent.op,
         intent.claimStartedAt,
+        intent.previousActivity,
         blocker,
       ]),
     )
@@ -391,13 +394,16 @@ export interface QuestionOutcome {
 }
 
 /**
- * Explicit resolutions by question comment id. The first trusted resolution of a question wins;
- * later ones are rejected. A question bound to another operation id is rejected. Unknown
- * potentially authoritative records are reported, so a reader can refuse to call a question
- * unresolved or resolved by guesswork.
+ * Explicit resolutions by question comment id, checked against the questions the caller read:
+ * `questions` maps each needs-human comment id to its operation id. A resolution naming an
+ * unknown question, or the right comment with another operation id, is rejected before it can
+ * be selected. The first exactly bound trusted resolution wins; later ones are rejected.
+ * Unknown potentially authoritative records are reported, so a reader can refuse to call a
+ * question unresolved or resolved by guesswork.
  */
 export function foldQuestionResolutions(
   classified: readonly Classified<QuestionResolutionRecord>[],
+  questions: ReadonlyMap<string, string>,
 ): { outcomes: Map<string, QuestionOutcome>; unknown: string[]; rejected: string[] } {
   const outcomes = new Map<string, QuestionOutcome & { questionOpId: string }>();
   const unknown: string[] = [];
@@ -415,6 +421,17 @@ export function foldQuestionResolutions(
       continue;
     }
     const r = c.record;
+    const questionOp = questions.get(r.questionCommentId);
+    if (questionOp === undefined) {
+      rejected.push(`${where}: no question ${r.questionCommentId} on this issue`);
+      continue;
+    }
+    if (questionOp !== r.questionOpId) {
+      rejected.push(
+        `${where}: bound to operation ${r.questionOpId}, not the question's ${questionOp}`,
+      );
+      continue;
+    }
     const earlier = outcomes.get(r.questionCommentId);
     if (earlier) {
       rejected.push(`${where}: question ${r.questionCommentId} was already ${earlier.op}d`);

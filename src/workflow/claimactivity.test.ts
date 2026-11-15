@@ -95,21 +95,29 @@ describe("claim-activity markers (#412)", () => {
     expect(parseActivityComment("no marker").kind).toBe("none");
   });
 
-  it("derives one operation id per intent and claim generation", () => {
+  it("derives one operation id per intent, claim generation and predecessor", () => {
     const intent = {
       repository: "O/R",
       issue: 7,
       agent: "me",
       op: "wait" as const,
       claimStartedAt: started,
+      previousActivity: null,
       blocker: human,
     };
+    // A retry of the same transition keeps its id.
     expect(activityOpId(intent)).toBe(activityOpId({ ...intent, repository: "o/r" }));
     expect(activityOpId(intent)).not.toBe(
       activityOpId({ ...intent, claimStartedAt: "2026-11-16T00:00:00Z" }),
     );
     expect(activityOpId(intent)).not.toBe(
       activityOpId({ ...intent, blocker: { kind: "dependency", repository: repo, issue: 3 } }),
+    );
+    // A later cycle (wait, resume, wait again on the same blocker) gets a new id.
+    expect(activityOpId(intent)).not.toBe(activityOpId({ ...intent, previousActivity: "2002" }));
+    const resume = { ...intent, op: "resume" as const, blocker: undefined };
+    expect(activityOpId({ ...resume, previousActivity: "2001" })).not.toBe(
+      activityOpId({ ...resume, previousActivity: "2003" }),
     );
   });
 
@@ -218,15 +226,19 @@ describe("activity fold (#412)", () => {
 });
 
 describe("question resolutions (#412)", () => {
-  const resolution = (questionCommentId: string, op: "resolve" | "withdraw" = "resolve") =>
+  const resolution = (
+    questionCommentId: string,
+    op: "resolve" | "withdraw" = "resolve",
+    questionOpId = "q-op",
+  ) =>
     resolutionMarker({
       v: 1,
       op,
-      opId: `r-${questionCommentId}-${op}`,
+      opId: `r-${questionCommentId}-${op}-${questionOpId}`,
       repository: repo,
       issue: 7,
       questionCommentId,
-      questionOpId: "q-op",
+      questionOpId,
       agent: "me",
       reason: "answered",
     });
@@ -241,7 +253,11 @@ describe("question resolutions (#412)", () => {
       trust,
       parseResolutionComment,
     );
-    const folded = foldQuestionResolutions(classified);
+    const questions = new Map([
+      ["1001", "q-op"],
+      ["1002", "q-op"],
+    ]);
+    const folded = foldQuestionResolutions(classified, questions);
     expect(folded.outcomes.get("1001")).toEqual({
       op: "resolve",
       agent: "me",
@@ -251,5 +267,24 @@ describe("question resolutions (#412)", () => {
     expect(folded.outcomes.has("1002")).toBe(false);
     expect(folded.rejected[0]).toMatch(/already resolved/);
     expect(folded.unknown[0]).toMatch(/permission could not be read/);
+  });
+
+  it("rejects a resolution bound to another operation or an unknown question before selecting it", async () => {
+    const mismatched = comment(resolution("1001", "resolve", "other-op"));
+    const unknown = comment(resolution("9999"));
+    const correct = comment(resolution("1001", "withdraw"));
+    const classified = await classifyMarkers(
+      [mismatched, unknown, correct],
+      { repository: repo, issue: 7 },
+      trust,
+      parseResolutionComment,
+    );
+    const folded = foldQuestionResolutions(classified, new Map([["1001", "q-op"]]));
+    // The mismatched record does not win; the later, exactly bound one does.
+    expect(folded.outcomes.get("1001")?.op).toBe("withdraw");
+    expect(folded.rejected).toEqual([
+      expect.stringMatching(/bound to operation other-op, not the question's q-op/),
+      expect.stringMatching(/no question 9999 on this issue/),
+    ]);
   });
 });
