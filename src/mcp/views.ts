@@ -585,7 +585,7 @@ export function dependenciesView(
   const truncated = report.tree === true && bounds.complete !== true;
   if (truncated)
     warnings.push(
-      `Tree incomplete: read ${String(bounds.nodesRead ?? "?")} issue(s); ${String(bounds.notRead ?? "unknown")} known issue(s) and more beyond them not read (${str(bounds.stoppedBy) || "bound unknown"}). Not a complete graph.`,
+      `Tree incomplete: read ${typeof bounds.nodesRead === "number" ? bounds.nodesRead : "an unknown number of"} issue(s); ${typeof bounds.notRead === "number" ? bounds.notRead : "unknown"} known issue(s) and more beyond them not read (${str(bounds.stoppedBy) || "bound unknown"}). Not a complete graph.`,
     );
   const incomplete = unknown.length > 0 || unfollowed.length > 0 || truncated;
   return {
