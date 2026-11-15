@@ -226,7 +226,7 @@ Example: sizes S: tickets A (pickup to merge 4h), B (10h), C (still open, 30h so
 
 ### Agents (#456)
 
-As specified in [serve-dashboard-read-views.md](serve-dashboard-read-views.md), with the owner's 1–7 day activity window: an agent is listed when it holds a claim or has a ledger event attributed through records or `agent:` labels in the window. Presence remains unknown.
+As specified in [serve-dashboard-read-views.md](serve-dashboard-read-views.md), with the owner's 1–7 day participation window: an agent is listed only when it has a ledger event attributed through records or `agent:` labels in the window. Holding a claim alone does not list it; such work appears under Stalled work on Pipeline health. Presence remains unknown.
 
 ## Flow (Sankey) contract
 
