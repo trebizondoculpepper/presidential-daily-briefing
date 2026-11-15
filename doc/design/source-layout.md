@@ -149,9 +149,17 @@ Measured over non-test modules at `7384969`:
 1. `github ↔ dependencies`. Both go to `src/github/`, so the cycle stays inside one directory.
 2. One strongly connected group: `assessments → claims`, `briefing → assessments`, `briefing → reviewevidence`, `reviewevidence → prstatus` (type only), `prstatus → briefing`, `claims → briefing` (the registered `workflow` definition), `delivery → claims`, `estimate → claims/delivery`, `complexitylabels → estimation → estimate`, `assessments → estimate`. After the moves it spans `briefing/`, `workflow/` and `estimation/`.
 
+#437 moved the registered `workflow` definition into `workflow/definition.ts`, which imports nothing. That removed the `claims → briefing` and `prstatus → briefing` edges and split group 2. The groups are now:
+
+1. `github/github ↔ github/dependencies` (unchanged).
+2. `estimation/complexitylabels → estimation/estimation → estimation/estimate → estimation/complexitylabels`.
+3. `workflow/prstatus ↔ workflow/reviewevidence` (`reviewevidence → prstatus` is type only).
+
+Each remaining group stays inside one directory.
+
 Added after the moves: `serve`, `serve/api`, `serve/cache`, `serve/mcp` and `serve/services` from `pdb serve` (#373, measured at `49ecaf6`). Every edge back into `serve.ts` is type-only; #445 removes the group by moving the shared serve types into `serve/types.ts`.
 
-The moves must not add a cycle or merge further modules into this group. `src/acceptance/importcycles.test.ts` (#436) enforces this: it computes the strongly connected groups over non-test modules (static, type-only and `import()` edges) and fails on a new group or a module joining a known one. A shrunken or broken group also fails until the pinned list in the test and this section are updated, so the list only tightens. Breaking the group is follow-up work, for example by moving the registered `workflow` definition out of `briefing.ts` into `workflow/`, so `claims` no longer imports `briefing`. Each such change needs its own focused ticket.
+The moves must not add a cycle or merge further modules into an existing group. `src/acceptance/importcycles.test.ts` (#436) enforces this: it computes the strongly connected groups over non-test modules (static, type-only and `import()` edges) and fails on a new group or a module joining a known one. A shrunken or broken group also fails until the pinned list in the test and this section are updated, so the list only tightens. Breaking a remaining group is follow-up work, and each such change needs its own focused ticket.
 
 ## Delivery sequence
 

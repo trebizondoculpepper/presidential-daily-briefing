@@ -6,7 +6,8 @@
  * unknown. It never changes anything and never reclaims. v2 (#67) attaches a deterministic
  * correction plan to every finding (src/workflow/doctorplans.ts): suggestions, never execution.
  */
-import { owners, workflow } from "../briefing/briefing.js";
+import { owners } from "../briefing/briefing.js";
+import { workflow } from "./definition.js";
 import { dependencyDrift, nativeKnown } from "../github/dependencies.js";
 import { teamView } from "./team.js";
 import { complexityLabelFindings, metricLabelFindings } from "../estimation/complexitylabels.js";
