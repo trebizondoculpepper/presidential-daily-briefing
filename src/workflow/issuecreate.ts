@@ -6,7 +6,7 @@
  */
 import { spawn } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
-import { readFile } from "node:fs/promises";
+import { open } from "node:fs/promises";
 import { isAgentName } from "../config/identity.js";
 import { shellQuote } from "./claims.js";
 import { classifyGhFailure, parseGhResponse } from "../github/evidence.js";
@@ -153,7 +153,8 @@ async function readBody(request: IssueCreateRequest, rt: IssueCreateRuntime): Pr
   let bytes: Uint8Array;
   try {
     bytes = request.bodyFile === "-" ? await rt.readStdin() : await rt.readFile(request.bodyFile);
-  } catch {
+  } catch (error) {
+    if (error instanceof IssueCreateUsageError) throw error;
     // Never echo the path's contents or the system error text.
     throw new IssueCreateUsageError("Cannot read --body-file.");
   }
@@ -459,28 +460,40 @@ export async function createIssue(
         })
       : null;
   let applied = names(prop(created, "labels"));
-  const missing = (have: string[] | null) =>
-    request.labels.filter((l) => !(have ?? []).some((h) => h.toLowerCase() === l.toLowerCase()));
-  if (request.labels.length && missing(applied).length) {
+  const missing = (have: string[]) =>
+    request.labels.filter((l) => !have.some((h) => h.toLowerCase() === l.toLowerCase()));
+  if (request.labels.length && (applied === null || missing(applied).length)) {
     // One bounded read-back before reporting labels missing.
     const back = await read(`repos/${fullName}/issues/${number}`);
-    if (back?.status === 200 && prop(back.body, "node_id") === issueNode)
-      applied = names(prop(back.body, "labels"));
+    const backLabels =
+      back?.status === 200 && prop(back.body, "node_id") === issueNode
+        ? names(prop(back.body, "labels"))
+        : null;
+    if (backLabels) applied = backLabels;
     else result.warnings.push("Read-back of the created issue failed; label state is unverified.");
   }
-  result.labels.applied = applied ?? [];
-  const absent = missing(applied);
+  // Unknown stays null: an unread label list is never reported as empty.
+  result.labels.applied = applied;
+  if (request.labels.length && applied === null) {
+    result.status = "partial";
+    result.error = {
+      id: "LABELS_UNVERIFIED",
+      message: `Issue created, but whether GitHub applied the requested labels is unknown. Inspect ${issueUrl}; do not create it again.`,
+    };
+    return result;
+  }
+  const absent = missing(applied ?? []);
   if (absent.length) {
     result.status = "partial";
     result.error = {
       id: "LABELS_MISSING",
       message: `Issue created, but GitHub did not apply: ${absent.join(", ")}. Do not create it again.`,
     };
-    result.recovery = absent.map((l) =>
-      ["gh", "issue", "edit", String(number), "--repo", fullName, "--add-label", l]
-        .map(shellQuote)
-        .join(" "),
-    );
+    // gh issue edit --add-label splits on commas; the REST call takes the exact names as JSON on
+    // stdin through a quoted here-doc, so nothing in a label is split or expanded by a shell.
+    result.recovery = [
+      `${["gh", "api", "--method", "POST", `repos/${fullName}/issues/${number}/labels`, "--input", "-"].map(shellQuote).join(" ")} <<'PDB_LABELS'\n${JSON.stringify({ labels: absent })}\nPDB_LABELS`,
+    ];
     return result;
   }
   result.status = "created";
@@ -594,17 +607,40 @@ export const ghPostWith =
 
 export const ghPost: RestPost = ghPostWith();
 
-/** Bounded stdin read: stops accumulating just past the body limit. */
-export async function readStdinBounded(): Promise<Uint8Array> {
+/** Bounded stdin read: stops reading just past the body limit. */
+export async function readStdinBounded(
+  stream: AsyncIterable<unknown> = process.stdin,
+): Promise<Uint8Array> {
   const chunks: Buffer[] = [];
   let size = 0;
-  for await (const chunk of process.stdin) {
+  for await (const chunk of stream) {
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk));
     chunks.push(buffer);
     size += buffer.byteLength;
-    if (size > MAX_BODY_BYTES) break;
+    if (size > MAX_BODY_BYTES)
+      throw new IssueCreateUsageError(`The body exceeds ${MAX_BODY_BYTES} bytes.`);
   }
   return Buffer.concat(chunks);
 }
 
-export const defaultReadFile = async (path: string): Promise<Uint8Array> => readFile(path);
+/** Bounded file read: refuses by size before loading, and never reads past the limit. */
+export async function defaultReadFile(path: string): Promise<Uint8Array> {
+  const handle = await open(path, "r");
+  try {
+    const info = await handle.stat();
+    if (info.size > MAX_BODY_BYTES)
+      throw new IssueCreateUsageError(`The body exceeds ${MAX_BODY_BYTES} bytes.`);
+    const buffer = Buffer.alloc(MAX_BODY_BYTES + 1);
+    let length = 0;
+    while (length < buffer.length) {
+      const { bytesRead } = await handle.read(buffer, length, buffer.length - length, length);
+      if (!bytesRead) break;
+      length += bytesRead;
+    }
+    if (length > MAX_BODY_BYTES)
+      throw new IssueCreateUsageError(`The body exceeds ${MAX_BODY_BYTES} bytes.`);
+    return buffer.subarray(0, length);
+  } finally {
+    await handle.close();
+  }
+}
