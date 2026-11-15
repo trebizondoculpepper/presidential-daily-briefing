@@ -114,6 +114,7 @@ async function setup(
     queryWith?: ServeReadRuntime["queryWith"];
     dependencyReport?: ServeReadRuntime["dependencyReport"];
     rest?: ServeReadRuntime["rest"];
+    loadEngine?: ServeReadRuntime["loadEngine"];
   } = {},
 ): Promise<Setup> {
   const clock = new ManualClock();
@@ -174,6 +175,7 @@ async function setup(
       } as never;
     },
     queryWith: overrides.queryWith,
+    ...(overrides.loadEngine ? { loadEngine: overrides.loadEngine } : {}),
     ...(overrides.rest ? { rest: overrides.rest } : {}),
     now: () => clock.now(),
     env: {},
@@ -724,6 +726,35 @@ describe("pdb serve classifies GitHub failures by structured signals (#373 revie
 });
 
 describe("pdb serve maps domain errors (#373 review)", () => {
+  it("a missing engine module carries its safe cause and recovery (#346)", async () => {
+    const s = await setup(["--repo", repo], {
+      loadEngine: async () => {
+        throw Object.assign(
+          new Error("Cannot find package 'datascript' imported from /private/home/x/dist/d.mjs"),
+          { code: "ERR_MODULE_NOT_FOUND", stack: "at /private/home/x" },
+        );
+      },
+    });
+    try {
+      const reply = await call(s.running.port, "/api/v1/briefing");
+      expect(reply.status).toBe(500);
+      expect(reply.json.error).toMatchObject({
+        code: "INTERNAL",
+        cause: {
+          category: "missing-module",
+          module: "datascript",
+          recovery: ["npm ci", "pdb doctor"],
+        },
+      });
+      expect(reply.json.error.message).toMatch(/Missing module datascript/);
+      expect(reply.json.error.next.slice(0, 2)).toEqual(["npm ci", "pdb doctor"]);
+      expect(reply.body).not.toContain("/private/home");
+      expect(reply.body).not.toContain("Cannot find package");
+    } finally {
+      await s.close();
+    }
+  });
+
   it("who answers an unavailable issue with its diagnosis, not a 500", async () => {
     const s = await setup(["--repo", repo], { collectIssueFocus: moved("someone/else") });
     try {

@@ -3,7 +3,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/server";
 import { boundedEnvelope, createServer } from "../mcp.js";
 import { describe, it, expect } from "vite-plus/test";
 import { parseConfig, settingFor } from "./config.js";
-import { resolveEngineSetting } from "./engine-setting.js";
+import { BriefingEngineError, engineFailure, resolveEngineSetting } from "./engine-setting.js";
 import { emptyFileSystem, fakeGit, SYNTHETIC_ROOT } from "../../scripts/benchmark-isolation.js";
 import { presentBriefing, readBriefing } from "../briefing/service.js";
 import { main } from "../cli.js";
@@ -249,4 +249,64 @@ it("defaults to an explicitly reported implementer view without inferring identi
   });
   expect("role" in result.report && result.report.role?.name).toBe("implementer");
   expect(result.text).toContain("No --agent given");
+});
+
+const missingDatascript = () =>
+  engineFailure(
+    Object.assign(
+      new Error("Cannot find package 'datascript' imported from /private/home/x/dist/datalog.mjs"),
+      { code: "ERR_MODULE_NOT_FOUND" },
+    ),
+    "unused",
+  );
+
+it("carries a missing engine module's safe cause into the MCP error envelope (#346)", async () => {
+  const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+  const server = createServer(
+    { repo: snapshot.repository, project: SYNTHETIC_ROOT },
+    {
+      collect: async () => snapshot,
+      // Injected local configuration readers: nothing reads the real checkout's config.
+      guide: local(),
+      estimation: local(),
+      fs: local().fs,
+      git: local().git,
+      loadEngine: async () => {
+        throw Object.assign(
+          new Error("Cannot find package 'datascript' imported from /private/home/x/dist/d.mjs"),
+          { code: "ERR_MODULE_NOT_FOUND" },
+        );
+      },
+      currentRepository: async () => snapshot.repository,
+      dependencyReport,
+      env: {},
+    },
+  );
+  await server.connect(serverSide);
+  const client = new Client({ name: "engine-cause", version: "1" });
+  await client.connect(clientSide);
+  try {
+    const raw = await client.callTool({
+      name: "triage_briefing",
+      arguments: { agent: "tester", role: "implementer" },
+    });
+    expect(missingDatascript()).toBeInstanceOf(BriefingEngineError);
+    const result = boundedEnvelope.parse(raw.structuredContent);
+    expect(raw.isError).toBe(true);
+    expect(result.error).toMatchObject({
+      code: "decision-engine-failed",
+      cause: {
+        category: "missing-module",
+        module: "datascript",
+        recovery: ["npm ci", "pdb doctor"],
+      },
+    });
+    expect(result.error?.message).toMatch(/Missing module datascript.*npm ci.*pdb doctor/);
+    const rendered = JSON.stringify(raw);
+    expect(rendered).not.toContain("/private/home");
+    expect(rendered).not.toContain("Cannot find package");
+  } finally {
+    await client.close();
+    await server.close();
+  }
 });

@@ -9,7 +9,11 @@
 import { BriefingArgumentError } from "../briefing/compact.js";
 import { resolveReviewPolicy } from "../config/review-setting.js";
 import type { DeclaredReviewPolicy } from "../workflow/reviewpolicy.js";
-import { BriefingEngineError } from "../config/engine-setting.js";
+import {
+  BriefingEngineError,
+  safeEngineCause,
+  safeEngineCauseText,
+} from "../config/engine-setting.js";
 import { validateHarness } from "../config/harness.js";
 import { validateEntryKey } from "../config/identity.js";
 import type { ConfigFileSystem, GitRunner } from "../config/config.js";
@@ -431,6 +435,7 @@ export function readApi(
     queryWith: memoQueryWith,
     now: runtime.now,
     redactDiagnostic: redactLocalText,
+    ...(runtime.loadEngine ? { loadEngine: runtime.loadEngine } : {}),
     ...projectReaders(runtime, project, repository),
   });
 
@@ -595,10 +600,13 @@ export function readApi(
           }
         } else if (error instanceof BriefingEngineError) {
           status = 500;
+          const cause = safeEngineCause(error);
           failure = {
             code: "INTERNAL",
-            message: redactLocalText(error.message),
+            message: cause ? safeEngineCauseText(cause) : redactLocalText(error.message),
+            ...(cause ? { cause } : {}),
             next: [
+              ...(cause?.recovery ?? []),
               cliCommand(view, served?.repository ?? "owner/name", number),
               "pdb config get briefing.engine",
             ],
