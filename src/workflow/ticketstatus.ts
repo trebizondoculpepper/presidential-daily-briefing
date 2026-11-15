@@ -29,6 +29,7 @@ import type { DeliverableView, DeliveryView, FollowUp } from "./deliveryread.js"
 import { excerpt, pullRequestStatus } from "./prstatus.js";
 import type { PrStatusReport } from "./prstatus.js";
 import { readWhoWith } from "./readservices.js";
+import { parseTargetLabel } from "./delivery.js";
 import type { DeliveryBoundaries } from "./readservices.js";
 import type { TicketOwnership } from "./who.js";
 
@@ -243,11 +244,22 @@ async function closingReferences(
   return { refs, complete: !more };
 }
 
-/** Target branch of a recorded `owner/name:branch` target; null for the default branch. */
-const targetBranch = (target: string | null): string | null => {
-  const m = target ? /^[\w.-]+\/[\w.-]+:(.+)$/.exec(target) : null;
-  return m ? m[1] : null;
-};
+/**
+ * Whether a PR's live base differs from a recorded intended target (`targetLabel` form, parsed
+ * with the shared `parseTargetLabel`). The default-branch sentinel is resolved with the known
+ * default branch; when that is unknown the answer is unknown (null), never a mismatch.
+ */
+export function targetMismatch(
+  intended: string | null,
+  pr: { repository: string; base: string },
+  defaultBranch: string | null = null,
+): boolean | null {
+  const target = intended ? parseTargetLabel(intended) : null;
+  if (!target) return null;
+  if (target.repository.toLowerCase() !== pr.repository.toLowerCase()) return true;
+  const branch = target.branch ?? defaultBranch;
+  return branch === null ? null : branch !== pr.base;
+}
 
 function prRow(
   id: { repository: string; number: number; url: string; relations: PrRelation[] },
@@ -288,7 +300,6 @@ function withStatus(
   closure: Closure,
 ): TicketPullRequest {
   const p = r.pullRequest;
-  const intended = targetBranch(row.intendedTarget);
   const open = p.state === "OPEN";
   const facts = reportFollowUpFacts(r);
   // Shared classifiers only: a required member exactly as `pr N` decides it (closure cleanup and
@@ -308,7 +319,11 @@ function withStatus(
     head: p.head,
     branch: p.branch,
     base: p.base,
-    targetMismatch: intended === null ? null : intended !== p.base,
+    // The PR status read does not select the default branch: the sentinel stays unknown.
+    targetMismatch: targetMismatch(row.intendedTarget, {
+      repository: row.repository,
+      base: p.base,
+    }),
     checks: {
       verify: r.checks.required ? r.checks.required.class : "missing",
       counts: r.checks.counts,

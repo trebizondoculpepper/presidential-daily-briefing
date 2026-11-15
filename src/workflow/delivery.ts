@@ -120,8 +120,20 @@ export const deliverableKey = (d: Deliverable): string =>
     : `commit:${d.repository.toLowerCase()}@${d.oid.toLowerCase()}`;
 export const deliverableLabel = (d: Deliverable): string =>
   d.kind === "pr" ? `${d.repository}#${d.number}` : `${d.repository}@${d.oid.slice(0, 12)}`;
+const defaultBranchLabel = "(default branch)";
 export const targetLabel = (t: DeliveryTarget): string =>
-  `${t.repository}:${t.branch ?? "(default branch)"}`;
+  `${t.repository}:${t.branch ?? defaultBranchLabel}`;
+/**
+ * The inverse of `targetLabel`: `branch` null is the repository's default branch, which only a
+ * live read resolves. Null when the label is not a target label.
+ */
+export const parseTargetLabel = (
+  label: string,
+): { repository: string; branch: string | null } | null => {
+  const m = /^([\w.-]+\/[\w.-]+):(.+)$/.exec(label);
+  if (!m) return null;
+  return { repository: m[1], branch: m[2] === defaultBranchLabel ? null : m[2] };
+};
 
 /** Deterministic id for retries: the same operation always yields the same `opId`. */
 export const deliveryOpId = (parts: {

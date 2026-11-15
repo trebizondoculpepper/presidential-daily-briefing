@@ -10,7 +10,7 @@ import { RateLimitError } from "../github/dependencies.js";
 import type { Issue } from "../github/types.js";
 import { deliveryMarker, markerTrust } from "./delivery.js";
 import type { Deliverable, DeliveryComment, DeliveryRecord } from "./delivery.js";
-import { readTicketStatus, ticketStatusText } from "./ticketstatus.js";
+import { readTicketStatus, targetMismatch, ticketStatusText } from "./ticketstatus.js";
 import type { TicketStatus } from "./ticketstatus.js";
 
 const repo = "owner/name";
@@ -373,6 +373,22 @@ describe("pdb ticket N (#197)", () => {
     });
     expect(row(r.report, 51)).toMatchObject({ state: "CLOSED", relations: ["closing-reference"] });
     expect(r.text).toMatch(/MISMATCH/);
+  });
+
+  it("a default-branch target is never a mismatch unless the default branch is known", async () => {
+    const issue = ticket(1, [submitted(1, [member(52)])]);
+    const r = await read({ issue, prs: { 52: { state: "OPEN", base: "main" } }, links: [] });
+    expect(row(r.report, 52)).toMatchObject({
+      intendedTarget: `${repo}:(default branch)`,
+      targetMismatch: null,
+    });
+    expect(r.text).not.toMatch(/MISMATCH/);
+    const pr = { repository: repo, base: "main" };
+    expect(targetMismatch(`${repo}:(default branch)`, pr, "main")).toBe(false);
+    expect(targetMismatch(`${repo}:(default branch)`, pr, "trunk")).toBe(true);
+    expect(targetMismatch(`${repo}:main`, pr)).toBe(false);
+    expect(targetMismatch(`${repo}:release`, pr)).toBe(true);
+    expect(targetMismatch(null, pr)).toBeNull();
   });
 
   it("a cross-repository or inaccessible PR is unknown, never optional success", async () => {
