@@ -31,6 +31,14 @@ For owned PRs whose checks/reviews are only pending, do not invent repair or mer
 
 Multiple-claim review and incomplete-inventory inspection retain #413's aggregate semantics and individual links. One issue is not duplicated merely to inflate the ownership signal. Unassign follows #588: terminate responsibility only, preserving current state, blockers and independent questions. Existing `release --as …` has explicit readiness side effects and must not be advertised as a state-preserving Unassign alias. Until the #588 service is shipped, identify that option as unavailable and offer another supported next step; do not duplicate its workflow in #652. Existing delivery facts survive according to their own contract. No automatic release, reassignment, reopening, closure or switch of active work is introduced.
 
+## Human ownership and routing-first amendment (#662 / #663)
+
+The [draft human-assignment contract](human-assignment-safeguard.md), once owner-reviewed and merged, adds human-scoped workflow defaults and a leading assignment-triage class before the ordinary comparator below. Routing completely unassigned issues using CONTRIBUTORS.md comes before owned work and estimation. Missing guidance produces human attention on the original ticket and waiting, not a new issue or endlessly executable duplicate. The ordinary comparator does not supersede that leading class.
+
+Normal work requires the agent's human among the ticket's human assignees. Multiple human owners permit either human's agent but only one active implementation claim. Eligible owner-side agents may take over verified wrong-human claims with a recorded reason. Displaced/explicitly removed agents preserve work and yield without undoing the handoff, closing the issue or duplicating a takeover explanation. Agent release does not remove human owners.
+
+Trusted explicit human instructions override workflow defaults; native rules express this precedence. On GitHub outages, continue from last-known facts; without definitive facts, report the lack of defaults and defer to human direction. Do not infer reassignment from a failed read. Current/last-known/human-directed evidence and every exception remain explicit in decision reasons. #667 and #673 own ordinary eligibility and routing/scheduling; #690–#693 supply claim binding, takeover, handoff and continuity. These amendments remain gated by the owner's #671 review.
+
 ## Explicit comparator
 
 Apply this lexicographic comparison to the complete candidate pool before any display limit. Each earlier key dominates all later ones:
