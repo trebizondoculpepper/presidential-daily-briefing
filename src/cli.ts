@@ -2216,7 +2216,7 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
       : undefined;
     const presentOptions = {
       ...options,
-      ...(human ? { human } : {}),
+      ...(human ? { employingHuman: human } : {}),
       ...(labels ? { labels } : {}),
       process: guideProcess,
       engineClock: runtime.engineClock,
@@ -2427,7 +2427,7 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
             snapshot,
             {
               ...options,
-              ...(human ? { human } : {}),
+              ...(human ? { employingHuman: human } : {}),
               ...(labels ? { labels } : {}),
               ...(stale ? { stale } : {}),
               process: guideProcess,
