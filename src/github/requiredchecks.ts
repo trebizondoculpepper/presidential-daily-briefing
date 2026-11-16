@@ -8,7 +8,8 @@
  * Missing or unreadable evidence is `unknown`, never advisory, and an expected required check
  * that has not reported is never passed.
  */
-import type { PullRequest } from "./types.js";
+import type { CheckEvidence } from "../rules/datalog/check-types.js";
+import type { Check } from "./types.js";
 import { workflow } from "../workflow/definition.js";
 
 export type Requiredness = "required" | "advisory" | "unknown";
@@ -36,6 +37,29 @@ export interface RequiredChecks {
   gaps: string[];
 }
 
+/** Minimum factual shape shared by snapshot and focused PR reads. */
+export interface RequiredCheckSource {
+  headRefOid: string;
+  baseRefName: string;
+  requiredChecks?: RequiredChecks;
+  commits?: {
+    nodes?: {
+      commit: {
+        oid?: string;
+        statusCheckRollup?: {
+          contexts: { nodes: Check[]; pageInfo?: { hasNextPage?: boolean } };
+        } | null;
+      };
+    }[];
+  };
+}
+type HydratableCheckSource = RequiredCheckSource & {
+  number: number;
+  state: string;
+  isDraft?: boolean;
+  url: string;
+};
+
 /** The shared classification every engine consumes. */
 export interface CheckClassification {
   requiredPending: string[];
@@ -47,14 +71,17 @@ export interface CheckClassification {
 }
 
 const unfinished: readonly string[] = workflow.unfinished;
-const outcomeOf = (c: { conclusion?: string | null; state?: string; status?: string }) =>
-  c.conclusion ?? c.state ?? c.status ?? "UNKNOWN";
+const outcomeOf = (c: {
+  conclusion?: string | null;
+  state?: string | null;
+  status?: string | null;
+}) => c.conclusion ?? c.state ?? c.status ?? "UNKNOWN";
 
 /**
  * Classify a PR's head checks with the required-check evidence (pure). A PR without evidence,
  * or evidence for another head or base, has every pending check `unknown`.
  */
-export function classifyChecks(pr: PullRequest): CheckClassification {
+export function classifyChecks(pr: RequiredCheckSource): CheckClassification {
   const contexts = pr.commits?.nodes?.[0]?.commit.statusCheckRollup?.contexts.nodes ?? [];
   const evidence = pr.requiredChecks;
   const bound = !!evidence && evidence.head === pr.headRefOid && evidence.base === pr.baseRefName;
@@ -124,13 +151,100 @@ export function classifyChecks(pr: PullRequest): CheckClassification {
   return result;
 }
 
-/** Whether a PR's checks are worth classifying: open, not a draft, with an unfinished check. */
-export const needsRequiredness = (pr: PullRequest): boolean =>
-  pr.state === "OPEN" &&
-  !pr.isDraft &&
-  (pr.commits?.nodes?.[0]?.commit.statusCheckRollup?.contexts.nodes ?? []).some((c) =>
-    unfinished.includes(outcomeOf(c)),
-  );
+/** Normalize source coverage and run identities; native policy interprets the outcomes. */
+export function requiredCheckEvidence(pr: RequiredCheckSource): CheckEvidence {
+  const commit = pr.commits?.nodes?.[0]?.commit;
+  const rollup = commit?.statusCheckRollup;
+  const contexts = rollup?.contexts.nodes ?? [];
+  const evidence = pr.requiredChecks;
+  const gaps = [...(evidence?.gaps ?? [])];
+  const bound = !!evidence && evidence.head === pr.headRefOid && evidence.base === pr.baseRefName;
+  if (commit?.oid !== undefined && commit.oid !== pr.headRefOid)
+    gaps.push("observed checks belong to another head commit");
+  if (!commit?.oid && contexts.some((check) => check.__typename === "StatusContext"))
+    gaps.push("legacy status contexts lack their head commit binding");
+  if (!bound) gaps.push("required-check evidence is absent or bound to another head/base");
+  if (evidence?.expected == null) gaps.push("expected required checks were not completely read");
+  if (
+    rollup === undefined ||
+    (rollup !== null &&
+      (!rollup.contexts.pageInfo ||
+        typeof rollup.contexts.pageInfo.hasNextPage !== "boolean" ||
+        rollup.contexts.pageInfo.hasNextPage))
+  )
+    gaps.push("observed head checks were not completely read");
+  const checks = contexts.map((check) => {
+    const name = check.name ?? check.context ?? "unnamed";
+    const matches = bound
+      ? evidence!.checks.filter(
+          (run) =>
+            run.name === name &&
+            (check.databaseId != null ? run.databaseId === check.databaseId : true),
+        )
+      : [];
+    const sameName = contexts.filter((c) => (c.name ?? c.context ?? "unnamed") === name);
+    const unambiguous = matches.length === 1 && (check.databaseId != null || sameName.length === 1);
+    if (!unambiguous) gaps.push(`run identity or requiredness of ${name} is ambiguous`);
+    let required: Requiredness = unambiguous ? matches[0]!.required : "unknown";
+    if (
+      bound &&
+      evidence!.expected?.some(
+        (expected) =>
+          expected.context === name &&
+          (expected.appId === null || (unambiguous && matches[0]!.appId === expected.appId)),
+      )
+    ) {
+      if (required === "advisory") gaps.push(`conflicting requiredness for ${name}`);
+      required = "required";
+    }
+    if (
+      bound &&
+      evidence!.expected !== null &&
+      required === "required" &&
+      !evidence!.expected.some(
+        (expected) =>
+          expected.context === name &&
+          (expected.appId === null || (unambiguous && matches[0]!.appId === expected.appId)),
+      )
+    )
+      gaps.push(`requiredness of ${name} is not explained by the expected policy`);
+    if (
+      typeof check.isRequired === "boolean" &&
+      required !== "unknown" &&
+      check.isRequired !== (required === "required")
+    )
+      gaps.push(`requiredness of ${name} changed between reads`);
+    if (required === "unknown") gaps.push(`requiredness of ${name} is unknown`);
+    return {
+      name,
+      outcome: outcomeOf(check),
+      required,
+      databaseId: check.databaseId ?? null,
+      appId: unambiguous ? matches[0]!.appId : null,
+    };
+  });
+  if (bound)
+    for (const run of evidence!.checks) {
+      if (
+        !contexts.some(
+          (c) =>
+            (c.name ?? c.context ?? "unnamed") === run.name &&
+            (run.databaseId === null || c.databaseId === run.databaseId),
+        )
+      )
+        gaps.push(`the outcome of newly observed check ${run.name} was not read`);
+    }
+  return {
+    complete: gaps.length === 0,
+    gaps: [...new Set(gaps)],
+    checks,
+    missing: classifyChecks(pr).missingRequired,
+  };
+}
+
+/** Selected open, non-draft PRs need requirement evidence even when visible checks are green. */
+export const needsRequiredness = (pr: HydratableCheckSource): boolean =>
+  pr.state === "OPEN" && !pr.isDraft;
 
 type Query = (
   query: string,
@@ -164,14 +278,24 @@ async function readBasePolicy(
       else {
         if (rules.length >= 100) gaps.push(`more than 100 effective rules for ${base}`);
         for (const rule of rules) {
-          if (!isRecord(rule) || rule.type !== "required_status_checks") continue;
+          if (!isRecord(rule) || typeof rule.type !== "string") {
+            gaps.push(`an effective rule for ${base} was unreadable`);
+            continue;
+          }
+          if (rule.type !== "required_status_checks") continue;
           const checks = isRecord(rule.parameters) ? rule.parameters.required_status_checks : null;
           if (!Array.isArray(checks)) {
             gaps.push(`a required-status-checks rule for ${base} was unreadable`);
             continue;
           }
           for (const c of checks)
-            if (isRecord(c) && typeof c.context === "string")
+            if (
+              isRecord(c) &&
+              typeof c.context === "string" &&
+              c.context.length > 0 &&
+              (c.integration_id == null ||
+                (typeof c.integration_id === "number" && Number.isSafeInteger(c.integration_id)))
+            )
               expected.push({
                 context: c.context,
                 appId: typeof c.integration_id === "number" ? c.integration_id : null,
@@ -196,12 +320,22 @@ async function readBasePolicy(
     else if (ref.branchProtectionRule !== null) {
       const rule = ref.branchProtectionRule;
       if (!isRecord(rule)) gaps.push(`legacy protection for ${base} was unreadable`);
+      else if (typeof rule.requiresStatusChecks !== "boolean")
+        gaps.push(`legacy status-check requirement for ${base} was unreadable`);
       else if (rule.requiresStatusChecks === true) {
         if (!Array.isArray(rule.requiredStatusChecks))
           gaps.push(`legacy required checks for ${base} were unreadable`);
         else
           for (const c of rule.requiredStatusChecks)
-            if (isRecord(c) && typeof c.context === "string")
+            if (
+              isRecord(c) &&
+              typeof c.context === "string" &&
+              c.context.length > 0 &&
+              (c.app === null ||
+                (isRecord(c.app) &&
+                  typeof c.app.databaseId === "number" &&
+                  Number.isSafeInteger(c.app.databaseId)))
+            )
               expected.push({
                 context: c.context,
                 appId:
@@ -223,12 +357,12 @@ async function readBasePolicy(
 /** Per-check requiredness for one PR, bound to that PR and its current head. */
 async function readRequiredness(
   repository: string,
-  pr: PullRequest,
+  pr: HydratableCheckSource,
   query: Query,
 ): Promise<{ head: string; checks: RequiredChecks["checks"]; gaps: string[] }> {
   const [owner, name] = repository.split("/");
   const data = await query(
-    `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){headRefOid baseRefName commits(last:1){nodes{commit{statusCheckRollup{contexts(first:100){nodes{__typename ... on CheckRun{name databaseId isRequired(pullRequestNumber:$number) checkSuite{app{databaseId}}} ... on StatusContext{context isRequired(pullRequestNumber:$number)}} pageInfo{hasNextPage}}}}}}}}}`,
+    `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){headRefOid baseRefName commits(last:1){nodes{commit{oid statusCheckRollup{contexts(first:100){nodes{__typename ... on CheckRun{name databaseId isRequired(pullRequestNumber:$number) checkSuite{app{databaseId}}} ... on StatusContext{context isRequired(pullRequestNumber:$number)}} pageInfo{hasNextPage}}}}}}}}}`,
     { owner: owner!, name: name!, number: pr.number },
   );
   const gaps: string[] = [];
@@ -240,12 +374,16 @@ async function readRequiredness(
     gaps.push("the head or base changed while required checks were read");
   const commits = isRecord(read.commits) ? read.commits.nodes : null;
   const commit = Array.isArray(commits) && isRecord(commits[0]) ? commits[0].commit : null;
+  if (isRecord(commit) && typeof commit.oid === "string" && commit.oid !== head)
+    gaps.push("head checks changed while requiredness was read");
   const rollup = isRecord(commit) ? commit.statusCheckRollup : null;
+  if (rollup === null && isRecord(commit)) return { head, checks: [], gaps };
   const contexts = isRecord(rollup) ? rollup.contexts : null;
   if (!isRecord(contexts) || !Array.isArray(contexts.nodes))
     return { head, checks: [], gaps: [...gaps, "the head checks could not be read"] };
-  if (isRecord(contexts.pageInfo) && contexts.pageInfo.hasNextPage === true)
-    gaps.push("more than 100 head checks");
+  if (!isRecord(contexts.pageInfo) || typeof contexts.pageInfo.hasNextPage !== "boolean")
+    gaps.push("head-check pagination coverage was not reported");
+  else if (contexts.pageInfo.hasNextPage === true) gaps.push("more than 100 head checks");
   const checks = contexts.nodes.filter(isRecord).map((c) => ({
     name:
       typeof c.name === "string" ? c.name : typeof c.context === "string" ? c.context : "unnamed",
@@ -267,13 +405,12 @@ async function readRequiredness(
 }
 
 /**
- * Hydrate required-check evidence for the PRs where it decides waiting: open, non-draft, with an
- * unfinished check. One base-policy read per distinct base (shared), one bound read per PR.
+ * Hydrate selected open non-draft PRs, including green and no-check heads (#676). One base-policy read per distinct base (shared), one bound read per PR.
  * Returns warnings for incomplete evidence (each `${pr.url}: …`, which marks that PR incomplete).
  */
 export async function hydrateRequiredChecks(
   repository: string,
-  prs: PullRequest[],
+  prs: HydratableCheckSource[],
   { query, rest }: { query: Query; rest: Rest },
 ): Promise<string[]> {
   const warnings: string[] = [];

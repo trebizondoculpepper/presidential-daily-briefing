@@ -82,6 +82,7 @@ const runtimeFor = (config: string | null): McpRuntime => {
     estimation: { fs, git, cwd: root },
     guide: { fs, git, cwd: root },
     now: clock,
+    engineClock: () => 0,
     git,
     fs,
     env: {},

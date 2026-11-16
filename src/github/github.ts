@@ -539,7 +539,7 @@ export const prFields = `${common} headRefOid headRefName baseRefName isDraft me
  closingIssuesReferences(first:100){nodes{number url} ${info}}
  reviewThreads(first:100){nodes{isResolved isOutdated comments(first:1){totalCount nodes{${comment}} ${info}}} ${info}}
  reviews(first:100){nodes{body url author{__typename login} state submittedAt commit{oid}} ${info}}
- commits(last:1){nodes{commit{statusCheckRollup{state contexts(first:100){nodes{__typename ... on CheckRun{name status conclusion detailsUrl databaseId} ... on StatusContext{context state targetUrl}} ${info}}}}}}`;
+ commits(last:1){nodes{commit{oid statusCheckRollup{state contexts(first:100){nodes{__typename ... on CheckRun{name status conclusion detailsUrl databaseId} ... on StatusContext{context state targetUrl}} ${info}}}}}}`;
 
 /** Cursor pagination also detects a broken/repeating cursor instead of spinning forever. */
 export async function pages<T>(
@@ -964,8 +964,8 @@ export async function collect(
     });
     historySources = [summary("issues", issueHistory), summary("pull-requests", prHistory)];
   }
-  // #343: required-check evidence for the PRs where it decides waiting (open, non-draft, with an
-  // unfinished check); bounded to one shared base-policy read per base and one read per PR.
+  // #676: selected open, non-draft PRs need requirements even with green/no visible checks;
+  // bounded to one shared base-policy read per base and one read per PR.
   const unmetered = options.rest ?? (injected ? undefined : ghRestWith(options.signal));
   if (unmetered) {
     // Through the shared meter: a quota refusal on either route stops the rest of the read, and

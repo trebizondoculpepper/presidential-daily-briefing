@@ -151,7 +151,15 @@ describe("host facts reaching the engine (#339)", () => {
       seen.add(key);
     }
     expect([...repeated].sort()).toEqual(
-      ["attention", "check", "label", "owner", "platform", "thread"].sort(),
+      [
+        "attention",
+        "check",
+        "label",
+        "owner",
+        "platform",
+        "required-evidence-gap",
+        "thread",
+      ].sort(),
     );
     // A cardinality-one attribute keeps only its last value: a lost owner or check would change
     // decisions silently, so the schema must list each of these.

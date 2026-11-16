@@ -708,10 +708,27 @@ try {
     throw new Error(
       `Packaged evaluator chunks ${JSON.stringify(engineChunks)} differ from those the entries load ${JSON.stringify([...referenced])}.`,
     );
+  // The native query seam shares pure policy and factual-normalization chunks with the lazy
+  // evaluator (#676). Follow their actual import graph, so no referenced helper can be omitted.
+  const runtimeChunks = new Set<string>();
+  const visit = async (file: string): Promise<void> => {
+    for (const match of (await readFile(join(root, file), "utf8")).matchAll(
+      /(?:\bfrom\s*|\bimport\s*(?:\(\s*)?)["']\.\/((?:datalog|engine|requiredchecks)-[A-Za-z0-9_-]+\.mjs)["']/g,
+    )) {
+      const child = `dist/${match[1]}`;
+      if (runtimeChunks.has(child)) continue;
+      if (!files.includes(child))
+        throw new Error(`Referenced runtime chunk ${child} is not packaged.`);
+      runtimeChunks.add(child);
+      await visit(child);
+    }
+  };
+  await visit("dist/cli.mjs");
+  await visit("dist/mcp.mjs");
   const expectedFiles = [
     ...expected,
-    ...engineChunks,
-    ...engineChunks.map((c) => `${c}.map`),
+    ...runtimeChunks,
+    ...[...runtimeChunks].map((c) => `${c}.map`),
   ].sort();
   if (JSON.stringify(files) !== JSON.stringify(expectedFiles))
     throw new Error(

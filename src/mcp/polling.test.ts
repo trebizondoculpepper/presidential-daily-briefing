@@ -52,6 +52,13 @@ const pr = (
   ...issue(40, options.labels ?? ["agent:ana"]),
   url: `https://github.com/${repo}/pull/40`,
   headRefOid: options.head ?? "aaa",
+  requiredChecks: {
+    head: options.head ?? "aaa",
+    base: "main",
+    expected: [{ context: "verify", appId: null }],
+    checks: [{ name: "verify", databaseId: null, appId: null, required: "required" }],
+    gaps: [],
+  },
   headRefName: "feature",
   baseRefName: "main",
   isDraft: false,

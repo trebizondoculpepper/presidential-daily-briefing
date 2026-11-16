@@ -45,9 +45,9 @@
    :band 2
    :preference 2
    :when [(pr-action ?t) (clean-pr ?t)]
-   :why "Current verify passes at head {head}; inspect the diff and review evidence, then consider merge."
+   :why "Current required checks are satisfied at head {head}; inspect the diff and review evidence, then consider merge."
    :codes ["pr-follow-up" "pr-inspect-merge"]
-   :witnesses {"verify" [[?t "check" ?c] [?c "name" "verify"] [?c "outcome" ?value]]
+   :witnesses {"requiredChecksComplete" [[?t "required-evidence-complete" ?value]]
                  "complete" [[?t "pr-complete" ?value]]
                  "draft" [[?t "draft" ?value]]
                  "mergeState" [[?t "merge-state" ?value]]}}
@@ -57,11 +57,11 @@
    :band 2
    :preference 3
    :when [(pr-action ?t) (integrate-pr ?t)]
-   :why "Accepted at head {head} (verify passed, head reviewed, no fetched findings) but merge state is {mergeState}, mergeable {mergeable}; refresh mergeability or update the branch, then recheck before considering merge."
+   :why "Accepted at head {head} (required checks satisfied, head reviewed, no fetched findings) but merge state is {mergeState}, mergeable {mergeable}; refresh mergeability or update the branch, then recheck before considering merge."
    :codes ["pr-follow-up" "pr-integrate"]
    :witnesses {"mergeable" [[?t "mergeable" ?value]]
                  "mergeState" [[?t "merge-state" ?value]]
-                 "verify" [[?t "check" ?c] [?c "name" "verify"] [?c "outcome" ?value]]}}
+                 "requiredChecksComplete" [[?t "required-evidence-complete" ?value]]}}
 
   {:id "D-DECIDE"
    :kind "decide"
@@ -339,7 +339,7 @@
    :band 3
    :preference 3
    :when [[1 "role" "human"] (open ?t) (accepted-pr ?t) (clean-pr ?t)]
-   :why "Accepted at head {head}: verify passed, head reviewed, no findings. Inferred: merge sign-off candidate; nobody asked explicitly."
+   :why "Accepted at head {head}: required checks satisfied, head reviewed, no findings. Inferred: merge sign-off candidate; nobody asked explicitly."
    :codes ["inferred"]}]
  :denials
  {"D-DENY-CLAIM" "Someone already claims the ticket."

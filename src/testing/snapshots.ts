@@ -29,6 +29,13 @@ export const pr = (): PullRequest => ({
   ...issue(4, []),
   url: `https://github.com/${repo}/pull/4`,
   headRefOid: "abc123",
+  requiredChecks: {
+    head: "abc123",
+    base: "main",
+    expected: [{ context: "verify", appId: null }],
+    checks: [{ name: "verify", databaseId: null, appId: null, required: "required" }],
+    gaps: [],
+  },
   headRefName: "feature",
   baseRefName: "main",
   isDraft: false,

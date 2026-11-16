@@ -96,11 +96,11 @@
   :viewer {:role "implementer"}
   :facts [{:e 1 "forward-complete" false}
           {:e 100 "kind" "issue" "state" "OPEN" "number" 3 "target" "https://github.com/o/r/issues/3" "created" 1767225600000 "labels-complete" true "reverse-complete" false "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "not-a-pr" "label" "status:ready"}
-          {:e 101 "kind" "pr" "state" "OPEN" "number" 4 "target" "https://github.com/o/r/pull/4" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "head4" "draft" false "mergeable" "MERGEABLE" "merge-state" "CLEAN" "review-decision" "" "pr-complete" true "check" 102}
+          {:e 101 "kind" "pr" "state" "OPEN" "number" 4 "target" "https://github.com/o/r/pull/4" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "head4" "draft" false "mergeable" "MERGEABLE" "merge-state" "CLEAN" "review-decision" "" "pr-complete" true "required-evidence-complete" true "check" 102}
           {:e 102 "name" "verify" "outcome" "SUCCESS"}]
   :expect {:actions [{:subject 101 :rule "D-PR-MERGE" :kind "pr-follow-up" :band 2
-              :why "Current verify passes at head head4; inspect the diff and review evidence, then consider merge."
-              :facts {"impact" "unknown" "complexity" "unknown" "impactState" "unknown" "complexityState" "unknown" "head" "head4" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "verify" "SUCCESS" "complete" true "draft" false "mergeState" "CLEAN"}
+              :why "Current required checks are satisfied at head head4; inspect the diff and review evidence, then consider merge."
+              :facts {"impact" "unknown" "complexity" "unknown" "impactState" "unknown" "complexityState" "unknown" "head" "head4" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "requiredChecksComplete" true "complete" true "draft" false "mergeState" "CLEAN"}
               :overridden [] :unlocks 0 :unknown [] :other-claims []}
             {:subject 100 :rule "D-INSPECT" :kind "inspect" :band 6
               :why "Eligibility is unproven: inspect incomplete evidence or state the required platform."
@@ -143,9 +143,9 @@
   :viewer {:role "implementer"}
   :facts [{:e 1 "forward-complete" true}
           {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "not-a-pr" "label" "status:ready"}
-          {:e 101 "kind" "pr" "state" "OPEN" "number" 2 "target" "https://github.com/o/r/pull/2" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "head2" "draft" false "mergeable" "MERGEABLE" "merge-state" "CLEAN" "review-decision" "" "pr-complete" true "check" 103}
+          {:e 101 "kind" "pr" "state" "OPEN" "number" 2 "target" "https://github.com/o/r/pull/2" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "head2" "draft" false "mergeable" "MERGEABLE" "merge-state" "CLEAN" "review-decision" "" "pr-complete" true "required-evidence-complete" true "check" 103}
           {:e 103 "name" "verify" "outcome" "FAILURE"}
-          {:e 102 "kind" "pr" "state" "OPEN" "number" 3 "target" "https://github.com/o/r/pull/3" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "head3" "draft" false "mergeable" "MERGEABLE" "merge-state" "CLEAN" "review-decision" "" "pr-complete" true "check" 104}
+          {:e 102 "kind" "pr" "state" "OPEN" "number" 3 "target" "https://github.com/o/r/pull/3" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "head3" "draft" false "mergeable" "MERGEABLE" "merge-state" "CLEAN" "review-decision" "" "pr-complete" true "required-evidence-complete" true "check" 104}
           {:e 104 "name" "verify" "outcome" "IN_PROGRESS"}]
   :expect {:actions [{:subject 101 :rule "D-PR-FAIL" :kind "pr-follow-up" :band 2
               :why "PR checks failed at head head2; inspect and repair before merge."
@@ -162,9 +162,9 @@
   :viewer {:role "implementer" :agent "me"}
   :facts [{:e 1 "forward-complete" true}
           {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "not-a-pr" "label" "agent:me" "owner" "me"}
-          {:e 101 "kind" "pr" "state" "OPEN" "number" 2 "target" "https://github.com/o/r/pull/2" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "head2" "draft" false "mergeable" "MERGEABLE" "merge-state" "CLEAN" "review-decision" "" "pr-complete" true "check" 103}
+          {:e 101 "kind" "pr" "state" "OPEN" "number" 2 "target" "https://github.com/o/r/pull/2" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "head2" "draft" false "mergeable" "MERGEABLE" "merge-state" "CLEAN" "review-decision" "" "pr-complete" true "required-evidence-complete" true "check" 103}
           {:e 103 "name" "verify" "outcome" "FAILURE"}
-          {:e 102 "kind" "pr" "state" "OPEN" "number" 3 "target" "https://github.com/o/r/pull/3" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "head3" "draft" false "mergeable" "MERGEABLE" "merge-state" "CLEAN" "review-decision" "" "pr-complete" true "closes" 100 "check" 104}
+          {:e 102 "kind" "pr" "state" "OPEN" "number" 3 "target" "https://github.com/o/r/pull/3" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "head3" "draft" false "mergeable" "MERGEABLE" "merge-state" "CLEAN" "review-decision" "" "pr-complete" true "required-evidence-complete" true "closes" 100 "check" 104}
           {:e 104 "name" "verify" "outcome" "FAILURE"}]
   :expect {:actions [{:subject 102 :rule "D-PR-FAIL" :kind "pr-follow-up" :band 2
               :why "PR checks failed at head head3; inspect and repair before merge."
@@ -193,11 +193,11 @@
   :doc "current-head clean PR yields consideration, never an approval"
   :viewer {:role "implementer"}
   :facts [{:e 1 "forward-complete" true}
-          {:e 100 "kind" "pr" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/pull/1" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "head1" "draft" false "mergeable" "MERGEABLE" "merge-state" "CLEAN" "review-decision" "" "pr-complete" true "check" 101}
+          {:e 100 "kind" "pr" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/pull/1" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "head1" "draft" false "mergeable" "MERGEABLE" "merge-state" "CLEAN" "review-decision" "" "pr-complete" true "required-evidence-complete" true "check" 101}
           {:e 101 "name" "verify" "outcome" "SUCCESS"}]
   :expect {:actions [{:subject 100 :rule "D-PR-MERGE" :kind "pr-follow-up" :band 2
-              :why "Current verify passes at head head1; inspect the diff and review evidence, then consider merge."
-              :facts {"impact" "unknown" "complexity" "unknown" "impactState" "unknown" "complexityState" "unknown" "head" "head1" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "verify" "SUCCESS" "complete" true "draft" false "mergeState" "CLEAN"}
+              :why "Current required checks are satisfied at head head1; inspect the diff and review evidence, then consider merge."
+              :facts {"impact" "unknown" "complexity" "unknown" "impactState" "unknown" "complexityState" "unknown" "head" "head1" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "requiredChecksComplete" true "complete" true "draft" false "mergeState" "CLEAN"}
               :overridden [] :unlocks 0 :unknown [] :other-claims []}]
            :denials #{}}}
 
@@ -320,7 +320,7 @@
   :doc "coalesces equally ranked PR findings before limiting, preserving overridden rule identity"
   :viewer {:role "implementer"}
   :facts [{:e 1 "forward-complete" true}
-          {:e 100 "kind" "pr" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/pull/1" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "head1" "draft" false "mergeable" "MERGEABLE" "merge-state" "CLEAN" "review-decision" "CHANGES_REQUESTED" "pr-complete" true "check" 101}
+          {:e 100 "kind" "pr" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/pull/1" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "head1" "draft" false "mergeable" "MERGEABLE" "merge-state" "CLEAN" "review-decision" "CHANGES_REQUESTED" "pr-complete" true "required-evidence-complete" true "check" 101}
           {:e 101 "name" "verify" "outcome" "FAILURE"}]
   :expect {:actions [{:subject 100 :rule "D-PR-FAIL" :kind "pr-follow-up" :band 2
               :why "PR checks failed at head head1; inspect and repair before merge."
@@ -332,7 +332,7 @@
   :doc "returns rule-specific matched failed-check and incomplete-evidence bindings (case 1 of 2)"
   :viewer {:role "implementer"}
   :facts [{:e 1 "forward-complete" true}
-          {:e 100 "kind" "pr" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/pull/1" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "head1" "draft" false "mergeable" "MERGEABLE" "merge-state" "CLEAN" "review-decision" "" "pr-complete" true "check" 101}
+          {:e 100 "kind" "pr" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/pull/1" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "head1" "draft" false "mergeable" "MERGEABLE" "merge-state" "CLEAN" "review-decision" "" "pr-complete" true "required-evidence-complete" true "check" 101}
           {:e 101 "name" "verify" "outcome" "FAILURE"}]
   :expect {:actions [{:subject 100 :rule "D-PR-FAIL" :kind "pr-follow-up" :band 2
               :why "PR checks failed at head head1; inspect and repair before merge."

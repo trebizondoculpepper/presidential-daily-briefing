@@ -234,6 +234,8 @@ export interface Runtime {
   /** Read-only REST boundary; claim and release use it for comment authors' permissions (#212). */
   rest?: Rest;
   now?: () => Date;
+  /** Monotonic engine-budget clock; parity tests inject a fixed one. */
+  engineClock?: () => number;
   updateCheck?: typeof cachedCheckForUpdate;
   /** Local-Git freshness of a source checkout (#309). */
   checkoutCheck?: typeof checkoutFreshness;
@@ -2199,6 +2201,7 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
       ...options,
       ...(labels ? { labels } : {}),
       process: guideProcess,
+      engineClock: runtime.engineClock,
       engineSetting:
         options.full || options.issue
           ? undefined
@@ -2409,6 +2412,7 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
               ...(labels ? { labels } : {}),
               ...(stale ? { stale } : {}),
               process: guideProcess,
+              engineClock: runtime.engineClock,
               engineSetting:
                 options.full || options.issue
                   ? undefined

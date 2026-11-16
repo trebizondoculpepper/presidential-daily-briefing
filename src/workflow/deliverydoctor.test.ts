@@ -881,6 +881,16 @@ describe("delivery, responsibility and closure on read surfaces (#192)", () => {
       state: "OPEN",
       isDraft: false,
       headRefOid: `head${n}`,
+      baseRefName: "main",
+      requiredChecks: {
+        head: `head${n}`,
+        base: "main",
+        expected: [{ context: "verify", appId: null }],
+        checks: verify
+          ? [{ name: "verify", databaseId: null, appId: null, required: "required" }]
+          : [],
+        gaps: [],
+      },
       mergeable,
       mergeStateStatus: mergeState,
       reviewDecision: decision,
@@ -1591,6 +1601,7 @@ describe("delivery, responsibility and closure on read surfaces (#192)", () => {
       },
       checks: {
         required: { class: "passed", outcome: "SUCCESS" },
+        policy: { ready: true, blockers: [], rulesHash: "synthetic-policy" },
         counts: { passed: 1, pending: 0, cancelled: 0, failed: 0, unknown: 0 },
       },
       threads: { unresolved: [], omitted: 0 },
@@ -1608,7 +1619,15 @@ describe("delivery, responsibility and closure on read surfaces (#192)", () => {
     for (const outcome of ["SKIPPED", "NEUTRAL"]) {
       const skipped = {
         ...report,
-        checks: { ...report.checks, required: { class: "passed", outcome } },
+        checks: {
+          ...report.checks,
+          required: { class: "passed", outcome },
+          policy: {
+            ready: false,
+            blockers: ["required outcome unproven"],
+            rulesHash: "synthetic-policy",
+          },
+        },
         receipts: [],
         headReviewed: true,
         reviews: [{ state: "APPROVED", reviewedCommit: "h1" }],

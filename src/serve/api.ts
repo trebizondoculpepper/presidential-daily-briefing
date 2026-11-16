@@ -497,6 +497,7 @@ export function readApi(
     rest: memoRest,
     queryWith: memoQueryWith,
     now: runtime.now,
+    engineClock: runtime.engineClock,
     redactDiagnostic: redactLocalText,
     ...(runtime.loadEngine ? { loadEngine: runtime.loadEngine } : {}),
     ...projectReaders(runtime, project, repository),
