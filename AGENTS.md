@@ -4,6 +4,13 @@ This is the shared, cross-platform contributor guide for every coding agent work
 
 Read [HANDOFF.md](HANDOFF.md) first. This is the standalone Presidential Daily Briefing project, extracted from poker_blocks at the owner's request. Its source is under `src/`; do not continue development in the game repository.
 
+## Natural language
+
+The natural language of this project is English. Use English for pull request
+titles and descriptions, documentation, user-facing prose, and explanatory code
+comments. Reject pull requests and proposed changes written in any other natural
+language.
+
 ## Source language
 
 Owner decision: application code in `src/` and maintained executable research examples must use TypeScript. Helpers in `scripts/` may use TypeScript, JavaScript, shell, batch, PowerShell or Python with a short justification, runtime requirements and supported platforms documented. Existing TypeScript helpers need no rewrite. A non-TypeScript file is acceptable only when nothing in TypeScript imports it and it holds no workflow logic, and each one is listed in an explicit allowlist (doc/design/typescript.md, #112; enforcement #113). Intentionally selected ancillary languages such as Datalog are allowed where the relevant design documents their purpose and validation boundary. Handwritten JavaScript is avoided in application code; the documented helper-script exception is intentional. Generated JavaScript bundles and third-party code remain normal runtime artifacts.
