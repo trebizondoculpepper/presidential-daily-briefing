@@ -146,6 +146,39 @@ function codexState(
     return null;
   }
 }
+function codexReceiptCommit(
+  body: string,
+  head: string,
+  hasRunningHead: boolean,
+  knownCommits: readonly (string | null | undefined)[],
+): string | null {
+  if (!/<!--\s*codex-review-receipt:v1\s*-->/.test(body)) return null;
+  const sha = /\*\*Reviewed commit:\*\*\s*`([0-9a-f]{7,40})`/i.exec(body)?.[1];
+  if (!sha || !/Codex Review: Didn't find any major issues\b/.test(body)) return null;
+  if (
+    sha === head ||
+    (/^[0-9a-f]{40}$/i.test(sha) &&
+      /^[0-9a-f]{40}$/i.test(head) &&
+      sha.toLowerCase() === head.toLowerCase())
+  )
+    return head;
+  if (
+    !hasRunningHead ||
+    !/^[0-9a-f]{7,39}$/i.test(sha) ||
+    !/^[0-9a-f]{40}$/i.test(head) ||
+    !head.toLowerCase().startsWith(sha.toLowerCase())
+  )
+    return null;
+  const prefix = sha.toLowerCase();
+  const collision = knownCommits.some(
+    (c) =>
+      typeof c === "string" &&
+      c.length > prefix.length &&
+      c.toLowerCase() !== head.toLowerCase() &&
+      c.toLowerCase().startsWith(prefix),
+  );
+  return collision ? null : head;
+}
 const emptyMetric = { state: "unknown" as const, size: null, provenance: null };
 const subjectsOf = (s: Snapshot) => [...s.issues, ...s.pullRequests];
 function normalize(
@@ -307,16 +340,42 @@ function normalize(
         put(r, "review-state", review.state);
         if (review.commit?.oid) put(r, "review-commit", review.commit.oid);
       }
-      for (const c of pr.comments?.nodes ?? []) {
-        if ((c.author?.login ?? "").replace(/\[bot\]$/, "") !== codexAccount) continue;
-        const state = codexState(c.body ?? "");
-        if (!state) continue;
-        const r = nextId++;
-        put(id, "receipt", r);
-        if (typeof state.commit_sha === "string") put(r, "receipt-commit", state.commit_sha);
-        if (typeof state.status === "string") put(r, "receipt-status", state.status);
-        if (typeof state.has_unresolved_findings === "boolean")
-          put(r, "receipt-findings", state.has_unresolved_findings);
+      const codexComments = (pr.comments?.nodes ?? []).filter(
+        (c) => (c.author?.login ?? "").replace(/\[bot\]$/, "") === codexAccount,
+      );
+      const codexStates = codexComments.map((c) => codexState(c.body ?? ""));
+      const hasRunningHead = codexStates.some(
+        (s) =>
+          s?.commit_sha === pr.headRefOid &&
+          typeof s.status === "string" &&
+          s.status !== "completed",
+      );
+      const knownCommits = [
+        ...(pr.reviews?.nodes ?? []).map((r) => r.commit?.oid),
+        ...codexStates.map((s) => (typeof s?.commit_sha === "string" ? s.commit_sha : null)),
+        ...codexComments.map(
+          (c) => /\*\*Reviewed commit:\*\*\s*`([0-9a-f]{7,40})`/i.exec(c.body ?? "")?.[1] ?? null,
+        ),
+      ];
+      for (const c of codexComments) {
+        const body = c.body ?? "";
+        const state = codexState(body);
+        if (state) {
+          const r = nextId++;
+          put(id, "receipt", r);
+          if (typeof state.commit_sha === "string") put(r, "receipt-commit", state.commit_sha);
+          if (typeof state.status === "string") put(r, "receipt-status", state.status);
+          if (typeof state.has_unresolved_findings === "boolean")
+            put(r, "receipt-findings", state.has_unresolved_findings);
+        }
+        const receiptHead = codexReceiptCommit(body, pr.headRefOid, hasRunningHead, knownCommits);
+        if (receiptHead) {
+          const r = nextId++;
+          put(id, "receipt", r);
+          put(r, "receipt-commit", receiptHead);
+          put(r, "receipt-status", "completed");
+          put(r, "receipt-findings", false);
+        }
       }
       for (const review of options.providerReviews?.get(pr.url) ?? []) {
         const r = nextId++;

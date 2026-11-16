@@ -441,3 +441,204 @@ describe("real-shaped snapshot reads authenticate providers (#556 review)", () =
     expect(r.headReviewed).toBe(true);
   });
 });
+
+describe("Codex receipt reconciliation (#647) and Copilot normalization (#694)", () => {
+  const cleanReceiptBody = (sha = head.slice(0, 10)) =>
+    `<!-- codex-review-receipt:v1 -->\n\nCodex Review: Didn't find any major issues. Bravo.\n\n**Reviewed commit:** \`${sha}\``;
+
+  it("reconciles a stale Codex running summary with a later clean codex-review-receipt", () => {
+    const e = evidence({
+      comments: [
+        codexReceipt(head, "running", false),
+        {
+          author: bot("chatgpt-codex-connector"),
+          body: cleanReceiptBody(),
+          url: "https://github.com/o/r/pull/1#codex-receipt",
+        },
+      ],
+    });
+    expect(observeProvider("codex", e)).toMatchObject({
+      provider: "codex",
+      state: "accepted",
+      head,
+      source: "https://github.com/o/r/pull/1#codex-receipt",
+    });
+    expect(run(e, legacy).headReviewed).toBe(true);
+  });
+
+  it("does not grant coverage from an abbreviated receipt without a unique full-SHA running summary", () => {
+    const bareShort = evidence({
+      comments: [
+        {
+          author: bot("chatgpt-codex-connector"),
+          body: cleanReceiptBody(head.slice(0, 10)),
+          url: "https://github.com/o/r/pull/1#bare-short",
+        },
+      ],
+    });
+    expect(observeProvider("codex", bareShort).state).toBe("stale");
+    expect(run(bareShort, legacy).headReviewed).toBe(false);
+
+    const collidingOld = `${head.slice(0, 12)}${"c".repeat(28)}`;
+    const colliding = evidence({
+      comments: [
+        codexReceipt(collidingOld, "completed", false),
+        codexReceipt(head, "running", false),
+        {
+          author: bot("chatgpt-codex-connector"),
+          body: cleanReceiptBody(head.slice(0, 10)),
+          url: "https://github.com/o/r/pull/1#colliding",
+        },
+      ],
+    });
+    expect(observeProvider("codex", colliding).state).toBe("pending");
+    expect(run(colliding, legacy).headReviewed).toBe(false);
+  });
+
+  it("keeps ambiguous codex-review-receipt prose unknown and ignores forged receipts", () => {
+    const ambiguous = evidence({
+      comments: [
+        {
+          author: bot("chatgpt-codex-connector"),
+          body: `<!-- codex-review-receipt:v1 -->\n\nLooks interesting.\n\n**Reviewed commit:** \`${head}\``,
+          url: "https://github.com/o/r/pull/1#ambiguous",
+        },
+      ],
+    });
+    expect(observeProvider("codex", ambiguous).state).toBe("unknown");
+
+    const notes: string[] = [];
+    const forged = evidence({
+      comments: [
+        {
+          author: user("chatgpt-codex-connector"),
+          body: cleanReceiptBody(),
+          url: "https://github.com/o/r/pull/1#forged",
+        },
+      ],
+    });
+    expect(observeProvider("codex", forged, notes).state).toBe("unknown");
+    expect(notes.some((n) => /ignored a Codex review-state marker/.test(n))).toBe(true);
+  });
+
+  it("keeps head findings ahead of a clean codex-review-receipt and marks older receipts stale", () => {
+    const findings = evidence({
+      comments: [
+        codexReceipt(head, "completed", true),
+        {
+          author: bot("chatgpt-codex-connector"),
+          body: cleanReceiptBody(),
+          url: "https://github.com/o/r/pull/1#codex-receipt",
+        },
+      ],
+    });
+    expect(observeProvider("codex", findings).state).toBe("findings");
+
+    const stale = evidence({
+      comments: [
+        {
+          author: bot("chatgpt-codex-connector"),
+          body: cleanReceiptBody(old.slice(0, 10)),
+          url: "https://github.com/o/r/pull/1#old-receipt",
+        },
+      ],
+    });
+    expect(observeProvider("codex", stale)).toMatchObject({
+      state: "stale",
+      head: old.slice(0, 10),
+    });
+  });
+
+  it("normalizes trusted Copilot reviews, threads, checks and failures without deciding acceptance", () => {
+    const copilotReview = (
+      state: string,
+      commit = head,
+      author: { __typename?: string; login: string } = bot("copilot-pull-request-reviewer"),
+    ) => ({
+      author,
+      state,
+      commit,
+      at: "2026-11-16T00:00:00Z",
+      url: `https://github.com/o/r/pull/1#copilot-${state}`,
+    });
+
+    expect(
+      observeProvider(
+        "copilot",
+        evidence({
+          reviews: [copilotReview("COMMENTED")],
+          unresolvedThreads: [
+            {
+              author: bot("copilot-pull-request-reviewer"),
+              url: "https://github.com/o/r/pull/1#thread-1",
+            },
+          ],
+        }),
+      ),
+    ).toMatchObject({
+      provider: "copilot",
+      state: "findings",
+      head,
+      source: "https://github.com/o/r/pull/1#thread-1",
+    });
+
+    // COMMENTED with 0 unresolved threads stays unknown in TS normalization (policy belongs in native rules).
+    expect(
+      observeProvider("copilot", evidence({ reviews: [copilotReview("COMMENTED")] })),
+    ).toMatchObject({
+      provider: "copilot",
+      state: "unknown",
+      head,
+      source: "https://github.com/o/r/pull/1#copilot-COMMENTED",
+    });
+
+    // Non-Bot impersonator is ignored.
+    expect(
+      observeProvider(
+        "copilot",
+        evidence({
+          reviews: [copilotReview("APPROVED", head, user("copilot-pull-request-reviewer"))],
+        }),
+      ),
+    ).toMatchObject({ provider: "copilot", state: "unknown", head: null, source: null });
+
+    // Runtime check failures are normalized as error, pending as pending, neutral as skipped.
+    expect(
+      observeProvider(
+        "copilot",
+        evidence({
+          checks: [
+            {
+              app: "copilot-pull-request-reviewer",
+              name: "Copilot",
+              status: "COMPLETED",
+              conclusion: "FAILURE",
+              url: "https://github.com/o/r/runs/1",
+            },
+          ],
+        }),
+      ),
+    ).toMatchObject({ provider: "copilot", state: "error" });
+
+    expect(
+      observeProvider(
+        "copilot",
+        evidence({
+          checks: [
+            {
+              app: "copilot-pull-request-reviewer",
+              name: "Copilot",
+              status: "IN_PROGRESS",
+              conclusion: null,
+              url: "https://github.com/o/r/runs/2",
+            },
+          ],
+        }),
+      ),
+    ).toMatchObject({ provider: "copilot", state: "pending" });
+
+    expect(
+      observeProvider("copilot", evidence({ reviews: [copilotReview("COMMENTED", old)] })),
+    ).toMatchObject({ provider: "copilot", state: "stale", head: old });
+  });
+});
