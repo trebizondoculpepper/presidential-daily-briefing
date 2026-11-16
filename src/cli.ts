@@ -103,6 +103,7 @@ import { complexityGuidanceJson, complexityGuidanceText } from "./estimation/com
 import { impactGuidanceJson, impactGuidanceText } from "./estimation/impact.js";
 import { declaredRulesContext } from "./rules/declared-context.js";
 import { runConfig, runSetup } from "./config/configcli.js";
+import { runContributors } from "./config/contributors.js";
 import { quotaRefusal } from "./github/readplan.js";
 import { STALE_WINDOW_MS } from "./serve/options.js";
 import { nodeGit, resolveRepositoryTarget } from "./config/config.js";
@@ -354,6 +355,9 @@ ${crashDisclosure()}
   onboard [--repo owner/name] [--role implementer|designer] [--server URL] [--install] [--json]
                         New here? How an agent starts with pdb: rules, identity, commands and
                         a prompt to give it; --install adds the pdb section to AGENTS.md
+  contributors [--repo owner/name] [--json]  Read-only: the verified checkout's CONTRIBUTORS.md
+                        routing guidance (accounts, areas, an explicit "Default: @login"),
+                        with its digest and revision; missing or unsafe guidance exits 2
   --repo owner/name     Repository (default: current gh checkout)
   --json                Versioned structured output (from a checkout: npm run --silent pdb)
   --issue N             Include full issue body/history, even if closed; diagnoses
@@ -1515,6 +1519,7 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
   if (args[0] === "config") return runConfig(args.slice(1), output, runtime.config);
   if (args[0] === "setup") return runSetup(args.slice(1), output, runtime.config);
   if (args[0] === "onboard") return runOnboard(args.slice(1), output, runtime.config);
+  if (args[0] === "contributors") return runContributors(args.slice(1), output, runtime.config);
   if (args[0] === "doctor") {
     const { values } = parseArgs({
       args: args.slice(1),
