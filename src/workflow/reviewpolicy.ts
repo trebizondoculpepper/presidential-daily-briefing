@@ -13,14 +13,21 @@
  * A known finding from any configured provider vetoes coverage; another clean provider is no
  * waiver. CI, conflicts, protections, draft state and authority stay independent requirements.
  */
-import { codexMarker, headAccepted, headCodexFindings } from "./reviewevidence.js";
+import {
+  codexCommitMatches,
+  codexMarker,
+  codexReceiptMatchesPrefix,
+  codexReviewReceipt,
+  headAccepted,
+  headCodexFindings,
+} from "./reviewevidence.js";
 import { prEvidenceGaps } from "../github/previdence.js";
 import type { PullRequest, Snapshot } from "../github/types.js";
 
 /** Registered `review.policy` values; absent configuration is "undeclared", never one of these. */
 export const reviewPolicyIds = ["legacy", "codex-or-coderabbit"] as const;
 export type ReviewPolicyId = (typeof reviewPolicyIds)[number];
-export type ProviderId = "codex" | "coderabbit";
+export type ProviderId = "codex" | "coderabbit" | "copilot";
 
 /** A registered policy: shared executable data, never selected by repository, issue or agent. */
 export interface RegisteredReviewPolicy {
@@ -68,6 +75,13 @@ export const reviewProviders: Readonly<Record<ProviderId, ReviewProvider>> = {
     apps: ["coderabbitai"],
     quota:
       /review(?:s)? (?:rate[- ])?limit(?:ed| reached)|rate[- ]limit(?:ed| exceeded)|reviews? paused/i,
+  },
+  copilot: {
+    id: "copilot",
+    label: "Copilot",
+    accounts: ["copilot-pull-request-reviewer"],
+    apps: ["copilot-pull-request-reviewer"],
+    quota: /usage limits?\b|rate[- ]limit(?:ed| exceeded)?/i,
   },
 };
 
@@ -164,7 +178,11 @@ export function observeProvider(
   const obs = (state: ProviderState, head: string | null, source: string | null, detail: string) =>
     ({ provider: id, state, head, source, detail }) satisfies ProviderObservation;
   for (const c of e.comments)
-    if (id === "codex" && codexMarker(c.body) && attribution(c.author, p) !== "provider")
+    if (
+      id === "codex" &&
+      (codexMarker(c.body) || codexReviewReceipt(c.body)) &&
+      attribution(c.author, p) !== "provider"
+    )
       notes.push(
         `ignored a Codex review-state marker posted by ${login(c.author) || "an unknown author"}${attribution(c.author, p) === "unattributed" ? " (author type unknown)" : " (not the Codex integration)"}`,
       );
@@ -175,7 +193,26 @@ export function observeProvider(
     const m = codexMarker(c.body)?.code_review;
     return id === "codex" && m ? [{ url: c.url, m }] : [];
   });
+  const receipts = own.flatMap((c) => {
+    const r = codexReviewReceipt(c.body);
+    return id === "codex" && r ? [{ url: c.url, r }] : [];
+  });
   const headMarkers = markers.filter(({ m }) => m.commit_sha === e.head);
+  const hasRunningHeadMarker = headMarkers.some(
+    ({ m }) => typeof m.status === "string" && m.status !== "completed",
+  );
+  const knownCommits = [
+    ...e.reviews.map((r) => r.commit),
+    ...markers.map(({ m }) => m.commit_sha),
+    ...receipts.map(({ r }) => r.commitSha),
+  ];
+  const receiptMatchesHead = (sha: string | null) =>
+    codexCommitMatches(e.head, sha) ||
+    (hasRunningHeadMarker && codexReceiptMatchesPrefix(e.head, sha, knownCommits));
+  const headCleanReceipts = receipts.filter(({ r }) => r.clean && receiptMatchesHead(r.commitSha));
+  const ambiguousHeadReceipts = receipts.filter(
+    ({ r }) => !r.clean && receiptMatchesHead(r.commitSha),
+  );
   const checks = (e.checks ?? []).filter((c) => c.app !== null && p.apps.includes(c.app));
 
   // Any head receipt with findings vetoes, even beside a clean one: conflicts are not resolved by
@@ -194,18 +231,34 @@ export function observeProvider(
     thread?.url;
   if (finding)
     return obs("findings", e.head, finding, "reports unresolved findings on the current head");
-  const latest = headMarkers.at(-1);
-  if (latest && typeof latest.m.status === "string" && latest.m.status !== "completed")
-    return obs("pending", e.head, latest.url, `review in progress (${latest.m.status})`);
   const clean = headMarkers.findLast(
     ({ m }) => m.status === "completed" && m.has_unresolved_findings === false,
   );
   if (clean)
     return obs("accepted", e.head, clean.url, "completed clean review of the current head");
+  // #647: a later clean codex-review-receipt on the head completes a stale "running" summary.
+  const cleanReceipt = headCleanReceipts.at(-1);
+  if (cleanReceipt)
+    return obs(
+      "accepted",
+      e.head,
+      cleanReceipt.url,
+      "completed clean review receipt of the current head",
+    );
+  const latest = headMarkers.at(-1);
+  if (latest && typeof latest.m.status === "string" && latest.m.status !== "completed")
+    return obs("pending", e.head, latest.url, `review in progress (${latest.m.status})`);
   if (decisive?.state === "APPROVED")
     return obs("accepted", e.head, decisive.url, "approved the current head");
   if (latest)
     return obs("unknown", e.head, latest.url, "unrecognised review-state receipt on the head");
+  if (ambiguousHeadReceipts.length)
+    return obs(
+      "unknown",
+      e.head,
+      ambiguousHeadReceipts.at(-1)!.url,
+      "unrecognised review receipt on the head",
+    );
   const running = checks.find((c) => unfinished.includes(c.status ?? c.conclusion ?? ""));
   if (running) return obs("pending", e.head, running.url, `check ${running.name} still running`);
   const broken = checks.find((c) => errored.includes(c.conclusion ?? ""));
@@ -233,15 +286,15 @@ export function observeProvider(
       latestReview!.url,
       `${latestReview!.state.toLowerCase()} review without a passing outcome`,
     );
-  const older = [...markers.map((m) => m.url), ...reviews.map((r) => r.url)].at(-1);
-  const olderHead = markers.at(-1)?.m.commit_sha ?? reviews.at(-1)?.commit ?? null;
-  if (older)
-    return obs(
-      "stale",
-      typeof olderHead === "string" ? olderHead : null,
-      older,
-      "latest review is for an older commit",
-    );
+  const older = [
+    ...markers.map((m) => ({
+      url: m.url,
+      head: typeof m.m.commit_sha === "string" ? m.m.commit_sha : null,
+    })),
+    ...receipts.map((r) => ({ url: r.url, head: r.r.commitSha })),
+    ...reviews.map((r) => ({ url: r.url, head: r.commit })),
+  ].at(-1);
+  if (older) return obs("stale", older.head, older.url, "latest review is for an older commit");
   return obs("unknown", null, null, "no attributable review evidence");
 }
 
@@ -277,19 +330,26 @@ export function evaluateReviewPolicy(
     by: login(c.author),
     state: codexMarker(c.body)?.code_review,
   }));
+  const codexReceipts = e.comments.map((c) => ({
+    by: login(c.author),
+    receipt: codexReviewReceipt(c.body),
+  }));
   const legacy = {
     headReviewed: headAccepted(
       e.head,
       e.reviews.map((r) => ({ state: r.state, commit: r.commit })),
       codexStates,
+      codexReceipts,
     ),
     headFindings: headCodexFindings(e.head, codexStates),
   };
   const effective = effectivePolicy(declared);
   const unknowns: string[] = [];
-  const providers = (Object.keys(reviewProviders) as ProviderId[]).map((id) =>
-    observeProvider(id, e, unknowns),
-  );
+  const activeProviders =
+    effective === "codex-or-coderabbit"
+      ? reviewPolicies[effective].providers
+      : (Object.keys(reviewProviders) as ProviderId[]);
+  const providers = activeProviders.map((id) => observeProvider(id, e, unknowns));
   if (declared.state === "unknown") unknowns.push(`review policy unknown: ${declared.reason}`);
   if (!e.complete)
     unknowns.push("review, comment or thread evidence is incomplete: findings may be unread");
