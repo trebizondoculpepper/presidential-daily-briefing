@@ -1,3 +1,4 @@
+import { pageById, shellContext, shellStart } from "./shell.js";
 /**
  * The read-only human attention view of `pdb serve` (#458): the human mode of the Work page
  * (doc/design/serve-dashboard-read-views.md "Human attention", owner clarification of
@@ -21,7 +22,7 @@ import { HttpFailure } from "./http.js";
 import { escapeHtml } from "./rules-page.js";
 
 /** Query parameters the page accepts (the shell's registry entry, doc/design/served-page-shell.md). */
-export const humanPageParameters = ["repo", "agent"] as const;
+export const humanPageParameters = pageById("human").parameters;
 /** The routing name: the same form the ticket page accepts for `agent`. */
 const namePattern = /^[A-Za-z0-9][\w.-]{0,99}$/;
 
@@ -32,43 +33,12 @@ const pageLink = (path: string, query: Record<string, string>) => {
   return text ? `${path}?${text}` : path;
 };
 
-const head = `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>pdb human attention</title>
-<link rel="stylesheet" href="/dashboard.css">
-<script src="/human.js" defer></script>
-</head>
-<body>
-`;
-
-/**
- * The page header until the shared toolbar (#605) replaces it: the Work modes for the selected
- * project, then one link per served project. Switching mode drops `agent`, because on the agent
- * views that name means an agent, not the human being routed to.
- */
 function navigation(served: readonly Served[], selected: string | null): string {
-  const repo: Record<string, string> = selected ? { repo: selected } : {};
-  const modes = [
-    ["Implementer", pageLink("/", { ...repo, role: "implementer" })],
-    ["Designer", pageLink("/", { ...repo, role: "designer" })],
-  ]
-    .map(([label, href]) => `<a href="${escapeHtml(href!)}">${label}</a>`)
-    .join(" · ");
-  const projects = served
-    .map((s) => {
-      const current = s.repository === selected ? ' aria-current="true"' : "";
-      return `<li><a href="${escapeHtml(pageLink("/human", { repo: s.repository }))}"${current}>${escapeHtml(s.repository)}</a></li>`;
-    })
-    .join("");
-  return `<header>
-<h1>Human attention</h1>
-<nav aria-label="Work">Work: ${modes} · <a href="${escapeHtml(pageLink("/human", repo))}" aria-current="page">Human</a> · <a href="${escapeHtml(pageLink("/rules", repo))}">Project rules</a></nav>
-<nav aria-label="Projects">Project: <ul class="projects">${projects}</ul></nav>
-</header>
-`;
+  return shellStart(
+    shellContext("human", served, new URLSearchParams(selected ? { repo: selected } : {})),
+    "Human attention",
+    "/human.js",
+  );
 }
 
 const footer = `<footer>Read-only. Items, order and evidence come from the shared human briefing; nothing here answers, signs off or edits GitHub.</footer>
@@ -89,7 +59,7 @@ export function humanPage(
 ): HumanPageResult {
   const error = (status: number, message: string): HumanPageResult => ({
     status,
-    html: `${head}${navigation(served, null)}<main id="content">
+    html: `${navigation(served, null)}<main id="content" tabindex="-1"><h1>Human attention</h1>
 <p class="error" role="alert">${escapeHtml(message)}</p>
 </main>
 ${footer}`,
@@ -110,7 +80,7 @@ ${footer}`,
   if (repo === null)
     return {
       status: 200,
-      html: `${head}${navigation(served, null)}<main id="content">
+      html: `${navigation(served, null)}<main id="content" tabindex="-1"><h1>Human attention</h1>
 <p>No project selected. Choose a served project above to see the input it is waiting for.</p>
 </main>
 ${footer}`,
@@ -129,8 +99,8 @@ ${footer}`,
   }
   return {
     status: 200,
-    html: `${head}${navigation(served, selected.repository)}<main id="content" data-repo="${escapeHtml(selected.repository)}">
-<p>Project: <strong>${escapeHtml(selected.repository)}</strong></p>
+    html: `${navigation(served, selected.repository)}<main id="content" tabindex="-1" data-repo="${escapeHtml(selected.repository)}">
+<h1>Human attention</h1><p><a href="${escapeHtml(pageLink("/", { repo: selected.repository, role: "implementer" }))}">Implementer</a> · <a href="${escapeHtml(pageLink("/", { repo: selected.repository, role: "designer" }))}">Designer</a></p><p>Project: <strong>${escapeHtml(selected.repository)}</strong></p>
 <form id="selection">
 <label>Human name <input id="agent" type="text" value="${escapeHtml(agent ?? "")}" placeholder="optional, as in attention:NAME" autocomplete="off" spellcheck="false"></label>
 <button id="show" type="submit">Show</button>
@@ -409,6 +379,12 @@ export function humanClient(base: DashboardRenderers, view: HumanRenderers): voi
     agent.value = new URLSearchParams(location.search).get("agent") ?? "";
     limit = 50;
     void show(false, false);
+  });
+  addEventListener("pageshow", (event: PageTransitionEvent) => {
+    if (event.persisted) {
+      agent.value = new URLSearchParams(location.search).get("agent") ?? "";
+      void show(false, false);
+    }
   });
   // Only this view is read: one project, on load or on request.
   void show(false, false);

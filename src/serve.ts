@@ -1,3 +1,4 @@
+import { servedPages, shellContext, selectionErrorPage } from "./serve/shell.js";
 /**
  * `pdb serve`: a foreground local HTTP server (doc/design/serve.md, #373).
  *
@@ -55,7 +56,7 @@ import {
   dashboardScript,
   dashboardSecurityPolicy,
 } from "./serve/dashboard.js";
-import { ticketPage, ticketPageParameters, ticketScript } from "./serve/ticket-page.js";
+import { ticketPage, ticketScript } from "./serve/ticket-page.js";
 import { humanPage, humanScript } from "./serve/human-page.js";
 import { quotasPage, quotasScript } from "./serve/quotas-page.js";
 
@@ -173,11 +174,9 @@ const urlHost = (host: string): string => (isIP(host) === 6 ? `[${host}]` : host
 /** The dashboard (#374): three same-origin static responses, built once per server. */
 const dashboardFiles = (): Map<string, { type: string; body: string }> =>
   new Map([
-    ["/", { type: "text/html; charset=utf-8", body: dashboardPage() }],
     ["/dashboard.css", { type: "text/css; charset=utf-8", body: dashboardCss }],
     ["/dashboard.js", { type: "text/javascript; charset=utf-8", body: dashboardScript() }],
     // The consolidated ticket detail (#454): another static page under the same policy.
-    ["/ticket", { type: "text/html; charset=utf-8", body: ticketPage() }],
     ["/ticket.js", { type: "text/javascript; charset=utf-8", body: ticketScript() }],
     // Copy buttons of the agent setup page (#391); the page works without it.
     ["/setup.js", { type: "text/javascript; charset=utf-8", body: setupScript() }],
@@ -313,21 +312,46 @@ export async function startServe(
         sendJson(response, 200, statusDocument());
         return;
       }
+      const registeredPage = servedPages.find((p) => p.shipped && p.path === path);
+      const selectedPage = registeredPage
+        ? shellContext(registeredPage.id, served, context.url.searchParams)
+        : null;
+      if (selectedPage) {
+        if (request.method !== "GET" && request.method !== "HEAD")
+          throw new HttpFailure(405, "METHOD_NOT_ALLOWED", "Use GET.", [], { allow: "GET, HEAD" });
+        const selection = selectedPage.selection;
+        if (
+          selection.status !== 200 ||
+          (registeredPage!.scope === "project" && !selection.repository)
+        ) {
+          response.writeHead(selection.status, {
+            "content-type": "text/html; charset=utf-8",
+            "cache-control": "no-store",
+            "x-content-type-options": "nosniff",
+            "referrer-policy": "no-referrer",
+            "content-security-policy": dashboardSecurityPolicy,
+          });
+          response.end(request.method === "HEAD" ? undefined : selectionErrorPage(selectedPage));
+          return;
+        }
+        // Canonical spelling is used by renderers and all generated navigation.
+        context.url.search = selection.query.toString();
+        if (path === "/" || path === "/ticket") {
+          const html = path === "/" ? dashboardPage(selectedPage) : ticketPage(selectedPage);
+          response.writeHead(200, {
+            "content-type": "text/html; charset=utf-8",
+            "cache-control": "no-store",
+            "x-content-type-options": "nosniff",
+            "referrer-policy": "no-referrer",
+            "content-security-policy": dashboardSecurityPolicy,
+          });
+          response.end(request.method === "HEAD" ? undefined : html);
+          return;
+        }
+      }
       const file = dashboard.get(path);
       if (file) {
-        // The page keeps its selection in the URL so a view can be reloaded or bookmarked; only
-        // those parameters are accepted, and only on the page itself (#374).
-        const selection: readonly string[] =
-          path === "/ticket" ? ticketPageParameters : ["repo", "role", "agent"];
-        if (
-          (path === "/" || path === "/ticket") &&
-          [...context.url.searchParams.keys()].every((k) => selection.includes(k))
-        ) {
-          if (request.method !== "GET" && request.method !== "HEAD")
-            throw new HttpFailure(405, "METHOD_NOT_ALLOWED", "Use GET.", [], {
-              allow: "GET, HEAD",
-            });
-        } else getOnly();
+        getOnly();
         response.writeHead(200, {
           "content-type": file.type,
           "cache-control": "no-store",

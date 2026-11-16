@@ -259,7 +259,7 @@ async function serveSmoke(bin: string, env: NodeJS.ProcessEnv, cwd: string): Pro
     }
     // The project rules page (#392) from the packaged artifact, with no source tree: the same
     // compiled policy as pdb rules, settings unknown for a --repo-only project, no script.
-    const rulesPage = await fetch(`${url}rules`);
+    const rulesPage = await fetch(`${url}rules?repo=example%2Fparity`);
     const rulesHtml = await rulesPage.text();
     if (
       rulesPage.status !== 200 ||
@@ -269,6 +269,24 @@ async function serveSmoke(bin: string, env: NodeJS.ProcessEnv, cwd: string): Pro
       rulesHtml.includes("<script")
     )
       throw new Error(`Installed pdb serve /rules is wrong: ${rulesHtml.slice(0, 400)}`);
+    // Every shipped HTML page uses the shared toolbar; browser scripts are never executed here.
+    for (const path of [
+      "?repo=example%2Fparity",
+      "ticket?repo=example%2Fparity&n=1",
+      "human?repo=example%2Fparity",
+      "setup",
+      "rules",
+      "quotas",
+    ]) {
+      const response = await fetch(`${url}${path}`);
+      const html = await response.text();
+      if (
+        response.status !== 200 ||
+        !html.includes('class="shell-toolbar"') ||
+        !html.includes('href="#content"')
+      )
+        throw new Error(`Installed shared shell missing on ${path}`);
+    }
     // HTTP MCP from the installed artifact (#390): initialize, list the read tools and read one
     // role briefing through the shared cache, as a real SDK client would.
     const mcp = new Client({ name: "package-test", version: "1.0.0" });
