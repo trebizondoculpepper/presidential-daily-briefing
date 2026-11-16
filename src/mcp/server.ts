@@ -937,13 +937,17 @@ export async function bindPolling(
     const snap = await shared(target, collectOptions, query, now);
     return snap.reviewPolicy ? snap : { ...snap, reviewPolicy };
   };
-  const trust = runtime.rest ? markerTrust(permissionLookup(repository, runtime.rest)) : undefined;
   runtime.watcher = new Watcher(
     { repository, intervalMinutes: options.pollIntervalMinutes },
     {
       collect: runtime.collect,
       clock,
-      responsible: async (snap) => (await readSnapshotResponsibility(snap, trust)).responsible,
+      responsible: async (snap, signal) => {
+        const trust = runtime.rest
+          ? markerTrust(permissionLookup(repository, runtime.rest, signal))
+          : undefined;
+        return (await readSnapshotResponsibility(snap, trust, signal)).responsible;
+      },
     },
   );
   return runtime.watcher;

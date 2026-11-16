@@ -565,6 +565,7 @@ export interface WatcherRuntime {
   /** Optional delivery-responsibility resolver for routing findings after claim release. */
   responsible?: (
     snapshot: Snapshot,
+    signal?: AbortSignal,
   ) => Promise<ReadonlyMap<string, readonly string[]>> | ReadonlyMap<string, readonly string[]>;
 }
 
@@ -713,7 +714,7 @@ export class Watcher {
       if (snapshot.metrics) this.lastRequestCount = snapshot.metrics.requestCount;
       this.resetAt =
         snapshot.rateLimit && snapshot.rateLimit.remaining <= 0 ? snapshot.rateLimit.resetAt : null;
-      outcome = await this.absorb(snapshot);
+      outcome = await this.absorb(snapshot, controller.signal);
     } catch (error) {
       if (this.stopped || controller.signal.aborted)
         outcome = this.stopped ? "cancelled" : "failed";
@@ -765,13 +766,13 @@ export class Watcher {
   }
 
   /** Fold one snapshot into the baseline; returns whether it was complete. */
-  private async absorb(snapshot: Snapshot): Promise<PollOutcome> {
+  private async absorb(snapshot: Snapshot, signal?: AbortSignal): Promise<PollOutcome> {
     const { global } = subjectWarnings(snapshot);
     // A repository-level gap (truncation, missing pages) makes the whole observation unknown.
     if (global.length) return "incomplete";
     const now = this.runtime.clock.now().toISOString();
     const responsible = this.runtime.responsible
-      ? await this.runtime.responsible(snapshot)
+      ? await this.runtime.responsible(snapshot, signal)
       : undefined;
     const next = observe(snapshot, now, { responsible });
     // A subject-scoped gap still leaves that subject without a trustworthy baseline, so the
