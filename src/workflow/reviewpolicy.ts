@@ -201,7 +201,11 @@ export function observeProvider(
   const hasRunningHeadMarker = headMarkers.some(
     ({ m }) => typeof m.status === "string" && m.status !== "completed",
   );
-  const knownCommits = [...e.reviews.map((r) => r.commit), ...markers.map(({ m }) => m.commit_sha)];
+  const knownCommits = [
+    ...e.reviews.map((r) => r.commit),
+    ...markers.map(({ m }) => m.commit_sha),
+    ...receipts.map(({ r }) => r.commitSha),
+  ];
   const receiptMatchesHead = (sha: string | null) =>
     codexCommitMatches(e.head, sha) ||
     (hasRunningHeadMarker && codexReceiptMatchesPrefix(e.head, sha, knownCommits));
@@ -283,19 +287,14 @@ export function observeProvider(
       `${latestReview!.state.toLowerCase()} review without a passing outcome`,
     );
   const older = [
-    ...markers.map((m) => m.url),
-    ...receipts.map((r) => r.url),
-    ...reviews.map((r) => r.url),
+    ...markers.map((m) => ({
+      url: m.url,
+      head: typeof m.m.commit_sha === "string" ? m.m.commit_sha : null,
+    })),
+    ...receipts.map((r) => ({ url: r.url, head: r.r.commitSha })),
+    ...reviews.map((r) => ({ url: r.url, head: r.commit })),
   ].at(-1);
-  const olderHead =
-    markers.at(-1)?.m.commit_sha ?? receipts.at(-1)?.r.commitSha ?? reviews.at(-1)?.commit ?? null;
-  if (older)
-    return obs(
-      "stale",
-      typeof olderHead === "string" ? olderHead : null,
-      older,
-      "latest review is for an older commit",
-    );
+  if (older) return obs("stale", older.head, older.url, "latest review is for an older commit");
   return obs("unknown", null, null, "no attributable review evidence");
 }
 

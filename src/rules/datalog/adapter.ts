@@ -168,6 +168,7 @@ function codexReceiptCommit(
   const collision = knownCommits.some(
     (c) =>
       typeof c === "string" &&
+      c.length > prefix.length &&
       c.toLowerCase() !== head.toLowerCase() &&
       c.toLowerCase().startsWith(prefix),
   );
@@ -344,6 +345,9 @@ function normalize(
       const knownCommits = [
         ...(pr.reviews?.nodes ?? []).map((r) => r.commit?.oid),
         ...codexStates.map((s) => (typeof s?.commit_sha === "string" ? s.commit_sha : null)),
+        ...codexComments.map(
+          (c) => /\*\*Reviewed commit:\*\*\s*`([0-9a-f]{7,40})`/i.exec(c.body ?? "")?.[1] ?? null,
+        ),
       ];
       for (const c of codexComments) {
         const body = c.body ?? "";

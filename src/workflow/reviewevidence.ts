@@ -70,6 +70,7 @@ export function codexReceiptMatchesPrefix(
   return !knownCommits.some(
     (c) =>
       typeof c === "string" &&
+      c.length > prefix.length &&
       c.toLowerCase() !== head.toLowerCase() &&
       c.toLowerCase().startsWith(prefix),
   );
@@ -117,7 +118,11 @@ export function headAccepted(
   const hasRunningHead = codex.some(
     (s) => s?.commit_sha === head && typeof s.status === "string" && s.status !== "completed",
   );
-  const knownCommits = [...reviews.map((r) => r.commit), ...codex.map((s) => s?.commit_sha)];
+  const knownCommits = [
+    ...reviews.map((r) => r.commit),
+    ...codex.map((s) => s?.commit_sha),
+    ...codexReceipts.map((c) => c.receipt?.commitSha),
+  ];
   return (
     reviews.some((r) => r.state === "APPROVED" && r.commit === head) ||
     codex.some(

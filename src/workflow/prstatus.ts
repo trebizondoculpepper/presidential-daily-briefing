@@ -331,21 +331,27 @@ export function prStatus(
   const requested =
     reviewerFor[(requestPattern.exec(lastRequest?.body ?? "")?.[1] ?? "").toLowerCase()];
   const answerer = (login: string | undefined): string => (login ?? "").replace(/\[bot\]$/, "");
+  const codexComments = comments.filter((c) => answerer(c.author?.login) === reviewerFor.codex);
+  const parsedCodexReceipts = codexComments.map((c) => codexReviewReceipt(c.body));
   const knownCommits = [
     ...pr.reviews.nodes.map((r) => r.commit?.oid),
     ...receipts.map((r) => r.codexState?.code_review?.commit_sha),
+    ...parsedCodexReceipts.map((r) => r?.commitSha),
   ];
-  const hasRunningHeadCodex =
-    codex?.commit_sha === head && typeof codex.status === "string" && codex.status !== "completed";
-  const codexCleanReceipt = comments.some((c) => {
-    if (answerer(c.author?.login) !== reviewerFor.codex) return false;
-    const r = codexReviewReceipt(c.body);
-    return Boolean(
+  const hasRunningHeadCodex = receipts.some(
+    (r) =>
+      answerer(r.by) === reviewerFor.codex &&
+      r.codexState?.code_review?.commit_sha === head &&
+      typeof r.codexState.code_review.status === "string" &&
+      r.codexState.code_review.status !== "completed",
+  );
+  const codexCleanReceipt = parsedCodexReceipts.some((r) =>
+    Boolean(
       r?.clean &&
       (codexCommitMatches(head, r.commitSha) ||
         (hasRunningHeadCodex && codexReceiptMatchesPrefix(head, r.commitSha, knownCommits))),
-    );
-  });
+    ),
+  );
   const newerReceipt = (at: string): boolean =>
     receipts.some((r) => answerer(r.by) === requested && (r.at ?? "") > at && !r.codexState) ||
     // A formal review by the requested service also answers the request.
