@@ -44,7 +44,15 @@ describe("shared served-page shell (#605)", () => {
       state: "unserved",
       status: 403,
     });
-    expect(context("quotas", "repo=Owner/Project").selection.status).toBe(400);
+    expect(context("quotas", "repo=owner/project&role=designer&agent=a.b").selection).toMatchObject(
+      {
+        status: 200,
+        state: "account",
+        repository: "Owner/Project",
+      },
+    );
+    expect(context("quotas", "extra=x").selection.status).toBe(400);
+    expect(context("quotas", "repo=unserved/repo").selection.status).toBe(403);
   });
   it("carries only equivalent view keys, encoding values and dropping page-specific filters", () => {
     const from = context("ticket", "repo=owner/project&n=2&role=designer&agent=a.b");
@@ -54,7 +62,16 @@ describe("shared served-page shell (#605)", () => {
     expect(pageHref(pageById("setup"), from.selection, pageById("ticket"))).toBe(
       "/setup?repo=Owner%2FProject",
     );
-    expect(pageHref(pageById("quotas"), from.selection, pageById("ticket"))).toBe("/quotas");
+    expect(pageHref(pageById("quotas"), from.selection, pageById("ticket"))).toBe(
+      "/quotas?repo=Owner%2FProject&role=designer&agent=a.b",
+    );
+    const onQuotas = context("quotas", "repo=owner/project&role=designer&agent=a.b");
+    expect(pageHref(pageById("work"), onQuotas.selection, pageById("quotas"))).toBe(
+      "/?repo=Owner%2FProject&role=designer&agent=a.b",
+    );
+    expect(pageHref(pageById("rules"), onQuotas.selection, pageById("quotas"))).toBe(
+      "/rules?repo=Owner%2FProject",
+    );
     const rules = context("rules", "repo=Owner/Project&rule=D-PR-MERGE&role=designer");
     expect(
       pageHref(

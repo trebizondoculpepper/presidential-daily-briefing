@@ -407,10 +407,14 @@ export async function startServe(
           throw new HttpFailure(405, "METHOD_NOT_ALLOWED", "Use GET.", [], {
             allow: "GET, HEAD",
           });
-        const page = quotasPage(context.url.searchParams, {
-          host: facts.auth.host,
-          login: facts.auth.login,
-        });
+        const page = quotasPage(
+          context.url.searchParams,
+          {
+            host: facts.auth.host,
+            login: facts.auth.login,
+          },
+          served,
+        );
         response.writeHead(page.status, {
           "content-type": "text/html; charset=utf-8",
           "cache-control": "no-store",
