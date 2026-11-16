@@ -295,6 +295,31 @@ describe("quota renderers (#548)", () => {
     expect(parts.secondary).toContain("that does not mean there was no throttling");
   });
 
+  it("renders the retained header evidence in a header-disagrees notice", () => {
+    const parts = view.render(
+      viewOf(body().resources, {
+        notices: [
+          {
+            code: "header-disagrees",
+            resource: "graphql",
+            aggregate: { remaining: 4100, limit: 5000, observedAt: `${T0}` },
+            header: {
+              remaining: 4000,
+              limit: 5000,
+              observedAt: `${T0}`,
+              operation: "collect",
+            },
+          },
+        ],
+      }),
+      T0,
+    );
+    expect(parts.notes).toContain("a response header reported 4000 remaining");
+    expect(parts.notes).toContain("(collect, observed");
+    expect(parts.notes).toContain("while this aggregate shows 4100 remaining");
+    expect(parts.notes).toContain("both are kept");
+  });
+
   it("never draws a bar for unknown, zero-limit, inconsistent or reset-passed readings", () => {
     const parts = view.render(
       viewOf({
