@@ -518,8 +518,8 @@ export function roleCandidates(input: CandidateInput): ActionFacts[] {
   for (const section of input.sections) {
     const kind = sectionKinds[section.name];
     if (section.background || !kind) continue;
-    // #413: an incomplete inventory with zero observed claims cannot establish that the viewer
-    // has no claim; new pickup is denied rather than inviting a claim the guard may refuse.
+    // #413: observed waiting claims cannot rule out unseen active claims in an incomplete
+    // inventory; new pickup is denied rather than inviting a claim the guard may refuse.
     const inventoryUnknown =
       input.role === "implementer" &&
       section.name === "pickup" &&

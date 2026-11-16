@@ -350,4 +350,4 @@
   "D-DENY-NATIVE-UNKNOWN" "Native dependency evidence is incomplete."
   "D-DENY-CLOSING-UNKNOWN" "Closing pull request evidence is incomplete."
   "D-DENY-PLATFORM" "The ticket names a platform the viewer is not known to run on."
-  "D-DENY-INVENTORY-UNKNOWN" "The viewer's claim inventory is incomplete: no claim was observed, so whether a claim already exists is unknown."}}
+  "D-DENY-INVENTORY-UNKNOWN" "The viewer's claim inventory is incomplete: unseen active claims cannot be ruled out."}}
