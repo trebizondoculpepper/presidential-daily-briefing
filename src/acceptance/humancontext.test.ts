@@ -6,6 +6,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { main } from "../cli.js";
 import { readBriefing } from "../briefing/service.js";
 import type { HumanContext } from "../config/humancontext.js";
+import { createServer } from "../mcp/server.js";
 import { repo, snapshot } from "../testing/snapshots.js";
 
 const human: HumanContext = {
@@ -65,6 +66,35 @@ describe("employing human in briefings (#664)", () => {
     ).toEqual(human);
     expect(JSON.parse((await cli(["--agent", "agent_two", "--json"])).out).employingHuman).toEqual(
       (read as unknown as { report: { employingHuman: HumanContext } }).report.employingHuman,
+    );
+  });
+
+  it("exposes employingHuman in MCP triage_briefing structured data and text", async () => {
+    const server = createServer({ repo }, {
+      collect: async () => snapshot(),
+      dependencyReport: async () => {
+        throw new Error("unused");
+      },
+      humanContext: async () => human,
+      currentRepository: async () => repo,
+      now: () => new Date(),
+      env: {},
+    } as never);
+    const handler = (
+      server as unknown as {
+        _registeredTools: Record<
+          string,
+          { handler: (args: unknown, ctx: unknown) => Promise<any> }
+        >;
+      }
+    )._registeredTools.triage_briefing.handler;
+    const response = await handler(
+      { repository: repo, agent: "agent_two" },
+      { mcpReq: { signal: new AbortController().signal } },
+    );
+    expect(response.structuredContent.data.employingHuman).toEqual(human);
+    expect(response.content[0].text).toContain(
+      "Working for: alice (github.com, the signed-in gh account)",
     );
   });
 
