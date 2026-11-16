@@ -2,11 +2,15 @@
 
 Research for #663, parent #662. Source baseline: `abcee7c452f25beb64683e61a2b4699f8f4b7506` (main, 2026-11-16). This report documents findings and recommendations; it does not implement eligibility, change configuration, or transfer existing human assignments.
 
-## Owner decisions
+## Current decision record
 
-The final discussion supersedes the earlier suggestion to merely lower the priority of unassigned or other-human tickets. Agents must know which human they work for and only process that human's assigned tickets. Assessment, estimation, planning, design and implementation all count as processing. An existing agent claim does not override a different human's assignment. The subsequent owner refinement permits implementers to triage completely unassigned tickets using CONTRIBUTORS.md, ahead of all other scheduling. They may assign one documented human or raise a routing-guidance question; they may not alter existing human assignments. Read-only listings may explain exclusions. Normal assessment/design/implementation still waits for human ownership.
+The owner refined the initial strict-assignment proposal through scenario review. The reconciled [draft contract](../design/human-assignment-safeguard.md) is the single current proposal and remains held for owner review. Historical recommendations below have been replaced rather than silently left contradictory.
 
-Human ownership is GitHub assignment, not ticket authorship, a new label, an agent name, or delivery responsibility. Ordinary account-per-human use should need no redundant identity setting. The authenticated GitHub account supplies the default context. The owner also requested a visible dashboard statement of whose work is being processed, and originally requested a default human assignment when a new ticket is created. Multiple human assignees are valid when set by humans, and work is permitted when the agent's human is included. On a positive reassignment away from its human, the agent parks work, releases its own claim and posts a reason, preserving human ownership and ticket state. The designer and human maintain helpful contributor guidance and defaults; unclear guidance requires a separate question, not implementation of the original ticket. The proposed contract is in [human-assignment-safeguard.md](../design/human-assignment-safeguard.md).
+Human assignment and agent claims are separate. Normal work is scoped to the employing human; trusted explicit human instructions override workflow defaults. New managed PDB issues default to the creating/employing human at creation. Unassigned issues are routed first using CONTRIBUTORS.md; missing guidance creates human attention on the original ticket, not another issue. Multiple human owners are valid but permit one active implementation claim, not competing claims.
+
+An eligible owner-side agent may take over a wrong-human claim and records the reason. The displaced agent saves/pushes useful work and ideally supplies a draft PR assigned to the current owner; leave the issue open and the new claim intact. It need not explain the takeover again. Human removal of an agent within the same domain is also respected, without automatic reclaim. Technical failures are actual errors, not a reason to fabricate successful handoff.
+
+On GitHub failure, continue from last-known context-bound facts and synchronize on return. Without definitive facts, PDB reports that limitation and defers to human instructions instead of inventing defaults. Real permissions, API availability and operation outcomes remain factual boundaries. These decisions supersede the earlier automatic pause, separate routing-question issue, no-takeover and duplicate-explanation proposals.
 
 ## Verified findings in the repository
 
@@ -33,84 +37,37 @@ The issue creation API accepts assignees, but its documentation says the request
 
 GitHub exposes assignment and removal as separate GraphQL mutations. We do not need to expose those mutations to agents merely to read assignment or enforce eligibility. The new categorized GraphQL reference replaces the older all-objects entry point; use the [Issues GraphQL reference](https://docs.github.com/en/graphql/reference/issues), checked 2026-11-16. No live reassignment experiment was performed.
 
-## Recommended design boundaries
+## Policy boundary and unresolved implementation mechanics
 
-### 1. Human context is distinct from permission
+The native engine is the definitive workflow-policy source. TypeScript gathers facts, validates data and executes operations. #679 defines this general architectural principle. #676 removes the universal verify assumption; #675 is now coordination for separate review-fact, native review-policy and responsible-agent follow-up slices (#694–#696). #680 coordinates focused PR, lifecycle and queue/transport audits (#697–#699), rather than a single broad runtime rewrite.
 
-Use a host-qualified authenticated login as the initial human principal, preserving a stable account identifier when the collector supplies one. Do not derive it from git author, issue creator, PR author, agent name, browser role or ticket text. Re-resolve on credential/account changes. Missing identity means no executable agent work.
+The existing ticketGuard fingerprint has a limited role: it is compared for throttled-comment recovery, not an ownership-admission check before ordinary first/label writes. Shared admission requires new integration, and fresh reads still cannot create an atomic GitHub ownership lock. Record claim-to-human bindings rather than infer every agent's employer from one shared gh account. Unknown bindings cannot prove a claim belongs to the wrong human.
 
-For the first HTTP slice, keep one configured human context per local server process, matching its authenticated account. A dashboard may display another human's read-only inventory without changing who the server's agents work for. Do not introduce arbitrary per-call `human=...` authority or imply that localhost is a multi-user authentication system.
+Contributor guidance remains approximate human-readable areas/subtrees and GitHub humans/defaults. Its focused interface must expose source/digest/coverage and reject unrelated or untrusted sources; it must not become a second hidden policy system or require a speculative owner when no route is known. Root-checkout identity and remote reporting fallback are explicit creation boundaries.
 
-A per-OS-user override for a shared/service account needs a documented trusted local configuration boundary. An override is a coordination declaration, not proof of delegation or an increase in GitHub permissions. Keep that optional path unresolved/ineligible until the reviewed design supplies it; ordinary human-account use need not wait for remote multi-user authentication.
+The reviewed contract and focused runtime work must still verify exact record compatibility, operation boundaries, concurrency/partial outcomes and supported command syntax. No caller parameter or issue prose becomes trusted human authority by assertion. PDB cannot police arbitrary external GitHub/git operations. Draft documentation does not advertise these features as shipped.
 
-### 2. Assignment has more than two states
+## Focused delivery map
 
-Normalize complete matching assignment, complete empty assignment, complete other-human assignment, and unknown evidence separately. Missing legacy fields, failed requests and truncated pages are unknown, never unassigned. Do not infer that a ticket lacks the matching assignee from a partial page. Multiple assignees must be visible explicitly; the owner has now allowed multiple human assignees when set by humans. Membership of the current human permits otherwise-eligible processing; agents never add/remove other owners.
+| Ticket      | Focus                                                        |
+| ----------- | ------------------------------------------------------------ |
+| #663        | Reconciled contract/research, held for owner review          |
+| #664        | Human identity resolution                                    |
+| #665        | Complete assignment/linked PR facts                          |
+| #666 / #674 | One creator-assigned creation service and its tracked report |
+| #667        | Native ordinary human-work eligibility                       |
+| #668        | Shared processing admission integration                      |
+| #669        | Visible dashboard human context                              |
+| #670        | Packaged activation/parity acceptance                        |
+| #672        | Contributor guidance evidence                                |
+| #673        | Routing-first assignment and original-ticket attention       |
+| #690        | Claim-to-employing-human bindings                            |
+| #691        | Invalid-claim takeover                                       |
+| #692        | Work-preserving displaced/removed-agent handoff              |
+| #693        | Last-known continuity and explicit-human precedence          |
 
-Human eligibility is a prerequisite, not a negative score. Completely unassigned work has the explicit contributor-routing exception, ranked above ordinary owned work and estimation. Role affinity, urgency, existing agent ownership, native dependencies and value scoring run only within the resulting permitted activity classes. A human-owned but otherwise blocked ticket still cannot be implemented. An agent-owned ticket reassigned elsewhere becomes a local conflict with read-only recovery instructions. The owner explicitly permits a reason comment as part of parking and releasing only the agent's own claim after a positive human-ownership change. No broader ticket processing or human reassignment is authorized.
+Each runtime slice has acceptance criteria, native prerequisites and impact provenance. The parent is coordination, not a competing omnibus implementation. Pipeline Health is separately split into #682–#688, then final cohort-flow data #700 and Sankey chart #689. Its simpler features do not depend on the chart.
 
-### 3. PR work must not infer its human from the author
+## Scenario coverage
 
-Use complete, explicit issue/deliverable relationships. For the minimal conservative slice, require all relevant linked issues to be within the current human's permitted scope. Missing or conflicting ownership stays inspect-only. A PR author or GitHub reviewer does not prove human ownership of the feature. Do not fetch arbitrary prose-linked tickets or guess an owner from a single convenient link.
-
-Separate inspection of checks/review evidence from executable PR repair, implementation or merge consideration. Repository-wide health diagnostics can remain visible without authorizing agents to fix somebody else's work.
-
-### 4. Guard the service boundary as well as the list
-
-Audit claim/resume/rework, complexity and impact estimates, design/decision records, needs-human/question updates, delivery changes/completion, dashboard edits and PR-processing recommendations. Pure read-only inspection is allowed. Substantive work and ticket-changing commands require fresh matching human assignment, regardless of how they were invoked.
-
-Use the same normalized predicate and reason codes in rules and command checks; host code supplies evidence and executes guards. Do not run the production engine twice to construct roles. Preserve native blockers, platform requirements, writer permissions, review checks and explicit evidence completeness.
-
-The existing fingerprint only checks throttled-comment recovery. New first-write/label-write admission integration is required; even that will not provide an atomic GitHub ownership lock. Human assignment may change after validation or outside PDB. On positively changed ownership, park/release the own claim with the approved reason comment. On unknown ownership, pause with a local diagnostic rather than inferring a reassignment. PDB cannot prevent arbitrary external `gh`, git or GitHub UI changes. The state-preserving release exception is now owner-approved, but its reviewed service contract must preserve human assignees and readiness/closure state; current release --as has different readiness effects.
-
-### 5. Creation is not takeover
-
-Propose allowing creation only with explicit intent to create a new issue for the resolved human, including that assignment in the one creation request, intent digest and dry-run. No arbitrary existing-ticket assignment operation follows. Verify the returned assignment. If GitHub creates the issue but omits assignment, return the issue link and a partial result; do not treat it as eligible, repeat the POST, or try to claim it.
-
-This creation recommendation reconciles two owner statements and must be explicit in the reviewed architecture contract; it is not an implementation authorization in this report. If creation assignment is omitted, the created ticket remains unassigned and only the guarded contributor-routing workflow can resolve it automatically; do not add a post-create takeover bypass. No live bulk reassignment is required for rollout.
-
-### 6. Dashboard and caching
-
-Show the effective human and its resolution source alongside project/role context. Label ticket human ownership independently from the agent worker and PR delivery responsibility. Explain why another-human/unassigned/unknown ticket is excluded; do not offer a self-assignment button.
-
-Keep raw fact caching within the existing auth identity partition. Derived results must include effective human context along with existing role/agent/filter inputs. A display filter cannot change execution context. On auth changes, do not reuse another account's personalized result. Cache TTL does not substitute for live pre-write assignment checks.
-
-## Minimum scenario matrix
-
-| Evidence / request                                               | Expected behavior                                                                                                 |
-| ---------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| Complete assignment to current human                             | Eligible for otherwise-permitted assessment/design/implementation; existing independent guards still apply.       |
-| Known empty assignees                                            | Top-priority contributor-routing or guidance question; no estimate/design/claim before human assignment.          |
-| Assigned only to another human                                   | Read-only exclusion; no write, planning or implementation.                                                        |
-| Missing human context or legacy/truncated/failed assignment read | Unknown diagnostic; no executable work.                                                                           |
-| Existing agent commitment now assigned elsewhere                 | Park useful work, release only the own claim, and post the approved reason; no human-assignee change.             |
-| Blocked issue assigned to current human                          | Existing blocker semantics still hold; ownership is not permission to implement.                                  |
-| Caller changes role/agent/display-human filter                   | No expansion of human eligibility.                                                                                |
-| Linked PR spans differently owned or unread tickets              | Inspection only; no inference from PR author.                                                                     |
-| Human account changes during cached session                      | Re-resolve context and isolate projections; live guards catch stale ownership.                                    |
-| Issue creation succeeds but assignment is omitted                | Partial result with real issue link; no second create attempt, automatic takeover or agent processing.            |
-| Agent release/unassign                                           | Human assignment, blockers, open questions and workflow state remain preserved per the reviewed release contract. |
-| Direct command bypasses briefing                                 | Same human predicate rejects it before mutation.                                                                  |
-
-Use native EDN decision fixtures for eligibility and injected I/O tests for command admission, races and creation outcomes. Packaged CLI/STDIO/HTTP/dashboard/rebrief acceptance belongs to #670. No live ownership changes or new credentials are needed as tests.
-
-## Delivery split and readiness
-
-| Ticket | Deliverable                                                          | Initial impact / complexity |
-| ------ | -------------------------------------------------------------------- | --------------------------- |
-| #663   | This research plus a separately reviewed architecture contract       | L / M                       |
-| #664   | Human context resolver and shared transport plumbing                 | M / M                       |
-| #665   | Assignment facts, linked PR evidence, collection/cache compatibility | M / M                       |
-| #666   | Verified default-at-creation intent and honest partial outcomes      | M / M                       |
-| #667   | Native human eligibility, exclusions and explanations                | L / M                       |
-| #668   | Live service admission and state-preserving claim recovery           | L / L                       |
-| #669   | Explicit dashboard human context and personalized result isolation   | M / M                       |
-| #670   | Cross-surface packaged acceptance and rollout documentation          | M / M                       |
-
-The refined split also adds #672 (contributor guidance/read/question workflow, L impact / M complexity) and #673 (guarded unassigned-routing executor, L / M). Assignment triage precedes ordinary ownership ranking; these are not generic human-transfer tools.
-
-The umbrella #662 is L impact / XL aggregate complexity, not an extra implementation reservation. Native blockers gate implementation; body prose is not a substitute for those edges. #588/#589 need a reviewed correction to the earlier Unassign plan, and #652 must consume the human prerequisite without duplicating identity or guard services.
-
-## Remaining work on this research ticket
-
-The source/API findings and the proposed architecture contract are submitted together for review. The later owner decisions settle top-priority contributor routing, valid multiple human assignees and comment-backed claim recovery. Review must still verify the shared-account trust boundary, concrete routing evidence/concurrency limits, PR association policy and processing-command matrix. Dependent tickets are refined to reflect those decisions. No runtime ticket is made ready by publishing this report alone.
+Rules-only decision fixtures and injected operation tests must cover normal human membership, multiple owners/one active claim, assignment/routing races, missing contributor guidance and deduplicated original attention, human-owned creation and dropped assignment, wrong-human takeover and valid-claim protection, preserved-work handoff with open issue, technical failure, explicit agent removal, cached/no-cache outages, human overrides, PR ownership conflicts and cross-surface parity. The draft contract supplies the detailed expectations; publishing the report alone does not unblock implementation.
