@@ -298,17 +298,21 @@ ${meter}
     const observed = Date.parse(str(view.observedAt));
     const currentAge =
       Number.isFinite(observed) && Number.isFinite(nowMs) ? (nowMs - observed) / 1000 : null;
+    // A negative age is a clock rollback (observation ahead of the rendering clock): the age is
+    // unknown, never "0s old", and the reading is no longer fresh on a live surface.
+    const rolledBack = currentAge !== null && currentAge < 0;
     const expired =
       view.freshness !== "stored" &&
       view.freshness !== "unavailable" &&
       currentAge !== null &&
       currentAge > freshnessSeconds;
-    const shownAge = currentAge;
-    const age = shownAge === null ? null : Math.max(0, Math.round(shownAge));
-    const freshness = expired ? "stale" : str(view.freshness);
-    const staleNotice = expired
-      ? `<li class="warn">This reading is older than the 60-second freshness window; it is shown only because no newer reading is held. Press Refresh for current numbers.</li>`
-      : "";
+    const age = currentAge === null || rolledBack ? null : Math.max(0, Math.round(currentAge));
+    const freshness =
+      expired || (view.freshness === "live" && rolledBack) ? "stale" : str(view.freshness);
+    const staleNotice =
+      expired || (view.freshness === "live" && rolledBack)
+        ? `<li class="warn">This ${expired ? "reading is older than the 60-second freshness window" : "reading"}'s age is unknown after a clock change; ${expired ? "it is shown only because no newer reading is held. " : ""}Press Refresh for current numbers.</li>`
+        : "";
     const state = `<p>Observed ${escapeHtml(str(view.observedAt))} via GET /rate_limit (${escapeHtml(freshness)}${age === null ? ", age unknown" : `, ${escapeHtml(age)}s old`}) for <strong>${escapeHtml(str(view.account) || "an unverified login")}</strong> on ${escapeHtml(str(view.host))}.</p>${
       coverage.complete === false
         ? `<p class="warn">${escapeHtml(num(coverage.omitted) ?? 0)} of ${escapeHtml(num(coverage.total) ?? 0)} reported resource(s) are not shown.</p>`
