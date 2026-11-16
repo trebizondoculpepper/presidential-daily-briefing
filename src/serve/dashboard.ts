@@ -50,7 +50,29 @@ label { display: flex; flex-direction: column; font-size: .8rem; }
 .provisional { opacity: .6; }
 ol { padding-left: 1.5rem; }
 li { margin: 0 0 1rem; }
-.kind { font-size: .75rem; border: 1px solid GrayText; border-radius: .25rem; padding: 0 .3rem; margin-left: .4rem; }
+.kind { font-size: .75rem; border: 1px solid GrayText; border-radius: .25rem; padding: 0 .3rem; display: inline-block; }
+/* Action-kind badge palette (#597): one distinct colour per kind, neutral fallback for
+   unknown kinds. Colour is supplementary; the text label is always present. */
+.kind.implement { color: #1a5fb4; border-color: #1a5fb4; }
+.kind.continue-implementation { color: #1a5fb4; border-color: #1a5fb4; }
+.kind.pr-follow-up { color: #c01c28; border-color: #c01c28; }
+.kind.inspect, .kind.inspect-ownership, .kind.inspect-assessment { color: #8643c1; border-color: #8643c1; }
+.kind.decide, .kind.design, .kind.design-review { color: #b26b00; border-color: #b26b00; }
+.kind.document { color: #b26b00; border-color: #b26b00; }
+.kind.estimate-complexity, .kind.assess-impact { color: #00793c; border-color: #00793c; }
+.kind.resume-claim, .kind.review-owned-work, .kind.wait-claim { color: #613a8e; border-color: #613a8e; }
+.kind.addressed-response { color: #005b57; border-color: #005b57; }
+/* Dark canvases need lighter badge text: the default palette's dark foregrounds lose contrast
+   on the supported dark colour scheme. Hues stay per-kind; only lightness rises. */
+@media (prefers-color-scheme: dark) {
+  .kind.implement, .kind.continue-implementation { color: #8ab4ff; border-color: #8ab4ff; }
+  .kind.pr-follow-up { color: #ff8a94; border-color: #ff8a94; }
+  .kind.inspect, .kind.inspect-ownership, .kind.inspect-assessment { color: #c9a5ff; border-color: #c9a5ff; }
+  .kind.decide, .kind.design, .kind.design-review, .kind.document { color: #ffd28a; border-color: #ffd28a; }
+  .kind.estimate-complexity, .kind.assess-impact { color: #8af0b0; border-color: #8af0b0; }
+  .kind.resume-claim, .kind.review-owned-work, .kind.wait-claim { color: #e6a5ff; border-color: #e6a5ff; }
+  .kind.addressed-response { color: #9ce6df; border-color: #9ce6df; }
+}
 .why { margin: .2rem 0; }
 code { font-size: .85rem; word-break: break-all; }
 footer { margin-top: 2rem; font-size: .8rem; color: GrayText; }
@@ -229,7 +251,14 @@ export function dashboardRenderers(): DashboardRenderers {
               }).toString()}`,
             )}">details</a>`
           : "";
-      return `<li>${name}${detail}<span class="kind">${escapeHtml(item.kind)}</span><p class="why">${escapeHtml(reason)}${rules ? ` <small>(${rules})</small>` : ""}</p>${commands}</li>`;
+      // The badge text labels every action kind; the colour is supplementary. `kind` is a string
+      // from the API; any other value renders escaped with a neutral class.
+      const kind = typeof item.kind === "string" ? item.kind : "";
+      const kindClass = kind
+        .split(" ")
+        .join("-")
+        .replace(/[^a-z0-9-]/gi, "");
+      return `<li>${name}${detail}<br><span class="kind ${kindClass}">${escapeHtml(kind)}</span><p class="why">${escapeHtml(reason)}${rules ? ` <small>(${rules})</small>` : ""}</p>${commands}</li>`;
     });
     const omitted = Number(ranked.omitted ?? 0);
     return `<ol>${rows.join("")}</ol>${omitted > 0 ? `<p>${omitted} more not shown.</p>` : ""}`;
