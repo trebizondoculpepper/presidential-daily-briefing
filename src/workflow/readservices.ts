@@ -8,7 +8,7 @@ import { collectIssueFocus, ghQueryWith, hydratePullRequests } from "../github/g
 import type { FocusOptions, Query, Rest } from "../github/github.js";
 import { permissionLookup } from "../github/github.js";
 import type { GraphQuery } from "./claims.js";
-import { readRetainedFacts, readTeamActivity, teamActivityCap } from "./retainedfacts.js";
+import { readClaimActivity, readTeamActivity, teamActivityCap } from "./retainedfacts.js";
 import { ReadMeter } from "../github/readplan.js";
 import type { Snapshot } from "../github/types.js";
 import { diagnoseDelivery } from "./deliverydoctor.js";
@@ -147,7 +147,7 @@ export async function readWho(
     boundaries.live && !options.offline && ownership.recordedOwners
       ? await Promise.all(
           ownership.recordedOwners.map(async (agent) => {
-            const facts = await readRetainedFacts(scoped, agent, {
+            const fact = await readClaimActivity(snapshot.repository, number, agent, {
               query: boundaries.live!.query as GraphQuery,
               permission: permissionLookup(
                 snapshot.repository,
@@ -155,8 +155,7 @@ export async function readWho(
                 boundaries.signal,
               ),
             });
-            const fact = issue ? facts?.claimActivity?.get(issue.url) : undefined;
-            return { agent, state: fact?.state ?? "unknown", reason: fact?.reason ?? "" };
+            return { agent, state: fact.state, reason: fact.reason };
           }),
         )
       : null;

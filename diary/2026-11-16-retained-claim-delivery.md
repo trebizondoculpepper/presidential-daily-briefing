@@ -15,3 +15,5 @@ The generated policy/English and parity artifacts change intentionally with the 
 ## Team and diagnostic projections
 
 Finished the stacked projection slice: failed live claim-activity reads now mark both team and who reports incomplete, including their text output. Live released claims remain visible as annotated snapshot evidence but no longer inflate retained-ownership review counts. Regression coverage exercises real injected read failures and mixed active/waiting/released claims. Existing Ticket Doctor activity-cap omissions remain preserved.
+
+Fresh review also identified Ticket Doctor unknown-read completeness and closed-ticket recorded-owner handling in who. Shared single-claim reading now verifies closed records directly through the guard reader and converts genuine read failures consistently; Ticket Doctor carries unknown facts into scan completeness. Added regressions for both cases.

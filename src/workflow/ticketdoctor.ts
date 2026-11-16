@@ -1193,6 +1193,12 @@ export function ticketDoctor(
     ...(delivery?.warnings ?? []),
     ...(closedDrift?.warnings ?? []),
   ];
+  for (const [agent, claims] of claimActivity ?? [])
+    for (const [url, fact] of claims)
+      if (fact.state === "unknown")
+        warnings.push(
+          `Claim activity for ${agent} on ${url} could not be verified: ${fact.reason}`,
+        );
   // #413: unread claim activity is a scan gap, not a clean pass: an agent's active-claim
   // contradictions are unknown when the activity budget skipped them.
   if (omittedAgents?.length)
