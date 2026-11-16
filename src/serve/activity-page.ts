@@ -146,14 +146,24 @@ export function activityRenderers(base: DashboardRenderers): ActivityRenderers {
     typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
   const str = (value: unknown): string => (typeof value === "string" ? value : "");
   const list = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
+  const eventAt = (c: unknown): string => {
+    const src = record(c);
+    return str(record(src.latestActivity).at) || str(src.since);
+  };
   /** Agents with an evidenced event in the window. */
   const agentsActive = (agents: unknown[], window: number, nowMs: number): unknown[] =>
     agents.filter((a) =>
       [...list(record(a).claims), ...list(record(a).responsibilities)].some((c) => {
-        const src = record(c);
-        const at = str(record(src.latestActivity).at) || str(src.since);
+        const at = eventAt(c);
         return at !== "" && Number.isFinite(Date.parse(at)) && nowMs - Date.parse(at) <= ms(window);
       }),
+    );
+  /** Agents whose participation cannot be determined: responsibility with no event timestamp. */
+  const agentsUndetermined = (agents: unknown[], window: number, nowMs: number): unknown[] =>
+    agents.filter(
+      (a) =>
+        !agentsActive([a], window, nowMs).length &&
+        list(record(a).responsibilities).some((c) => eventAt(c) === ""),
     );
   const safeLink = (url: unknown): string | null =>
     typeof url === "string" && /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\//.test(url) ? url : null;
@@ -257,15 +267,22 @@ export function activityRenderers(base: DashboardRenderers): ActivityRenderers {
     const agents = list(team(envelope));
     if (!agents.length) return "";
     const repository = str(record(e.selection).repository);
-    // Agents with no evidenced activity in the window are not listed (owner clarification).
     const active = agentsActive(agents, window, nowMs);
-    if (!active.length)
+    const undetermined = agentsUndetermined(agents, window, nowMs);
+    const shown = [...active, ...undetermined];
+    // Agents with no evidenced activity and no responsibility are not listed (owner
+    // clarification); deliverable-only agents whose participation cannot be determined are
+    // listed with a note, never silently dropped as a fake all-clear.
+    if (!shown.length)
       return '<p class="warn">No agent has evidenced activity in this window within the available evidence.</p>';
-    const rows = active.map((a) => {
+    const rows = shown.map((a) => {
       const agent = record(a);
       const name = escapeHtml(str(agent.agent));
       const claims = list(agent.claims);
       const responsibilities = list(agent.responsibilities);
+      const undeterminedNote = undetermined.includes(a)
+        ? '<p class="warn">Participation cannot be determined: this agent holds responsibility, but no event timestamp is in the available evidence.</p>'
+        : "";
       const warnings = list(agent.warnings).map((w) => {
         const wr = record(w);
         return `<li class="warn">${escapeHtml(str(wr.detail))}</li>`;
@@ -276,7 +293,7 @@ export function activityRenderers(base: DashboardRenderers): ActivityRenderers {
           : responsibilities.length
             ? renderResponsibilities(responsibilities)
             : "<p>No recorded claims or responsibilities.</p>"
-      }${warnings.length ? `<ul>${warnings.join("")}</ul>` : ""}</li>`;
+      }${undeterminedNote}${warnings.length ? `<ul>${warnings.join("")}</ul>` : ""}</li>`;
     });
     return `<ol class="agents">${rows.join("")}</ol>`;
   };
@@ -287,9 +304,14 @@ export function activityRenderers(base: DashboardRenderers): ActivityRenderers {
     const all = list(team(envelope));
     const total = all.length;
     const active = agentsActive(all, window, nowMs).length;
+    const undetermined = agentsUndetermined(all, window, nowMs).length;
+    const gap =
+      undetermined > 0
+        ? `<p class="warn">${undetermined} agent(s) hold responsibility but their participation could not be determined (no event timestamp in the evidence).</p>`
+        : "";
     return `<h2>Evidence</h2><p>${complete ? "Coverage complete." : '<span class="warn">Coverage incomplete: missing evidence is unknown, never absent.</span>'}</p><p>${
       active
-    } of ${total} agent(s) have evidenced activity in the last ${escapeHtml(String(window))} day(s).</p>`;
+    } of ${total} agent(s) have evidenced activity in the last ${escapeHtml(String(window))} day(s).</p>${gap}`;
   };
 
   return { activityUrl, matches, renderNotices, renderAgents, renderCoverage };

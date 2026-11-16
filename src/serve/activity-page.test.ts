@@ -356,6 +356,56 @@ describe("activity renderers (#456)", () => {
     expect(html.match(/follow-up:/g)).toHaveLength(1);
   });
 
+  it("lists deliverable-only agents whose participation cannot be determined, with the gap", () => {
+    // A responsibility with no event timestamp (deliverable scope carries since: null and no
+    // latestActivity in the shared inventory) cannot prove participation, but dropping the
+    // agent would present a fake all-clear: it is listed with a note and the coverage gap is
+    // reported.
+    const html = view.renderAgents(
+      teamEnvelope([
+        agent("gamma", [], {
+          responsibilities: [
+            {
+              number: 20,
+              url: url(20),
+              scope: "deliverable",
+              deliverable: "audit",
+              delivery: "pending",
+              followUp: "waiting",
+              since: null,
+            },
+          ],
+        }),
+      ]),
+      1,
+      start,
+    );
+    expect(html).toContain("gamma");
+    expect(html).toContain("Continuing responsibility");
+    expect(html).toContain("Participation cannot be determined");
+    const coverage = view.renderCoverage(
+      teamEnvelope([
+        agent("gamma", [], {
+          responsibilities: [
+            {
+              number: 20,
+              url: url(20),
+              scope: "deliverable",
+              deliverable: "audit",
+              delivery: "pending",
+              followUp: "waiting",
+              since: null,
+            },
+          ],
+        }),
+      ]),
+      1,
+      start,
+    );
+    expect(coverage).toContain("0 of 1 agent(s) have evidenced activity");
+    expect(coverage).toContain("participation could not be determined");
+  });
+
   it("escapes agent, title and warning text and links only GitHub URLs", () => {
     const html = view.renderAgents(
       teamEnvelope([
