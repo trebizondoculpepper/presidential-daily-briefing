@@ -153,6 +153,9 @@ export interface QuotaRenderers {
 /** Pure HTML-string renderers over the shared quota view; every string is escaped. */
 export function quotaRenderers(base: DashboardRenderers): QuotaRenderers {
   const escapeHtml = (text: unknown): string => base.escapeHtml(text);
+  // The service's freshness window (QUOTA_TTL_MS) is embedded here so the browser script can
+  // qualify an aging local redraw without a module import or a fetch.
+  const freshnessSeconds = 60;
   const record = (value: unknown): Record<string, unknown> =>
     typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
   const list = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
@@ -289,8 +292,28 @@ ${meter}
       };
     const rows = list(view.resources);
     const coverage = record(view.coverage);
-    const age = num(view.ageSeconds);
-    const state = `<p>Observed ${escapeHtml(str(view.observedAt))} via GET /rate_limit (${escapeHtml(str(view.freshness))}${age === null ? ", age unknown" : `, ${escapeHtml(age)}s old when read`}) for <strong>${escapeHtml(str(view.account) || "an unverified login")}</strong> on ${escapeHtml(str(view.host))}.</p>${
+    // Local redraws age the reading even though no request was made: derive the current age
+    // from the observation time and qualify a reading past the service's freshness window as
+    // stale, preserving the quota contract's explicit-freshness behavior without fetching.
+    const observed = Date.parse(str(view.observedAt));
+    const currentAge =
+      Number.isFinite(observed) && Number.isFinite(nowMs) ? (nowMs - observed) / 1000 : null;
+    // A negative age is a clock rollback (observation ahead of the rendering clock): the age is
+    // unknown, never "0s old", and the reading is no longer fresh on a live surface.
+    const rolledBack = currentAge !== null && currentAge < 0;
+    const expired =
+      view.freshness !== "stored" &&
+      view.freshness !== "unavailable" &&
+      currentAge !== null &&
+      currentAge > freshnessSeconds;
+    const age = currentAge === null || rolledBack ? null : Math.max(0, Math.round(currentAge));
+    const freshness =
+      expired || (view.freshness === "live" && rolledBack) ? "stale" : str(view.freshness);
+    const staleNotice =
+      expired || (view.freshness === "live" && rolledBack)
+        ? `<li class="warn">This ${expired ? "reading is older than the 60-second freshness window" : "reading"}'s age is unknown after a clock change; ${expired ? "it is shown only because no newer reading is held. " : ""}Press Refresh for current numbers.</li>`
+        : "";
+    const state = `<p>Observed ${escapeHtml(str(view.observedAt))} via GET /rate_limit (${escapeHtml(freshness)}${age === null ? ", age unknown" : `, ${escapeHtml(age)}s old`}) for <strong>${escapeHtml(str(view.account) || "an unverified login")}</strong> on ${escapeHtml(str(view.host))}.</p>${
       coverage.complete === false
         ? `<p class="warn">${escapeHtml(num(coverage.omitted) ?? 0)} of ${escapeHtml(num(coverage.total) ?? 0)} reported resource(s) are not shown.</p>`
         : ""
@@ -308,7 +331,7 @@ ${meter}
           : '<p class="warn">GitHub reported no resources; their allowance is unknown.</p>'
       }`,
       secondary: secondaryHtml(view),
-      notes: notes ? `<h2>Notes</h2><ul>${notes}</ul>` : "",
+      notes: notes || staleNotice ? `<h2>Notes</h2><ul>${staleNotice}${notes}</ul>` : "",
     };
   };
 
