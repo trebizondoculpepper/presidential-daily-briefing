@@ -1,4 +1,5 @@
 import { pageById, shellContext, shellStart } from "./shell.js";
+import type { ServedProject } from "./shell.js";
 /**
  * GitHub quota meters in `pdb serve` (#548, doc/design/github-quotas.md "Serve JSON and visual
  * page", owner decisions on #548).
@@ -89,7 +90,12 @@ export interface QuotasPageResult {
  * The account-scoped page shell: no project, no data, no GitHub read. Until the shared toolbar
  * (#605) lands, the header carries plain links to the other pages, none with a project.
  */
-export function quotasPage(query: URLSearchParams, account: QuotaContext): QuotasPageResult {
+export function quotasPage(
+  query: URLSearchParams,
+  account: QuotaContext,
+  served: readonly ServedProject[] = [],
+): QuotasPageResult {
+  const context = shellContext("quotas", served, query);
   const header = `<h1>GitHub quotas</h1>
 <p class="scope">Account-wide: <strong id="quota-account">${escapeHtml(account.login ?? "unverified login")}</strong> on <strong id="quota-host">${escapeHtml(account.host)}</strong>. These quotas belong to the GitHub login, not to any project, and include other agents, machines and applications.</p>
 `;
@@ -97,17 +103,17 @@ export function quotasPage(query: URLSearchParams, account: QuotaContext): Quota
 </body>
 </html>
 `;
-  if ([...query.keys()].length)
+  if (context.selection.status !== 200)
     return {
-      status: 400,
-      html: `${shellStart(shellContext("quotas"), "GitHub quotas", "/quotas.js")}<main id="content" tabindex="-1">${header}
-<p class="error" role="alert">/quotas takes no parameters: quotas are account-wide, not per project.</p>
+      status: context.selection.status,
+      html: `${shellStart(context, "GitHub quotas", "/quotas.js")}<main id="content" tabindex="-1">${header}
+<p class="error" role="alert">${escapeHtml(context.selection.message ?? "Invalid selection.")}</p>
 </main>
 ${footer}`,
     };
   return {
     status: 200,
-    html: `${shellStart(shellContext("quotas"), "GitHub quotas", "/quotas.js")}<main id="content" tabindex="-1">${header}
+    html: `${shellStart(context, "GitHub quotas", "/quotas.js")}<main id="content" tabindex="-1">${header}
 <p><button id="refresh" type="button">Refresh</button> <span id="clock"></span></p>
 <section id="state" aria-live="polite"><p>No reading has been taken yet. Press Refresh to read GitHub's /rate_limit once; nothing is fetched until you do.</p></section>
 <section id="meters" aria-labelledby="meters-heading"></section>
