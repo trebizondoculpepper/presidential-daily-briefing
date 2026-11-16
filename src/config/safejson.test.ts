@@ -32,34 +32,64 @@ const failing = (step: keyof Omit<SafeFs, "lock">, error = "EIO"): SafeFs => ({
 });
 
 describe("locked durable JSON writes (#382)", () => {
-  it("separate processes doing read-modify-write lose no update", async () => {
-    await withDir(async (dir) => {
-      const target = join(dir, "counter.json");
-      // A file URL, not a path: a Windows path (C:\...) is not a valid module specifier.
-      const module = new URL("./safejson.ts", import.meta.url).href;
-      const script = join(dir, "worker.mts");
-      await writeFile(
-        script,
-        `import { updateJsonFile } from ${JSON.stringify(module)};
+  // Exercise more independent acquisition/release interleavings on Windows, where #729
+  // exposed an immediate filesystem refusal. Every batch retains the exact 20-write assertion.
+  it.each(process.platform === "win32" ? Array.from({ length: 10 }, (_, i) => i + 1) : [1])(
+    "separate processes doing read-modify-write lose no update (batch %s)",
+    async () => {
+      await withDir(async (dir) => {
+        const target = join(dir, "counter.json");
+        // A file URL, not a path: a Windows path (C:\...) is not a valid module specifier.
+        const module = new URL("./safejson.ts", import.meta.url).href;
+        const script = join(dir, "worker.mts");
+        await writeFile(
+          script,
+          `import { updateJsonFile } from ${JSON.stringify(module)};
 for (let i = 0; i < 5; i++) {
   const r = await updateJsonFile(${JSON.stringify(target)}, (c) => ({ write: { n: (c.state === "value" ? (c.value as { n: number }).n : 0) + 1 } }), { lockWaitMs: 30000 });
   if (r.status !== "written") { console.error(JSON.stringify(r)); process.exit(1); }
 }
 `,
-      );
-      const tsx = import.meta.resolve("tsx");
-      const run = () =>
-        new Promise<number>((resolveExit) => {
-          const child = spawn(process.execPath, ["--import", tsx, script], { stdio: "inherit" });
-          child.on("exit", (code) => resolveExit(code ?? 1));
-        });
-      expect(await Promise.all([run(), run(), run(), run()])).toEqual([0, 0, 0, 0]);
-      expect(JSON.parse(await readFile(target, "utf8"))).toEqual({ n: 20 });
-      // No leftover temporary or lock files.
-      expect(await readdir(dir)).toEqual(["counter.json", "worker.mts"].sort());
-    });
-  }, 60_000);
+        );
+        const tsx = import.meta.resolve("tsx");
+        const run = () =>
+          new Promise<number>((resolveExit) => {
+            const child = spawn(process.execPath, ["--import", tsx, script], { stdio: "inherit" });
+            child.on("exit", (code) => resolveExit(code ?? 1));
+          });
+        expect(await Promise.all([run(), run(), run(), run()])).toEqual([0, 0, 0, 0]);
+        expect(JSON.parse(await readFile(target, "utf8"))).toEqual({ n: 20 });
+        // No leftover temporary or lock files.
+        expect(await readdir(dir)).toEqual(["counter.json", "worker.mts"].sort());
+      });
+    },
+    60_000,
+  );
 
+  it("reports lock acquisition syscall errors separately from a stuck writer", async () => {
+    await withDir(async (dir) => {
+      const target = join(dir, "counter.json");
+      await writeFile(target, JSON.stringify({ n: 7 }));
+      const fs: SafeFs = {
+        ...nodeSafeFs,
+        lock: {
+          ...nodeSafeFs.lock,
+          writeFile: async () => {
+            throw Object.assign(new Error("private system detail"), { code: "EPERM" });
+          },
+        },
+      };
+      const outcome = await updateJsonFile(target, () => ({ write: { n: 8 } }), { fs });
+      expect(outcome).toMatchObject({
+        status: "not-written",
+        reason: expect.stringContaining("create: EPERM"),
+      });
+      expect(JSON.stringify(outcome)).not.toContain("private system detail");
+      expect(JSON.stringify(outcome)).not.toContain("delete");
+      expect(JSON.parse(await readFile(target, "utf8"))).toEqual({ n: 7 });
+      expect(await readdir(dir)).toEqual(["counter.json"]);
+    });
+  });
   it("a failure before the rename keeps the previous file and leaves no temporary file", async () => {
     await withDir(async (dir) => {
       const target = join(dir, "a.json");

@@ -16,7 +16,12 @@ import { createHash, randomBytes } from "node:crypto";
 import * as nodeFs from "node:fs/promises";
 import { join } from "node:path";
 import envPaths from "env-paths";
-import { acquireFileLock } from "../../../../src/config/filelock.js";
+import {
+  acquireFileLock,
+  acquireFileLockResult,
+  acquisitionProblem,
+  type FileLockAcquisition,
+} from "../../../../src/config/filelock.js";
 
 export const SCHEMA_VERSION = 1;
 export const SNAPSHOT_KIND = "cache-experiment-snapshot";
@@ -648,12 +653,12 @@ export async function storeSnapshot(
     return failed(e);
   }
   let release: (() => Promise<unknown>) | null = null;
-  const started = lockNow();
+  let acquisition: FileLockAcquisition | undefined;
   try {
     step = "lock";
     await beforeStep?.("lock");
     // Assign before the after-hook runs, so a hook failure still releases a lock we took.
-    release = await acquireFileLock(
+    acquisition = await acquireFileLockResult(
       fs,
       join(dir, LOCK_FILE),
       // Age-based breaking disabled: an old lock is never removed (contract).
@@ -661,6 +666,7 @@ export async function storeSnapshot(
       lockNow,
       sleep,
     );
+    release = acquisition.status === "acquired" ? acquisition.lock : null;
     if (release) await afterStep?.("lock");
   } catch (e) {
     let detail = "";
@@ -670,15 +676,16 @@ export async function storeSnapshot(
     return f.status === "not-written" ? { ...f, detail: f.detail + detail } : f;
   }
   if (!release) {
-    // acquireFileLock returns null both on timeout and on an unexpected error; tell them apart.
-    const timedOut = lockNow() - started >= lockWaitMs;
+    // Report acquisition facts rather than guessing the failure from elapsed time.
+    const timedOut = acquisition?.status === "busy";
     return {
       status: "not-written",
       reason: timedOut ? "lock-timeout" : "lock-error",
       step: "lock",
-      detail: timedOut
-        ? `lock held by another writer for ${lockWaitMs} ms; cache miss, lock left in place`
-        : "lock could not be created (filesystem error)",
+      detail:
+        acquisition && acquisition.status !== "acquired"
+          ? acquisitionProblem(join(dir, LOCK_FILE), acquisition)
+          : "lock acquisition did not complete",
     };
   }
   const temp = join(dir, `${SNAPSHOT_FILE}.${process.pid}.${randomBytes(6).toString("hex")}.tmp`);
