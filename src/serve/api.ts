@@ -25,6 +25,11 @@ import { briefingRoleNames, roleSectionIds } from "../briefing/roles.js";
 import { pickupOrders } from "../briefing/ranking.js";
 import type { PickupOrder } from "../briefing/ranking.js";
 import { readBriefing } from "../briefing/service.js";
+import {
+  humanContextEnabled,
+  serverHumanContext,
+  type HumanContext,
+} from "../config/humancontext.js";
 import type { ReadRuntime } from "../briefing/service.js";
 import {
   collectIssueFocus as CollectIssueFocus,
@@ -476,6 +481,8 @@ export function readApi(
 ): (facts: ServerFacts) => Routes {
   // The served set, known once listening.
   let servedSet: readonly ServedRepository[] = [];
+  // #664: the one execution-human context of this process, known once listening.
+  let serverHuman: HumanContext | undefined;
   const isServed = (repository: string): boolean =>
     servedSet.some((s) => s.repository.toLowerCase() === repository.toLowerCase());
   const {
@@ -491,6 +498,7 @@ export function readApi(
   const redact = <T>(value: T): T => redactPaths(value, known);
 
   const readRuntime = (project: string | undefined, repository: string): ReadRuntime => ({
+    ...(serverHuman ? { humanContext: async () => serverHuman! } : {}),
     collect: cachedCollect,
     collectShortlist: cachedShortlist,
     dependencyReport: cachedDependencies,
@@ -574,6 +582,7 @@ export function readApi(
 
   return (facts) => {
     servedSet = facts.served;
+    if (humanContextEnabled()) serverHuman = serverHumanContext(facts.auth, facts.startedAt);
     const respond = (
       context: RequestContext,
       httpStatus: number,

@@ -105,6 +105,11 @@ import { declaredRulesContext } from "./rules/declared-context.js";
 import { runConfig, runSetup } from "./config/configcli.js";
 import { runContributors } from "./config/contributors.js";
 import { quotaRefusal } from "./github/readplan.js";
+import {
+  humanContextEnabled,
+  resolveHumanContext,
+  type HumanContext,
+} from "./config/humancontext.js";
 import { STALE_WINDOW_MS } from "./serve/options.js";
 import { nodeGit, resolveRepositoryTarget } from "./config/config.js";
 import {
@@ -240,6 +245,8 @@ export interface Runtime {
   updateCheck?: typeof cachedCheckForUpdate;
   /** Local-Git freshness of a source checkout (#309). */
   checkoutCheck?: typeof checkoutFreshness;
+  /** #664: the employing human for a briefing; absent: not resolved (no \`human\` field). */
+  briefingHuman?: (offline: boolean) => Promise<HumanContext>;
   /** First-use onboarding hint store (#351); tests inject it so no real cache is touched. */
   firstUseHint?: (project: string, version: string) => Promise<boolean>;
   stderr?: (text: string) => void;
@@ -1174,6 +1181,9 @@ export async function main(
   runtime: Runtime = {
     collect,
     collectShortlist,
+    ...(humanContextEnabled()
+      ? { briefingHuman: (offline: boolean) => resolveHumanContext(ghAuthContext, { offline }) }
+      : {}),
     currentRepository,
     dependencyReport,
     rest: ghRest,
@@ -2161,6 +2171,8 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
     await output(help);
     return 0;
   }
+  // #664: the employing human, once per run; offline reads use only the last-known record.
+  const human = runtime.briefingHuman ? await runtime.briefingHuman(!!options.offline) : undefined;
   /**
    * The briefing presentation for `repository`, resolved once: configuration, label filter and
    * one per-run permission cache shared by the shortlist's ranking passes and the final report.
@@ -2204,6 +2216,7 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
       : undefined;
     const presentOptions = {
       ...options,
+      ...(human ? { human } : {}),
       ...(labels ? { labels } : {}),
       process: guideProcess,
       engineClock: runtime.engineClock,
@@ -2414,6 +2427,7 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
             snapshot,
             {
               ...options,
+              ...(human ? { human } : {}),
               ...(labels ? { labels } : {}),
               ...(stale ? { stale } : {}),
               process: guideProcess,

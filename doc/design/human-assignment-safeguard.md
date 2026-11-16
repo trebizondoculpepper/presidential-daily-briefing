@@ -119,3 +119,21 @@ before acting; anything not available counts as changed. Guidance is read only f
 the requested repository, never borrowed from another. The reader assigns nothing and decides
 nothing; #673 uses it. The project's `CONTRIBUTORS.md` gained `Default: @trebizondoculpepper`,
 restating its existing prose default.
+
+Implementation note (#664, `src/config/humancontext.ts`): one resolver returns the employing human
+for the target host from the signed-in gh account (`ghAuthContext`, now in
+`src/github/ghauth.ts`), with explicit provenance:
+
+- `current`: read just now;
+- `last-known`: GitHub did not answer, so the last login recorded for that host is used, with its
+  observation time;
+- `unresolved`: with a reason. Missing or refused credentials are `unresolved`, never replaced by
+  an older login.
+
+Records are kept per OS user in the pdb cache, keyed by host. Agent name, git author, PR creator
+and display selectors are never inputs. Briefings carry the result as an additive `human` field
+plus one leading `Working for:` text line, identically through the CLI (offline: last known only),
+STDIO MCP and `pdb serve`. `pdb serve` has one execution-human context, the login read at startup.
+`PDB_NO_HUMAN_CONTEXT` disables resolution (tests, smoke and package runs). The optional
+per-OS-user shared-account override is not part of this slice. No assignment, claim or admission
+behaviour changes; #667/#668 consume the context.

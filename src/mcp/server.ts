@@ -22,6 +22,8 @@ import { collectShortlist } from "../github/shortlist.js";
 import { dependencyReport } from "../github/dependencies.js";
 import { impactGuidanceSummary } from "../estimation/impact.js";
 import { readBriefing, readDependencies } from "../briefing/service.js";
+import { humanContextEnabled, resolveHumanContext } from "../config/humancontext.js";
+import { ghAuthContext } from "../github/ghauth.js";
 import { onboardingDocument, onboardingInstructions } from "../briefing/onboarding.js";
 import { catchUp, catchUpLimits } from "../briefing/catchup.js";
 import { collectBriefing, WindowRefusal } from "../briefing/catchupcli.js";
@@ -883,6 +885,10 @@ function errorResult(
 /** Production boundaries: authenticated gh through the existing argument-array runners. */
 export const defaultRuntime = (options: McpOptions): McpRuntime => ({
   collect,
+  // #664: the employing human, from the signed-in gh account (last known during an outage).
+  ...(humanContextEnabled()
+    ? { humanContext: (signal?: AbortSignal) => resolveHumanContext(ghAuthContext, { signal }) }
+    : {}),
   // #368: the routine briefing hydrates only its shortlist.
   collectShortlist,
   dependencyReport,
