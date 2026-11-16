@@ -440,7 +440,9 @@ export function prStatus(
       !pr.reviews.pageInfo?.hasPreviousPage &&
       !pr.reviewThreads.pageInfo.hasNextPage,
   });
-  const declaredCoverage = policy.detail.effective === "codex-or-coderabbit";
+  const declaredCoverage =
+    policy.detail.effective === "codex-or-coderabbit" ||
+    policy.detail.effective === "codex-or-copilot";
   // A satisfied declared policy makes another provider's pending or stale state detail only.
   const optionalDetail = declaredCoverage && policy.headReviewed;
 
