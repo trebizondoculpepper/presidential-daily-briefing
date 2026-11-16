@@ -123,7 +123,7 @@ describe("quota page and API (#548)", () => {
       expect(page.status).toBe(200);
       expect(page.headers["content-security-policy"]).toBe(dashboardSecurityPolicy);
       expect(page.body).toContain("No reading has been taken yet");
-      expect(page.body).toContain("Account-wide: <strong>octo</strong>");
+      expect(page.body).toContain('Account-wide: <strong id="quota-account">octo</strong>');
       expect(page.body).not.toMatch(/<script>|<style|style=/);
       expect((await get(s.running.port, "/quotas.js")).body).toBe(quotasScript());
       // The passive diagnostics never read quotas either.
@@ -198,7 +198,9 @@ describe("quota page and API (#548)", () => {
       expect(switched.account).toBe("other-login");
       expect(switched.freshness).toBe("live");
       // The page names the login the server now verifies.
-      expect((await get(s.running.port, "/quotas")).body).toContain("<strong>other-login</strong>");
+      expect((await get(s.running.port, "/quotas")).body).toContain(
+        '<strong id="quota-account">other-login</strong>',
+      );
     } finally {
       await s.running.close();
     }
@@ -336,13 +338,16 @@ describe("quota browser script (#548)", () => {
     const element = (id: string) => ({
       id,
       innerHTML: "",
+      textContent: "",
       disabled: false,
       addEventListener(type: string, fn: () => void) {
         listeners.set(`${id}:${type}`, fn);
       },
     });
     const elements = new Map(
-      ["refresh", "state", "meters", "secondary", "notes"].map((id) => [id, element(id)]),
+      ["refresh", "state", "meters", "secondary", "notes", "quota-account", "quota-host"].map(
+        (id) => [id, element(id)],
+      ),
     );
     const fetched: { path: string; signal: AbortSignal }[] = [];
     const timers: (() => void)[] = [];
@@ -402,6 +407,37 @@ describe("quota browser script (#548)", () => {
     await settle();
     expect(b.elements.get("state")!.innerHTML).toContain("Refresh failed: INTERNAL");
     expect(b.elements.get("meters")!.innerHTML).toBe("");
+  });
+
+  it("updates the account header to the login the refresh read, and invalidates on failure", async () => {
+    const b = fakeBrowser();
+    runInNewContext(quotasScript(), b.sandbox);
+    await settle();
+    // Server-rendered default before any refresh.
+    expect(b.elements.get("quota-account")!.textContent).toBe("");
+    b.listeners.get("refresh:click")!();
+    b.pending[0]!({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        ...viewOf(body().resources),
+        account: "other-login",
+        accountVerified: true,
+        host: "github.com",
+      }),
+    });
+    await settle();
+    expect(b.elements.get("quota-account")!.textContent).toBe("other-login");
+    expect(b.elements.get("quota-host")!.textContent).toBe("github.com");
+    // A failed refresh must not leave a switched account named as current.
+    b.listeners.get("refresh:click")!();
+    b.pending[1]!({
+      ok: false,
+      status: 500,
+      json: async () => ({ error: { code: "INTERNAL", message: "Internal error." } }),
+    });
+    await settle();
+    expect(b.elements.get("quota-account")!.textContent).toBe("unverified login");
   });
 });
 

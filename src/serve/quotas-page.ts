@@ -104,7 +104,7 @@ export function quotasPage(query: URLSearchParams, account: QuotaContext): Quota
   const header = `<header>
 <h1>GitHub quotas</h1>
 <nav aria-label="Pages"><a href="/">Work</a> · <a href="/human">Human attention</a> · <a href="/rules">Project rules</a> · <a href="/setup">Agent setup</a> · <a href="/quotas" aria-current="page">Quotas</a></nav>
-<p class="scope">Account-wide: <strong>${escapeHtml(account.login ?? "unverified login")}</strong> on <strong>${escapeHtml(account.host)}</strong>. These quotas belong to the GitHub login, not to any project, and include other agents, machines and applications.</p>
+<p class="scope">Account-wide: <strong id="quota-account">${escapeHtml(account.login ?? "unverified login")}</strong> on <strong id="quota-host">${escapeHtml(account.host)}</strong>. These quotas belong to the GitHub login, not to any project, and include other agents, machines and applications.</p>
 </header>
 `;
   const footer = `<footer>Read-only. One GET /rate_limit per Refresh, through the same service as <code>pdb quotas</code>; nothing is fetched on open or in the background. Model-provider, Codex and CodeRabbit quotas are separate and not shown.</footer>
@@ -325,6 +325,20 @@ export function quotasClient(view: QuotaRenderers): void {
   const meters = byId("meters");
   const secondary = byId("secondary");
   const notes = byId("notes");
+  const account = byId("quota-account");
+  const host = byId("quota-host");
+  /**
+   * Reflect the account the last refresh actually read: a switched gh login is reported by the
+   * API on refresh, and the header must never name A while showing B's quotas. A failed refresh
+   * leaves the label unknown ("unverified login") rather than stale-A.
+   */
+  const updateAccount = (raw: unknown) => {
+    const view = (raw ?? {}) as { account?: unknown; accountVerified?: unknown; host?: unknown };
+    const login = view.account;
+    const holds = typeof login === "string" && login !== "" && view.accountVerified === true;
+    account.textContent = holds ? login : "unverified login";
+    if (typeof view.host === "string" && view.host !== "") host.textContent = view.host;
+  };
   let controller: AbortController | null = null;
   let generation = 0;
   /** The last successful view, redrawn locally as time passes; never re-fetched. */
@@ -366,6 +380,7 @@ export function quotasClient(view: QuotaRenderers): void {
     if (current !== generation) return;
     button.disabled = false;
     shown = failure ? null : body;
+    updateAccount(failure ? null : body);
     show(failure ? view.renderUnreachable(failure) : view.render(body, Date.now()));
   };
   button.addEventListener("click", () => void refresh());
