@@ -69,7 +69,9 @@ import {
   describeCheckout,
 } from "./updates/checkout.js";
 import { installedVersion, optOutEnv, legacyOptOutEnv, updateAdvisory } from "./updates/updates.js";
-import { defaultStaleHours } from "./workflow/team.js";
+import { defaultStaleHours, teamView } from "./workflow/team.js";
+import { readTeamActivity } from "./workflow/retainedfacts.js";
+import type { GraphQuery } from "./workflow/claims.js";
 import { migrationPlanText, planMigration } from "./github/migration.js";
 import {
   humanRole,
@@ -1593,9 +1595,20 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
             live: { query: runtime.query ?? ghQuery, rest },
           })
         : undefined;
+    // #413: claim activity, read live with the claim guard's own reader (bounded like team).
+    const claimAgents = teamView(snapshot, {}).agents.map((a) => a.agent);
+    const teamActivity =
+      rest && claimAgents.length
+        ? await readTeamActivity(snapshot, claimAgents, {
+            query: (runtime.query ?? ghQuery) as GraphQuery,
+            permission: permissionLookup(snapshot.repository, rest),
+          })
+        : undefined;
     const report = ticketDoctor(snapshot, {
       delivery,
       closedDrift,
+      ...(teamActivity?.activity.size ? { claimActivity: teamActivity.activity } : {}),
+      ...(teamActivity?.omitted.length ? { omittedAgents: teamActivity.omitted } : {}),
       staleHours,
       limit,
       now: runtime.now?.() ?? new Date(),
