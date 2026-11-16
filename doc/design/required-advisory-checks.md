@@ -16,9 +16,9 @@ change does not auto-merge or waive it.
 
 Requiredness is independent of outcome, review acceptance and evidence coverage.
 Never infer requiredness from a job's name, a green aggregate rollup, how long it
-has run, or a bot being rate-limited. The existing registered `verify` policy is
-an additional required floor, not a repository-specific special case or proof
-that no other checks are required.
+has run, or a bot being rate-limited. Under the superseding #679 workflow-policy boundary, no check name is a universal
+required floor. The selected target's completely read requirements, or an explicit
+policy bound to that target, determine its required set.
 
 ## Evidence model
 
@@ -34,8 +34,9 @@ or unknown. Visible checks alone cannot prove that an expected check never ran.
 Expected requirements bind context name and app/integration identity where the
 source specifies one. Normalize equivalent duplicate requirements without losing
 source attribution. Missing expected checks are unknown/not-yet-reported, never
-passed or advisory. A known empty GitHub-required set does not remove the
-registered workflow's required checks.
+passed or advisory. A known empty GitHub-required set proves that GitHub requires no status checks;
+it does not remove an explicit additional policy bound to that target. Never
+inherit this checkout's `verify` convention for another project.
 
 A pure shared classifier returns observed failures, required pending checks,
 advisory pending checks, missing required checks and unknown required evidence.
@@ -126,7 +127,7 @@ Cover both check runs and legacy statuses, including:
 - two PRs sharing a base coalesce metadata reads, distinct auth/base keys do not,
   budget exhaustion stays unknown and discovery makes no new metadata request.
 
-Report measured collection cost. Keep `verify` and review gates independent.
+Report measured collection cost. Keep required-check and review gates independent.
 Completing #343 requires delivered runtime and these tests; merging this document
 only makes that implementation ready.
 
@@ -160,3 +161,42 @@ collector implementation. No check settings or branch rules were mutated.
 - [GitHub check-run/status GraphQL objects](https://docs.github.com/en/graphql/reference/objects)
 - [Effective rules for a branch](https://docs.github.com/en/rest/repos/rules#get-rules-for-a-branch)
 - [Legacy status-check protection](https://docs.github.com/en/rest/branches/branch-protection#get-status-checks-protection)
+
+## Focused correction (#676, superseding implementation limitations)
+
+The #679 contract supersedes the historical universal `verify` floor and the
+unfinished-check-only collection optimization described above. Selected PR reads
+and acceptance candidates must acquire complete requirement evidence even when
+all visible checks are green or there are no visible checks. Discovery stays
+bounded and does not hydrate every discovered PR. Reuse one requirement collector
+for direct PR diagnostics and briefing; a direct `pdb pr N` read must not invent a
+requirement the briefing lacks.
+
+Normalize observed checks, expected contexts and app constraints, per-run
+requiredness, target head/base binding, and named coverage gaps into facts. A
+reported same-name check is not evidence for a requirement constrained to another
+app. Ambiguous duplicates, missing run identity, conflicting source answers,
+truncated connections and changed target bindings stay explicit unknown evidence.
+A new collection generation uses its own authenticated boundaries and does not
+reuse another account's requirement cache.
+
+Native clauses decide required-check readiness and emit diagnostic reasons and
+witnesses for missing, pending, failed or unread requirements. Expose a narrow
+typed pure query entry point over the shipped policy bundle for the direct PR
+report. The briefing uses the same clauses and normalized facts. The host may
+validate and associate identities and render results; it must not compute a
+parallel Boolean readiness verdict or duplicate a check-outcome policy in a
+TypeScript selector. All positive acceptance requires complete requirement and
+observed-check coverage. A completely known empty required set can satisfy the
+check gate; unknown requirements cannot. Keep observed failure follow-up,
+current-head review, draft, mergeability and permission safeguards independent.
+The PR report retains its factual groups; additive structured native reasons
+identify the matching rule and evidence. #707 owns migration of the remaining
+non-check diagnostic blocker policies.
+
+Regressions cover differently named requirements, actually required `verify`,
+complete empty requirements, missing/pending/failing/successful outcomes,
+app-qualified duplicates, stale head/base bindings and unread sources. Native
+rules-only cases prove the policy; injected collector cases prove coverage and
+bounded reads; representative direct-PR/briefing/transport cases prove parity.
+No changes to target branch protection or GitHub permissions are authorized.
