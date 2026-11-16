@@ -248,6 +248,45 @@ describe("human assignment evidence (#665)", () => {
     );
     expect(untypedPr.conflict).toBe(false);
     expect(untypedPr.effective).toBe("unknown");
+
+    const mixedUntypedIssue = baseIssue({
+      number: 5,
+      url: "https://github.com/o/r/issues/5",
+      assignees: {
+        nodes: [{ __typename: "User", login: "alice" }, { login: "bob" }],
+        pageInfo: { hasNextPage: false, endCursor: null },
+      },
+    });
+    const aliceBobIssue = baseIssue({
+      number: 6,
+      url: "https://github.com/o/r/issues/6",
+      assignees: {
+        nodes: [
+          { __typename: "User", login: "alice" },
+          { __typename: "User", login: "bob" },
+        ],
+        pageInfo: { hasNextPage: false, endCursor: null },
+      },
+    });
+    const mapWithMixed = new Map<string, Issue>([
+      [mixedUntypedIssue.url, mixedUntypedIssue],
+      [aliceBobIssue.url, aliceBobIssue],
+    ]);
+    const mixedPr = collectAssignmentEvidence(
+      basePr({
+        closingIssuesReferences: {
+          nodes: [
+            { number: 5, url: mixedUntypedIssue.url },
+            { number: 6, url: aliceBobIssue.url },
+          ],
+          pageInfo: { hasNextPage: false, endCursor: null },
+        },
+      }),
+      mapWithMixed,
+      { employingHuman: "alice" },
+    );
+    expect(mixedPr.conflict).toBe(false);
+    expect(mixedPr.effective).toBe("matching");
   });
 
   it("preserves per-subject observation times from cached shortlist coverage", () => {

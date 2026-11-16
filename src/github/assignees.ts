@@ -190,36 +190,36 @@ export function collectAssignmentEvidence(
     .filter((a): a is SubjectAssignment => a !== null);
 
   // Detect conflicting human ownership across resolved linked issues (or between PR and issue).
+  // Only compare sets whose account types are completely known (state !== "unknown").
+  const knownHumanStates = resolvedStates.filter(
+    (a) => a.completeness === "complete" && a.untyped.length === 0 && a.humans.length > 0,
+  );
   const distinctHumanSets = new Set(
-    resolvedStates
-      .filter((a) => a.completeness === "complete" && a.humans.length > 0)
-      .map((a) =>
-        a.humans
-          .map((h) => h.toLowerCase())
-          .sort()
-          .join(","),
-      ),
+    knownHumanStates.map((a) =>
+      a.humans
+        .map((h) => h.toLowerCase())
+        .sort()
+        .join(","),
+    ),
   );
   // Only positively established human-unassigned states (unassigned / non-human) conflict with
   // assigned states; missing account-type evidence (state === "unknown") stays unknown.
   const hasAssignedAndUnassigned =
-    resolvedStates.some((a) => a.completeness === "complete" && a.humans.length > 0) &&
-    resolvedStates.some((a) => a.state === "unassigned");
+    knownHumanStates.length > 0 && resolvedStates.some((a) => a.state === "unassigned");
   const directVsLinkedConflict =
     direct.completeness === "complete" &&
+    direct.untyped.length === 0 &&
     direct.humans.length > 0 &&
-    resolvedStates.some(
+    knownHumanStates.some(
       (a) =>
-        a.completeness === "complete" &&
-        a.humans.length > 0 &&
         a.humans
           .map((h) => h.toLowerCase())
           .sort()
           .join(",") !==
-          direct.humans
-            .map((h) => h.toLowerCase())
-            .sort()
-            .join(","),
+        direct.humans
+          .map((h) => h.toLowerCase())
+          .sort()
+          .join(","),
     );
   const conflict = distinctHumanSets.size > 1 || hasAssignedAndUnassigned || directVsLinkedConflict;
 
