@@ -18,6 +18,7 @@ import { budgetBytes } from "./bounded.js";
 import { RateLimitError } from "../github/dependencies.js";
 import { closingPrEvidence } from "../briefing/ranking.js";
 import { rateLimitFailure } from "../github/github.js";
+import { deliveryMarker } from "../workflow/delivery.js";
 import type { McpRuntime } from "../mcp.js";
 import type { Issue, Page, PullRequest, Snapshot } from "../github/types.js";
 
@@ -1074,5 +1075,80 @@ describe("polling startup binds only an explicit startup target (#271, #291)", (
         (f) => f.kind === "review-feedback",
       ),
     ).toEqual([]);
+  });
+
+  it("wires reviewPolicy and delivery responsibility into bindPolling production watcher (#696)", async () => {
+    const pull = pr({ threads: [] });
+    pull.labels = page([]);
+    pull.headRefOid = "h40";
+    pull.comments = page([]);
+    const linkedIssue = issue(1, []);
+    linkedIssue.comments = page([
+      {
+        databaseId: 1001,
+        url: `https://github.com/${repo}/issues/1#issuecomment-1`,
+        author: { __typename: "User", login: "alice" },
+        lastEditedAt: null,
+        includesCreatedEdit: false,
+        body: deliveryMarker({
+          v: 1,
+          op: "submit",
+          opId: "op-1",
+          repository: repo,
+          issue: 1,
+          agent: "alice",
+          issuedAt: "2026-11-12T09:00:00Z",
+          membership: "complete",
+          deliverables: [
+            {
+              kind: "pr",
+              repository: repo,
+              number: 40,
+              nodeId: "PR_40",
+              target: { repository: repo, branch: "main" },
+            },
+          ],
+        }),
+        createdAt: "2026-11-12T09:00:00Z",
+      },
+    ]);
+    const snap0 = snap([linkedIssue], [pull]);
+    const pullWithFinding = pr({ threads: [] });
+    pullWithFinding.labels = page([]);
+    pullWithFinding.headRefOid = "h40";
+    pullWithFinding.comments = page([
+      {
+        author: { __typename: "Bot", login: "chatgpt-codex-connector" },
+        body: '<!-- codex-review-state:v1 {"code_review":{"status":"completed","commit_sha":"h40","has_unresolved_findings":true}} -->\n1 finding',
+        createdAt: new Date(start + minute).toISOString(),
+        url: `https://github.com/${repo}/pull/40#issuecomment-99`,
+      },
+    ]);
+    const snap1 = snap([linkedIssue], [pullWithFinding]);
+    let call = 0;
+    const b = boundaries(async () => repo);
+    b.runtime.collect = async () => (call++ === 0 ? snap0 : snap1);
+    b.runtime.reviewPolicy = { state: "declared", policy: "codex-or-copilot" };
+    b.runtime.rest = (async () => ({ status: 200, body: { permission: "write" } })) as never;
+    const watcher = await bindPolling(
+      mcpArguments(["--repo", repo, "--poll"]),
+      b.runtime,
+      b.time.clock,
+    );
+    expect(watcher).toBeDefined();
+    watcher!.start();
+    await b.time.advance(0);
+    await b.time.advance(45 * minute);
+    watcher!.stop();
+    expect(call).toBe(2);
+    expect(watcher!.status().lastOutcome).toBe("complete");
+    const events = watcher!.log.read(undefined, 20).items;
+    expect(
+      events.map((e) => ({ kind: e.kind, evidence: e.evidence, destinations: e.destinations })),
+    ).toContainEqual({
+      kind: "review-feedback",
+      evidence: [`https://github.com/${repo}/pull/40#issuecomment-99`],
+      destinations: ["alice"],
+    });
   });
 });

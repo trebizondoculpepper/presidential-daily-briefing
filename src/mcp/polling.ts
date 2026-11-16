@@ -14,6 +14,7 @@ import { RateLimitError } from "../github/dependencies.js";
 import type { collect as collectFn } from "../github/github.js";
 import { closingPrEvidence, pickupEligibility } from "../briefing/ranking.js";
 import type { Issue, Snapshot } from "../github/types.js";
+import { codexMarker } from "../workflow/reviewevidence.js";
 import { reviewProviders, snapshotPolicyReview } from "../workflow/reviewpolicy.js";
 
 export const eventKinds = [
@@ -257,18 +258,42 @@ export function observe(
       });
     }
     const policy = snapshotPolicyReview(pr, snapshot.warnings, snapshot.reviewPolicy);
-    for (const finding of policy.detail.findings) {
-      put(subject, {
-        key: `finding/${finding.provider}/${head}/${finding.source}`,
-        kind: "review-feedback",
-        evidence: [finding.source],
-        sourceEventAt: null,
-        currentSha: head,
-        reviewedSha: head,
-        reason: `${reviewProviders[finding.provider].label} reports unresolved findings on the current head.`,
-        destinations: routed,
-        origin: null,
+    if (policy.detail.findings.length > 0) {
+      for (const finding of policy.detail.findings) {
+        put(subject, {
+          key: `finding/${finding.provider}/${head}/${finding.source}`,
+          kind: "review-feedback",
+          evidence: [finding.source],
+          sourceEventAt: null,
+          currentSha: head,
+          reviewedSha: head,
+          reason: `${reviewProviders[finding.provider].label} reports unresolved findings on the current head.`,
+          destinations: routed,
+          origin: null,
+        });
+      }
+    } else if (policy.headFindings) {
+      // Legacy review policy reports headFindings without populating detail.findings.
+      const receiptComments = (pr.comments?.nodes ?? []).filter((c) => {
+        const state = codexMarker(c.body)?.code_review;
+        return state?.commit_sha === head && state.has_unresolved_findings === true;
       });
+      const sources = receiptComments.length
+        ? receiptComments.map((c) => c.url ?? pr.url)
+        : [pr.url];
+      for (const source of sources) {
+        put(subject, {
+          key: `finding/codex/${head}/${source}`,
+          kind: "review-feedback",
+          evidence: [source],
+          sourceEventAt: null,
+          currentSha: head,
+          reviewedSha: head,
+          reason: "Codex reports unresolved findings on the current head.",
+          destinations: routed,
+          origin: null,
+        });
+      }
     }
     for (const review of pr.reviews.nodes)
       if (workflow.changesRequested.includes(review.state) && review.url)
