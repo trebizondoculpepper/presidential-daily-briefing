@@ -158,3 +158,12 @@ lock conflicts and temp-file exclusion. Read-only get/Doctor/briefing/MCP calls 
 zero filesystem writes. CLI/MCP/serve focus and onboarding diagnostics agree.
 Package smoke uses temporary projects/configuration only; no live identity files
 or credentials are committed or changed to test the feature.
+
+## Automatic first-use extension (#677)
+
+[effective-identity.md](effective-identity.md) defines the shared preparation service, verified
+active-session binding metadata and visible automatic setup for normal commands. It supersedes
+this document's session-selection prohibition only for those verified bindings, and its blanket
+non-initializing briefing rule only for normal first-use operations. Explicit read-only operations,
+dry-run, display selection and remotely supplied identity strings remain non-initializing. The
+existing identity store, initializer and safety/unknown-key guarantees remain the foundation.
