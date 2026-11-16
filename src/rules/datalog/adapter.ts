@@ -141,6 +141,17 @@ function codexState(
     return null;
   }
 }
+function codexReceiptCommit(body: string, head: string): string | null {
+  if (!/<!--\s*codex-review-receipt:v1\s*-->/.test(body)) return null;
+  const sha = /\*\*Reviewed commit:\*\*\s*`([0-9a-f]{7,40})`/i.exec(body)?.[1];
+  if (!sha || !/Codex Review: Didn't find any major issues\b/.test(body)) return null;
+  const matches =
+    sha === head ||
+    (/^[0-9a-f]{7,39}$/i.test(sha) &&
+      /^[0-9a-f]{40}$/i.test(head) &&
+      head.toLowerCase().startsWith(sha.toLowerCase()));
+  return matches ? head : null;
+}
 const emptyMetric = { state: "unknown" as const, size: null, provenance: null };
 const subjectsOf = (s: Snapshot) => [...s.issues, ...s.pullRequests];
 function normalize(
@@ -301,14 +312,24 @@ function normalize(
       }
       for (const c of pr.comments?.nodes ?? []) {
         if ((c.author?.login ?? "").replace(/\[bot\]$/, "") !== codexAccount) continue;
-        const state = codexState(c.body ?? "");
-        if (!state) continue;
-        const r = nextId++;
-        put(id, "receipt", r);
-        if (typeof state.commit_sha === "string") put(r, "receipt-commit", state.commit_sha);
-        if (typeof state.status === "string") put(r, "receipt-status", state.status);
-        if (typeof state.has_unresolved_findings === "boolean")
-          put(r, "receipt-findings", state.has_unresolved_findings);
+        const body = c.body ?? "";
+        const state = codexState(body);
+        if (state) {
+          const r = nextId++;
+          put(id, "receipt", r);
+          if (typeof state.commit_sha === "string") put(r, "receipt-commit", state.commit_sha);
+          if (typeof state.status === "string") put(r, "receipt-status", state.status);
+          if (typeof state.has_unresolved_findings === "boolean")
+            put(r, "receipt-findings", state.has_unresolved_findings);
+        }
+        const receiptHead = codexReceiptCommit(body, pr.headRefOid);
+        if (receiptHead) {
+          const r = nextId++;
+          put(id, "receipt", r);
+          put(r, "receipt-commit", receiptHead);
+          put(r, "receipt-status", "completed");
+          put(r, "receipt-findings", false);
+        }
       }
       for (const review of options.providerReviews?.get(pr.url) ?? []) {
         const r = nextId++;

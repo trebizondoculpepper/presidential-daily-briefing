@@ -10,7 +10,7 @@
  * approval.
  */
 import { workflow } from "./definition.js";
-import { codexMarker } from "./reviewevidence.js";
+import { codexCommitMatches, codexMarker, codexReviewReceipt } from "./reviewevidence.js";
 import type { CodexMarker } from "./reviewevidence.js";
 import {
   evaluateReviewPolicy,
@@ -227,7 +227,9 @@ export function classifyCheck(check: CheckContext): CheckClass {
 }
 
 const isBot = (login: string | undefined): boolean =>
-  /\[bot\]$|^coderabbitai$|^chatgpt-codex-connector$/.test(login ?? "");
+  /\[bot\]$|^coderabbitai$|^chatgpt-codex-connector$|^copilot-pull-request-reviewer$/.test(
+    login ?? "",
+  );
 const requestPattern = /@(codex|coderabbitai)\s+review\b/i;
 /** The account that answers each review request; other bots never count as an answer. */
 const reviewerFor: Record<string, string> = {
@@ -324,6 +326,11 @@ export function prStatus(
   const requested =
     reviewerFor[(requestPattern.exec(lastRequest?.body ?? "")?.[1] ?? "").toLowerCase()];
   const answerer = (login: string | undefined): string => (login ?? "").replace(/\[bot\]$/, "");
+  const codexCleanReceipt = comments.some((c) => {
+    if (answerer(c.author?.login) !== reviewerFor.codex) return false;
+    const r = codexReviewReceipt(c.body);
+    return Boolean(r?.clean && codexCommitMatches(head, r.commitSha));
+  });
   const newerReceipt = (at: string): boolean =>
     receipts.some((r) => answerer(r.by) === requested && (r.at ?? "") > at && !r.codexState) ||
     // A formal review by the requested service also answers the request.
@@ -337,8 +344,7 @@ export function prStatus(
         // The Codex state marker answers only a Codex request; other services need their own reply.
         status:
           requested === reviewerFor.codex &&
-          codex?.commit_sha === head &&
-          codex.status === "completed"
+          ((codex?.commit_sha === head && codex.status === "completed") || codexCleanReceipt)
             ? "current head reviewed (Codex)"
             : requested === reviewerFor.codex && codex?.commit_sha === head
               ? `review in progress on the current head (Codex: ${codex.status})`
@@ -457,7 +463,8 @@ export function prStatus(
       !optionalDetail &&
       codex &&
       codex.commit_sha !== head &&
-      // A formal Codex review of the current head covers it even if the marker comment is stale.
+      !codexCleanReceipt &&
+      // A formal Codex review or clean receipt of the current head covers it even if the marker comment is stale.
       !pr.reviews.nodes.some(
         (r) => answerer(r.author?.login) === reviewerFor.codex && r.commit?.oid === head,
       )
@@ -491,7 +498,12 @@ export function prStatus(
     else if (request?.status.startsWith("review in progress"))
       blockers.push(`waiting for the requested review to finish (${request.status})`);
     // An automatically started review is still running even when nobody asked for it.
-    else if (codex?.commit_sha === head && codex.status && codex.status !== "completed")
+    else if (
+      !codexCleanReceipt &&
+      codex?.commit_sha === head &&
+      codex.status &&
+      codex.status !== "completed"
+    )
       blockers.push(`waiting for Codex's review of the current head to finish (${codex.status})`);
   }
 

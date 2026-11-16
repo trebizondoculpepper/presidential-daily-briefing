@@ -619,4 +619,76 @@ describe("pr status: bot instructions are not review requests", () => {
     expect(r.reviewRequest!.url).toBe("a");
     expect(r.reviewRequest!.status).toBe("a reviewer has posted since the request");
   });
+
+  it("reconciles a stale Codex running summary when a clean codex-review-receipt covers the head (#647)", async () => {
+    const { prStatus } = await import("./prstatus.js");
+    const head = "c0d70d5e471bb6d944d1abc5dbd61e0286703cc6";
+    const pr = {
+      number: 646,
+      url: "https://github.com/o/r/pull/646",
+      title: "Fix",
+      state: "OPEN",
+      updatedAt: "2026-11-15T22:07:00Z",
+      isDraft: false,
+      merged: false,
+      mergeable: "MERGEABLE",
+      mergeStateStatus: "CLEAN",
+      reviewDecision: null,
+      headRefName: "feat/x",
+      headRefOid: head,
+      baseRefName: "main",
+      commits: {
+        nodes: [
+          {
+            commit: {
+              oid: head,
+              statusCheckRollup: {
+                contexts: {
+                  nodes: [
+                    {
+                      __typename: "CheckRun",
+                      name: "verify",
+                      status: "COMPLETED",
+                      conclusion: "SUCCESS",
+                      startedAt: "2026-11-15T22:05:00Z",
+                    },
+                  ],
+                  pageInfo: { hasNextPage: false },
+                },
+              },
+            },
+          },
+        ],
+      },
+      reviews: { nodes: [], pageInfo: { hasPreviousPage: false } },
+      reviewThreads: { nodes: [], pageInfo: { hasNextPage: false } },
+      comments: {
+        nodes: [
+          {
+            author: { login: "trebizondoculpepper" },
+            body: "@codex review",
+            createdAt: "2026-11-15T22:05:50Z",
+            url: "req",
+          },
+          {
+            author: { __typename: "Bot", login: "chatgpt-codex-connector" },
+            body: `<!-- codex-review-state:v1 {"code_review":{"commit_sha":"${head}","status":"running","has_unresolved_findings":null}} -->`,
+            createdAt: "2026-11-15T22:06:01Z",
+            url: "summary",
+          },
+          {
+            author: { __typename: "Bot", login: "chatgpt-codex-connector" },
+            body: `<!-- codex-review-receipt:v1 -->\n\nCodex Review: Didn't find any major issues. Bravo.\n\n**Reviewed commit:** \`${head.slice(0, 10)}\``,
+            createdAt: "2026-11-15T22:06:55Z",
+            url: "receipt",
+          },
+        ],
+        pageInfo: { hasPreviousPage: false },
+      },
+      closingIssuesReferences: { nodes: [], pageInfo: { hasNextPage: false } },
+    };
+    const r = prStatus(repo, pr);
+    expect(r.reviewRequest!.status).toBe("current head reviewed (Codex)");
+    expect(r.blockers).toEqual([]);
+  });
 });
