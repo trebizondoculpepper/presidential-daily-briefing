@@ -103,7 +103,7 @@ interface ServedPage {
   path: string; // e.g. "/"
   label: string; // toolbar text, e.g. "Work"
   scope: PageScope;
-  /** Every accepted query key; `repo` is implied except on account pages. */
+  /** Every accepted query key; `repo` is implied across shell pages (validated on account pages as navigation context only). */
   parameters: readonly string[];
   /** Keys this page carries forward to the same keys on another page (see Carry rules). */
   carries: readonly string[];
@@ -124,7 +124,7 @@ interface ServedPage {
 | Agents          | `/activity`    | project                                            | `repo`, `window`                                                | Proposed (#456, [read views](serve-dashboard-read-views.md))                            |
 | Diagnostics     | `/diagnostics` | project-optional (the Ticket Doctor tab needs one) | `repo`, `tab`                                                   | Proposed ([contract](serve-diagnostics-page.md), #585)                                  |
 | Settings        | `/settings`    | global-or-project                                  | `repo`                                                          | Proposed ([contract](serve-settings-page.md), #584)                                     |
-| Quotas          | `/quotas`      | account                                            | none                                                            | Proposed ([contract](github-quotas.md), #548)                                           |
+| Quotas          | `/quotas`      | account                                            | `repo`, `role`, `agent` (navigation context only)               | Proposed ([contract](github-quotas.md), #548; context retention #732)                   |
 
 The toolbar never links to a page whose `shipped` flag is false. An unshipped route keeps answering 404 as it does today, so the toolbar has no dead links. When a page ticket ships, it adds its registry entry and its route in the same PR.
 
@@ -156,9 +156,9 @@ Every toolbar and cross-page link is built by one helper, `pageHref(page, select
 
 A rule decides which parameters follow the user from one page to another:
 
-- `repo` is carried to every project, project-optional and global-or-project page. It is never carried to account pages, and links to Quotas have no query.
+- `repo` is carried across every shell page—including account pages such as Quotas—as navigation context so returning to Work, Rules, or Setup preserves the selected project. Account pages still label their data as account-wide (`Account-wide: your GitHub login's quotas, not a project's`), validate `repo` against the served allowlist, omit the project menu, and never attribute account data to a repository.
 - On Settings without `repo` (Global), links to other pages carry no `repo`. Global is a Settings scope, not a project.
-- `role` and `agent` are carried only between Work and Ticket detail, where they mean the same view. Every other page drops them. Setup's `role` is a different setting (the onboarding prompt's role) and is never filled in from Work's role.
+- `role` and `agent` are carried between Work, Ticket detail, and through account pages (such as Quotas) as navigation context so returning to Work or Ticket preserves the same view. Setup's `role` is a different setting (the onboarding prompt's role) and is never filled in from Work's role.
 - Page-specific keys (`n`, `rule`, `window`, `tab`, metric windows and the like) are never carried to another page.
 - An identity is never inferred. `agent` appears only when the user entered or followed it. The shell never reads `pdb.toml`, a harness identity or the GitHub login to fill it in.
 
@@ -247,7 +247,7 @@ It does not write its own header, project list, selector or parameter allowlist.
 
 1. **Shell module.** `src/serve/shell.ts` with the registry for the four shipped pages, `resolvePageSelection`, `pageHref`, `renderToolbar` and `shellPage`, plus the toolbar CSS added to `dashboardCss`. Unit tests:
    - every selection state in the table, including a case-variant repo, an empty repo, a repeated key and an unknown key;
-   - carry rules: `repo` on every project page, nothing on Quotas or from Global, `role` and `agent` only between Work and Ticket, page keys never carried;
+   - carry rules: `repo` across every shell page (including Quotas as navigation context, nothing from Global), `role` and `agent` between Work, Ticket, and Quotas, page keys never carried;
    - link encoding with hostile values (`<`, `"`, `&`, `#`, `?`, `/`, spaces and non-ASCII);
    - `aria-current` on the active page and the current project, with no link to an unshipped page;
    - a spy on an injected GitHub runtime and cache shows zero calls while rendering any toolbar state.
