@@ -348,6 +348,29 @@ describe("quota renderers (#548)", () => {
     expect(later.meters).toContain("reset passed; refresh needed");
   });
 
+  it("ages the displayed reading on local redraws and qualifies it stale past the TTL", () => {
+    // The reading was observed at T0; the local timer re-renders it two minutes later, before
+    // any bucket resets (30 min). It must show the derived age and a stale qualification rather
+    // than still claiming "live, 0s old when read".
+    const soon = view.render(viewOf(body().resources), T0);
+    expect(soon.state).toContain("live");
+    expect(soon.state).toContain("0s old");
+    const later = view.render(viewOf(body().resources), T0 + 2 * 60_000);
+    expect(later.state).toContain("stale");
+    expect(later.state).toContain("120s old");
+    expect(later.notes).toContain("older than the 60-second freshness window");
+  });
+
+  it("keeps a clock-rollback age unknown and never shows it fresh", () => {
+    // A redraw whose rendering clock is earlier than the observation time is a rollback: the
+    // age is unknown ("age unknown"), not "0s old", and a live reading must not look fresh.
+    const rolledBack = view.render(viewOf(body().resources), T0 - 10_000);
+    expect(rolledBack.state).toContain("age unknown");
+    expect(rolledBack.state).not.toContain("0s old");
+    expect(rolledBack.state).toContain("stale");
+    expect(rolledBack.notes).toContain("age is unknown after a clock change");
+  });
+
   it("escapes every string and states unreachable failures without numbers", () => {
     const parts = view.renderUnreachable("TypeError: <img src=x onerror=alert(1)>");
     expect(parts.state).not.toContain("<img");
