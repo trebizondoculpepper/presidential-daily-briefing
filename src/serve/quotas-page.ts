@@ -257,7 +257,7 @@ ${meter}
       ? `<ul>${events
           .map(
             (e) =>
-              `<li>${escapeHtml(str(e.observedAt))}: ${escapeHtml(str(e.category))} (${escapeHtml(str(e.operation))})${e.retryAt ? `; retry not before ${escapeHtml(str(e.retryAt))}` : ""}</li>`,
+              `<li>${escapeHtml(str(e.observedAt))}: ${escapeHtml(str(e.category))} (${escapeHtml(str(e.operation))})${e.retryAt ? `; retry not before ${escapeHtml(str(e.retryAt))}` : typeof e.retryAfterSeconds === "number" ? `; GitHub asked to wait ${escapeHtml(String(e.retryAfterSeconds))}s` : ""}</li>`,
           )
           .join(
             "",

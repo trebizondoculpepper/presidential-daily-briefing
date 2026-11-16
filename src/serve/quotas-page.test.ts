@@ -414,7 +414,7 @@ describe("quota telemetry from the serve error ring (#548)", () => {
       initialAuth: { host: "github.com", login: "octo" },
     });
     const ring = (cache as unknown as { errors: unknown[] }).errors;
-    const event = (auth: string, category: string | null, remaining: number) => ({
+    const event = (auth: string, category: string | null, remaining: number, retry = {}) => ({
       id: "e",
       repository: "o/r",
       auth,
@@ -429,17 +429,39 @@ describe("quota telemetry from the serve error ring (#548)", () => {
         limit: 5000,
         remaining,
         resetAt: new Date(T0 + 60_000).toISOString(),
+        retryAfterSeconds: null,
+        retryAt: null,
+        ...retry,
       },
     });
     ring.push(
       event("github.com/octo", "rate-limited", 0),
       event("github.com/other", "rate-limited", 0),
+      event("github.com/octo", "secondary-rate-limit", 42, {
+        retryAfterSeconds: 30,
+        retryAt: null,
+      }),
     );
     ring.push(event("github.com/octo", null, 42));
     const mine = cache.quotaTelemetry({ host: "github.com", login: "octo" })!;
-    expect(mine.events).toHaveLength(1);
+    expect(mine.events).toHaveLength(2);
+    expect(mine.events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          category: "rate-limited",
+          retryAfterSeconds: null,
+          retryAt: new Date(T0 + 60_000).toISOString(),
+        }),
+        expect.objectContaining({
+          category: "secondary-rate-limit",
+          retryAfterSeconds: 30,
+          retryAt: null,
+        }),
+      ]),
+    );
     expect(mine.observations).toEqual([
       expect.objectContaining({ resource: "graphql", remaining: 0, operation: "collect" }),
+      expect.objectContaining({ resource: "graphql", remaining: 42 }),
       expect.objectContaining({ resource: "graphql", remaining: 42 }),
     ]);
     expect(cache.quotaTelemetry({ host: "github.com", login: null })).toBeNull();

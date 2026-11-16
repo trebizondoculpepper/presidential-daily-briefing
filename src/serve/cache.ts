@@ -305,6 +305,8 @@ export class ServeCache {
             limit: num(o.limit),
             remaining: num(o.remaining),
             resetAt: typeof o.resetAt === "string" ? o.resetAt : null,
+            retryAfterSeconds: num(o.retryAfterSeconds),
+            retryAt: typeof o.retryAt === "string" ? o.retryAt : null,
           }
         : null,
     });
@@ -448,8 +450,8 @@ export class ServeCache {
           category: e.category as QuotaEvent["category"],
           observedAt: e.at,
           operation: e.operation,
-          retryAfterSeconds: null,
-          retryAt: e.quota?.remaining === 0 ? e.quota.resetAt : null,
+          retryAfterSeconds: e.quota?.retryAfterSeconds ?? null,
+          retryAt: e.quota?.retryAt ?? (e.quota?.remaining === 0 ? e.quota.resetAt : null),
           resource: e.quota?.resource ?? null,
           limit: e.quota?.limit ?? null,
           remaining: e.quota?.remaining ?? null,
