@@ -30,7 +30,7 @@ const pr = (over: Record<string, unknown> = {}) => ({
   base: "main",
   intendedTarget: null,
   targetMismatch: null,
-  checks: { verify: "passed", counts: { passed: 3 } },
+  checks: { verify: "missing", requirements: "satisfied", counts: { passed: 3 } },
   review: { decision: null, headReviewed: true, headFindings: false, unresolvedThreads: 0 },
   mergeable: "MERGEABLE",
   blockers: [],
@@ -127,7 +127,7 @@ describe("ticket detail renderers (#454)", () => {
     expect(html).toContain('data-delivery="pending"');
     expect(html).toContain("One member open.");
     expect(html).toContain("current head reviewed");
-    expect(html).toContain("checks passed");
+    expect(html).toContain("checks satisfied");
     expect(html).toContain("Waiting for review.");
     expect(html).toContain("<code>pdb --issue 1 --repo o/r --json</code>");
     expect(html).toContain('data-pr="9"');

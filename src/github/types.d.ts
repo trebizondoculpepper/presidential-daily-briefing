@@ -18,11 +18,13 @@ export type Comment = {
   editor?: { __typename?: string; login?: string } | null;
 };
 export type Check = {
+  __typename?: string;
+  isRequired?: boolean | null;
   name?: string;
   context?: string;
-  status?: string;
+  status?: string | null;
   conclusion?: string | null;
-  state?: string;
+  state?: string | null;
   detailsUrl?: string | null;
   targetUrl?: string | null;
   /** CheckRun database id: a stable per-run identity (StatusContexts have none). */

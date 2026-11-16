@@ -11,6 +11,8 @@ import type { Schema } from "datascript";
  * query the engine never runs, so a rename cannot surface as a runtime failure.
  */
 export const requiredQueries = [
+  "check-ready",
+  "check-blockers",
   "q0",
   "declared-overrides",
   "q1",

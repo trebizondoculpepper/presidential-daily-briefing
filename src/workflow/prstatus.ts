@@ -1,3 +1,9 @@
+import { evaluateCheckPolicy } from "../rules/datalog/engine.js";
+import {
+  hydrateRequiredChecks,
+  requiredCheckEvidence,
+  type RequiredChecks,
+} from "../github/requiredchecks.js";
 /**
  * "Why is this pull request not progressing?" in one operation (#59).
  * Contract: doc/design/diagnostics.md, "#59".
@@ -21,13 +27,14 @@ import {
 import type { DeclaredReviewPolicy, ReviewPolicyDetail } from "./reviewpolicy.js";
 export { codexMarker };
 export type { CodexMarker, CodexReviewState } from "./reviewevidence.js";
-import { ghQuery, prop, selected, SubjectUnavailable } from "../github/github.js";
-import type { Query } from "../github/github.js";
+import { ghQuery, ghRest, prop, selected, SubjectUnavailable } from "../github/github.js";
+import type { Query, Rest } from "../github/github.js";
 import type { ReadMeter } from "../github/readplan.js";
 
 type Login = { __typename?: string; login: string } | null;
 type PageInfo = { hasNextPage?: boolean; hasPreviousPage?: boolean };
 type CheckContext = {
+  databaseId?: number | null;
   __typename?: string;
   name?: string;
   context?: string;
@@ -39,7 +46,7 @@ type CheckContext = {
   startedAt?: string | null;
   completedAt?: string | null;
   /** The GitHub App that published a check run: provider identity, never its display name. */
-  checkSuite?: { app: { slug: string } | null } | null;
+  checkSuite?: { app: { slug: string; databaseId?: number } | null } | null;
   /** Whether GitHub requires this check for this PR (#343); null/absent is unknown. */
   isRequired?: boolean | null;
 };
@@ -69,6 +76,7 @@ type LinkedIssueNode = {
 };
 /** The pull request as selected by `query` below. */
 export type PullRequestNode = {
+  requiredChecks?: RequiredChecks;
   number: number;
   title: string;
   url: string;
@@ -138,7 +146,17 @@ export type PrStatusReport = {
     updatedAt: string;
   };
   checks: {
+    /** Deprecated singular convention; null when requirements are a target-specific set. */
     required: { name: string; class: CheckClass; outcome: string; url: string } | null;
+    requirements?: {
+      expected: RequiredChecks["expected"];
+      complete: boolean;
+      gaps: string[];
+      head: string | null;
+      base: string | null;
+    };
+    policy?: ReturnType<typeof evaluateCheckPolicy>;
+    evidence?: ReturnType<typeof requiredCheckEvidence>;
     counts: Record<string, number>;
     problems: { name: string; class: CheckClass; outcome: string; url: string; note?: string }[];
     omittedProblems: number;
@@ -194,7 +212,7 @@ export type PrStatusReport = {
 };
 
 const query = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){number title url state isDraft merged mergeable mergeStateStatus reviewDecision headRefOid headRefName baseRefName updatedAt
-commits(last:1){nodes{commit{oid committedDate statusCheckRollup{state contexts(first:100){nodes{__typename ... on CheckRun{name status conclusion detailsUrl startedAt completedAt isRequired(pullRequestNumber:$number) checkSuite{app{slug}}} ... on StatusContext{context state targetUrl isRequired(pullRequestNumber:$number)}} pageInfo{hasNextPage}}}}}}
+commits(last:1){nodes{commit{oid committedDate statusCheckRollup{state contexts(first:100){nodes{__typename ... on CheckRun{name databaseId status conclusion detailsUrl startedAt completedAt isRequired(pullRequestNumber:$number) checkSuite{app{slug databaseId}}} ... on StatusContext{context state targetUrl isRequired(pullRequestNumber:$number)}} pageInfo{hasNextPage}}}}}}
 reviews(last:50){nodes{author{__typename login} state submittedAt url commit{oid}} pageInfo{hasPreviousPage}}
 reviewThreads(first:100){nodes{isResolved isOutdated path line first:comments(first:1){totalCount nodes{author{__typename login} body createdAt url}} latest:comments(last:1){nodes{author{login} createdAt url}}} pageInfo{hasNextPage}}
 comments(last:100){nodes{author{__typename login} body createdAt url} pageInfo{hasPreviousPage}}
@@ -249,16 +267,23 @@ export function prStatus(
 ): PrStatusReport {
   const head = pr.headRefOid;
   const rollup = pr.commits.nodes[0]?.commit.statusCheckRollup ?? null;
-  const contexts = (rollup?.contexts.nodes ?? []).map((c) => ({
+  const checkEvidence = requiredCheckEvidence(pr);
+  const contexts = (rollup?.contexts.nodes ?? []).map((c, index) => ({
     name: c.name ?? c.context ?? "unnamed",
     outcome: c.conclusion ?? c.state ?? c.status ?? "UNKNOWN",
-    class: ((cls) => (cls === "pending" && c.isRequired === false ? "advisory-pending" : cls))(
-      classifyCheck(c),
-    ) as CheckClass,
+    class: ((cls) =>
+      cls === "pending" && checkEvidence.checks[index]?.required === "advisory"
+        ? "advisory-pending"
+        : cls)(classifyCheck(c)) as CheckClass,
     url: c.detailsUrl ?? c.targetUrl ?? pr.url,
     noRunTime: c.__typename === "CheckRun" && !c.startedAt,
   }));
-  const required = contexts.find((c) => c.name === workflow.verify) ?? null;
+  const checkPolicy = evaluateCheckPolicy(checkEvidence);
+  // Legacy singular detail is factual only; readiness comes exclusively from the native query.
+  const requiredContexts = contexts.filter(
+    (_, index) => checkEvidence.checks[index]?.required === "required",
+  );
+  const required = requiredContexts.length === 1 ? requiredContexts[0]! : null;
   const byClass = (k: CheckClass) => contexts.filter((c) => c.class === k);
   const problems = [...byClass("failed"), ...byClass("cancelled")];
 
@@ -399,27 +424,12 @@ export function prStatus(
   // Merge-readiness blockers only make sense for an open pull request.
   if (open) {
     if (pr.isDraft) blockers.push("draft");
-    if (!required)
-      blockers.push(
-        byClass("pending").length
-          ? `required check \`${workflow.verify}\` not reported yet on head ${head.slice(0, 7)} (other checks still pending)`
-          : `required check \`${workflow.verify}\` is missing on head ${head.slice(0, 7)}`,
-      );
-    else if (required.class !== "passed")
-      blockers.push(
-        `required check \`${workflow.verify}\` is ${required.class} on head ${head.slice(0, 7)}`,
-      );
-    // The required check must succeed (workflow.verifySuccess); skipped or neutral is not proof.
-    else if (!workflow.verifySuccess.includes(required.outcome))
-      blockers.push(
-        `required check \`${workflow.verify}\` concluded ${required.outcome.toLowerCase()} on head ${head.slice(0, 7)}; it must succeed`,
-      );
-    for (const c of byClass("failed")) if (c !== required) blockers.push(`check ${c.name} failed`);
+    blockers.push(...checkPolicy.blockers);
+    for (const c of byClass("failed")) blockers.push(`check ${c.name} failed`);
     for (const c of byClass("cancelled"))
-      if (c !== required)
-        blockers.push(
-          `check ${c.name} cancelled${c.noRunTime ? " without running (likely infrastructure, not a code defect)" : ""}: verification incomplete`,
-        );
+      blockers.push(
+        `check ${c.name} cancelled${c.noRunTime ? " without running (likely infrastructure, not a code defect)" : ""}: verification incomplete`,
+      );
     if (byClass("pending").length)
       blockers.push(`${byClass("pending").length} check(s) still pending: waiting`);
     if (pr.mergeable === "CONFLICTING") blockers.push("merge conflicts with the base branch");
@@ -499,7 +509,7 @@ export function prStatus(
   if (open && !blockers.length && pr.mergeStateStatus === "BLOCKED")
     blockers.push("GitHub reports merging is blocked (branch protection); inspect the rules");
 
-  const incomplete: string[] = [];
+  const incomplete: string[] = open ? [...checkEvidence.gaps] : [];
   if (rollup?.contexts.pageInfo.hasNextPage) incomplete.push("more than 100 check contexts");
   if (pr.reviewThreads.pageInfo.hasNextPage) incomplete.push("more than 100 review threads");
   // Truncated evidence is reported, never silently treated as complete.
@@ -533,14 +543,16 @@ export function prStatus(
       updatedAt: pr.updatedAt,
     },
     checks: {
-      required: required
-        ? {
-            name: required.name,
-            class: required.class,
-            outcome: required.outcome,
-            url: required.url,
-          }
-        : null,
+      required,
+      requirements: {
+        expected: pr.requiredChecks?.expected ?? null,
+        head: pr.requiredChecks?.head ?? null,
+        base: pr.requiredChecks?.base ?? null,
+        complete: checkEvidence.complete,
+        gaps: [...checkEvidence.gaps],
+      },
+      policy: checkPolicy,
+      evidence: checkEvidence,
       counts: Object.fromEntries(
         (["passed", "pending", "advisory-pending", "cancelled", "failed", "unknown"] as const).map(
           (k) => [k, byClass(k).length],
@@ -585,6 +597,7 @@ export async function pullRequestStatus(
   now: () => Date = () => new Date(),
   meter?: ReadMeter,
   reviewPolicy?: DeclaredReviewPolicy,
+  rest?: Rest,
 ): Promise<PrStatusReport> {
   const startedAt = now().toISOString();
   const [owner, name] = repository.split("/");
@@ -596,6 +609,18 @@ export async function pullRequestStatus(
   });
   const pr = selected<PullRequestNode>(prop(data, "repository", "pullRequest"));
   if (!pr) throw new SubjectUnavailable(`Pull request #${number} is unavailable in ${repository}.`);
+  const restBoundary = rest ?? (q === ghQuery ? ghRest : undefined);
+  if (restBoundary)
+    await hydrateRequiredChecks(repository, [pr], {
+      query: (text, variables) =>
+        (meter ? meter.query(q, "required-checks", subject) : q)(text, variables),
+      rest: async (path) => {
+        const answer = await (
+          meter ? meter.rest(restBoundary, "required-checks", subject) : restBoundary
+        )(path);
+        return { status: answer.status, body: answer.body };
+      },
+    });
   if (meter) coverPullRequest(meter, subject, pr);
   return prStatus(repository, pr, { now: now(), startedAt, reviewPolicy });
 }
@@ -629,9 +654,7 @@ export function prStatusText(r: PrStatusReport): string {
     "",
     `Checks: ${Object.entries(r.checks.counts)
       .map(([k, v]) => `${k} ${v}`)
-      .join(
-        ", ",
-      )}; required ${r.checks.required ? `${r.checks.required.name} ${r.checks.required.class}` : "missing"}`,
+      .join(", ")}; target requirements ${r.checks.policy?.ready ? "satisfied" : "unproven"}`,
     ...r.checks.problems.map(
       (c) => `  ${c.class}: ${c.name} (${c.outcome}${c.note ? `, ${c.note}` : ""}) ${c.url}`,
     ),

@@ -23,7 +23,11 @@
     "dist/mcp.mjs.map",
     "third-party",
     "dist/datalog-*.mjs",
-    "dist/datalog-*.mjs.map"
+    "dist/datalog-*.mjs.map",
+    "dist/engine-*.mjs",
+    "dist/engine-*.mjs.map",
+    "dist/requiredchecks-*.mjs",
+    "dist/requiredchecks-*.mjs.map"
   ],
   "type": "module",
   "publishConfig": {

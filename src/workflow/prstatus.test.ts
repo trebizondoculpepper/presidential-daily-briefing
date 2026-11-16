@@ -9,6 +9,7 @@ describe("pr status: why is a PR not progressing (#59)", () => {
     __typename: "CheckRun",
     name,
     status: "COMPLETED",
+    isRequired: true,
     conclusion: "SUCCESS",
     detailsUrl: `https://ci/${name}`,
     startedAt: time,
@@ -31,6 +32,33 @@ describe("pr status: why is a PR not progressing (#59)", () => {
     mergeStateStatus: "CLEAN",
     reviewDecision: null,
     headRefOid: head,
+    requiredChecks: {
+      head,
+      base: "main",
+      expected: [
+        { context: "verify", appId: null },
+        ...(o.checks ?? [])
+          .filter(
+            (c: { name: string; isRequired?: boolean }) =>
+              c.name !== "verify" && c.isRequired === true,
+          )
+          .map((c: { name: string }) => ({ context: c.name, appId: null })),
+      ],
+      checks: (o.checks ?? [run("verify")]).map((c: { name: string; isRequired?: boolean }) => ({
+        name: c.name,
+        databaseId: null,
+        appId: null,
+        required:
+          c.name === "verify"
+            ? "required"
+            : c.isRequired === true
+              ? "required"
+              : c.isRequired === false
+                ? "advisory"
+                : "unknown",
+      })),
+      gaps: [],
+    },
     headRefName: "fix",
     baseRefName: "main",
     updatedAt: time,
@@ -118,7 +146,9 @@ describe("pr status: why is a PR not progressing (#59)", () => {
       { now: new Date(time) },
     );
     expect(r.blockers).toEqual([
-      `required check \`verify\` is missing on head ${head.slice(0, 7)}`,
+      "Required check mac is CANCELLED",
+      "Required check not yet reported: verify",
+      "Required check unit is FAILURE",
       "check unit failed",
       "check mac cancelled without running (likely infrastructure, not a code defect): verification incomplete",
       "merge conflicts with the base branch",
@@ -134,7 +164,7 @@ describe("pr status: why is a PR not progressing (#59)", () => {
       repo,
       pull({ checks: [run("unit", { status: "QUEUED", conclusion: null })] }),
     );
-    expect(pending.blockers[0]).toMatch(/not reported yet .*other checks still pending/);
+    expect(pending.blockers).toContain("Required check not yet reported: verify");
   });
   it("a running job GitHub reports as not required is shown, never a waiting blocker (#343)", async () => {
     const { prStatus } = await import("./prstatus.js");
@@ -286,6 +316,13 @@ describe("pr status: truncation and requested-reviewer matching", () => {
     mergeStateStatus: "CLEAN",
     reviewDecision: null,
     headRefOid: head,
+    requiredChecks: {
+      head,
+      base: "main",
+      expected: [],
+      checks: [{ name: "verify", databaseId: null, appId: null, required: "advisory" as const }],
+      gaps: [],
+    },
     headRefName: "fix",
     baseRefName: "main",
     updatedAt: time,
@@ -454,6 +491,13 @@ describe("pr status: required approvals, verify success and review scoping", () 
     mergeStateStatus: o.mergeState ?? "CLEAN",
     reviewDecision: o.decision ?? null,
     headRefOid: head,
+    requiredChecks: {
+      head,
+      base: "main",
+      expected: [{ context: "verify", appId: null }],
+      checks: [{ name: "verify", databaseId: null, appId: null, required: "required" as const }],
+      gaps: [],
+    },
     headRefName: "fix",
     baseRefName: "main",
     updatedAt: time,
@@ -500,7 +544,7 @@ describe("pr status: required approvals, verify success and review scoping", () 
       /merging is blocked/,
     );
     expect(prStatus(repo, make({ verify: "SKIPPED" })).blockers[0]).toMatch(
-      /concluded skipped.*must succeed/,
+      /Required check verify is SKIPPED/,
     );
   });
   it("blocks a branch whose merge state is outside the registered current states", async () => {

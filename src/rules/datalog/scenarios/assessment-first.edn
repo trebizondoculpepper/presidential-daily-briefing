@@ -10,11 +10,11 @@
   :viewer {:role "implementer"}
   :facts [{:e 1 "forward-complete" true}
           {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "current" "impact-size" "L" "complexity-state" "unassessed" "complexity-size" "unknown" "head" "not-a-pr" "label" "status:ready"}
-          {:e 101 "kind" "pr" "state" "OPEN" "number" 2 "target" "https://github.com/o/r/pull/2" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "head2" "draft" false "mergeable" "MERGEABLE" "merge-state" "CLEAN" "review-decision" "" "pr-complete" true "check" 102}
+          {:e 101 "kind" "pr" "state" "OPEN" "number" 2 "target" "https://github.com/o/r/pull/2" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "head2" "draft" false "mergeable" "MERGEABLE" "merge-state" "CLEAN" "review-decision" "" "pr-complete" true "required-evidence-complete" true "check" 102}
           {:e 102 "name" "verify" "outcome" "SUCCESS"}]
   :expect {:actions [{:subject 101 :rule "D-PR-MERGE" :kind "pr-follow-up" :band 2
-              :why "Current verify passes at head head2; inspect the diff and review evidence, then consider merge."
-              :facts {"impact" "unknown" "complexity" "unknown" "impactState" "unknown" "complexityState" "unknown" "head" "head2" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "verify" "SUCCESS" "complete" true "draft" false "mergeState" "CLEAN"}
+              :why "Current required checks are satisfied at head head2; inspect the diff and review evidence, then consider merge."
+              :facts {"impact" "unknown" "complexity" "unknown" "impactState" "unknown" "complexityState" "unknown" "head" "head2" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "requiredChecksComplete" true "complete" true "draft" false "mergeState" "CLEAN"}
               :overridden [] :unlocks 0 :unknown [] :other-claims []}
             {:subject 100 :rule "D-COMPLEXITY-BOOST" :kind "estimate-complexity" :band 5
               :why "High impact L, but effort is unassessed; estimate it to test implementation value."

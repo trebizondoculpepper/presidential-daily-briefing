@@ -91,7 +91,9 @@ describe("pr N under the declared policy", () => {
     startedAt: "2026-11-15T00:00:00Z",
     ...extra,
   });
-  const node = (o: { comments?: unknown[]; reviews?: unknown[]; checks?: unknown[] } = {}) =>
+  const node = (
+    o: { comments?: unknown[]; reviews?: unknown[]; checks?: { name: string }[] } = {},
+  ) =>
     ({
       number: 12,
       title: "Fix",
@@ -103,6 +105,18 @@ describe("pr N under the declared policy", () => {
       mergeStateStatus: "CLEAN",
       reviewDecision: null,
       headRefOid: head,
+      requiredChecks: {
+        head,
+        base: "main",
+        expected: [{ context: "verify", appId: null }],
+        checks: (o.checks ?? [checkRun("verify")]).map((check: { name: string }) => ({
+          name: check.name,
+          databaseId: null,
+          appId: null,
+          required: check.name === "verify" ? "required" : "advisory",
+        })),
+        gaps: [],
+      },
       headRefName: "fix",
       baseRefName: "main",
       updatedAt: "2026-11-15T00:00:00Z",
@@ -185,9 +199,8 @@ describe("pr N under the declared policy", () => {
       expect(r.headReviewed).toBe(true);
       expect(r.reviewPolicy.providers[1].state).toMatch(/skipped|pending/);
       // The still-running provider check is an ordinary pending check, never hidden.
-      if (rabbitCheck.status === "IN_PROGRESS")
-        expect(r.blockers).toEqual(["1 check(s) still pending: waiting"]);
-      else expect(r.blockers).toEqual([]);
+      expect(r.blockers).toEqual([]);
+      if (rabbitCheck.status === "IN_PROGRESS") expect(r.checks.counts["advisory-pending"]).toBe(1);
     }
   });
 
@@ -268,7 +281,7 @@ describe("pr N under the declared policy", () => {
       { reviewPolicy: or },
     );
     expect(r.headReviewed).toBe(true);
-    expect(r.blockers.join("\n")).toMatch(/required check `verify` is failed/);
+    expect(r.blockers.join("\n")).toMatch(/Required check verify is FAILURE/);
   });
 
   it("a live pr N read requests author types and app slugs, so providers authenticate", async () => {
@@ -286,7 +299,7 @@ describe("pr N under the declared policy", () => {
           checkRun("verify"),
           checkRun("Codex", {
             conclusion: "NEUTRAL",
-            ...(source.includes("checkSuite{app{slug}}")
+            ...(source.includes("checkSuite{app{slug databaseId}}")
               ? { checkSuite: { app: { slug: "chatgpt-codex-connector" } } }
               : {}),
           }),
@@ -368,6 +381,13 @@ describe("briefing engines and delivery follow-up agree under the declared polic
     labels: page(),
     comments: page(comments),
     headRefOid: head,
+    requiredChecks: {
+      head,
+      base: "main",
+      expected: [{ context: "verify", appId: null }],
+      checks: [{ name: "verify", databaseId: null, appId: null, required: "required" }],
+      gaps: [],
+    },
     headRefName: "fix",
     baseRefName: "main",
     isDraft: false,

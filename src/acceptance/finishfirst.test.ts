@@ -139,6 +139,13 @@ const pr = (n: number, s: PrShape): PullRequest => ({
   ...issue(n, s.labels ?? [], evidence(n, s.evidence ?? "approved").comments),
   url: pullUrl(n),
   headRefOid: `head${n}`,
+  requiredChecks: {
+    head: `head${n}`,
+    base: "main",
+    expected: [{ context: "verify", appId: null }],
+    checks: [{ name: "verify", databaseId: null, appId: null, required: "required" }],
+    gaps: [],
+  },
   headRefName: `branch-${n}`,
   baseRefName: "main",
   isDraft: false,
