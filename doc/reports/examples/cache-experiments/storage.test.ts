@@ -467,7 +467,7 @@ describe("locking", () => {
 });
 
 describe("separate processes", () => {
-  it.each(Array.from({ length: process.platform === "win32" ? 10 : 1 }, (_, i) => i + 1))(
+  it.each(Array.from({ length: process.platform === "win32" ? 100 : 1 }, (_, i) => i + 1))(
     "two concurrent writers lose no records (batch %i)",
     async () => {
       const root = newRoot();
