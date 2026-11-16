@@ -103,9 +103,9 @@ export const CONFIG_KEYS: readonly ConfigKey[] = [
     type: "string",
     nullable: true,
     defaultValue: null,
-    choices: ["legacy", "codex-or-coderabbit"],
+    choices: ["legacy", "codex-or-coderabbit", "codex-or-copilot"],
     description:
-      "Declared automated-review policy for PR readiness advice (#301). Unset (default) keeps the legacy rule and reports it as undeclared; legacy selects it explicitly; codex-or-coderabbit accepts a clean current-head Codex receipt OR a CodeRabbit approval of the current head, while a finding from either still blocks. Advice only: CI, protections and authority are unchanged.",
+      "Declared automated-review policy for PR readiness advice (#301, #695). Unset (default) keeps the legacy rule and reports it as undeclared; legacy selects it explicitly; codex-or-coderabbit or codex-or-copilot accepts a clean current-head review from either named provider, while a finding from either still blocks. Advice only: CI, protections and authority are unchanged.",
   },
   {
     key: "rules.project.enabled",
