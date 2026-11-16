@@ -231,8 +231,11 @@ ${meter}
   const noticeText = (raw: unknown): string | null => {
     const n = record(raw);
     switch (n.code) {
-      case "header-disagrees":
-        return `${names[str(n.resource)] ?? str(n.resource)}: a response header reported a different remaining count than this aggregate; both are kept.`;
+      case "header-disagrees": {
+        const aggregate = record(n.aggregate);
+        const header = record(n.header);
+        return `${names[str(n.resource)] ?? str(n.resource)}: a response header reported ${num(header.remaining) ?? "unknown"} remaining (${str(header.operation) || "an operation"}, observed ${utc(str(header.observedAt))}) while this aggregate shows ${num(aggregate.remaining) ?? "unknown"} remaining (observed ${utc(str(aggregate.observedAt))}); both are kept.`;
+      }
       case "refusal-with-headroom":
         return `${names[str(n.resource)] ?? str(n.resource)}: a request was refused for quota although allowance now remains; this reading does not explain that refusal.`;
       case "missing-family":
