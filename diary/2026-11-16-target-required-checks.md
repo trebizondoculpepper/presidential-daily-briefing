@@ -51,3 +51,11 @@ passed without increasing their timeout. The optional engine clock is threaded
 through CLI and serve adapters for deterministic parity testing.
 
 Final pre-commit validation: checks passed (zero errors), all 130 test files passed (2,457 tests, one skipped), and build passed. Installed-package smoke is rerun against the final materialized-query build before merge.
+
+Codex review of #726 found that the standalone adapter fallback omitted normalized
+missing requirements, allowing a clean-looking PR with a never-reported required
+check to receive merge consideration. Added a regression reproducing the failure
+without a host classification map, then made every required-check field project
+from the same normalized evidence. The direct report already blocked that case.
+
+The review correction passed all 130 files (2,458 tests, one skipped), checks and build. The original head passed Ubuntu/FreeBSD but Windows hit the existing separate-process JSON writer fixture: one child exhausted its explicit lock wait. The final head receives fresh CI; that failure is not a check-policy result.

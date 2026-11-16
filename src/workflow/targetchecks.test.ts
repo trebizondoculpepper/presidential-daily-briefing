@@ -43,6 +43,20 @@ describe("target required-check parity (#676)", () => {
       ),
     ).toBe(true);
   });
+  it("projects a never-reported requirement in standalone native evaluation", () => {
+    const p = target(true);
+    p.commits.nodes[0]!.commit.statusCheckRollup!.contexts = page([]);
+    p.requiredChecks!.checks = [];
+    const report = prStatus(repo, p as never);
+    expect(report.checks.requirements?.complete).toBe(true);
+    expect(report.blockers).toContain("Required check not yet reported: CI gate");
+    // No host checkRequiredness map: this is the trial/standalone adapter path.
+    expect(
+      evaluateDatalog(snapshot([], [p]), new Map(), { role: "implementer", limit: 10 }).items.some(
+        (a) => a.ruleIds.includes("D-PR-MERGE"),
+      ),
+    ).toBe(false);
+  });
   it("keeps unread requirements unknown even with green checks and CLEAN mergeability", () => {
     const p = target(false);
     p.requiredChecks!.expected = null;

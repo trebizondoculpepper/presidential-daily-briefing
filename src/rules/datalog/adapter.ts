@@ -287,27 +287,19 @@ function normalize(
         if (other !== undefined) put(id, "closes", other);
       }
       const requiredness = options.checkRequiredness?.get(pr.url);
-      const advisory = new Set(requiredness?.advisoryPending ?? []);
       const checkEvidence = requiredness?.evidence ?? requiredCheckEvidence(pr);
-      put(id, "required-evidence-complete", checkEvidence?.complete ?? false);
-      for (const gap of checkEvidence?.gaps ?? ["required-check evidence was not read"])
-        put(id, "required-evidence-gap", gap);
-      for (const check of rollup?.contexts.nodes ?? []) {
+      put(id, "required-evidence-complete", checkEvidence.complete);
+      for (const gap of checkEvidence.gaps) put(id, "required-evidence-gap", gap);
+      for (const [index, check] of (rollup?.contexts.nodes ?? []).entries()) {
         const c = nextId++;
         const checkName = check.name ?? check.context ?? "unnamed";
         put(id, "check", c);
         put(c, "name", checkName);
         put(c, "outcome", check.conclusion ?? check.state ?? check.status ?? "UNKNOWN");
         // #343: a pending check GitHub reports as not required for this PR does not make it wait.
-        put(
-          c,
-          "required",
-          checkEvidence?.checks[(rollup?.contexts.nodes ?? []).indexOf(check)]?.required ??
-            (advisory.has(checkName) ? "advisory" : "unknown"),
-        );
+        put(c, "required", checkEvidence.checks[index]?.required ?? "unknown");
       }
-      for (const missing of requiredness?.missingRequired ?? [])
-        put(id, "missing-required", missing);
+      for (const missing of checkEvidence.missing) put(id, "missing-required", missing);
       // Raw review evidence; the policy decides what binds to the current head (#182).
       for (const review of pr.reviews?.nodes ?? []) {
         const r = nextId++;
