@@ -160,7 +160,7 @@ export class LabelFilterUnresolved extends Error {
 
 export function compactBriefing(
   snapshot: Snapshot,
-  options: Pick<BriefingOptions, "limit" | "agent" | "estimate" | "responsible"> & {
+  options: Pick<BriefingOptions, "limit" | "agent" | "estimate" | "responsible" | "retained"> & {
     role?: string;
     /** One registered section, every row (#311, doc/design/briefing-focus-controls.md). */
     section?: string;
@@ -436,6 +436,7 @@ export function compactBriefing(
             isParked: (url) => isParked(defined(byUrl.get(url))),
             urgency: (url) => urgencyBand(defined(byUrl.get(url))),
             ownedByViewer: (url) => isMine(defined(byUrl.get(url))),
+            ...(options.retained ? { retained: options.retained } : {}),
           }),
           // Rank everything once; the display limit is applied below, so counts see it all.
           { order: facts.ranking.order, limit: Number.MAX_SAFE_INTEGER },
@@ -446,7 +447,9 @@ export function compactBriefing(
   const fullRanking: RankedActions | null =
     unscopedRanking && wanted.length
       ? (() => {
-          const items = unscopedRanking.items.filter((i) => inScope(i.target));
+          const items = unscopedRanking.items.filter(
+            (i) => i.kind === "inspect-ownership" || inScope(i.target),
+          );
           return { ...unscopedRanking, total: items.length, items };
         })()
       : unscopedRanking;
@@ -465,7 +468,13 @@ export function compactBriefing(
     fullRanking && blendedRole === "designer" && assessments
       ? impactEstimationReport(impactStatus, scopedAssessments!, fullRanking.items, shownRanked)
       : null;
-  const projection = fullRanking ? [...new Set(fullRanking.items.map((i) => i.target))] : null;
+  const projection = fullRanking
+    ? [
+        ...new Set(
+          fullRanking.items.filter((i) => i.kind !== "inspect-ownership").map((i) => i.target),
+        ),
+      ]
+    : null;
   const ordered = projection
     ? projection.map((target) => ({ target, findings: grouped.get(target) ?? [] }))
     : role
@@ -602,38 +611,44 @@ export function compactBriefing(
     ...Object.values(sections).flatMap((s) => s.items),
     ...(role?.sections.flatMap((s) => s.items.map((row) => row.url)) ?? []),
   ]);
-  const subjects = [...urls].map((url): CompactSubject => {
-    const item = defined(byUrl.get(url));
-    return {
-      url,
-      number: item.number,
-      title: item.title,
-      owners: owners(item),
-      labels: item.labels.nodes.map(({ name }) => name),
-      updatedAt: item.updatedAt,
-      source: sourceContext(item),
-      dependencies: facts.dependencies.find((dep) => dep.url === url) ?? null,
-      findings: grouped.get(url) ?? [],
-      complexity: estimates.get(url) ?? null,
-      assessments: assessments?.get(url) ?? null,
-      detailCommand: item.headRefOid
-        ? `gh pr view ${item.number} --repo ${snapshot.repository} --json headRefOid,statusCheckRollup,reviews`
-        : `npm run --silent pdb -- --repo ${snapshot.repository} --issue ${item.number} --json`,
-      ...Object.fromEntries(
-        facts.pullRequests
-          .filter((pr) => pr.url === url)
-          .map((pr) => [
-            "pullRequest",
-            {
-              head: pr.headRefOid,
-              checks: pr.checks,
-              unresolvedThreads: pr.unresolvedThreads.length,
-              linkedIssues: pr.linkedIssues,
-            },
-          ]),
-      ),
-    };
-  });
+  // Only registered context actions lack a ticket; unknown ticket targets still fail loudly.
+  const contextTargets = new Set(
+    rankedActions?.items.filter((i) => i.kind === "inspect-ownership").map((i) => i.target) ?? [],
+  );
+  const subjects = [...urls]
+    .filter((url) => !contextTargets.has(url))
+    .map((url): CompactSubject => {
+      const item = defined(byUrl.get(url));
+      return {
+        url,
+        number: item.number,
+        title: item.title,
+        owners: owners(item),
+        labels: item.labels.nodes.map(({ name }) => name),
+        updatedAt: item.updatedAt,
+        source: sourceContext(item),
+        dependencies: facts.dependencies.find((dep) => dep.url === url) ?? null,
+        findings: grouped.get(url) ?? [],
+        complexity: estimates.get(url) ?? null,
+        assessments: assessments?.get(url) ?? null,
+        detailCommand: item.headRefOid
+          ? `gh pr view ${item.number} --repo ${snapshot.repository} --json headRefOid,statusCheckRollup,reviews`
+          : `npm run --silent pdb -- --repo ${snapshot.repository} --issue ${item.number} --json`,
+        ...Object.fromEntries(
+          facts.pullRequests
+            .filter((pr) => pr.url === url)
+            .map((pr) => [
+              "pullRequest",
+              {
+                head: pr.headRefOid,
+                checks: pr.checks,
+                unresolvedThreads: pr.unresolvedThreads.length,
+                linkedIssues: pr.linkedIssues,
+              },
+            ]),
+        ),
+      };
+    });
   // #312: a filtered view says so, names the obligations it leaves out, and is incomplete while
   // any ticket's label membership is unknown (truncated labels are not a known nonmatch).
   const filter = wanted.length
@@ -858,6 +873,12 @@ export function compactText(
         `\nNEXT STEPS (${ranked.total}${ranked.omitted ? `; ${ranked.omitted} omitted` : ""})`,
       );
     for (const [i, item] of ranked.items.entries()) {
+      if (item.kind === "inspect-ownership" && !subjects.has(item.target)) {
+        rows.push(
+          leanRow(i + 1, item, { title: "Repository ownership inventory" }, item.why?.text),
+        );
+        continue;
+      }
       const s = defined(subjects.get(item.target));
       const why = item.why?.text ?? roleReasons.get(item.target);
       // Lean default rows (#487): no metric line, codes or zero-only unlocks; --context keeps

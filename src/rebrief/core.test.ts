@@ -286,6 +286,31 @@ describe("shared rebrief decision", () => {
       decision: "continue",
     });
   });
+  it("accepts band-8 waiting rows but stops when the queue holds only waits (#413)", async () => {
+    const waitOnly = read();
+    const wait = obj(waitOnly).rankedActions.items[0] as unknown as Record<string, unknown>;
+    wait.kind = "wait-claim";
+    wait.band = 8;
+    const t = setup(waitOnly);
+    expect(await t.session.evaluate(input, t.runtime)).toMatchObject({
+      decision: "stop",
+      reason: "empty-queue",
+    });
+    const mixed = read();
+    const queue = obj(mixed).rankedActions as unknown as {
+      items: Record<string, unknown>[];
+      total: number;
+      omitted: number;
+    };
+    queue.items = [
+      queue.items[0],
+      { ...queue.items[0], id: `${queue.items[0].id} wait`, kind: "wait-claim", band: 8 },
+    ];
+    queue.total = 2;
+    queue.omitted = 0;
+    const m = setup(mixed);
+    expect(await m.session.evaluate(input, m.runtime)).toMatchObject({ decision: "continue" });
+  });
   it("deduplicates concurrent callbacks and rejects reentry, then stops at three acknowledged offers", async () => {
     const t = setup();
     let release!: (r: Read) => void;

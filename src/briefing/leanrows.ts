@@ -18,6 +18,10 @@ const labels: Record<string, string> = {
   "inspect-assessment": "Inspect assessment",
   inspect: "Inspect",
   design: "Design",
+  "resume-claim": "Resume",
+  "review-owned-work": "Review your claims",
+  "inspect-ownership": "Inspect ownership",
+  "wait-claim": "Waiting",
 };
 export const actionLabel = (kind: string): string => labels[kind] ?? kind;
 
@@ -53,11 +57,13 @@ function unlocksText(item: LeanRowInput): string | null {
 export function leanRow(
   rank: number,
   item: LeanRowInput,
-  subject: { number: number | string; title: string },
+  subject: { number?: number | string; title: string },
   why: string | null | undefined,
   fallbackInspection?: string,
 ): string {
-  const lines = [`${rank}. ${actionLabel(item.kind)} #${subject.number}: ${subject.title}`];
+  const lines = [
+    `${rank}. ${actionLabel(item.kind)}${subject.number === undefined ? "" : ` #${subject.number}`}: ${subject.title}`,
+  ];
   if (why) lines.push(`   ${why}`);
   const unlocks = unlocksText(item);
   if (unlocks) lines.push(`   ${unlocks}`);

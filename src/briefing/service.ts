@@ -25,6 +25,13 @@ import type { DeclaredReviewPolicy } from "../workflow/reviewpolicy.js";
 import { collect, ghQuery, IssueUnavailable, permissionLookup } from "../github/github.js";
 import { classifyChecks } from "../github/requiredchecks.js";
 import type { IssueDiagnosis, Query, Rest } from "../github/github.js";
+import type { GraphQuery } from "../workflow/claims.js";
+import type { readRetained } from "../workflow/retained.js";
+import {
+  ownedClaims,
+  readRetainedFacts,
+  type ClaimActivityFact,
+} from "../workflow/retainedfacts.js";
 import { diagnoseDelivery } from "../workflow/deliverydoctor.js";
 import { deliveryRead } from "../workflow/deliveryread.js";
 import type { DeliveryRead } from "../workflow/deliveryread.js";
@@ -220,8 +227,29 @@ export async function presentBriefing(
     source: "default" as const,
   };
   const roleSource = options.role === undefined ? ("default" as const) : ("request" as const);
+  const datalogPath = selection.requested === "datalog" && !options.full && !options.issue;
+  // #413: the viewer's retained claims and, on a live read, their activity: the same facts for
+  // the Datalog rules and the TypeScript rollback ranking.
+  // Facts a caller already holds (tests, a future shared read) are used as given.
+  const retained =
+    options.retained ??
+    (!options.full &&
+    !options.issue &&
+    (datalogPath ? (options.role ?? defaultEngineRole) : options.role) === "implementer"
+      ? await readRetainedFacts(
+          snapshot,
+          options.agent,
+          live
+            ? {
+                query: live.query as GraphQuery,
+                permission: permissionLookup(snapshot.repository, live.rest, signal),
+              }
+            : undefined,
+        )
+      : undefined);
+  if (retained) options = { ...options, retained };
   // Full issue intake is outside the experimental next-action slice.
-  if (selection.requested === "datalog" && !options.full && !options.issue) {
+  if (datalogPath) {
     options = { ...options, role: options.role ?? defaultEngineRole };
     if (options.role !== "implementer" && options.role !== "designer")
       throw new BriefingEngineError(
@@ -235,6 +263,8 @@ export async function presentBriefing(
         agent: options.agent,
         platform: options.platform,
         order: options.order,
+        ...(retained ? { ownedClaims: retained.ownedClaims } : {}),
+        ...(retained?.claimActivity ? { claimActivity: retained.claimActivity } : {}),
         responsible: responsibility.responsible,
         responsibilityUnknown: responsibility.unknown.map((u) => u.issue),
         ...datalogReviewFacts(snapshot),
@@ -539,6 +569,8 @@ export interface ReadRuntime {
    * reads the full snapshot, as before.
    */
   collectShortlist?: typeof collectShortlist;
+  /** #413: the retained-claim activity reader; default: the claim guard's `readRetained`. */
+  claimActivityReader?: typeof readRetained;
   /** Test seam for the lazily loaded Datalog engine; defaults to importing it (#346). */
   loadEngine?: () => Promise<Pick<typeof import("../rules/datalog/datalog.js"), "evaluateDatalog">>;
   dependencyReport: typeof dependencyReport;
@@ -723,10 +755,46 @@ export async function readBriefing(
   const trust = rest
     ? markerTrust(permissionLookup(request.repository, rest, request.signal))
     : undefined;
-  const present = (collected: Snapshot, live: boolean, reserve = 0) =>
+  // #413: claim activity is read live, before the first shortlist ranking, so every selection
+  // pass and the final presentation rank the same retained-claim rows: hydration then covers
+  // whatever those rows bring into view. The inventory is recomputed per snapshot; a claim
+  // first revealed by hydration (an ownership label discovery did not see) is read then, so a
+  // waiting or resume-required claim is never treated as active legacy work.
+  let activity: ReadonlyMap<string, ClaimActivityFact> | undefined;
+  let activityReadFor = new Set<string>();
+  const retainedFor = async (collected: Snapshot): Promise<PresentOptions["retained"]> => {
+    if (!request.agent || (request.role ?? defaultEngineRole) !== "implementer") return undefined;
+    const owned = ownedClaims(collected, request.agent);
+    const fresh = owned.urls.filter((url) => !activityReadFor.has(url));
+    if (fresh.length && rest && liveQuery) {
+      const facts = await readRetainedFacts(
+        { ...collected, issues: collected.issues.filter((i) => fresh.includes(i.url)) },
+        request.agent,
+        {
+          query: liveQuery as GraphQuery,
+          permission: permissionLookup(request.repository, rest, request.signal),
+        },
+        runtime.claimActivityReader,
+      );
+      for (const url of fresh) activityReadFor.add(url);
+      if (facts?.claimActivity) activity = new Map([...(activity ?? []), ...facts.claimActivity]);
+    }
+    return {
+      ownedClaims: {
+        ...owned,
+        urls: owned.urls.filter((u) => activity?.get(u)?.state !== "not-owned"),
+      },
+      ...(activity ? { claimActivity: activity } : {}),
+    };
+  };
+  const present = async (collected: Snapshot, live: boolean, reserve = 0) =>
     presentBriefing(
       collected,
-      { ...options, maxChars: Math.max(0, options.maxChars - reserve) },
+      {
+        ...options,
+        maxChars: Math.max(0, options.maxChars - reserve),
+        ...(options.issue ? {} : { retained: await retainedFor(collected) }),
+      },
       runtime.estimation,
       runtime.now?.(),
       runtime.redactDiagnostic,

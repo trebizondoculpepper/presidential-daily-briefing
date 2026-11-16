@@ -241,6 +241,38 @@ labels unchanged and the same command retries idempotently. A claim already wait
 blocker keeps that wait. A wait's question must be on the same issue. Resume also refuses while
 any v2 question recorded during the claim is open; legacy v1 questions keep label resolution.
 
+Implementation note (#413, slice 1: ranking). The shared facts are in
+`src/workflow/retainedfacts.ts`:
+
+- **Inventory:** the viewer's open `agent:` claims in this repository, unparked first, then
+  oldest. Its completeness is false when any open issue's labels were truncated. It is read from
+  the snapshot, so it also works offline.
+- **Activity:** on a live read, each claim's activity comes from the claim guard's own
+  `readRetained`. A failed read is `unknown`; a claim whose label is gone is dropped.
+
+`presentBriefing` passes the same facts to both engines.
+
+In the rules (`decisions.edn`):
+
+| Decision                      | Kind                                 | Placement                                            |
+| ----------------------------- | ------------------------------------ | ---------------------------------------------------- |
+| `D-OWN-RESUME`                | `resume-claim`, `pdb claim resume N` | band 3                                               |
+| `D-REVIEW-OWNED` / `-PARTIAL` | `review-owned-work`, `pdb team`      | band 3; lower bound when the inventory is incomplete |
+| `D-OWN-UNKNOWN`               | `inspect`                            | band 3                                               |
+| `D-OWN-WAIT`                  | `wait-claim`                         | band 8: shown, never work                            |
+
+- The continuation rules apply only to `own-active` claims: no activity fact (legacy or offline)
+  or `active`.
+- A verified waiting claim no longer triggers the "release your other claim first" step before a
+  new pickup, matching the admission guard.
+- #378 holds for one claim: a boosted assessment still precedes the M/M continuation.
+- The TypeScript rollback builds the same rows and bands from the same facts, and orders band 3 by
+  the same preferences.
+
+Tests: `scenarios/retained-claims.edn` and `src/workflow/retainedranking.test.ts`, which covers
+engine agreement and the review row inside the top ten ahead of eleven assessments. Projections in
+`who`/`team`/Ticket Doctor are slice 2.
+
 Use a separate `github-triage:claim-activity v1` JSON marker. Required fields:
 `v: 1`, `op: wait|resume`, `opId`, `repository`, `issue`, `agent`, `claimStartedAt`,
 `previousActivity` (comment node ID or null), and `reason`. A wait also carries

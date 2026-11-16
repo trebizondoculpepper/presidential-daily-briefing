@@ -319,6 +319,36 @@ describe("routine briefing: discover all, rank, hydrate only the shortlist (#368
     expect(snapshot.warnings).toEqual([]);
   });
 
+  it("carries discovery completeness into selection passes, not only the final record", async () => {
+    // Capped discovery: more open issues exist than the page bound reads. The retained-claim
+    // inventory must not be silently complete during selection (#413): a capped inventory can
+    // hide the viewer's claim, so ranking during selection must see the same incompleteness the
+    // final presentation reports. Regression for the Codex finding on PR #606.
+    const issues = Array.from({ length: 20 }, (_, i) => ready(i + 1));
+    const claimed = ready(21, ["status:in-progress", "agent:kavya"]);
+    const fake = fakeGitHub([...issues, claimed], []);
+    const seen: Array<Snapshot["shortlist"]> = [];
+    await collectShortlist(
+      repo,
+      {
+        select: async (candidates) => {
+          seen.push(candidates.shortlist);
+          return [claimed.url];
+        },
+        // One page of 5: discovery is capped, so the shortlist record says complete:false.
+        bounds: { pages: 1, pageSize: 5, maxHydrated: 40 },
+      },
+      fake.query,
+      clock,
+    );
+    expect(seen.length).toBeGreaterThan(0);
+    // Every selection pass sees the same discovery-completeness facts the final record reports.
+    for (const record of seen) {
+      expect(record?.discovered.complete).toBe(false);
+      expect(record?.provisional).toBe(true);
+    }
+  });
+
   it("hydrates the issue that holds a shown PR's records, found by cross-reference", async () => {
     const issues = Array.from({ length: 30 }, (_, i) => ready(i + 1));
     const member: PullRequest = {

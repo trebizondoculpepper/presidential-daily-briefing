@@ -80,6 +80,20 @@ export interface DatalogOptions {
     string,
     { readonly advisoryPending: readonly string[]; readonly missingRequired: readonly string[] }
   >;
+  /**
+   * Retained claims (#413): each of the viewer's own claims' activity per issue URL, read by the
+   * host with the claim guard's verified reader (workflow/retained.ts). Absent: not read, so the
+   * ordinary continuation applies (a legacy claim counts as active).
+   */
+  claimActivity?: ReadonlyMap<
+    string,
+    { state: "active" | "waiting" | "resume-required" | "unknown" | "not-owned"; reason: string }
+  >;
+  /**
+   * The viewer's open implementation claims in this repository, oldest first, and whether that
+   * inventory is complete. Submitted PR responsibility is not a claim. Absent: not read.
+   */
+  ownedClaims?: { urls: readonly string[]; complete: boolean };
   limit: number;
   signal?: AbortSignal;
   now?: () => number;
@@ -157,6 +171,19 @@ function normalize(
   // Absent is legacy (rules.edn legacy-coverage), keeping legacy inputs exactly as before #301.
   if (options.reviewCoverage && options.reviewCoverage !== "legacy")
     put(1, "review-coverage", options.reviewCoverage);
+  // #413: the viewer's retained claims; absent means the inventory was not read.
+  if (options.ownedClaims) {
+    // Entity 1 is the existing viewer/context entity, not a GitHub ticket or a claim.
+    put(1, "ownership-inventory", true);
+    put(1, "number", 0);
+    put(1, "target", `https://github.com/${snapshot.repository}`);
+    put(1, "owned-claims", options.ownedClaims.urls.length);
+    put(1, "owned-claims-complete", options.ownedClaims.complete);
+    const subject = options.ownedClaims.urls
+      .map((url) => ids.get(url))
+      .find((id) => id !== undefined);
+    if (subject !== undefined) put(1, "owned-review-subject", subject);
+  }
   for (const [id, s] of objects) {
     // A NaN sort key breaks the comparator's total order (#450): refuse, naming the subject.
     if (!Number.isFinite(Date.parse(s.createdAt)))
@@ -215,6 +242,11 @@ function normalize(
     for (const p of s.closedByPullRequestsReferences?.nodes ?? [])
       if (p.state === "OPEN") put(id, "closing", ids.get(p.url) ?? nextId++);
     for (const agent of options.responsible?.get(s.url) ?? []) put(id, "responsible", agent);
+    const activity = options.claimActivity?.get(s.url);
+    if (activity) {
+      put(id, "claim-activity", activity.state);
+      if (activity.reason) put(id, "wait-reason", activity.reason);
+    }
     for (const record of options.questionRecords?.get(s.url) ?? []) {
       const r = nextId++;
       put(id, "question-record", r);
@@ -327,7 +359,11 @@ export function evaluateDatalog(
     { signal: options.signal },
   );
   const ranked = result.decisions.map((decision): DatalogAction => {
-    const subject = objects.get(decision.subject);
+    const subject =
+      objects.get(decision.subject) ??
+      (decision.subject === 1
+        ? { url: `https://github.com/${snapshot.repository}`, number: 0 }
+        : undefined);
     if (!subject) throw new DatalogError("invalid-inference", "unknown subject or rule");
     const a = assessments.get(subject.url);
     const commandFacts: Record<string, string> = {

@@ -102,7 +102,7 @@
    :kind "continue-implementation"
    :band 4
    :preference 0
-   :when [[1 "role" "implementer"] (own-issue ?t) (easy ?t)]
+   :when [[1 "role" "implementer"] (own-active ?t) (easy ?t)]
    :why "Continue your known easy win: impact {impact}, complexity {complexity}."
    :codes ["easy-win" "own-claim"]}
 
@@ -166,7 +166,7 @@
    :kind "continue-implementation"
    :band 6
    :preference 0
-   :when [[1 "role" "implementer"] (own-issue ?t)]
+   :when [[1 "role" "implementer"] (own-active ?t)]
    :why "Continue your active claim; impact {impact}, complexity {complexity}."
    :codes ["ordinary" "own-claim"]}
 
@@ -191,9 +191,73 @@
    :kind "continue-implementation"
    :band 7
    :preference 0
-   :when [[1 "role" "implementer"] (own-issue ?t) (unfavorable ?t)]
+   :when [[1 "role" "implementer"] (own-active ?t) (unfavorable ?t)]
    :why "Your active work has impact {impact} and complexity {complexity}; reconsider or split before continuing."
    :codes ["unfavorable" "own-claim"]}
+
+  ;; Retained claims (#413, doc/design/blocked-retained-claims.md). The host reads each own
+  ;; claim's activity with the same verified reader as the claim guard; absent facts mean the
+  ;; read was not made (offline), so the ordinary continuation rules above apply unchanged.
+  {:id "D-OWN-RESUME"
+   :kind "resume-claim"
+   :band 3
+   :preference 0
+   :when [[1 "role" "implementer"] (own-issue ?t) [?t "claim-activity" "resume-required"]]
+   :why "What your claim waited on has cleared ({waitReason}); resume it explicitly before starting other work."
+   :codes ["own-claim" "resume-required"]
+   :witnesses {"waitReason" [[?t "wait-reason" ?value]]}}
+
+  {:id "D-REVIEW-OWNED"
+   :kind "review-owned-work"
+   :band 3
+   :preference 1
+   :when [[1 "role" "implementer"] [1 "owned-review-subject" ?t] (own-issue ?t) [1 "owned-claims" ?n] [(> ?n 1)] [1 "owned-claims-complete" true]]
+   :why "You retain {ownedClaims} implementation claims; review which to finish, justify as waiting, release or reassign before starting more work."
+   :codes ["own-claim" "review-owned-work"]
+   :witnesses {"ownedClaims" [[1 "owned-claims" ?value]]}}
+
+  {:id "D-REVIEW-OWNED-PARTIAL"
+   :kind "review-owned-work"
+   :band 3
+   :preference 1
+   :when [[1 "role" "implementer"] [1 "owned-review-subject" ?t] (own-issue ?t) [1 "owned-claims" ?n] [(> ?n 1)] [1 "owned-claims-complete" false]]
+   :why "You retain at least {ownedClaims} implementation claims (the claim inventory is incomplete); review which to finish, justify as waiting, release or reassign before starting more work."
+   :codes ["own-claim" "review-owned-work" "inspection"]
+   :witnesses {"ownedClaims" [[1 "owned-claims" ?value]]}}
+
+  {:id "D-INVENTORY-UNKNOWN"
+   :kind "inspect-ownership"
+   :band 3
+   :preference 3
+   :when [[1 "role" "implementer"] [?t "ownership-inventory" true] [1 "owned-claims" 0] [1 "owned-claims-complete" false]]
+   :why "Your claim inventory is incomplete and no claim was observed; inspect your ownership before claiming more work."
+   :codes ["inspection" "inventory-unknown"]}
+
+  {:id "D-OWNED-INCOMPLETE"
+   :kind "inspect"
+   :band 3
+   :preference 3
+   :when [[1 "role" "implementer"] [1 "owned-review-subject" ?t] (own-issue ?t) [1 "owned-claims" 1] [1 "owned-claims-complete" false]]
+   :why "Your claim inventory is incomplete and only this claim was observed; inspect your ownership before claiming more work."
+   :codes ["own-claim" "inspection"]}
+
+  {:id "D-OWN-UNKNOWN"
+   :kind "inspect"
+   :band 3
+   :preference 2
+   :when [[1 "role" "implementer"] (own-issue ?t) [?t "claim-activity" "unknown"]]
+   :why "Your claim's activity is unknown ({waitReason}); inspect its wait evidence. Unknown is never waiting, so no other claim is admitted."
+   :codes ["own-claim" "inspection"]
+   :witnesses {"waitReason" [[?t "wait-reason" ?value]]}}
+
+  {:id "D-OWN-WAIT"
+   :kind "wait-claim"
+   :band 8
+   :preference 0
+   :when [[1 "role" "implementer"] (own-issue ?t) [?t "claim-activity" "waiting"]]
+   :why "Waiting: {waitReason}. You keep this claim; nothing to do on it until that clears."
+   :codes ["own-claim" "waiting"]
+   :witnesses {"waitReason" [[?t "wait-reason" ?value]]}}
 
   {:id "D-INSPECT"
    :kind "inspect"
@@ -285,4 +349,5 @@
   "D-DENY-LABELS-UNKNOWN" "Label evidence is incomplete."
   "D-DENY-NATIVE-UNKNOWN" "Native dependency evidence is incomplete."
   "D-DENY-CLOSING-UNKNOWN" "Closing pull request evidence is incomplete."
-  "D-DENY-PLATFORM" "The ticket names a platform the viewer is not known to run on."}}
+  "D-DENY-PLATFORM" "The ticket names a platform the viewer is not known to run on."
+  "D-DENY-INVENTORY-UNKNOWN" "The viewer's claim inventory is incomplete: unseen active claims cannot be ruled out."}}

@@ -135,10 +135,14 @@ const action = z.object({
     "inspect-assessment",
     "inspect",
     "design",
+    "resume-claim",
+    "review-owned-work",
+    "inspect-ownership",
+    "wait-claim",
   ]),
   target: z.string().min(1),
   role: z.string(),
-  band: z.number().int().min(1).max(7),
+  band: z.number().int().min(1).max(8),
   complexity: z.object({ state: z.string(), size: z.string().nullable() }),
   impact: z.object({ state: z.string(), size: z.string().nullable() }),
   unlocks: z.number().int().nonnegative(),
@@ -325,9 +329,12 @@ export class RebriefSession {
         new Set(queue.items.map((a) => a.id)).size !== queue.items.length
       )
         return stop("invalid-evidence");
+      // A waiting row (#413) is visible responsibility, not work: a queue of waits only stops.
       if (
         !queue.items.length ||
-        !queue.items.some((a) => a.nextCommand?.trim() || a.inspection?.trim())
+        !queue.items.some(
+          (a) => a.kind !== "wait-claim" && (a.nextCommand?.trim() || a.inspection?.trim()),
+        )
       )
         return stop("empty-queue");
       if (report.decisionEngine.used === "datalog" && !report.decisionEngine.rulesHash)

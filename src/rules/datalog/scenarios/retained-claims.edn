@@ -1,0 +1,136 @@
+;; Retained claims (#413, doc/design/blocked-retained-claims.md "Ranking and visibility" and
+;; "Multiple owned claims"). The host reads each own claim's activity with the claim guard's
+;; verified reader and asserts claim-activity / wait-reason per claim, and the owned-claim count,
+;; its completeness and the review subject on entity 1. No activity fact means the read was not
+;; made: the ordinary continuation applies (legacy claims count as active).
+{:suite "retained-claims"
+ :scenarios
+ [
+ {:id "one-active-claim-continues"
+  :doc "One active claim: ordinary continuation, no review row."
+  :viewer {:role "implementer" :agent "me"}
+  :facts [{:e 1 "forward-complete" true "owned-claims" 1 "owned-claims-complete" true "owned-review-subject" 100}
+          {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "t1" "created" 1 "label" "status:ready" "labels-complete" true "native-complete" true "reverse-complete" true "blocking-complete" true "open-blockers" 0 "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "owner" "me" "claim-activity" "active"}]
+  :expect {:actions [{:subject 100 :rule "D-OWN" :kind "continue-implementation" :band 6}]
+           :denials #{[100 "D-DENY-CLAIM"]}}}
+
+ {:id "waiting-claim-is-a-wait-row-not-continuation"
+  :doc "A verified waiting claim is shown as waiting after all work, never as continue-implementation."
+  :viewer {:role "implementer" :agent "me"}
+  :facts [{:e 1 "forward-complete" true "owned-claims" 1 "owned-claims-complete" true "owned-review-subject" 100}
+          {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "t1" "created" 1 "label" "status:ready" "labels-complete" true "native-complete" true "reverse-complete" true "blocking-complete" true "open-blockers" 0 "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "owner" "me" "claim-activity" "waiting" "wait-reason" "question on #1"}
+          {:e 101 "kind" "issue" "state" "OPEN" "number" 2 "target" "t2" "created" 2 "label" "status:ready" "labels-complete" true "native-complete" true "reverse-complete" true "blocking-complete" true "open-blockers" 0 "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M"}]
+  :expect {:actions [{:subject 101 :rule "D-ORDINARY" :kind "implement" :band 6}
+                     {:subject 100 :rule "D-OWN-WAIT" :kind "wait-claim" :band 8
+                      :why "Waiting: question on #1. You keep this claim; nothing to do on it until that clears."}]
+           :denials #{[100 "D-DENY-CLAIM"]}}}
+
+ {:id "resume-required-precedes-assessments-and-new-work"
+  :doc "A cleared wait is resume-required: an explicit resume row ahead of assessments and new implementation."
+  :viewer {:role "implementer" :agent "me"}
+  :facts [{:e 1 "forward-complete" true "owned-claims" 1 "owned-claims-complete" true "owned-review-subject" 100}
+          {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "t1" "created" 1 "label" "status:ready" "labels-complete" true "native-complete" true "reverse-complete" true "blocking-complete" true "open-blockers" 0 "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "owner" "me" "claim-activity" "resume-required" "wait-reason" "o/r#9 no longer blocks #1"}
+          {:e 101 "kind" "issue" "state" "OPEN" "number" 2 "target" "t2" "created" 2 "label" "status:ready" "labels-complete" true "native-complete" true "reverse-complete" true "blocking-complete" true "open-blockers" 0 "impact-state" "current" "impact-size" "L" "complexity-state" "unassessed" "complexity-size" "unknown"}]
+  :expect {:actions [{:subject 100 :rule "D-OWN-RESUME" :kind "resume-claim" :band 3
+                      :why "What your claim waited on has cleared (o/r#9 no longer blocks #1); resume it explicitly before starting other work."}
+                     {:subject 101 :rule "D-COMPLEXITY-BOOST" :kind "estimate-complexity" :band 5}
+                     {:subject 101 :rule "D-ORDINARY" :kind "implement" :band 6}]
+           :denials #{[100 "D-DENY-CLAIM"]}}}
+
+ {:id "unknown-activity-is-inspected-never-continued"
+  :doc "Unknown activity is an inspection row, not waiting and not continuation."
+  :viewer {:role "implementer" :agent "me"}
+  :facts [{:e 1 "forward-complete" true "owned-claims" 1 "owned-claims-complete" true "owned-review-subject" 100}
+          {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "t1" "created" 1 "label" "status:ready" "labels-complete" true "native-complete" true "reverse-complete" true "blocking-complete" true "open-blockers" 0 "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "owner" "me" "claim-activity" "unknown" "wait-reason" "when me's claim on #1 began is unknown"}]
+  :expect {:actions [{:subject 100 :rule "D-OWN-UNKNOWN" :kind "inspect" :band 3}]
+           :denials #{[100 "D-DENY-CLAIM"]}}}
+
+ {:id "two-claims-get-one-review-row-ahead-of-assessments"
+  :doc "Two retained claims (one waiting, one active) produce one review-owned-work row ahead of boosted assessments and new work (band 3); the eleven-assessment shortlist case is in retainedranking.test.ts."
+  :viewer {:role "implementer" :agent "me"}
+  :facts [{:e 1 "forward-complete" true "owned-claims" 2 "owned-claims-complete" true "owned-review-subject" 100}
+          {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "t1" "created" 1 "label" "status:ready" "labels-complete" true "native-complete" true "reverse-complete" true "blocking-complete" true "open-blockers" 0 "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "owner" "me" "claim-activity" "waiting" "wait-reason" "question on #1"}
+          {:e 101 "kind" "issue" "state" "OPEN" "number" 2 "target" "t2" "created" 2 "label" "status:ready" "labels-complete" true "native-complete" true "reverse-complete" true "blocking-complete" true "open-blockers" 0 "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "owner" "me" "claim-activity" "active"}
+          {:e 110 "kind" "issue" "state" "OPEN" "number" 10 "target" "t10" "created" 10 "label" "status:ready" "labels-complete" true "native-complete" true "reverse-complete" true "blocking-complete" true "open-blockers" 0 "impact-state" "current" "impact-size" "L" "complexity-state" "unassessed" "complexity-size" "unknown"}]
+  :expect {:actions [{:subject 100 :rule "D-REVIEW-OWNED" :kind "review-owned-work" :band 3
+                      :why "You retain 2 implementation claims; review which to finish, justify as waiting, release or reassign before starting more work."}
+                     {:subject 110 :rule "D-COMPLEXITY-BOOST" :kind "estimate-complexity" :band 5}
+                     {:subject 101 :rule "D-OWN" :kind "continue-implementation" :band 6}
+                     {:subject 110 :rule "D-ORDINARY" :kind "implement" :band 6}
+                     {:subject 100 :rule "D-OWN-WAIT" :kind "wait-claim" :band 8}]
+           :denials #{[100 "D-DENY-CLAIM"] [101 "D-DENY-CLAIM"]}}}
+
+ {:id "incomplete-inventory-reviews-the-observed-lower-bound"
+  :doc "Two positively observed claims with an incomplete inventory: the review row states a lower bound."
+  :viewer {:role "implementer" :agent "me"}
+  :facts [{:e 1 "forward-complete" true "owned-claims" 2 "owned-claims-complete" false "owned-review-subject" 100}
+          {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "t1" "created" 1 "label" "status:ready" "labels-complete" true "native-complete" true "reverse-complete" true "blocking-complete" true "open-blockers" 0 "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "owner" "me" "claim-activity" "active"}
+          {:e 101 "kind" "issue" "state" "OPEN" "number" 2 "target" "t2" "created" 2 "label" "status:ready" "labels-complete" true "native-complete" true "reverse-complete" true "blocking-complete" true "open-blockers" 0 "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "owner" "me" "claim-activity" "active"}]
+  :expect {:actions [{:subject 100 :rule "D-REVIEW-OWNED-PARTIAL" :kind "review-owned-work" :band 3
+                      :why "You retain at least 2 implementation claims (the claim inventory is incomplete); review which to finish, justify as waiting, release or reassign before starting more work."}
+                     {:subject 100 :rule "D-OWN" :kind "continue-implementation" :band 6}
+                     {:subject 101 :rule "D-OWN" :kind "continue-implementation" :band 6}]
+           :denials #{[100 "D-DENY-CLAIM"] [101 "D-DENY-CLAIM"]}}}
+
+ {:id "one-mm-claim-keeps-the-378-assessment-first-order"
+  :doc "#378 preserved: with one active M/M claim and no review row, a boosted assessment still precedes own continuation."
+  :viewer {:role "implementer" :agent "me"}
+  :facts [{:e 1 "forward-complete" true "owned-claims" 1 "owned-claims-complete" true "owned-review-subject" 100}
+          {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "t1" "created" 1 "label" "status:ready" "labels-complete" true "native-complete" true "reverse-complete" true "blocking-complete" true "open-blockers" 0 "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "owner" "me" "claim-activity" "active"}
+          {:e 110 "kind" "issue" "state" "OPEN" "number" 10 "target" "t10" "created" 10 "label" "status:ready" "labels-complete" true "native-complete" true "reverse-complete" true "blocking-complete" true "open-blockers" 0 "impact-state" "current" "impact-size" "L" "complexity-state" "unassessed" "complexity-size" "unknown"}]
+  :expect {:actions [{:subject 110 :rule "D-COMPLEXITY-BOOST" :kind "estimate-complexity" :band 5}
+                     {:subject 100 :rule "D-OWN" :kind "continue-implementation" :band 6}
+                     {:subject 110 :rule "D-ORDINARY" :kind "implement" :band 6}]
+           :denials #{[100 "D-DENY-CLAIM"]}}}
+
+ {:id "one-observed-claim-in-an-incomplete-inventory-is-inspected"
+  :doc "An incomplete inventory showing one claim cannot prove it is the only one: inspect ownership ahead of new work, and continuation stays."
+  :viewer {:role "implementer" :agent "me"}
+  :facts [{:e 1 "forward-complete" true "owned-claims" 1 "owned-claims-complete" false "owned-review-subject" 100}
+          {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "t1" "created" 1 "label" "status:ready" "labels-complete" true "native-complete" true "reverse-complete" true "blocking-complete" true "open-blockers" 0 "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "owner" "me" "claim-activity" "active"}]
+  :expect {:actions [{:subject 100 :rule "D-OWNED-INCOMPLETE" :kind "inspect" :band 3}
+                     {:subject 100 :rule "D-OWN" :kind "continue-implementation" :band 6}]
+           :denials #{[100 "D-DENY-CLAIM"]}}}
+
+ {:id "a-claim-released-since-the-snapshot-is-not-continued"
+  :doc "The live read found the claim released after the snapshot: no continuation and no release-first step for new work, although the stale label still denies pickup."
+  :viewer {:role "implementer" :agent "me"}
+  :facts [{:e 1 "forward-complete" true "owned-claims" 0 "owned-claims-complete" true}
+          {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "t1" "created" 1 "label" "status:ready" "labels-complete" true "native-complete" true "reverse-complete" true "blocking-complete" true "open-blockers" 0 "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "owner" "me" "claim-activity" "not-owned" "wait-reason" "me has no open claim on #1"}
+          {:e 101 "kind" "issue" "state" "OPEN" "number" 2 "target" "t2" "created" 2 "label" "status:ready" "labels-complete" true "native-complete" true "reverse-complete" true "blocking-complete" true "open-blockers" 0 "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M"}]
+  :expect {:actions [{:subject 101 :rule "D-ORDINARY" :kind "implement" :band 6}]
+           :denials #{[100 "D-DENY-CLAIM"]}}}
+
+ {:id "another-agents-claims-do-not-count-as-yours"
+  :doc "Viewer separation: another agent's claim is never your continuation, wait or review."
+  :viewer {:role "implementer" :agent "me"}
+  :facts [{:e 1 "forward-complete" true "owned-claims" 0 "owned-claims-complete" true}
+          {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "t1" "created" 1 "label" "status:ready" "labels-complete" true "native-complete" true "reverse-complete" true "blocking-complete" true "open-blockers" 0 "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "owner" "other" "claim-activity" "waiting" "wait-reason" "theirs"}]
+  :expect {:actions []
+           :denials #{[100 "D-DENY-CLAIM"]}}}
+
+ {:id "zero-observed-claims-in-an-incomplete-inventory-deny-new-pickup"
+  :doc "Zero observed claims with an incomplete inventory cannot establish that the viewer has no claim: new pickup is denied, not offered. Codex finding on #606."
+  :viewer {:role "implementer" :agent "me"}
+  :facts [{:e 1 "forward-complete" true "owned-claims" 0 "owned-claims-complete" false}
+          {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "t1" "created" 1 "label" "status:ready" "labels-complete" true "native-complete" true "reverse-complete" true "blocking-complete" true "open-blockers" 0 "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M"}]
+  :expect {:actions []
+           :denials #{[100 "D-DENY-INVENTORY-UNKNOWN"]}}}
+
+ {:id "empty-incomplete-inventory-has-a-repository-inspection"
+  :doc "No ticket is invented when zero claims and zero subjects were observed."
+  :viewer {:role "implementer" :agent "me"}
+  :facts [{:e 1 "ownership-inventory" true "number" 0 "target" "https://github.com/o/r" "owned-claims" 0 "owned-claims-complete" false}]
+  :expect {:actions [{:subject 1 :rule "D-INVENTORY-UNKNOWN" :kind "inspect-ownership" :band 3
+    :why "Your claim inventory is incomplete and no claim was observed; inspect your ownership before claiming more work."}]
+    :denials #{}}}
+ {:id "observed-waits-do-not-complete-an-incomplete-inventory"
+  :doc "A known wait does not rule out an omitted active claim: deny new pickup."
+  :viewer {:role "implementer" :agent "me"}
+  :facts [{:e 1 "forward-complete" true "owned-claims" 1 "owned-claims-complete" false "owned-review-subject" 100}
+    {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "t1" "created" 1 "label" "status:ready" "labels-complete" true "native-complete" true "reverse-complete" true "blocking-complete" true "open-blockers" 0 "owner" "me" "claim-activity" "waiting" "wait-reason" "question q"}
+    {:e 101 "kind" "issue" "state" "OPEN" "number" 2 "target" "t2" "created" 2 "label" "status:ready" "labels-complete" true "native-complete" true "reverse-complete" true "blocking-complete" true "open-blockers" 0 "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M"}]
+  :expect {:actions [{:subject 100 :rule "D-OWNED-INCOMPLETE" :kind "inspect" :band 3}
+    {:subject 100 :rule "D-OWN-WAIT" :kind "wait-claim" :band 8}]
+    :denials #{[100 "D-DENY-CLAIM"] [101 "D-DENY-INVENTORY-UNKNOWN"]}}}
+ ]}
