@@ -173,6 +173,10 @@ function normalize(
     put(1, "review-coverage", options.reviewCoverage);
   // #413: the viewer's retained claims; absent means the inventory was not read.
   if (options.ownedClaims) {
+    // Entity 1 is the existing viewer/context entity, not a GitHub ticket or a claim.
+    put(1, "ownership-inventory", true);
+    put(1, "number", 0);
+    put(1, "target", `https://github.com/${snapshot.repository}`);
     put(1, "owned-claims", options.ownedClaims.urls.length);
     put(1, "owned-claims-complete", options.ownedClaims.complete);
     const subject = options.ownedClaims.urls
@@ -355,7 +359,11 @@ export function evaluateDatalog(
     { signal: options.signal },
   );
   const ranked = result.decisions.map((decision): DatalogAction => {
-    const subject = objects.get(decision.subject);
+    const subject =
+      objects.get(decision.subject) ??
+      (decision.subject === 1
+        ? { url: `https://github.com/${snapshot.repository}`, number: 0 }
+        : undefined);
     if (!subject) throw new DatalogError("invalid-inference", "unknown subject or rule");
     const a = assessments.get(subject.url);
     const commandFacts: Record<string, string> = {

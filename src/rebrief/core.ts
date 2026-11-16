@@ -137,6 +137,7 @@ const action = z.object({
     "design",
     "resume-claim",
     "review-owned-work",
+    "inspect-ownership",
     "wait-claim",
   ]),
   target: z.string().min(1),

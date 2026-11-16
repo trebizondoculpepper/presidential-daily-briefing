@@ -1,5 +1,9 @@
 # Blocked retained claims and the active-work limit
 
+## Ownership-first shared-pool amendment (#651)
+
+[unified-activity-ranking.md](unified-activity-ranking.md) is the reviewed replacement for agent role-exclusive membership and assessment-over-owned-work priority, to be implemented separately in #652. Both roles receive the same pre-limit activity pool; ownership precedes role affinity and existing within-role bands. It explicitly supersedes #378, including the single owned M/M exception below. Human briefing, eligibility, mutation authority and retained-claim admission remain separate and unchanged. Conflicting ranking passages below describe the pre-#652 baseline, not additional exceptions to the amendment.
+
 Owner-approved direction for #262, 2026-11-14. This is a proposed implementation
 contract; the current single-claim enforcement stays in force until its replacement
 ships. It refines the activity invariant in delivery-lifecycle.md without changing
