@@ -39,10 +39,24 @@ function closure(entry: string): { files: string[]; external: string[] } {
 describe("engine boundary (#348)", () => {
   it("imports no host modules: only the policy bundle, DataScript and node:crypto", () => {
     const { files, external } = closure(join(here, "engine.ts"));
-    expect(files).toEqual(["bundle.ts", "engine.ts", "hash.ts", "policy.generated.json"]);
+    expect(files).toEqual([
+      "bundle.ts",
+      "check-types.ts",
+      "engine.ts",
+      "hash.ts",
+      "policy.generated.json",
+    ]);
     expect(external).toEqual(["datascript", "node:crypto"]);
   });
 
+  it("refuses a host-supplied native check verdict", () => {
+    expect(() =>
+      evaluatePolicy({
+        viewer: { role: "implementer", agent: "", platform: "", order: "impact" },
+        datoms: [[100, "native-checks-satisfied", true]],
+      }),
+    ).toThrow(/cannot be supplied by the host/);
+  });
   it("evaluates plain facts without any GitHub snapshot", () => {
     const t = firstSubjectId;
     const result = evaluatePolicy({

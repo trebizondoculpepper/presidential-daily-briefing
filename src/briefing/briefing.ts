@@ -1,3 +1,4 @@
+import { evaluateCheckPolicy } from "../rules/datalog/engine.js";
 /** Registered workflow rules. GitHub facts are evidence, not natural-language decisions. */
 import { dependencyDrift, dependencyFacts, nativeKnown, pickable } from "../github/dependencies.js";
 import {
@@ -14,7 +15,7 @@ import type { SubjectAssessments } from "./assessments.js";
 import { labelEstimationReport } from "../estimation/complexitylabels.js";
 import type { LabelEstimationInput } from "../estimation/complexitylabels.js";
 import type { Action, Dependency, Issue, PullRequest, Snapshot } from "../github/types.js";
-import { classifyChecks } from "../github/requiredchecks.js";
+import { classifyChecks, requiredCheckEvidence } from "../github/requiredchecks.js";
 import { snapshotPolicyReview } from "../workflow/reviewpolicy.js";
 import { workflow } from "../workflow/definition.js";
 
@@ -437,9 +438,8 @@ analysisRules.set("pull-requests", ({ snapshot, prs }) =>
           "Wait for the current head checks; continue independent work.",
         ),
       );
-    const verified = checks.some(
-      (check) => check.name === workflow.verify && workflow.verifySuccess.includes(check.outcome),
-    );
+    const checkPolicy = evaluateCheckPolicy(requiredCheckEvidence(pr));
+    const verified = checkPolicy.ready;
     // Warnings are `${url}: …`; the separator stops /pull/1 matching /pull/12 (#448).
     const complete = !snapshot.warnings.some((warning) => warning.startsWith(`${pr.url}:`));
     const clean =
@@ -479,7 +479,7 @@ analysisRules.set("pull-requests", ({ snapshot, prs }) =>
           "pr-integrate",
           pr,
           75,
-          `Accepted at the current head (verify passed, head reviewed, no fetched findings) but merge state is ${pr.mergeStateStatus}, mergeable ${pr.mergeable}.`,
+          `Accepted at the current head (required checks satisfied, head reviewed, no fetched findings) but merge state is ${pr.mergeStateStatus}, mergeable ${pr.mergeable}.`,
           "Refresh mergeability or update the branch, then recheck the new head before considering merge. This is not approval.",
           "candidate",
         ),
@@ -490,7 +490,7 @@ analysisRules.set("pull-requests", ({ snapshot, prs }) =>
           "pr-inspect-merge",
           pr,
           80,
-          "Current verify passes; no fetched unresolved threads or blocking check findings.",
+          "Current required checks are satisfied; no fetched unresolved threads or blocking check findings.",
           "Inspect diff/design and advisory reviews, recheck current head, then consider merge. This is not approval.",
           "candidate",
         ),
@@ -501,7 +501,7 @@ analysisRules.set("pull-requests", ({ snapshot, prs }) =>
           "pr-verification-needed",
           pr,
           60,
-          `Required verify not proven successful or evidence incomplete; ${unknown.length} unknown check outcomes.`,
+          `Required checks are unproven or evidence incomplete; ${checkPolicy.blockers.join("; ")}${unknown.length ? `; ${unknown.length} unknown check outcomes` : ""}.`,
           "Inspect current head checks and missing review evidence. Do not infer approval.",
         ),
       );

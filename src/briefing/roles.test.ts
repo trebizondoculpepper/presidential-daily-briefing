@@ -145,7 +145,7 @@ describe("role-shaped briefings (#1, doc/design/briefings.md)", () => {
     const waiting = section(r, "pr-waiting");
     expect(numbers(waiting.items)).toEqual([4]);
     expect(waiting.background).toBe(true);
-    expect(waiting.items[0]!.reason).toMatch(/verify not proven/);
+    expect(waiting.items[0]!.reason).toMatch(/Required checks are unproven/);
     // An accepted PR that is only BEHIND is an integration action, not waiting (#182 S9).
     expect(numbers(section(r, "pr-follow-up").items)).toEqual([5]);
     expect(section(r, "pr-follow-up").items[0]!.reason).toMatch(/merge state is BEHIND/);

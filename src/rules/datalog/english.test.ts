@@ -211,13 +211,19 @@ describe("English policy compiler (#416)", () => {
         compileEnglish({ ...bundle, clauses: bundle.clauses.replace(/\]$/, ` ${extra}]`) }),
       );
     expect(withClauses('[(odd ?t) [?t "number" ?n] [(odd? ?n)]]')).toEqual([
-      "policy/rules.edn[108] odd[1]: unsupported function clause (odd?)",
+      expect.stringMatching(
+        /policy\/rules\.edn\[\d+\] odd\[1\]: unsupported function clause \(odd\?\)/,
+      ),
     ]);
     expect(withClauses("[(any ?t) [?t 42 ?v]]")).toEqual([
-      "policy/rules.edn[108] any[0]: a dynamic attribute must be a variable or wildcard",
+      expect.stringMatching(
+        /policy\/rules\.edn\[\d+\] any\[0\]: a dynamic attribute must be a variable or wildcard/,
+      ),
     ]);
     expect(withClauses('[(first ?t) [?t "label" ?l] [(count ?l) ?n]]')).toEqual([
-      "policy/rules.edn[108] first[1]: unsupported function clause (count)",
+      expect.stringMatching(
+        /policy\/rules\.edn\[\d+\] first\[1\]: unsupported function clause \(count\)/,
+      ),
     ]);
     const q2 = '[:find ?t (max ?d) :where [?t "unlocks-dependent" ?d]]';
     expect(

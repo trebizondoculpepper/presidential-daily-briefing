@@ -486,7 +486,15 @@ export async function readPullRequest(
   // pr-status-v1 (#367): the selected PR, then delivery of the issues it closes; nothing else.
   const meter = new ReadMeter("pr-status-v1", "pr", now, undefined, boundaries.signal);
   const subject = `${repository}#${number}`;
-  const status = await pullRequestStatus(repository, number, query, now, meter, reviewPolicy);
+  const status = await pullRequestStatus(
+    repository,
+    number,
+    query,
+    now,
+    meter,
+    reviewPolicy,
+    boundaries.live?.rest,
+  );
   const metered = meteredBoundaries(boundaries, meter, subject);
   // Keep each linked issue's repository: a PR may close an issue elsewhere.
   const linked = status.linkedIssues.map((i) => {

@@ -311,11 +311,11 @@ describe("pr review history: why does this keep failing review (#60)", () => {
     };
     expect(
       await main(["pr", "47", "--history", "--json"], async (t) => void (text = t), runtime),
-    ).toBe(0);
+    ).toBe(2);
     expect(calls).toHaveLength(2);
     const r = JSON.parse(text);
     expect(r).toMatchObject({ kind: "pr-review-history", cost: { requests: 2 } });
-    expect(r.current.blockers.join(" ")).toContain("verify");
+    expect(r.current.blockers.join(" ")).toContain("Required-check evidence unknown");
     expect(r.nextCommands[1]).toBe(`pdb pr 47 --repo ${repo} --history --json`);
   });
 });

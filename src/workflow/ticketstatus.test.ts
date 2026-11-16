@@ -102,6 +102,16 @@ const statusNode = (n: number, p: LivePr) => ({
   mergeStateStatus: "CLEAN",
   reviewDecision: null,
   headRefOid: `head${n}`,
+  requiredChecks: {
+    head: `head${n}`,
+    base: p.base ?? "main",
+    expected: [{ context: "verify", appId: null }],
+    checks:
+      p.verify === null
+        ? []
+        : [{ name: "verify", databaseId: null, appId: null, required: "required" as const }],
+    gaps: [],
+  },
   headRefName: `b${n}`,
   baseRefName: p.base ?? "main",
   updatedAt: time,
@@ -184,6 +194,16 @@ function fake(w: World) {
         },
         ...rate(q),
       };
+    if (q.includes("branchProtectionRule"))
+      return { repository: { ref: { branchProtectionRule: null } } };
+    if (q.includes("databaseId isRequired")) {
+      const p = w.prs[n];
+      const node = p ? statusNode(n, p) : null;
+      if (node)
+        for (const c of node.commits.nodes[0]!.commit.statusCheckRollup?.contexts.nodes ?? [])
+          Object.assign(c, { isRequired: true });
+      return { repository: { pullRequest: node }, ...rate(q) };
+    }
     if (q.includes("pullRequest(number")) {
       prReads.push(n);
       if (w.rateLimitPr?.has(n)) throw new RateLimitError("API rate limit exceeded");
@@ -215,11 +235,21 @@ function fake(w: World) {
     return { repository: { defaultBranchRef: { name: "main" } } };
   };
   const rest = async (path: string): Promise<RestAnswer> =>
-    path.includes("/collaborators/")
-      ? { status: 200, body: { user: { login: "writer" }, role_name: "write" } }
-      : path.includes("compare")
-        ? { status: 200, body: { status: "identical" } }
-        : { status: 404, body: null };
+    path.includes("/rules/branches/")
+      ? {
+          status: 200,
+          body: [
+            {
+              type: "required_status_checks",
+              parameters: { required_status_checks: [{ context: "verify", integration_id: null }] },
+            },
+          ],
+        }
+      : path.includes("/collaborators/")
+        ? { status: 200, body: { user: { login: "writer" }, role_name: "write" } }
+        : path.includes("compare")
+          ? { status: 200, body: { status: "identical" } }
+          : { status: 404, body: null };
   const boundaries = {
     trust: markerTrust(permissionLookup(repo, rest)),
     trustWith: (r: typeof rest) => markerTrust(permissionLookup(repo, r)),

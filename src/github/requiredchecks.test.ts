@@ -3,7 +3,7 @@
  * bounded collection, and the waiting decision. Injected boundaries only.
  */
 import { describe, expect, it } from "vite-plus/test";
-import { classifyChecks, hydrateRequiredChecks } from "./requiredchecks.js";
+import { classifyChecks, hydrateRequiredChecks, requiredCheckEvidence } from "./requiredchecks.js";
 import type { RequiredChecks } from "./requiredchecks.js";
 import type { PullRequest } from "./types.js";
 import { briefing } from "../briefing/briefing.js";
@@ -25,6 +25,7 @@ const withChecks = (
       gaps: [],
       ...evidence,
     };
+  else delete base.requiredChecks;
   return base;
 };
 const run = (name: string, required: "required" | "advisory" | "unknown", appId = ACTIONS) => ({
@@ -185,16 +186,18 @@ describe("collecting required-check evidence (#343)", () => {
     return { query, rest, calls };
   };
 
-  it("reads only open non-draft PRs with an unfinished check, sharing one base-policy read per base", async () => {
+  it("reads green and unfinished open non-draft PRs, sharing one base-policy read per base", async () => {
     const draft = { ...pending(3), isDraft: true };
     const green = withChecks(
       [{ name: "verify", status: "COMPLETED", conclusion: "SUCCESS" }],
       null,
     );
+    green.number = 4;
+    green.headRefOid = "h4";
     const f = fake();
     const prs = [pending(1), pending(2), draft, green];
     expect(await hydrateRequiredChecks("o/r", prs, f)).toEqual([]);
-    expect(f.calls).toEqual({ rest: 1, legacy: 1, pr: [1, 2] });
+    expect(f.calls).toEqual({ rest: 1, legacy: 1, pr: [1, 2, 4] });
     expect(prs[0]!.requiredChecks).toMatchObject({
       head: "h1",
       checks: [{ name: "test (freebsd)", required: "advisory", appId: ACTIONS }],
@@ -353,5 +356,72 @@ describe("delivery follow-up and metering use the same model (#343)", () => {
       expect.objectContaining({ route: "rest", outcome: "rate-limited", status: 429 }),
     ]);
     expect(data.warnings.join(" ")).toMatch(/required-check evidence incomplete .*answered 429/);
+  });
+});
+
+describe("target-bound required-check facts (#676)", () => {
+  it("distinguishes a known empty set from unread requirements even without verify", () => {
+    const known = withChecks([{ name: "CI gate", conclusion: "SUCCESS" }], {
+      checks: [run("CI gate", "advisory")],
+      expected: [],
+    });
+    expect(requiredCheckEvidence(known)).toMatchObject({ complete: true, missing: [] });
+    known.requiredChecks!.expected = null;
+    expect(requiredCheckEvidence(known)).toMatchObject({ complete: false });
+  });
+  it("binds app-qualified duplicate names to their actual run identities", () => {
+    const p = withChecks(
+      [
+        { name: "build", databaseId: 1, conclusion: "SUCCESS" },
+        { name: "build", databaseId: 2, status: "IN_PROGRESS", conclusion: null },
+      ],
+      {
+        expected: [{ context: "build", appId: 2 }],
+        checks: [
+          { name: "build", databaseId: 1, appId: 1, required: "advisory" },
+          { name: "build", databaseId: 2, appId: 2, required: "required" },
+        ],
+      },
+    );
+    expect(requiredCheckEvidence(p)).toMatchObject({
+      complete: true,
+      missing: [],
+      checks: [
+        { required: "advisory", outcome: "SUCCESS" },
+        { required: "required", outcome: "IN_PROGRESS" },
+      ],
+    });
+    p.commits.nodes[0]!.commit.statusCheckRollup!.contexts.nodes.pop();
+    expect(requiredCheckEvidence(p)).toMatchObject({ complete: false, missing: ["build"] });
+  });
+  it("does not borrow a duplicate's identity, stale base, or conflicting source answer", () => {
+    const p = withChecks(
+      [
+        { name: "build", conclusion: "SUCCESS" },
+        { name: "build", conclusion: "SUCCESS" },
+      ],
+      {
+        checks: [run("build", "required")],
+        expected: [{ context: "build", appId: null }],
+      },
+    );
+    expect(requiredCheckEvidence(p).complete).toBe(false);
+    p.requiredChecks!.base = "another-base";
+    expect(requiredCheckEvidence(p).complete).toBe(false);
+    const conflict = withChecks([{ name: "build", conclusion: "SUCCESS" }], {
+      checks: [run("build", "advisory")],
+      expected: [{ context: "build", appId: null }],
+    });
+    expect(requiredCheckEvidence(conflict).gaps).toContain("conflicting requiredness for build");
+    conflict.requiredChecks!.expected = [];
+    conflict.requiredChecks!.checks[0]!.required = "required";
+    expect(requiredCheckEvidence(conflict).complete).toBe(false);
+  });
+  it("preserves complete no-check heads separately from absent observed coverage", () => {
+    const p = withChecks([], { checks: [], expected: [] });
+    p.commits.nodes[0]!.commit.statusCheckRollup = null;
+    expect(requiredCheckEvidence(p)).toMatchObject({ complete: true, checks: [], missing: [] });
+    p.commits.nodes = [];
+    expect(requiredCheckEvidence(p).complete).toBe(false);
   });
 });

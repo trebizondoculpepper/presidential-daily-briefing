@@ -200,3 +200,25 @@ app-qualified duplicates, stale head/base bindings and unread sources. Native
 rules-only cases prove the policy; injected collector cases prove coverage and
 bounded reads; representative direct-PR/briefing/transport cases prove parity.
 No changes to target branch protection or GitHub permissions are authorized.
+
+## Implementation of the focused correction (#676)
+
+Selected open, non-draft PRs are now hydrated even when their visible checks are
+green or absent. Direct PR reads and consolidated ticket details use the same
+injected collector. The native `verified` predicate consumes complete target
+requirements and per-run requiredness; the `check-ready` and `check-blockers`
+queries expose that same policy to diagnostic and delivery projections. The engine
+materializes the native query once for dependent rules and rejects host-supplied
+values for that private result relation.
+`RC-COVERAGE`, `RC-REQUIREDNESS`, `RC-GAP`, `RC-MISSING` and `RC-OUTCOME` identify
+native reasons. PR JSON retains source head/base, app/run identity, expected
+requirements, policy version and rules hash. Legacy singular fields remain for
+compatibility; text and HTML use the target required-set state.
+
+The read-profile identifiers remain stable; `pr-status-v1` and `ticket-status-v1`
+profile version 2 add required-check coverage. One selected direct PR uses three
+additional bounded reads: effective rules, legacy protection and head-bound
+requiredness. Base-policy reads coalesce within one collection, without a global
+or cross-account cache. Native queries share generated runtime chunks with the
+briefing evaluator; installed-package smoke traverses the actual import graph and
+checks that every referenced allowlisted chunk is included.
