@@ -199,6 +199,11 @@ npm test
 npm run build
 ```
 
+To build this checkout and install its commands globally on macOS/Linux (or a
+POSIX shell on Windows), run `./install-from-source-global.sh`. Install dependencies
+once with `npm ci`. The script runs `npm run build`, then `npm install -g .` from
+this checkout. Restart an existing PDB server separately to load the new code.
+
 The workflow rules are native DataScript EDN files in `src/rules/datalog/policy/`. After editing them, run `npm run rules:test` for a fast rules-only check against the EDN scenarios in `src/rules/datalog/scenarios/`, then `npm run rules:build` and the full checks. [AGENTS.md](AGENTS.md#editing-the-rules) has a worked example and [the rules component contract](doc/design/rules-component.md) the details.
 
 The exhaustive formal-comprehension research validator is manual/local only: `npm run test:manual:formal`. Run it when changing the formal research representation or preparation/scoring, or regenerating experiment inputs after relevant policy changes. It is excluded from normal unit-test/CI discovery and does not replace `rules:test` or the product tests. See the [experiment procedure](doc/reports/formal-rules-comprehension-experiment.md).
