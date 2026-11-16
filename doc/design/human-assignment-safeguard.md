@@ -131,7 +131,7 @@ for the target host from the signed-in gh account (`ghAuthContext`, now in
   an older login.
 
 Records are kept per OS user in the pdb cache, keyed by host. Agent name, git author, PR creator
-and display selectors are never inputs. Briefings carry the result as an additive `human` field
+and display selectors are never inputs. Briefings carry the result as an additive `employingHuman` field
 plus one leading `Working for:` text line, identically through the CLI (offline: last known only),
 STDIO MCP and `pdb serve`. `pdb serve` has one execution-human context, the login read at startup.
 `PDB_NO_HUMAN_CONTEXT` disables resolution (tests, smoke and package runs). The optional

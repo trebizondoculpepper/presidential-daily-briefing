@@ -72,7 +72,7 @@ export const defaultEngineRole = "implementer";
 
 export interface PresentOptions extends Omit<BriefingOptions, "estimation" | "assessments"> {
   /** The employing human (#664), when the caller resolved it; added to the report. */
-  human?: HumanContext;
+  employingHuman?: HumanContext;
   /** Expanded version-1 report instead of the compact briefing. */
   full?: boolean;
   engineSetting?: EngineSetting;
@@ -139,21 +139,21 @@ export const datalogCheckFacts = (snapshot: Snapshot) =>
 
 /** Build the briefing (compact unless `full`) for an already collected snapshot. */
 /**
- * Present a briefing, with the employing human (#664) when the caller resolved one: a `human`
- * field in the report and one leading text line inside the same character budget. Callers that
- * resolve no human (tests, focused reads) get the report unchanged.
+ * Present a briefing, with the employing human (#664) when the caller resolved one: an
+ * `employingHuman` field in the report and one leading text line inside the same character budget.
+ * Callers that resolve no human (tests, focused reads) get the report unchanged.
  */
 export async function presentBriefing(
   ...args: Parameters<typeof presentBriefingFor>
 ): ReturnType<typeof presentBriefingFor> {
-  const human = args[1].human;
-  if (!human) return presentBriefingFor(...args);
-  const line = `${humanContextText(human)}\n`;
+  const employingHuman = args[1].employingHuman;
+  if (!employingHuman) return presentBriefingFor(...args);
+  const line = `${humanContextText(employingHuman)}\n`;
   const options = { ...args[1], maxChars: Math.max(0, args[1].maxChars - line.length) };
   const presented = await presentBriefingFor(args[0], options, ...(args.slice(2) as []));
   return {
     ...presented,
-    report: { ...presented.report, human },
+    report: { ...presented.report, employingHuman },
     text: line + presented.text,
   } as unknown as Awaited<ReturnType<typeof presentBriefingFor>>;
 }
@@ -754,9 +754,11 @@ export async function readBriefing(
   const process = briefingProcess(
     redact ? { ...setting, diagnostics: setting.diagnostics.map(redact) } : setting,
   );
-  const human = runtime.humanContext ? await runtime.humanContext(request.signal) : undefined;
+  const employingHuman = runtime.humanContext
+    ? await runtime.humanContext(request.signal)
+    : undefined;
   const options: PresentOptions = {
-    ...(human ? { human } : {}),
+    ...(employingHuman ? { employingHuman } : {}),
     limit: request.limit,
     maxChars: request.maxChars,
     context: request.context,

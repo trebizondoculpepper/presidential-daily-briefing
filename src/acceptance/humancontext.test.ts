@@ -1,6 +1,6 @@
 /**
  * The employing human across surfaces (#664): the CLI briefing and the shared read service (MCP
- * and HTTP) carry the same `human` metadata and text line, independent of the agent selected.
+ * and HTTP) carry the same `employingHuman` metadata and text line, independent of the agent selected.
  */
 import { describe, expect, it } from "vite-plus/test";
 import { main } from "../cli.js";
@@ -34,10 +34,17 @@ describe("employing human in briefings (#664)", () => {
   it("is reported in CLI JSON and text, whatever agent is selected", async () => {
     for (const agent of ["agent_one", "agent_two"]) {
       const json = JSON.parse((await cli(["--agent", agent, "--json"])).out);
-      expect(json.human).toEqual(human);
+      expect(json.employingHuman).toEqual(human);
     }
     const text = (await cli(["--agent", "agent_one"])).out;
     expect(text.split("\n")[0]).toBe("Working for: alice (github.com, the signed-in gh account)");
+  });
+
+  it("preserves report.human in --role human briefings while adding employingHuman", async () => {
+    const json = JSON.parse((await cli(["--role", "human", "--agent", "alice", "--json"])).out);
+    expect(json.employingHuman).toEqual(human);
+    expect(json.human).toMatchObject({ schemaVersion: 1, human: "alice" });
+    expect(Array.isArray(json.human.items)).toBe(true);
   });
 
   it("is the same through the shared read service used by MCP and HTTP", async () => {
@@ -53,9 +60,11 @@ describe("employing human in briefings (#664)", () => {
       } as never,
       { repository: repo, agent: "agent_two", limit: 10, maxChars: 100_000 },
     );
-    expect((read as unknown as { report: { human: HumanContext } }).report.human).toEqual(human);
-    expect(JSON.parse((await cli(["--agent", "agent_two", "--json"])).out).human).toEqual(
-      (read as unknown as { report: { human: HumanContext } }).report.human,
+    expect(
+      (read as unknown as { report: { employingHuman: HumanContext } }).report.employingHuman,
+    ).toEqual(human);
+    expect(JSON.parse((await cli(["--agent", "agent_two", "--json"])).out).employingHuman).toEqual(
+      (read as unknown as { report: { employingHuman: HumanContext } }).report.employingHuman,
     );
   });
 
@@ -65,6 +74,6 @@ describe("employing human in briefings (#664)", () => {
       collect: async () => snapshot(),
       currentRepository: async () => repo,
     });
-    expect(JSON.parse(out).human).toBeUndefined();
+    expect(JSON.parse(out).employingHuman).toBeUndefined();
   });
 });
