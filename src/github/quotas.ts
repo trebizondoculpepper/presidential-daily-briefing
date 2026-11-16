@@ -29,8 +29,12 @@ export const QUOTA_MAX_EVENTS = 10;
 /** Most header/aggregate discrepancy notices. */
 export const QUOTA_MAX_DISCREPANCIES = 5;
 /** PDB display heuristics (not GitHub limits): percent used for warning and critical. */
-export const QUOTA_WARNING_PERCENT = 80;
-export const QUOTA_CRITICAL_PERCENT = 95;
+/**
+ * PDB display heuristics (owner-confirmed on #548): warning at 20% remaining or less, critical
+ * below 5% remaining. Compared on the unrounded counts; the rounded percentage is display only.
+ */
+export const QUOTA_WARNING_REMAINING_PERCENT = 20;
+export const QUOTA_CRITICAL_REMAINING_PERCENT = 5;
 
 /** The verified gh host and login, or an unverified host (no cross-call reuse). */
 export interface QuotaContext {
@@ -328,12 +332,13 @@ export function rowState(
   if (row.resetAt !== null && Date.parse(row.resetAt) <= now)
     return { state: "reset-passed", percentUsed: null };
   const percentUsed = Math.round((row.used / row.limit) * 1000) / 10;
+  // Integer comparisons on the reported counts: 9,501 of 10,000 used (4.99% left) is critical.
   const state: QuotaRowState =
     row.remaining === 0
       ? "exhausted"
-      : percentUsed >= QUOTA_CRITICAL_PERCENT
+      : row.remaining * 100 < row.limit * QUOTA_CRITICAL_REMAINING_PERCENT
         ? "critical"
-        : percentUsed >= QUOTA_WARNING_PERCENT
+        : row.remaining * 100 <= row.limit * QUOTA_WARNING_REMAINING_PERCENT
           ? "warning"
           : "normal";
   return { state, percentUsed };

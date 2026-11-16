@@ -16,7 +16,64 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      docs_only: ${{ steps.paths.outputs.docs_only }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - id: paths
+        name: Classify documentation-only pull requests
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          docs_only=false
+          if [[ "$EVENT" == pull_request ]]; then
+            base=$(git merge-base "$BASE" "$HEAD")
+            git diff --no-renames --name-only -z "$base" "$HEAD" > /tmp/changed-paths
+            docs_only=true
+            count=0
+            while IFS= read -r -d '' path; do
+              count=$((count + 1))
+              case "$path" in
+                doc/reports/examples/*) docs_only=false ;;
+                doc/*.md|diary/*.md|.github/ISSUE_TEMPLATE/*.md|.github/PULL_REQUEST_TEMPLATE/*.md) ;;
+                */*) docs_only=false ;;
+                *.md) ;;
+                *) docs_only=false ;;
+              esac
+            done < /tmp/changed-paths
+            if [[ "$count" == 0 ]]; then docs_only=false; fi
+          fi
+          echo "docs_only=$docs_only" >> "$GITHUB_OUTPUT"
+          echo "Documentation-only fast path: $docs_only" >> "$GITHUB_STEP_SUMMARY"
+
+  docs:
+    needs: changes
+    if: needs.changes.outputs.docs_only == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+          cache: npm
+      - run: npm ci
+      - name: Documentation formatting
+        run: npx vp fmt --check
+
   test:
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
     name: test (${{ matrix.os }}, node ${{ matrix.node }})
     strategy:
       fail-fast: false
@@ -91,6 +148,8 @@ jobs:
   # where npm lifecycle scripts (prepare -> vp, prepack -> build) are disabled; the VM then runs
   # the built CLI, the source CLI via tsx, both smoke tests and the installed-archive test.
   freebsd:
+    needs: changes
+    if: needs.changes.outputs.docs_only != 'true'
     name: test (freebsd 15.1, node 26) [trial, non-blocking]
     runs-on: ubuntu-latest
     timeout-minutes: 45
@@ -129,11 +188,23 @@ jobs:
             npm run package-test
 
   # Single stable check name for branch protection and the triage tool's
-  # required "verify" check; passes only if every matrix job passed.
+  # required "verify" check; requires the selected docs or full-matrix path.
   verify:
     if: always()
-    needs: test
+    needs: [changes, docs, test]
     runs-on: ubuntu-latest
     steps:
-      - name: Require every matrix job to pass
-        run: test "${{ needs.test.result }}" = "success"
+      - name: Require the selected verification path to pass
+        env:
+          CLASSIFICATION: ${{ needs.changes.result }}
+          DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
+          DOCS: ${{ needs.docs.result }}
+          TESTS: ${{ needs.test.result }}
+        run: |
+          set -eu
+          test "$CLASSIFICATION" = success
+          if [ "$DOCS_ONLY" = true ]; then
+            test "$DOCS" = success && test "$TESTS" = skipped
+          else
+            test "$TESTS" = success && test "$DOCS" = skipped
+          fi
