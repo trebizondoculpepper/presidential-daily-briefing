@@ -202,7 +202,7 @@ describe("dashboard page and script (#374)", () => {
     const page = dashboardPage();
     expect(page).toContain('<script src="/dashboard.js" defer></script>');
     expect(page).toContain('<link rel="stylesheet" href="/dashboard.css">');
-    expect(page).toContain('<a id="rules-link" href="/rules">Project rules</a>');
+    expect(page).toContain('<a href="/rules">Rules</a>');
     expect(page).not.toMatch(/<script>|<style|\sstyle=|\son[a-z]+=|https?:\/\//);
     expect(dashboardCss).not.toMatch(/url\(|@import/);
     expect(dashboardSecurityPolicy).toContain("default-src 'none'");
@@ -237,22 +237,47 @@ describe("dashboard page and script (#374)", () => {
     );
     elements.get("role")!.value = "implementer";
     const fetched: string[] = [];
+    const signals: (AbortSignal | undefined)[] = [];
+    const viewLinks = [
+      {
+        href: "http://localhost/?repo=other%2Frepo&role=designer",
+        getAttribute: () => "role agent",
+      },
+    ];
     const sandbox = {
       document: {
         getElementById: (id: string) => elements.get(id),
         createElement: () => ({ value: "", textContent: "" }),
+        querySelectorAll: () => viewLinks,
       },
-      location: { search, assign: (to: string) => void (shown.assigned = to) },
-      history: { replaceState: (_s: unknown, _t: string, to: string) => void (shown.url = to) },
+      location: {
+        href: "http://localhost/",
+        search,
+        assign: (to: string) => void (shown.assigned = to),
+      },
+      history: {
+        replaceState: (_s: unknown, _t: string, to: string) => {
+          shown.url = to;
+          sandbox.location.search = to;
+        },
+        pushState: (_s: unknown, _t: string, to: string) => {
+          shown.url = to;
+          sandbox.location.search = to;
+        },
+      },
       URLSearchParams,
-      fetch: async (path: string) => {
+      URL,
+      AbortController,
+      addEventListener: (type: string, fn: () => void) => listeners.set(type, fn),
+      fetch: async (path: string, options?: { signal?: AbortSignal }) => {
         fetched.push(path);
+        signals.push(options?.signal);
         const body = responses[path.split("?")[0]!];
-        return { json: async () => body };
+        return { json: async () => await body };
       },
     };
     const shown = { url: "", assigned: "" };
-    return { sandbox, elements, fetched, shown, listeners };
+    return { sandbox, elements, fetched, shown, listeners, signals, viewLinks };
   }
   const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -264,23 +289,20 @@ describe("dashboard page and script (#374)", () => {
     expect(context.result).toBe(7);
   });
 
-  it("runs standalone: reads status, then only the selected briefing, and renders it", async () => {
-    const browser = fakeBrowser("?role=designer", {
+  it("runs standalone: reads only the explicitly selected briefing and renders it", async () => {
+    const browser = fakeBrowser("?repo=o%2Fr&role=designer", {
       "/api/v1/status": { repositories: [{ repository: "o/r", default: true }] },
       "/api/v1/briefing": envelope(),
     });
     runInNewContext(dashboardScript(), browser.sandbox);
     await settle();
     await settle();
-    expect(browser.fetched).toEqual([
-      "/api/v1/status",
-      "/api/v1/briefing?repo=o%2Fr&role=designer&limit=50",
-    ]);
+    expect(browser.fetched).toEqual(["/api/v1/briefing?repo=o%2Fr&role=designer&limit=50"]);
     expect(browser.elements.get("actions")!.innerHTML).toContain("#1 Fix &lt;b&gt;bold");
     expect(browser.elements.get("state")!.innerHTML).toContain("Observed");
     expect(browser.shown.url).toBe("?repo=o%2Fr&role=designer");
     // The rules page link (#392) follows the selected project, encoded, on the same origin.
-    expect(browser.elements.get("rules-link")!.href).toBe("/rules?repo=o%2Fr");
+    expect(browser.fetched).not.toContain("/api/v1/status");
     // Refresh asks the server to bypass its cache for this one view.
     browser.listeners.get("refresh:click")!();
     await settle();
@@ -298,17 +320,56 @@ describe("dashboard page and script (#374)", () => {
     });
     runInNewContext(dashboardScript(), browser.sandbox);
     await settle();
-    expect(browser.fetched).toEqual(["/api/v1/status"]);
-    expect(browser.elements.get("state")!.innerHTML).toContain("Select a project.");
+    expect(browser.fetched).toEqual([]);
+    expect(browser.elements.get("state")!.innerHTML).toContain("No project selected.");
   });
 
   it("opens the human attention page (#458) for the human role, without fetching a briefing", async () => {
-    const browser = fakeBrowser("?role=human&agent=me", {
+    const browser = fakeBrowser("?repo=o%2Fr&role=human&agent=me", {
       "/api/v1/status": { repositories: [{ repository: "o/r", default: true }] },
     });
     runInNewContext(dashboardScript(), browser.sandbox);
     await settle();
     expect(browser.shown.assigned).toBe("/human?repo=o%2Fr");
-    expect(browser.fetched).toEqual(["/api/v1/status"]);
+    expect(browser.fetched).toEqual([]);
+  });
+  it("aborts superseded reads, ignores late results and restores the role on history navigation", async () => {
+    let resolveOld!: (value: unknown) => void;
+    const responses: Record<string, unknown> = {
+      "/api/v1/briefing": new Promise((done) => {
+        resolveOld = done;
+      }),
+    };
+    const browser = fakeBrowser("?repo=o/r&role=designer&agent=me", responses);
+    runInNewContext(dashboardScript(), browser.sandbox);
+    await settle();
+    responses["/api/v1/briefing"] = envelope(
+      {},
+      { subjects: [{ url: url(1), title: "New result" }] },
+    );
+    browser.elements.get("role")!.value = "implementer";
+    browser.listeners.get("role:change")!();
+    await settle();
+    expect(browser.signals[0]?.aborted).toBe(true);
+    expect(browser.shown.url).toContain("role=implementer");
+    expect(browser.viewLinks[0]!.href).toBe("/?repo=other%2Frepo&role=implementer&agent=me");
+    resolveOld(envelope({}, { subjects: [{ url: url(1), title: "Old result" }] }));
+    await settle();
+    expect(browser.elements.get("actions")!.innerHTML).toContain("New result");
+    expect(browser.elements.get("actions")!.innerHTML).not.toContain("Old result");
+    browser.sandbox.location.search = "?repo=o/r&role=designer&agent=me";
+    browser.listeners.get("popstate")!();
+    await settle();
+    expect(browser.elements.get("role")!.value).toBe("designer");
+    expect(browser.fetched.at(-1)).toContain("role=designer");
+  });
+  it("does not render an answer from another repository", async () => {
+    const browser = fakeBrowser("?repo=o/r", {
+      "/api/v1/briefing": envelope({ selection: { repository: "other/repo" } }),
+    });
+    runInNewContext(dashboardScript(), browser.sandbox);
+    await settle();
+    expect(browser.elements.get("actions")!.innerHTML).toBe("");
+    expect(browser.elements.get("state")!.innerHTML).toContain("SELECTION_MISMATCH");
   });
 });

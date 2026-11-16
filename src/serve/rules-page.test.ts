@@ -192,8 +192,8 @@ describe("GET /rules (#392)", () => {
         'briefing.engine = "datalog"  (not stored; the registry default applies)',
       );
       // Links use the real server origin and encoded selection.
-      expect(reply.body).toContain(`href="http://127.0.0.1:${port}/rules?repo=other%2Frepo"`);
-      expect(reply.body).toContain(`href="http://127.0.0.1:${port}/?repo=example%2Fproject"`);
+      expect(reply.body).toContain(`href="/rules?repo=other%2Frepo"`);
+      expect(reply.body).toContain(`href="/?repo=example%2Fproject"`);
 
       // A repository served without a project: settings unknown, never the defaults.
       const remote = unescape((await call(port, "/rules?repo=other/repo")).body);
@@ -203,7 +203,7 @@ describe("GET /rules (#392)", () => {
       // Several projects and none selected: the selector and the shared policy, settings unknown.
       const none = await call(port, "/rules");
       expect(none.status).toBe(200);
-      expect(none.body).toContain("select one above");
+      expect(none.body).toContain("No project selected");
       expect(unescape(none.body)).toContain("effective settings: unknown");
 
       // A filter is labelled a subset.

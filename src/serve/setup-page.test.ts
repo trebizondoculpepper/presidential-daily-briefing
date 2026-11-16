@@ -115,7 +115,7 @@ describe("GET /setup (#391)", () => {
       // The MCP endpoint is this server's, and the verified Claude Code command uses it.
       expect(unescape(reply.body)).toContain(`claude mcp add --transport http pdb ${origin}/mcp`);
       expect(reply.body).toContain(`href="${origin}/rules?repo=example%2Fproject"`);
-      expect(reply.body).toContain(`href="${origin}/setup?repo=other%2Frepo"`);
+      expect(reply.body).toContain(`href="/setup?repo=other%2Frepo"`);
       expect(reply.body).toContain("unverified");
       expect(github).toEqual([]);
       expect((await call(port, "/setup.js")).body).toBe(setupScript());
@@ -129,7 +129,7 @@ describe("GET /setup (#391)", () => {
     try {
       const reply = await call(port, "/setup");
       expect(reply.status).toBe(200);
-      expect(reply.body).toContain("select one above");
+      expect(reply.body).toContain("No project selected");
       expect(unescape(reply.body)).toContain("--repo OWNER/NAME");
     } finally {
       await running.close();

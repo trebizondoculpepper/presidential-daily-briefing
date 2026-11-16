@@ -2,7 +2,7 @@
  * The local read-only dashboard served by `pdb serve` at `/` (#374, doc/design/serve.md and
  * doc/design/serve-global-dashboard-roadmap.md).
  *
- * It reads only `/api/v1/status` and `/api/v1/briefing`; each issue row links to the read-only
+ * It reads only `/api/v1/briefing`; each issue row links to the read-only
  * ticket detail page (#454, ticket-page.ts), which reads that one ticket only when opened.
  * Ranking, reasons and commands come from the shared engine through that API; nothing here orders or chooses work. The page loads no
  * external resources and has no inline script: the HTML, stylesheet and script are three
@@ -18,40 +18,29 @@
 export const dashboardSecurityPolicy =
   "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 
-/** The HTML shell: no data, no inline script or style. */
-export const dashboardPage = (): string => `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>pdb serve</title>
-<link rel="stylesheet" href="/dashboard.css">
-<script src="/dashboard.js" defer></script>
-</head>
-<body>
-<header>
-<h1>pdb serve</h1>
+import { shellContext, shellPage, shellCss, type ShellContext } from "./shell.js";
+
+/** The page is rendered for the validated request; its script reads only the selected view. */
+export const dashboardPage = (context: ShellContext = shellContext("work")): string =>
+  shellPage(
+    context,
+    "Work",
+    `
 <form id="selection">
-<label>Project <select id="repo"></select></label>
 <label>Role <select id="role"><option value="implementer">implementer</option><option value="designer">designer</option><option value="human">human</option></select></label>
 <label>Agent <input id="agent" type="text" placeholder="optional" autocomplete="off" spellcheck="false"></label>
-<button id="show" type="submit">Show</button>
-<button id="refresh" type="button">Refresh</button>
+<button id="show" type="submit">Show</button><button id="refresh" type="button">Refresh</button>
 </form>
-<p><a id="human-link" href="/human">Human attention</a> · <a href="/quotas">GitHub quotas</a> · <a id="rules-link" href="/rules">Project rules</a> · <a id="setup-link" href="/setup">Agent setup</a></p>
-</header>
-<main>
-<section id="state" aria-live="polite"></section>
-<section id="actions"></section>
-</main>
-<footer>Read-only. Ranking, reasons and commands come from the shared rules engine. <a href="/api/v1/status">/api/v1/status</a></footer>
-</body>
-</html>
-`;
+<p><a id="human-link" href="/human">Human attention</a></p>
+<section id="state" aria-live="polite"></section><section id="actions"></section>
+`,
+    "/dashboard.js",
+    "Read-only. Ranking, reasons and commands come from the shared rules engine.",
+  );
 
 export const dashboardCss = `:root { color-scheme: light dark; font-family: system-ui, sans-serif; }
 body { margin: 0 auto; max-width: 70rem; padding: 0 1rem 2rem; }
-header { position: sticky; top: 0; background: Canvas; padding: .5rem 0; border-bottom: 1px solid GrayText; }
+
 h1 { font-size: 1.2rem; margin: .25rem 0; }
 form { display: flex; flex-wrap: wrap; gap: .5rem 1rem; align-items: end; }
 label { display: flex; flex-direction: column; font-size: .8rem; }
@@ -88,7 +77,7 @@ ul.quotas meter { width: 100%; height: 1.25rem; }
 .nobar, .scope, .note { font-size: .85rem; }
 button:focus-visible, a:focus-visible { outline: 2px solid Highlight; outline-offset: 2px; }
 main a, main code { overflow-wrap: anywhere; }
-`;
+${shellCss}`;
 
 export interface DashboardRenderers {
   escapeHtml(text: unknown): string;
@@ -231,6 +220,11 @@ export function dashboardRenderers(): DashboardRenderers {
               `/ticket?${new URLSearchParams({
                 repo: repository,
                 n: issue[2]!,
+                role: String(
+                  record(record(result.decisionEngine).role).used ??
+                    record(result.role).name ??
+                    "implementer",
+                ),
                 ...(selection.agent ? { agent: String(selection.agent) } : {}),
               }).toString()}`,
             )}">details</a>`
@@ -247,37 +241,41 @@ export function dashboardRenderers(): DashboardRenderers {
 /** The browser entry point; receives the renderers so it references no module-level names. */
 export function dashboardClient(render: DashboardRenderers): void {
   const byId = (id: string) => document.getElementById(id) as HTMLElement;
-  const repo = byId("repo") as HTMLSelectElement;
   const role = byId("role") as HTMLSelectElement;
   const agent = byId("agent") as HTMLInputElement;
   const state = byId("state");
   const actions = byId("actions");
-  const rulesLink = byId("rules-link") as HTMLAnchorElement | null;
-  // The rules page link follows the selected project, encoded, on this same origin.
-  const setupLink = byId("setup-link") as HTMLAnchorElement | null;
-  // The human mode of Work (#458) is its own page; it never reuses the agent field as a human.
-  const humanLink = byId("human-link") as HTMLAnchorElement | null;
-  const humanHref = () =>
-    `/human${repo.value ? `?${new URLSearchParams({ repo: repo.value }).toString()}` : ""}`;
-  const linkRules = () => {
-    if (humanLink) humanLink.href = humanHref();
-    if (rulesLink && repo.value)
-      rulesLink.href = `/rules?${new URLSearchParams({ repo: repo.value }).toString()}`;
-    // The agent setup page (#391) follows the same selection.
-    if (setupLink && repo.value)
-      setupLink.href = `/setup?${new URLSearchParams({ repo: repo.value }).toString()}`;
-  };
   const initial = new URLSearchParams(location.search);
+  const repo = byId("content")?.dataset.repo ?? initial.get("repo") ?? "";
+  const humanLink = byId("human-link") as HTMLAnchorElement | null;
+  const humanHref = () => `/human${repo ? `?${new URLSearchParams({ repo })}` : ""}`;
+  if (humanLink) humanLink.href = humanHref();
+  let controller: AbortController | null = null;
   let request = 0;
 
-  const show = async (refresh: boolean) => {
-    if (!repo.value) return;
+  const show = async (refresh: boolean, push = false) => {
+    if (!repo) {
+      state.innerHTML = "<p>No project selected. Choose a project from the menu.</p>";
+      return;
+    }
     const mine = ++request;
-    const selection = { repo: repo.value, role: role.value, agent: agent.value.trim(), refresh };
+    controller?.abort();
+    controller = new AbortController();
+    const selection = { repo, role: role.value, agent: agent.value.trim(), refresh };
     const shown = new URLSearchParams({ repo: selection.repo, role: selection.role });
     if (selection.agent) shown.set("agent", selection.agent);
-    history.replaceState(null, "", `?${shown.toString()}`);
-    linkRules();
+    if (push) history.pushState(null, "", `?${shown.toString()}`);
+    else history.replaceState(null, "", `?${shown.toString()}`);
+    // The server marks only equivalent view links with their declared carry keys. Preserve
+    // each link's own project while keeping its role/agent synchronized with this URL.
+    for (const link of document.querySelectorAll<HTMLAnchorElement>("a[data-shell-carries]")) {
+      const url = new URL(link.href, location.href);
+      for (const key of (link.getAttribute("data-shell-carries") ?? "").split(" ")) {
+        if (shown.has(key)) url.searchParams.set(key, shown.get(key)!);
+        else url.searchParams.delete(key);
+      }
+      link.href = url.pathname + url.search + url.hash;
+    }
     // Earlier results stay visible but marked provisional until the new response arrives.
     actions.classList.add("provisional");
     state.innerHTML = render.renderState(null, true);
@@ -285,6 +283,7 @@ export function dashboardClient(render: DashboardRenderers): void {
     try {
       const response = await fetch(render.briefingUrl(selection), {
         headers: { accept: "application/json" },
+        signal: controller.signal,
       });
       envelope = await response.json();
     } catch (error) {
@@ -294,54 +293,48 @@ export function dashboardClient(render: DashboardRenderers): void {
       };
     }
     if (mine !== request) return; // a newer request superseded this one
+    const observed = envelope as { selection?: { repository?: string }; status?: string };
+    if (observed.selection?.repository !== repo && observed.status !== "error")
+      envelope = {
+        status: "error",
+        error: { code: "SELECTION_MISMATCH", message: "The answer was for another project." },
+      };
     actions.classList.remove("provisional");
     state.innerHTML = render.renderState(envelope, false);
     actions.innerHTML = render.renderActions(envelope);
   };
 
+  const restore = () => {
+    const params = new URLSearchParams(location.search);
+    role.value = params.get("role") ?? "implementer";
+    agent.value = params.get("agent") ?? "";
+  };
   const start = async () => {
-    let status: { repositories?: { repository: string; default?: boolean }[] } = {};
-    try {
-      status = await (await fetch("/api/v1/status")).json();
-    } catch (error) {
-      state.innerHTML = render.renderState(
-        { status: "error", error: { code: "UNREACHABLE", message: String(error) } },
-        false,
-      );
-      return;
-    }
-    const served = status.repositories ?? [];
-    for (const entry of served) {
-      const option = document.createElement("option");
-      option.value = option.textContent = entry.repository;
-      repo.append(option);
-    }
-    const wanted = initial.get("repo");
-    const preset = served.find((s) => s.repository === wanted) ?? served.find((s) => s.default);
-    if (preset) repo.value = preset.repository;
-    else {
-      repo.selectedIndex = -1;
-      state.innerHTML = "<p>Select a project.</p>";
-    }
-    if (initial.get("role") === "designer") role.value = "designer";
-    // An old deep link to the human role opens its page, for the same project.
-    if (initial.get("role") === "human" && preset) {
+    restore();
+    if (role.value === "human") {
       location.assign(humanHref());
       return;
     }
-    agent.value = initial.get("agent") ?? "";
     byId("selection").addEventListener("submit", (event) => {
       event.preventDefault();
-      void show(false);
+      void show(false, true);
     });
     byId("refresh").addEventListener("click", () => void show(true));
-    repo.addEventListener("change", () => void show(false));
     role.addEventListener("change", () => {
       if (role.value === "human") location.assign(humanHref());
-      else void show(false);
+      else void show(false, true);
     });
-    // Only the view the user opened is fetched: one project, one role, on load or on request.
-    if (preset) await show(false);
+    addEventListener("popstate", () => {
+      restore();
+      void show(false);
+    });
+    addEventListener("pageshow", (event: PageTransitionEvent) => {
+      if (event.persisted) {
+        restore();
+        void show(false);
+      }
+    });
+    await show(false);
   };
   void start();
 }

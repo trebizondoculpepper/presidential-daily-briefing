@@ -9,43 +9,31 @@
  * ticket; a pull request's current status is fetched only when the user asks for it. Nothing is
  * written anywhere.
  *
- * Like the #374 dashboard, the HTML, stylesheet and script are same-origin static responses under
+ * Like the #374 dashboard, the per-request HTML and shared stylesheet and script are served under
  * the strict Content-Security-Policy, with no inline script. `ticketRenderers` and `ticketClient`
  * reference no module-level names, so their source text runs on its own in the browser; tests call
  * the renderers directly and run the served script in an isolated context.
  */
 
-/** Query parameters the page accepts: the selected project, ticket and focus agent. */
-export const ticketPageParameters = ["repo", "n", "agent"] as const;
-
-/** The HTML shell: no data, no inline script or style. */
-export const ticketPage = (): string => `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>pdb ticket</title>
-<link rel="stylesheet" href="/dashboard.css">
-<script src="/ticket.js" defer></script>
-</head>
-<body>
-<header>
-<h1>pdb ticket</h1>
+import { pageById, shellContext, shellPage, type ShellContext } from "./shell.js";
+export const ticketPageParameters = pageById("ticket").parameters;
+export const ticketPage = (context: ShellContext = shellContext("ticket")): string =>
+  shellPage(
+    context,
+    "Ticket",
+    `
 <p><a id="back" href="/">Back to the to-do list</a> · <button id="refresh" type="button">Refresh</button></p>
-</header>
-<main>
-<section id="state" aria-live="polite"></section>
-<section id="ticket"></section>
-</main>
-<footer>Read-only. Delivery, review and next steps come from the shared ticket-status service; nothing here edits GitHub.</footer>
-</body>
-</html>
-`;
+<section id="state" aria-live="polite"></section><section id="ticket"></section>
+`,
+    "/ticket.js",
+    "Read-only. Delivery, review and next steps come from the shared ticket-status service; nothing here edits GitHub.",
+  );
 
 export interface TicketSelection {
   repo: string;
   n: string;
   agent: string;
+  role?: string;
   refresh?: boolean;
 }
 
@@ -114,6 +102,7 @@ export function ticketRenderers(): TicketRenderers {
   const backUrl = (s: TicketSelection): string => {
     const query = new URLSearchParams();
     if (s.repo) query.set("repo", s.repo);
+    if (s.role) query.set("role", s.role);
     if (s.agent) query.set("agent", s.agent);
     const text = query.toString();
     return text ? `/?${text}` : "/";
@@ -492,16 +481,21 @@ export function ticketClient(render: TicketRenderers): void {
   const back = byId("back") as HTMLAnchorElement;
   const params = new URLSearchParams(location.search);
   const selection = {
-    repo: params.get("repo") ?? "",
+    repo: byId("content")?.dataset.repo ?? params.get("repo") ?? "",
     n: params.get("n") ?? "",
     agent: params.get("agent") ?? "",
+    role: params.get("role") ?? "implementer",
   };
   back.href = render.backUrl(selection);
   let request = 0;
+  let controller = new AbortController();
 
   const fetchEnvelope = async (url: string): Promise<unknown> => {
     try {
-      const response = await fetch(url, { headers: { accept: "application/json" } });
+      const response = await fetch(url, {
+        headers: { accept: "application/json" },
+        signal: controller.signal,
+      });
       return await response.json();
     } catch (error) {
       return { status: "error", error: { code: "UNREACHABLE", message: String(error) } };
@@ -523,10 +517,18 @@ export function ticketClient(render: TicketRenderers): void {
       return;
     }
     const mine = ++request;
+    controller.abort();
+    controller = new AbortController();
     ticket.classList.add("provisional");
     state.innerHTML = render.renderState(null, true);
-    const envelope = await fetchEnvelope(render.ticketUrl({ ...selection, refresh }));
+    let envelope = await fetchEnvelope(render.ticketUrl({ ...selection, refresh }));
     if (mine !== request) return;
+    const observed = envelope as { selection?: { repository?: string }; status?: string };
+    if (observed.selection?.repository !== selection.repo && observed.status !== "error")
+      envelope = {
+        status: "error",
+        error: { code: "SELECTION_MISMATCH", message: "The answer was for another project." },
+      };
     ticket.classList.remove("provisional");
     state.innerHTML = render.renderState(envelope, false);
     ticket.innerHTML = render.renderTicket(envelope);
@@ -542,11 +544,21 @@ export function ticketClient(render: TicketRenderers): void {
     ) as HTMLElement | null;
     if (!target || !/^[1-9]\d*$/.test(number)) return;
     target.innerHTML = render.renderPullRequest(null, true);
+    const mine = request;
     void fetchEnvelope(render.pullRequestUrl(selection.repo, number)).then((envelope) => {
+      const observed = envelope as { selection?: { repository?: string }; status?: string };
+      if (
+        mine !== request ||
+        (observed.selection?.repository !== selection.repo && observed.status !== "error")
+      )
+        return;
       target.innerHTML = render.renderPullRequest(envelope, false);
     });
   });
   byId("refresh").addEventListener("click", () => void show(true));
+  addEventListener("pageshow", (event: PageTransitionEvent) => {
+    if (event.persisted) void show(false);
+  });
   void show(false);
 }
 

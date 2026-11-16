@@ -396,7 +396,7 @@ describe("ticket detail renderers (#454)", () => {
         },
       },
     });
-    expect(html).toContain('href="/ticket?repo=o%2Fr&amp;n=4&amp;agent=me"');
+    expect(html).toContain('href="/ticket?repo=o%2Fr&amp;n=4&amp;role=implementer&amp;agent=me"');
     expect(html.match(/\/ticket\?/g)).toHaveLength(1);
   });
 });
@@ -427,6 +427,8 @@ describe("ticket detail page and script (#454)", () => {
       document: { getElementById: (id: string) => elements.get(id) },
       location: { search },
       URLSearchParams,
+      AbortController,
+      addEventListener: () => {},
       CSS: { escape: (s: string) => s },
       fetch: async (path: string) => {
         fetched.push(path);
@@ -447,7 +449,7 @@ describe("ticket detail page and script (#454)", () => {
     await settle();
     expect(browser.fetched).toEqual(["/api/v1/tickets/1?repo=o%2Fr&agent=me"]);
     expect(browser.elements.get("ticket")!.innerHTML).toContain("#1 Ticket one");
-    expect(browser.elements.get("back")!.href).toBe("/?repo=o%2Fr&agent=me");
+    expect(browser.elements.get("back")!.href).toBe("/?repo=o%2Fr&role=implementer&agent=me");
     const button = { dataset: { pr: "9" } };
     browser.listeners.get("ticket:click")!({ target: { closest: () => button } });
     expect(browser.detail.innerHTML).toContain("Loading the pull request");
