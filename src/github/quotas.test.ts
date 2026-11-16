@@ -7,6 +7,7 @@ import {
   QUOTA_MAX_ROWS,
   quotaExitCode,
   QuotaService,
+  rowState,
 } from "./quotas.js";
 import type { QuotaContext, QuotaRest, QuotaTelemetrySnapshot } from "./quotas.js";
 import { quotasText, runQuotas } from "./quotascli.js";
@@ -666,5 +667,34 @@ describe("pdb quotas", () => {
     expect(code).toBe(2);
     expect(h.calls).toHaveLength(0);
     expect(out).toContain("No quota reading available (unavailable).");
+  });
+});
+
+describe("display thresholds on unrounded counts (#548)", () => {
+  const row = (used: number, limit = 10_000) => ({
+    resource: "core",
+    family: "rest-core" as const,
+    unit: "rest-requests" as const,
+    limit,
+    used,
+    usedDerived: false,
+    remaining: limit - used,
+    resetAt: null,
+    observedAt: "2026-11-15T10:00:00.000Z",
+    source: "rate-limit-endpoint" as const,
+    inconsistencies: [],
+  });
+  it("warns at 20% remaining and is critical only below 5% remaining", () => {
+    const state = (used: number, limit?: number) => rowState(row(used, limit), 0).state;
+    expect(state(7_999)).toBe("normal");
+    expect(state(8_000)).toBe("warning");
+    expect(state(9_500)).toBe("warning");
+    // 4.99% remaining rounds to 95.0% used for display, but is critical on the counts.
+    expect(state(9_501)).toBe("critical");
+    expect(rowState(row(9_501), 0).percentUsed).toBe(95);
+    expect(state(9_999)).toBe("critical");
+    expect(state(10_000)).toBe("exhausted");
+    expect(state(4_750, 5_000)).toBe("warning");
+    expect(state(4_751, 5_000)).toBe("critical");
   });
 });

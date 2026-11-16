@@ -447,7 +447,14 @@ describe("serve diagnostics (#459)", () => {
           category: "rate-limited",
           subject: null,
           hint: expect.stringContaining("Nothing retries automatically"),
-          quota: { resource: "graphql", limit: 5000, remaining: 5000, resetAt: null },
+          quota: {
+            resource: "graphql",
+            limit: 5000,
+            remaining: 5000,
+            resetAt: null,
+            retryAfterSeconds: null,
+            retryAt: null,
+          },
         },
       ]);
       expect(read.text).not.toContain("783193");

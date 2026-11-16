@@ -159,6 +159,13 @@ polling. Escape account/resource/error strings as text; no external chart librar
 CDN, credential-bearing links or HTML injection. Switching selection cancels/ignores
 old requests so account A's result cannot flash under account B.
 
+**Delivered (#548).**
+
+- `GET /api/v1/quotas` and `/quotas` are implemented in `src/serve/quotas-page.ts`. They use one `QuotaService` per server, keyed by the server's verified gh host and login, and draw the secondary-limit history from the serve cache's sanitized error ring for that login (`quotaTelemetry`).
+- The API accepts only `refresh` and `offline` (each `true` or `false`, once, not both).
+- The page takes no parameters, reads nothing on open, and draws a native `<meter>` with text counts and a text-and-symbol state only for valid current readings. A failed refresh clears every number.
+- `rowState` now compares unrounded counts, so the CLI uses the same thresholds.
+
 ## Acceptance and readiness
 
 Use injected gh/clock/telemetry/cache boundaries and synthetic fixture accounts;

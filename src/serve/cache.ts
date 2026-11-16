@@ -9,6 +9,7 @@
  * fails (interim rule pending #369). Nothing is persisted and nothing is collected in the
  * background: an idle server makes no GitHub requests.
  */
+import type { QuotaEvent, QuotaTelemetrySnapshot } from "../github/quotas.js";
 import type {
   CacheEntryDiagnostic,
   ErrorEventDiagnostic,
@@ -304,6 +305,8 @@ export class ServeCache {
             limit: num(o.limit),
             remaining: num(o.remaining),
             resetAt: typeof o.resetAt === "string" ? o.resetAt : null,
+            retryAfterSeconds: num(o.retryAfterSeconds),
+            retryAt: typeof o.retryAt === "string" ? o.retryAt : null,
           }
         : null,
     });
@@ -424,6 +427,47 @@ export class ServeCache {
       errors: this.errors.filter((e) => e.auth === auth).map(({ auth: _auth, ...event }) => event),
       discardedErrors: this.discardedErrors,
       errorsSince: this.errorsSince,
+    };
+  }
+
+  /**
+   * Recent classified throttling and resource-limit failures of the current login, for the
+   * quota view's secondary-limit history (#548). Built from the same sanitized error ring the
+   * diagnostics show; other logins' events never appear. In memory only: a restart loses them.
+   */
+  quotaTelemetry(context: { host: string; login: string | null }): QuotaTelemetrySnapshot | null {
+    // An unverified context gets no account-specific history at all.
+    if (!context.login) return null;
+    const auth = `${context.host}/${context.login}`;
+    const kinds = new Set(["rate-limited", "secondary-rate-limit", "resource-limit"]);
+    const mine = this.errors.filter((e) => e.auth === auth);
+    return {
+      scope: "service",
+      since: this.errorsSince,
+      events: mine
+        .filter((e) => e.category !== null && kinds.has(e.category))
+        .map((e) => ({
+          category: e.category as QuotaEvent["category"],
+          observedAt: e.at,
+          operation: e.operation,
+          retryAfterSeconds: e.quota?.retryAfterSeconds ?? null,
+          retryAt: e.quota?.retryAt ?? (e.quota?.remaining === 0 ? e.quota.resetAt : null),
+          resource: e.quota?.resource ?? null,
+          limit: e.quota?.limit ?? null,
+          remaining: e.quota?.remaining ?? null,
+        })),
+      discarded: this.discardedErrors,
+      // Same-response quota headers the failures proved, kept for the aggregate comparison.
+      observations: mine
+        .filter((e) => e.quota?.resource)
+        .map((e) => ({
+          resource: e.quota!.resource!,
+          observedAt: e.at,
+          operation: e.operation,
+          limit: e.quota!.limit,
+          remaining: e.quota!.remaining,
+          resetAt: e.quota!.resetAt,
+        })),
     };
   }
 
@@ -616,6 +660,23 @@ export class ServeCache {
     const next = this.queue.shift();
     if (next) next();
     else this.running--;
+  }
+
+  /**
+   * The current login for a read outside the collection path (the quota refresh, #548). With
+   * `force`, the login is re-read now, through the same check collections use, so a gh login
+   * switch is noticed (and clears the cache) before a reading is labelled. Null when the login
+   * cannot be read: the caller then treats the context as unverified and reuses nothing.
+   */
+  async verifiedAuth(force: boolean): Promise<{ auth: AuthContext | null; read: boolean }> {
+    if (force) this.authCheckedAt = Number.NEGATIVE_INFINITY;
+    const before = this.authCheckedAt;
+    try {
+      await this.checkAuth();
+      return { auth: this.auth, read: this.authCheckedAt !== before };
+    } catch {
+      return { auth: null, read: true };
+    }
   }
 
   /** Re-read the login before live work at most once per TTL; a change clears the cache. */
