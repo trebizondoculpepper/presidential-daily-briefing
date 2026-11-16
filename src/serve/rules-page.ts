@@ -1,3 +1,4 @@
+import { pageById, shellContext, shellStart } from "./shell.js";
 /**
  * The read-only project rules page served at `/rules` (#392, doc/design/rules-english-command.md
  * and doc/design/serve-global-dashboard-roadmap.md).
@@ -36,7 +37,7 @@ export const defaultRulesPageRuntime = (): RulesPageRuntime => ({
 });
 
 /** Query parameters the page accepts: the project and the `pdb rules` filters. */
-export const rulesPageParameters = ["repo", "role", "rule"] as const;
+export const rulesPageParameters = pageById("rules").parameters;
 
 export const escapeHtml = (text: string | number | null): string =>
   String(text ?? "").replace(
@@ -113,32 +114,15 @@ interface PageContext {
   filters: { role?: string; rule?: string };
 }
 
-const head = (title: string) => `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${escapeHtml(title)}</title>
-<link rel="stylesheet" href="/dashboard.css">
-</head>
-<body>
-`;
-
-function navigation(page: PageContext): string {
-  const dashboard = pageUrl(page.origin, "/", page.selected ? { repo: page.selected } : {});
-  const projects = page.served
-    .map((s) => {
-      const href = pageUrl(page.origin, "/rules", { repo: s.repository });
-      const current = s.repository === page.selected ? ' aria-current="page"' : "";
-      return `<li><a href="${escapeHtml(href)}"${current}>${escapeHtml(s.repository)}</a></li>`;
-    })
-    .join("");
-  return `<header>
-<h1>Project rules</h1>
-<nav aria-label="Projects"><a href="${escapeHtml(dashboard)}">Dashboard</a> · Project: <ul class="projects">${projects}</ul></nav>
-</header>
-`;
-}
+const navigation = (page: PageContext, title = "Project rules") =>
+  shellStart(
+    shellContext(
+      "rules",
+      page.served,
+      new URLSearchParams(page.selected ? { repo: page.selected } : {}),
+    ),
+    title,
+  );
 
 /** The full page for one compiled document. */
 export function rulesPageHtml(doc: RulesDocument, text: string, page: PageContext): string {
@@ -148,7 +132,7 @@ export function rulesPageHtml(doc: RulesDocument, text: string, page: PageContex
   const notices: string[] = [];
   if (page.selected === null)
     notices.push(
-      '<p class="warn" role="status">This server serves more than one project; select one above to see its effective settings. The policy below is the same for every project.</p>',
+      '<p class="warn" role="status">No project selected; choose one above to see its effective settings. The policy below is the same for every project.</p>',
     );
   if (doc.effectivePolicy.state === "error")
     notices.push(
@@ -189,7 +173,7 @@ export function rulesPageHtml(doc: RulesDocument, text: string, page: PageContex
         `<section id="section-${i}"><h2>${escapeHtml(s.title)}</h2>\n<pre class="rules">${escapeHtml(s.lines.join("\n"))}</pre></section>`,
     )
     .join("\n");
-  return `${head("pdb rules")}${navigation(page)}<main>
+  return `${navigation(page)}<main id="content" tabindex="-1"><h1>Project rules</h1>
 ${notices.join("\n")}
 ${identity}<nav aria-label="Sections"><ol class="toc">${toc}</ol></nav>
 ${body}
@@ -202,7 +186,7 @@ ${body}
 
 /** An error page: the reason and the served projects, never an older document. */
 export function rulesErrorHtml(message: string, page: PageContext): string {
-  return `${head("pdb rules: error")}${navigation(page)}<main>
+  return `${navigation({ ...page, selected: null }, "Project rules: error")}<main id="content" tabindex="-1"><h1>Project rules</h1>
 <p class="error" role="alert">${escapeHtml(message)}</p>
 </main>
 </body>
@@ -240,10 +224,13 @@ export async function rulesPage(
           page,
         ),
       };
+  for (const key of new Set(query.keys()))
+    if (query.getAll(key).length > 1)
+      return { status: 400, html: rulesErrorHtml("Give each parameter at most once.", page) };
   const repo = query.get("repo") ?? undefined;
   let selected: { repository: string; project?: string } | null = null;
   try {
-    selected = select(served, repo);
+    selected = repo === undefined ? null : select(served, repo);
   } catch (error) {
     if (!(error instanceof HttpFailure)) throw error;
     // Missing selection with several projects: show the selector and the shared policy.

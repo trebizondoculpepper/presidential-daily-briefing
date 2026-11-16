@@ -1,3 +1,4 @@
+import { pageById, shellContext, shellStart } from "./shell.js";
 /**
  * GitHub quota meters in `pdb serve` (#548, doc/design/github-quotas.md "Serve JSON and visual
  * page", owner decisions on #548).
@@ -20,7 +21,7 @@ import type { RequestContext } from "./types.js";
 import type { QuotaContext, QuotaService } from "../github/quotas.js";
 
 /** The page takes no parameters: it is account-wide, never per project. */
-export const quotasPageParameters = [] as const;
+export const quotasPageParameters = pageById("quotas").parameters;
 /** The API takes only explicit Boolean refresh or offline, never a host, login or path. */
 export const quotasApiParameters = ["refresh", "offline"] as const;
 
@@ -79,18 +80,6 @@ export function quotasApi(
   };
 }
 
-const head = `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>pdb quotas</title>
-<link rel="stylesheet" href="/dashboard.css">
-<script src="/quotas.js" defer></script>
-</head>
-<body>
-`;
-
 export interface QuotasPageResult {
   status: number;
   html: string;
@@ -101,11 +90,8 @@ export interface QuotasPageResult {
  * (#605) lands, the header carries plain links to the other pages, none with a project.
  */
 export function quotasPage(query: URLSearchParams, account: QuotaContext): QuotasPageResult {
-  const header = `<header>
-<h1>GitHub quotas</h1>
-<nav aria-label="Pages"><a href="/">Work</a> · <a href="/human">Human attention</a> · <a href="/rules">Project rules</a> · <a href="/setup">Agent setup</a> · <a href="/quotas" aria-current="page">Quotas</a></nav>
+  const header = `<h1>GitHub quotas</h1>
 <p class="scope">Account-wide: <strong id="quota-account">${escapeHtml(account.login ?? "unverified login")}</strong> on <strong id="quota-host">${escapeHtml(account.host)}</strong>. These quotas belong to the GitHub login, not to any project, and include other agents, machines and applications.</p>
-</header>
 `;
   const footer = `<footer>Read-only. One GET /rate_limit per Refresh, through the same service as <code>pdb quotas</code>; nothing is fetched on open or in the background. Model-provider, Codex and CodeRabbit quotas are separate and not shown.</footer>
 </body>
@@ -114,14 +100,14 @@ export function quotasPage(query: URLSearchParams, account: QuotaContext): Quota
   if ([...query.keys()].length)
     return {
       status: 400,
-      html: `${head}${header}<main id="content">
+      html: `${shellStart(shellContext("quotas"), "GitHub quotas", "/quotas.js")}<main id="content" tabindex="-1">${header}
 <p class="error" role="alert">/quotas takes no parameters: quotas are account-wide, not per project.</p>
 </main>
 ${footer}`,
     };
   return {
     status: 200,
-    html: `${head}${header}<main id="content">
+    html: `${shellStart(shellContext("quotas"), "GitHub quotas", "/quotas.js")}<main id="content" tabindex="-1">${header}
 <p><button id="refresh" type="button">Refresh</button> <span id="clock"></span></p>
 <section id="state" aria-live="polite"><p>No reading has been taken yet. Press Refresh to read GitHub's /rate_limit once; nothing is fetched until you do.</p></section>
 <section id="meters" aria-labelledby="meters-heading"></section>

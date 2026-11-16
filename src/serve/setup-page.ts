@@ -1,3 +1,4 @@
+import { pageById, shellContext, shellStart } from "./shell.js";
 /**
  * The read-only agent setup page served at `/setup` (#391, doc/design/agent-onboarding.md "Web
  * page and prompt"). It renders the same onboarding document as `pdb onboard` (#351), built with
@@ -10,10 +11,10 @@
  */
 import { onboardingDocument, type OnboardingDocument } from "../briefing/onboarding.js";
 import { HttpFailure } from "./http.js";
-import { escapeHtml, pageUrl } from "./rules-page.js";
+import { escapeHtml } from "./rules-page.js";
 
 /** Query parameters the page accepts. */
-export const setupPageParameters = ["repo", "role"] as const;
+export const setupPageParameters = pageById("setup").parameters;
 
 type Served = { repository: string; project?: string };
 
@@ -53,18 +54,6 @@ export function clientExamples(endpoint: string): ClientExample[] {
   ];
 }
 
-const head = `<!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>pdb agent setup</title>
-<link rel="stylesheet" href="/dashboard.css">
-<script src="/setup.js" defer></script>
-</head>
-<body>
-`;
-
 let blockId = 0;
 /** A selectable, copyable block; `/setup.js` adds the copy button. */
 const copyBlock = (label: string, text: string) => {
@@ -72,21 +61,12 @@ const copyBlock = (label: string, text: string) => {
   return `<pre class="rules" id="${id}" data-copy aria-label="${escapeHtml(label)}">${escapeHtml(text)}</pre>`;
 };
 
-function navigation(origin: string, served: readonly Served[], selected: string | null): string {
-  const projects = served
-    .map((s) => {
-      const href = pageUrl(origin, "/setup", { repo: s.repository });
-      const current = s.repository === selected ? ' aria-current="page"' : "";
-      return `<li><a href="${escapeHtml(href)}"${current}>${escapeHtml(s.repository)}</a></li>`;
-    })
-    .join("");
-  const links = (path: string, label: string) =>
-    `<a href="${escapeHtml(pageUrl(origin, path, selected ? { repo: selected } : {}))}">${label}</a>`;
-  return `<header>
-<h1>Agent setup</h1>
-<nav aria-label="Projects">${links("/", "Dashboard")} · ${links("/rules", "Rules")} · Project: <ul class="projects">${projects}</ul></nav>
-</header>
-`;
+function navigation(_origin: string, served: readonly Served[], selected: string | null): string {
+  return shellStart(
+    shellContext("setup", served, new URLSearchParams(selected ? { repo: selected } : {})),
+    "Agent setup",
+    "/setup.js",
+  );
 }
 
 /** The page for one onboarding document and the server's MCP endpoint. */
@@ -99,7 +79,7 @@ export function setupPageHtml(
   const endpoint = new URL("/mcp", origin).toString();
   const notice = doc.repository
     ? ""
-    : '<p class="warn" role="status">This server serves more than one project; select one above. The prompt and examples below use placeholders until you do.</p>\n';
+    : '<p class="warn" role="status">No project selected; choose one above. The prompt and examples below use placeholders until you do.</p>\n';
   const clients = clientExamples(endpoint)
     .map(
       (c) =>
@@ -112,7 +92,7 @@ export function setupPageHtml(
   const rulesLink = doc.rules.url
     ? `<a href="${escapeHtml(doc.rules.url)}">the rules page</a> or `
     : "";
-  return `${head}${navigation(origin, served, doc.repository)}<main>
+  return `${navigation(origin, served, doc.repository)}<main id="content" tabindex="-1"><h1>Agent setup</h1>
 ${notice}<p>${escapeHtml(doc.purpose)}</p>
 <section><h2>1. Give your agent this prompt</h2>
 <p>Paste it into any agent. It reads the onboarding and the current rules first, sets up its own identity and adds the pdb section to AGENTS.md if missing. Copying it changes nothing here.</p>
@@ -177,7 +157,7 @@ export function setupPage(
   const origin = new URL(serverUrl).origin;
   const error = (status: number, message: string): SetupPageResult => ({
     status,
-    html: `${head}${navigation(origin, served, null)}<main>
+    html: `${navigation(origin, served, null)}<main id="content" tabindex="-1"><h1>Agent setup</h1>
 <p class="error" role="alert">${escapeHtml(message)}</p>
 </main>
 </body>
@@ -190,12 +170,14 @@ export function setupPage(
         400,
         `Unknown parameter. The setup page accepts ${setupPageParameters.join(", ")}.`,
       );
+  for (const key of new Set(query.keys()))
+    if (query.getAll(key).length > 1) return error(400, "Give each parameter at most once.");
   const role = query.get("role");
   if (role !== null && role !== "implementer" && role !== "designer")
     return error(400, "role must be implementer or designer.");
   let selected: Served | null = null;
   try {
-    selected = select(served, query.get("repo") ?? undefined);
+    selected = query.has("repo") ? select(served, query.get("repo")!) : null;
   } catch (failure) {
     if (!(failure instanceof HttpFailure)) throw failure;
     if (failure.code !== "REPOSITORY_UNRESOLVED")

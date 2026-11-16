@@ -207,7 +207,7 @@ describe("pdb serve lifecycle (#373)", () => {
     expect(page.status).toBe(200);
     expect(page.headers["content-type"]).toBe("text/html; charset=utf-8");
     expect(page.headers["content-security-policy"]).toContain("script-src 'self'");
-    expect(page.body).toContain("/api/v1/status");
+    expect(page.body).toContain("No project selected");
     expect(page.body).not.toMatch(/<script>|https?:\/\/(?!127)/);
     const script = await call(port, "/dashboard.js");
     expect(script.status).toBe(200);
@@ -416,3 +416,48 @@ async function until(predicate: () => boolean, timeoutMs = 10_000): Promise<void
     await new Promise((done) => setTimeout(done, 10));
   }
 }
+
+describe("shared HTML route binding (#605)", () => {
+  it("keeps the toolbar and CSP on every shipped page and refuses URLs before reads", async () => {
+    const { running } = await started();
+    try {
+      for (const path of [
+        "/?repo=example/one",
+        "/ticket?repo=example/one&n=1",
+        "/human?repo=example/one",
+        "/rules",
+        "/setup",
+        "/quotas",
+      ]) {
+        const reply = await call(running.port, path);
+        expect(reply.status).toBe(200);
+        expect(reply.body.match(/<header/g)).toHaveLength(1);
+        expect(reply.body).toContain('class="shell-toolbar"');
+        expect(reply.headers["content-security-policy"]).toContain("script-src 'self'");
+      }
+      for (const path of [
+        "/?repo=bad",
+        "/ticket?repo=example/one&n=-1",
+        "/ticket?repo=example/one",
+        "/?repo=example/one&repo=other/repo",
+        "/setup?role=implementer&role=designer",
+        "/rules?repo=",
+        "/quotas?repo=example/one",
+      ]) {
+        const reply = await call(running.port, path);
+        expect(reply.status).toBe(400);
+        expect(reply.headers["content-type"]).toContain("text/html");
+        expect(reply.body).toContain('role="alert"');
+        expect(reply.body).not.toContain("<script");
+      }
+      expect((await call(running.port, "/?repo=unserved/repo")).status).toBe(403);
+      const noSelection = await call(running.port, "/");
+      expect(noSelection.body).toContain("No project selected");
+      expect(noSelection.body).not.toContain("/dashboard.js");
+      const canonical = await call(running.port, "/?repo=EXAMPLE/ONE");
+      expect(canonical.body).toContain('data-repo="example/one"');
+    } finally {
+      await running.close();
+    }
+  });
+});

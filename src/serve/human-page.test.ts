@@ -152,7 +152,7 @@ describe("human attention page route (#458)", () => {
       expect(reply.body).not.toMatch(/<script>|<style|style=/);
       // Work navigation: the agent views drop the human's name.
       expect(reply.body).toContain('href="/?repo=example%2Fparity&amp;role=designer"');
-      expect(reply.body).toContain('aria-current="page">Human</a>');
+      expect(reply.body).toContain('aria-current="page">Work</a>');
       const script = await get(s.running.port, "/human.js");
       expect(script.headers["content-type"]).toBe("text/javascript; charset=utf-8");
       expect(script.body).toBe(humanScript());
