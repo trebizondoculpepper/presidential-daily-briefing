@@ -4,9 +4,11 @@ import { Client } from "@modelcontextprotocol/client";
 import { InMemoryTransport } from "@modelcontextprotocol/server";
 import {
   chunkedTimeout,
+  diffObservations,
   EventLog,
   eventsReport,
   maxTimerDelayMs,
+  observe,
   sharedCollect,
   Watcher,
 } from "./polling.js";
@@ -984,5 +986,93 @@ describe("polling startup binds only an explicit startup target (#271, #291)", (
       ),
     ).rejects.toThrow(/resolvable --repo/);
     refusedWithNothingStarted(unusable);
+  });
+
+  it("routes review findings to delivery-responsible agents, deduplicates unchanged snapshots, and handles ownership changes (#696)", () => {
+    const pull = pr({ threads: ["t1"] });
+    pull.labels = page([]);
+    pull.headRefOid = "h40";
+    pull.comments = page([
+      {
+        author: { __typename: "Bot", login: "chatgpt-codex-connector" },
+        body: '<!-- codex-review-state:v1 {"code_review":{"status":"completed","commit_sha":"h40","has_unresolved_findings":true}} -->\n1 finding',
+        createdAt: new Date(start - 2 * minute).toISOString(),
+        url: `https://github.com/${repo}/pull/40#issuecomment-9`,
+      },
+    ]);
+    const base = snap([], [pull], {
+      reviewPolicy: {
+        state: "declared",
+        policy: "codex-or-copilot",
+      },
+    });
+    const prUrl = pull.url;
+
+    // No owner and no responsible agent -> empty destinations.
+    const noOwnerObs = observe(base, new Date(start).toISOString());
+    const threadFact = noOwnerObs.subjects
+      .get(prUrl)!
+      .facts.get(`thread/https://github.com/${repo}/pull/40#discussion_t1`);
+    expect(threadFact?.destinations).toEqual([]);
+    const codexFact = noOwnerObs.subjects
+      .get(prUrl)!
+      .facts.get(`finding/codex/h40/https://github.com/${repo}/pull/40#issuecomment-9`);
+    expect(codexFact?.kind).toBe("review-feedback");
+    expect(codexFact?.destinations).toEqual([]);
+
+    // Ownership acquired via delivery responsibility after claim release -> emits to new owner.
+    const aliceObs = observe(base, new Date(start + minute).toISOString(), {
+      responsible: new Map([[prUrl, ["alice"]]]),
+    });
+    const toAlice = diffObservations(noOwnerObs, aliceObs);
+    expect(toAlice.drafts.map((d) => [d.fact.kind, d.fact.destinations])).toEqual([
+      ["review-feedback", ["alice"]],
+      ["review-feedback", ["alice"]],
+    ]);
+
+    // Unchanged snapshot -> 0 drafts (no duplicate events).
+    const unchanged = diffObservations(toAlice.merged, aliceObs);
+    expect(unchanged.drafts).toEqual([]);
+
+    // Outdated but still unresolved thread stays in facts; resolved thread clears.
+    const outdatedPr = pr({ threads: ["t1"] });
+    outdatedPr.labels = page([]);
+    outdatedPr.reviewThreads.nodes[0]!.isOutdated = true;
+    const outdatedObs = observe(
+      snap([], [outdatedPr]),
+      new Date(start + 2 * minute).toISOString(),
+      {
+        responsible: new Map([[prUrl, ["alice"]]]),
+      },
+    );
+    expect(
+      outdatedObs.subjects
+        .get(prUrl)!
+        .facts.get(`thread/https://github.com/${repo}/pull/40#discussion_t1`)?.reason,
+    ).toContain("outdated");
+    expect(diffObservations(toAlice.merged, outdatedObs).drafts).toEqual([]);
+
+    // Human-directed handoff / ownership change from alice -> bob emits to bob.
+    const bobObs = observe(base, new Date(start + 3 * minute).toISOString(), {
+      responsible: new Map([[prUrl, ["bob"]]]),
+    });
+    const toBob = diffObservations(toAlice.merged, bobObs);
+    expect(toBob.drafts.map((d) => [d.fact.kind, d.fact.destinations])).toEqual([
+      ["review-feedback", ["bob"]],
+      ["review-feedback", ["bob"]],
+    ]);
+
+    // Resolved threads + clean head clears all review-feedback facts from merged baseline.
+    const cleanPr = pr({ threads: [] });
+    cleanPr.labels = page([]);
+    const cleanObs = observe(snap([], [cleanPr]), new Date(start + 4 * minute).toISOString(), {
+      responsible: new Map([[prUrl, ["bob"]]]),
+    });
+    const cleared = diffObservations(toBob.merged, cleanObs);
+    expect(
+      [...cleared.merged.subjects.get(prUrl)!.facts.values()].filter(
+        (f) => f.kind === "review-feedback",
+      ),
+    ).toEqual([]);
   });
 });

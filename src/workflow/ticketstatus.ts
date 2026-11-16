@@ -28,6 +28,7 @@ import { classifyFollowUp, memberFollowUp, reportFollowUpFacts } from "./deliver
 import type { DeliverableView, DeliveryView, FollowUp } from "./deliveryread.js";
 import { excerpt, pullRequestStatus } from "./prstatus.js";
 import type { PrStatusReport } from "./prstatus.js";
+import { reviewProviders } from "./reviewpolicy.js";
 import { readWhoWith } from "./readservices.js";
 import { parseTargetLabel } from "./delivery.js";
 import type { DeliveryBoundaries } from "./readservices.js";
@@ -77,6 +78,7 @@ export interface TicketPullRequest {
     headReviewed: boolean;
     headFindings: boolean;
     unresolvedThreads: number;
+    findings?: { reason: string; url: string; outdated?: boolean }[];
   } | null;
   mergeable: string | null;
   blockers: string[];
@@ -309,6 +311,17 @@ function withStatus(
     : open
       ? classifyFollowUp(facts)
       : [null, null];
+  const findings: { reason: string; url: string; outdated?: boolean }[] = [
+    ...r.threads.unresolved.map((t) => ({
+      reason: `Unresolved thread${t.path ? ` at ${t.path}${t.line ? `:${t.line}` : ""}` : ""}${t.outdated ? " (outdated)" : ""}`,
+      url: t.url || p.url,
+      ...(t.outdated ? { outdated: true } : {}),
+    })),
+    ...r.reviewPolicy.findings.map((f) => ({
+      reason: `${reviewProviders[f.provider].label} reports unresolved findings on the current head`,
+      url: f.source,
+    })),
+  ];
   return {
     ...row,
     detail: "read",
@@ -334,6 +347,7 @@ function withStatus(
       headReviewed: r.headReviewed,
       headFindings: r.headFindings,
       unresolvedThreads: r.threads.unresolved.length + r.threads.omitted,
+      ...(findings.length ? { findings } : {}),
     },
     mergeable: p.mergeable,
     blockers: r.blockers,
@@ -811,7 +825,11 @@ function prLine(r: TicketPullRequest): string {
     r.state === "OPEN" && r.blockers.length
       ? ` · blockers: ${r.blockers.slice(0, ticketLimits.rowBlockers).join("; ")}${r.blockers.length > ticketLimits.rowBlockers ? ` (+${r.blockers.length - ticketLimits.rowBlockers})` : ""}`
       : "";
-  return `  #${r.number} ${r.repository} [${rel}] ${r.state}${r.draft ? " draft" : ""} ${short(r.head)} → ${r.base}${target} · required checks ${r.checks?.requirements ?? "unknown"} · ${review}${threads}${r.memberState ? ` · member ${r.memberState}` : ""}${follow}${extra}${r.complete ? "" : " · INCOMPLETE"}`;
+  const findingLines = (r.review?.findings ?? [])
+    .slice(0, ticketLimits.rowBlockers)
+    .map((f) => `\n    finding: ${f.reason} ${f.url}`)
+    .join("");
+  return `  #${r.number} ${r.repository} [${rel}] ${r.state}${r.draft ? " draft" : ""} ${short(r.head)} → ${r.base}${target} · required checks ${r.checks?.requirements ?? "unknown"} · ${review}${threads}${r.memberState ? ` · member ${r.memberState}` : ""}${follow}${extra}${r.complete ? "" : " · INCOMPLETE"}${findingLines}`;
 }
 
 const metric = (name: string, v: MetricView) =>

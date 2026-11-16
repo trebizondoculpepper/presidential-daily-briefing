@@ -14,6 +14,7 @@ import { RateLimitError } from "../github/dependencies.js";
 import type { collect as collectFn } from "../github/github.js";
 import { closingPrEvidence, pickupEligibility } from "../briefing/ranking.js";
 import type { Issue, Snapshot } from "../github/types.js";
+import { reviewProviders, snapshotPolicyReview } from "../workflow/reviewpolicy.js";
 
 export const eventKinds = [
   "attention-requested",
@@ -130,12 +131,21 @@ function checkProblem(outcome: string): "failed" | "cancelled" | "unknown" | nul
   return "unknown";
 }
 
+export interface ObserveOptions {
+  /** Trusted delivery responsibility per issue/PR URL (after claim release or handoff). */
+  responsible?: ReadonlyMap<string, readonly string[]>;
+}
+
 /**
  * Derive normalized facts from a collected snapshot through the shared rules and ranking
  * policy. Returns null facts for subjects whose evidence is incomplete (they keep their
  * previous baseline facts instead of being treated as absent).
  */
-export function observe(snapshot: Snapshot, observedAt: string): Observation {
+export function observe(
+  snapshot: Snapshot,
+  observedAt: string,
+  options: ObserveOptions = {},
+): Observation {
   const { urls: incomplete } = subjectWarnings(snapshot);
   const issues = snapshot.issues.filter(active);
   const prs = snapshot.pullRequests.filter(active);
@@ -221,8 +231,15 @@ export function observe(snapshot: Snapshot, observedAt: string): Observation {
     );
     attention(subject, pr);
     const head = pr.headRefOid;
+    const responsible = [
+      ...(options.responsible?.get(pr.url) ?? []),
+      ...linked.flatMap((issue) => options.responsible?.get(issue.url) ?? []),
+    ];
     const routed = [
-      ...new Set([pr, ...linked].flatMap((item) => prefixed(item, workflow.ownerPrefix))),
+      ...new Set([
+        ...[pr, ...linked].flatMap((item) => prefixed(item, workflow.ownerPrefix)),
+        ...responsible,
+      ]),
     ].sort();
     for (const thread of pr.reviewThreads.nodes) {
       const first = thread.comments.nodes[0];
@@ -235,6 +252,20 @@ export function observe(snapshot: Snapshot, observedAt: string): Observation {
         currentSha: head,
         reviewedSha: null,
         reason: `Unresolved review thread${thread.isOutdated ? " (outdated against the current head)" : ""}.`,
+        destinations: routed,
+        origin: null,
+      });
+    }
+    const policy = snapshotPolicyReview(pr, snapshot.warnings, snapshot.reviewPolicy);
+    for (const finding of policy.detail.findings) {
+      put(subject, {
+        key: `finding/${finding.provider}/${head}/${finding.source}`,
+        kind: "review-feedback",
+        evidence: [finding.source],
+        sourceEventAt: null,
+        currentSha: head,
+        reviewedSha: head,
+        reason: `${reviewProviders[finding.provider].label} reports unresolved findings on the current head.`,
         destinations: routed,
         origin: null,
       });
@@ -345,7 +376,13 @@ export function diffObservations(
       continue;
     }
     for (const fact of subject.facts.values()) {
-      if (before?.facts.has(fact.key)) continue;
+      const prior = before?.facts.get(fact.key);
+      if (prior) {
+        const added = fact.destinations.filter((d) => !prior.destinations.includes(d));
+        if (!added.length) continue;
+        drafts.push({ subject, fact: { ...fact, destinations: added } });
+        continue;
+      }
       // Only a known-ineligible -> eligible transition counts; first sight is not a transition.
       if (fact.kind === "work-became-eligible" && before?.eligibility !== "ineligible") continue;
       drafts.push({ subject, fact });
@@ -498,7 +535,12 @@ export interface WatcherRuntime {
   random?: () => number;
   /** Opaque process generation for cursors. */
   generation?: string;
+  /** Reliable operation identity for exact echoes of an agent's own mechanical writes. */
   origins?: OperationOrigins;
+  /** Optional delivery-responsibility resolver for routing findings after claim release. */
+  responsible?: (
+    snapshot: Snapshot,
+  ) => Promise<ReadonlyMap<string, readonly string[]>> | ReadonlyMap<string, readonly string[]>;
 }
 
 export interface WatcherOptions {
@@ -646,7 +688,7 @@ export class Watcher {
       if (snapshot.metrics) this.lastRequestCount = snapshot.metrics.requestCount;
       this.resetAt =
         snapshot.rateLimit && snapshot.rateLimit.remaining <= 0 ? snapshot.rateLimit.resetAt : null;
-      outcome = this.absorb(snapshot);
+      outcome = await this.absorb(snapshot);
     } catch (error) {
       if (this.stopped || controller.signal.aborted)
         outcome = this.stopped ? "cancelled" : "failed";
@@ -698,12 +740,15 @@ export class Watcher {
   }
 
   /** Fold one snapshot into the baseline; returns whether it was complete. */
-  private absorb(snapshot: Snapshot): PollOutcome {
+  private async absorb(snapshot: Snapshot): Promise<PollOutcome> {
     const { global } = subjectWarnings(snapshot);
     // A repository-level gap (truncation, missing pages) makes the whole observation unknown.
     if (global.length) return "incomplete";
     const now = this.runtime.clock.now().toISOString();
-    const next = observe(snapshot, now);
+    const responsible = this.runtime.responsible
+      ? await this.runtime.responsible(snapshot)
+      : undefined;
+    const next = observe(snapshot, now, { responsible });
     // A subject-scoped gap still leaves that subject without a trustworthy baseline, so the
     // poll is reported as incomplete rather than describing the observation as complete.
     const outcome: PollOutcome = [...next.subjects.values()].every((subject) => subject.complete)

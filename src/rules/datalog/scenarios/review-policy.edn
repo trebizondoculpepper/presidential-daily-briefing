@@ -91,7 +91,8 @@
           {:e 101 "name" "verify" "outcome" "SUCCESS"}
           {:e 102 "provider" "codex" "provider-state" "accepted" "provider-commit" "head2"}
           {:e 103 "provider" "coderabbit" "provider-state" "findings" "provider-commit" "head2"}]
-  :expect {:actions []
+  :expect {:actions [{:subject 100 :rule "D-PR-REVIEW" :kind "pr-follow-up" :band 2
+                      :why "PR has unresolved review findings at head head2."}]
            :denials #{}}}
 
  {:id "unknown-review-policy-accepts-nothing"
@@ -165,7 +166,8 @@
           {:e 101 "name" "verify" "outcome" "SUCCESS"}
           {:e 102 "provider" "codex" "provider-state" "accepted" "provider-commit" "head2"}
           {:e 103 "provider" "copilot" "provider-state" "findings" "provider-commit" "head2"}]
-  :expect {:actions []
+  :expect {:actions [{:subject 100 :rule "D-PR-REVIEW" :kind "pr-follow-up" :band 2
+                      :why "PR has unresolved review findings at head head2."}]
            :denials #{}}}
 
  {:id "codex-or-copilot-execution-failure-not-accepted"
@@ -191,5 +193,27 @@
               :why "PR checks failed at head head2; inspect and repair before merge."
               :facts {"impact" "unknown" "complexity" "unknown" "impactState" "unknown" "complexityState" "unknown" "head" "head2" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "failedChecks" "verify:FAILURE"}
               :overridden [] :unlocks 0 :unknown [] :other-claims []}]
+           :denials #{}}}
+
+ {:id "responsible-agent-head-findings-after-claim-release"
+  :doc "A PR with Copilot head findings and no owner label still routes D-PR-REVIEW to the delivery-responsible agent (#696)."
+  :viewer {:role "implementer" :agent "alice"}
+  :facts [{:e 1 "forward-complete" true "review-coverage" "any"}
+          {:e 100 "kind" "pr" "state" "OPEN" "number" 2 "target" "https://github.com/o/r/pull/2" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "head2" "draft" false "pr-complete" true "required-evidence-complete" true "review-decision" "" "mergeable" "MERGEABLE" "merge-state" "CLEAN" "responsible" "alice" "check" 101 "provider-review" 102}
+          {:e 101 "name" "verify" "outcome" "SUCCESS"}
+          {:e 102 "provider" "copilot" "provider-state" "findings" "provider-commit" "head2"}]
+  :expect {:actions [{:subject 100 :rule "D-PR-REVIEW" :kind "pr-follow-up" :band 2
+                      :why "PR has unresolved review findings at head head2."}]
+           :denials #{}}}
+
+ {:id "no-owner-still-surfaces-head-findings-for-review"
+  :doc "A PR with head findings and no owner or responsible agent still surfaces D-PR-REVIEW (#696)."
+  :viewer {:role "implementer" :agent "alice"}
+  :facts [{:e 1 "forward-complete" true "review-coverage" "any"}
+          {:e 100 "kind" "pr" "state" "OPEN" "number" 2 "target" "https://github.com/o/r/pull/2" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "head2" "draft" false "pr-complete" true "required-evidence-complete" true "review-decision" "" "mergeable" "MERGEABLE" "merge-state" "CLEAN" "check" 101 "provider-review" 102}
+          {:e 101 "name" "verify" "outcome" "SUCCESS"}
+          {:e 102 "provider" "codex" "provider-state" "findings" "provider-commit" "head2"}]
+  :expect {:actions [{:subject 100 :rule "D-PR-REVIEW" :kind "pr-follow-up" :band 2
+                      :why "PR has unresolved review findings at head head2."}]
            :denials #{}}}
 ]}

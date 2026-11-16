@@ -582,4 +582,62 @@ describe("briefing change evidence and comparison windows (#168)", () => {
       reason: expect.stringContaining("unsupported"),
     });
   });
+
+  it("surfaces head-findings review actions with finding links in briefing (#696)", () => {
+    const pull: PullRequest = {
+      ...pr(),
+      number: 20,
+      url: `https://github.com/${repo}/pull/20`,
+      headRefOid: "head20",
+      mergeable: "MERGEABLE",
+      mergeStateStatus: "CLEAN",
+      requiredChecks: {
+        head: "head20",
+        base: "main",
+        expected: [{ context: "verify", appId: null }],
+        checks: [{ name: "verify", databaseId: null, appId: null, required: "required" }],
+        gaps: [],
+      },
+      commits: {
+        nodes: [
+          {
+            commit: {
+              statusCheckRollup: {
+                state: "SUCCESS",
+                contexts: page([
+                  {
+                    name: "verify",
+                    status: "COMPLETED",
+                    conclusion: "SUCCESS",
+                    detailsUrl: "https://github.com/o/r/runs/1",
+                  },
+                ]),
+              },
+            },
+          },
+        ],
+      },
+      comments: page([
+        {
+          author: { __typename: "Bot", login: "chatgpt-codex-connector" },
+          body: '<!-- codex-review-state:v1 {"code_review":{"status":"completed","commit_sha":"head20","has_unresolved_findings":true}} -->\nCodex found 1 issue',
+          url: `https://github.com/${repo}/pull/20#issuecomment-11`,
+          createdAt: "2026-11-16T00:00:00Z",
+        },
+      ]),
+    };
+    const snap = snapshot([issue()], [pull]);
+    snap.reviewPolicy = {
+      state: "declared",
+      policy: "codex-or-copilot",
+    };
+    const report = brief(snap);
+    const rules = report.actions.items.filter((f) => f.target === pull.url).map((f) => f.rule);
+    expect(rules).toContain("pr-review-findings");
+    expect(rules).not.toContain("pr-inspect-merge");
+    const reviewFinding = report.actions.items.find(
+      (f) => f.target === pull.url && f.rule === "pr-review-findings",
+    );
+    expect(reviewFinding?.evidence).toContain(`https://github.com/${repo}/pull/20#issuecomment-11`);
+  });
 });
