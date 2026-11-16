@@ -74,7 +74,13 @@ function classifyCompleteness(
   const related = warnings.filter((w) => w.startsWith(prefix));
   if (related.some((w) => /assignees exceed|assignment evidence incomplete/i.test(w)))
     return "truncated";
-  if (related.some((w) => /could not be read|unavailable|failed|rate limited/i.test(w)))
+  if (
+    related.some((w) =>
+      /assignees?\b.*\b(could not be read|unavailable|failed|rate limited)|assignment evidence\b.*\b(could not be read|unavailable|failed|rate limited)|(issue|pull request|subject) could not be read/i.test(
+        w,
+      ),
+    )
+  )
     return "failed";
   if (!subject.assignees) return "legacy";
   if (!subject.assignees.pageInfo || subject.assignees.pageInfo.hasNextPage) return "truncated";

@@ -132,11 +132,28 @@ describe("human assignment evidence (#665)", () => {
       }),
       {
         employingHuman: "alice",
-        warnings: ["https://github.com/o/r/issues/1: could not be read"],
+        warnings: ["https://github.com/o/r/issues/1: assignment evidence could not be read"],
       },
     );
     expect(failed.completeness).toBe("failed");
     expect(failed.state).toBe("unknown");
+
+    const unrelatedFailure = normalizeSubjectAssignment(
+      baseIssue({
+        assignees: {
+          nodes: [{ __typename: "User", login: "alice" }],
+          pageInfo: { hasNextPage: false, endCursor: null },
+        },
+      }),
+      {
+        employingHuman: "alice",
+        warnings: [
+          "https://github.com/o/r/issues/1: native dependencies could not be read (read-failed); unknown.",
+        ],
+      },
+    );
+    expect(unrelatedFailure.completeness).toBe("complete");
+    expect(unrelatedFailure.state).toBe("matching");
   });
 
   it("evaluates linked PR scope, missing links, and conflicting human ownership", () => {
