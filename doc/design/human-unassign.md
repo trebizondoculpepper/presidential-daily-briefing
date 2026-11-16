@@ -2,6 +2,14 @@
 
 Status: proposed contract for #588, delivered under #589. Nothing here is implemented by this document. Sections headed "Shipped today" describe current behaviour and cite the implementing file; everything else is a proposal. The read-only human view (#458) does not wait for this feature.
 
+## Human-ownership amendment (#662 / #663)
+
+The [draft human-assignment contract](human-assignment-safeguard.md), held for owner review, supersedes the older coupling of agent claim release and GitHub human-assignee removal. Agent unclaim preserves human assignment. Removing a human invalidates claims of that human's agents; valid remaining human owners and their agents are preserved.
+
+An eligible owner-side agent may take over a wrong-human claim after verified binding/assignment checks and records the reason. The displaced agent preserves/publishes useful work, ideally a draft PR for the current human owner, without duplicating the takeover explanation or touching the new claim. Leave the original issue open. A human's explicit removal of an agent is respected without automatic reclaim even if that human still owns the issue. Technical errors are reported honestly; no fabricated handoff completion.
+
+These are workflow defaults subject to trusted explicit human direction. Last-known facts permit continuity on outages; unavailable evidence is not proof of reassignment. See the reconciled contract for exact exceptions and #690–#693 for focused slices. Do not implement the historical human-assignee-removal or own-claim-only/no-takeover restrictions below as current design; #668 owns shared admission, not all recovery/publication features in one PR. Current release --as readiness effects are not a state-preserving alias. Historical sections below require reconciliation before their runtime adoption.
+
 ## Owner decisions (settled)
 
 From #588 and its owner comments, adopted without reopening:
