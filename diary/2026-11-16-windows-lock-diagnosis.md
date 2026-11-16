@@ -14,3 +14,21 @@ changing contention behavior; do not increase a timeout based only on the generi
 message. No operator lock, identity file or live cache is touched.
 
 No root TODO.md exists. This documentation correction does not complete #729.
+
+The first runtime patch adds a typed acquisition result (acquired, busy, replaced
+or failed with create/verify phase and error code). The old held-lock/null API
+remains compatible. Safe JSON writes consume the detailed result and no longer
+suggest deleting a stuck lock for an immediate filesystem refusal. Injected tests
+preserve the target, unverified/replaced locks, deadlines and diagnostic privacy.
+No retry or deadline change is made before observing the Windows failure cause.
+The Windows concurrent-writer fixture now runs ten independent batches, each with
+four processes and exactly twenty updates, and asserts that no temporary or lock
+files remain. This
+bounded diagnostic coverage retains all original assertions and budgets.
+
+Platform hypothesis only: Microsoft documents that opening a path pending deletion
+can fail with ERROR_ACCESS_DENIED, and libuv maps that native code to EPERM. This
+makes a create-phase EPERM plausible, but does not establish the cause of the
+original CI failure. The diagnostic Windows run must supply that evidence.
+Sources: [CreateFileW](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew),
+[libuv Windows errors](https://github.com/libuv/libuv/blob/v1.x/src/win/error.c).

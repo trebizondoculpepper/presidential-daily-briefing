@@ -125,6 +125,17 @@ or an unreadable file), `advanceCheckpoint` (same schema and repository, monoton
 `pdb briefing` report unwritten caches on stderr and a checkpoint that was not advanced with exit 2. The update cache syncs its temporary file and directory on the real filesystem. Windows
 directory sync is the named limitation; transient Windows rename refusals retry three times.
 
+## Acquisition diagnostics (#729)
+
+The companion `acquireFileLockResult` preserves acquisition facts separately from
+its compatible held-lock/null wrapper: acquired, contention deadline, replaced
+token, or filesystem failure with create/readback-verification phase and code.
+Safe JSON writes consume this result. An immediate filesystem failure is not
+reported as proof of a stuck holder and does not advise deleting a lock. No target
+write occurs on that failed attempt. Error text, lock tokens and file contents are
+not copied into diagnostics. Ownership, bounded waits and non-stealing behavior
+remain those specified above.
+
 ## Acceptance
 
 Keep the real-filesystem experiment as prior evidence, not production acceptance.
