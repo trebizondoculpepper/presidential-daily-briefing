@@ -211,6 +211,12 @@ The outcome categories follow [local service and isolated rule testing](local-se
 
 Each result carries the scenario ID, file and line, and rule IDs. `--junit PATH` writes JUnit XML, which is what #394 publishes through #393's shared reporting path. A missing report or a crash never looks like a pass. A single Vitest file, `rules.test.ts`, calls the runner once, so `npm test` and the required `verify` check still include rule tests. `rules:test` exists for speed and does not replace the full suite.
 
+### Manual local research validation
+
+The formal-comprehension research preparation check is a separate manual category. Run `npm run test:manual:formal` locally when designing/changing the formal engine representation, modifying research preparation/scoring, or regenerating experiment inputs after relevant rule changes. This exhaustive check replays native scenarios for projection parity and compiles a research engine bundle; it is not a product unit test and must not be included in `npm test`, required CI checks or a new automatic CI job. See the [experiment procedure](../reports/formal-rules-comprehension-experiment.md).
+
+The explicit manual configuration selects `doc/reports/examples/formal-comprehension.manual.ts`. Normal test discovery selects `*.test.ts`, so the manual validator is still type/lint checked without running its expensive setup in CI. It is offline and makes no LLM/GitHub requests. Native EDN correctness, normal adapter/integration tests and installed-package checks remain in their existing CI paths; this exception does not weaken their coverage.
+
 ### Relation to existing tests
 
 - `assessment-priority.test.ts` (#356 via PR #375) and the policy cases in `datalog.test.ts` become EDN scenarios. Each conversion keeps its assertions and reports the scenario count before and after.
