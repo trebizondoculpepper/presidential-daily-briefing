@@ -58,4 +58,4 @@ check to receive merge consideration. Added a regression reproducing the failure
 without a host classification map, then made every required-check field project
 from the same normalized evidence. The direct report already blocked that case.
 
-The review correction passed all 130 files (2,458 tests, one skipped), checks and build. The original head passed Ubuntu/FreeBSD but Windows hit the existing separate-process JSON writer fixture: one child exhausted its explicit lock wait. The final head receives fresh CI; that failure is not a check-policy result.
+The review correction passed all 130 files (2,458 tests, one skipped), checks and build. The original head passed Ubuntu/FreeBSD but Windows hit the existing separate-process JSON writer fixture: one child received the generic held/stuck-lock message after only 546ms. That message also covers unexpected acquisition filesystem errors, so it does not establish a wait timeout. Follow-up #729 records the unresolved cause. The final head passed required Ubuntu/Windows CI and the FreeBSD trial, received a clean current-head Codex review, and merged as `fd08189` through #726; `pdb complete 676` recorded delivery.
