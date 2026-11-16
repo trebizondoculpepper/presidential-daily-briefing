@@ -23,6 +23,11 @@ export default defineConfig({
     testTimeout: 20_000,
     // #309: the real source-checkout probe reads the developer's or CI's own Git state, so
     // tests run without it; a test that wants it injects Runtime.checkoutCheck.
-    env: { SENTRY_DISABLED: "1", PDB_NO_CHECKOUT_CHECK: "1", PDB_NO_FIRST_USE_HINT: "1" },
+    env: {
+      SENTRY_DISABLED: "1",
+      PDB_NO_CHECKOUT_CHECK: "1",
+      PDB_NO_FIRST_USE_HINT: "1",
+      PDB_NO_HUMAN_CONTEXT: "1",
+    },
   },
 });

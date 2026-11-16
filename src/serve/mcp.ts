@@ -15,6 +15,7 @@ import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/
 import type { McpServer } from "@modelcontextprotocol/server";
 import { createServer, SelectionRefusal } from "../mcp/server.js";
 import type { CallFreshness, McpOptions, McpRuntime } from "../mcp/server.js";
+import { humanContextEnabled, serverHumanContext } from "../config/humancontext.js";
 import type { Clock } from "../mcp/polling.js";
 import type { RequestContext, ServerFacts } from "./types.js";
 import { cachedBoundaries, projectReaders, selectRepository } from "./api.js";
@@ -52,6 +53,10 @@ export function cachedMcpRuntime(
   const { guardedQueryWith, guardedRest: _r, ...cached } = cachedBoundaries(read, cache, isServed);
   return {
     ...cached,
+    // #664: the process's execution human, the same as the JSON API's.
+    ...(humanContextEnabled()
+      ? { humanContext: async () => serverHumanContext(facts.auth, facts.startedAt) }
+      : {}),
     now: read.now,
     env: read.env,
     git: read.git,
