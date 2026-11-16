@@ -117,6 +117,11 @@ export function evaluatePolicy(input: PolicyFacts, options: PolicyOptions = {}):
       "use --role implementer, --role designer or --role human",
     );
   for (const [entity, attribute, value] of input.datoms) {
+    if (attribute === "native-checks-satisfied")
+      throw new DatalogError(
+        "invalid-facts",
+        "native check-query results cannot be supplied by the host",
+      );
     if (entity !== 1 && entity < firstSubjectId)
       throw new DatalogError("invalid-facts", `entity ${entity} is reserved for the policy`);
     // NaN and infinities are not comparable keys: one would reorder unrelated subjects (#450).
@@ -174,6 +179,12 @@ export function evaluatePolicy(input: PolicyFacts, options: PolicyOptions = {}):
     return ds.init_db(facts, fullSchema);
   };
   let db = database();
+  // Materialize this native relation once rather than expanding its negative joins in every
+  // dependent rule query. This transacts returned tuples only; the policy owns readiness.
+  const checkReady = query(db, queries["check-ready"]);
+  for (const [subject] of checkReady)
+    facts.push([Number(subject), "native-checks-satisfied", true]);
+  if (checkReady.length) db = database();
   const denials = query(db, queries.denials).map(([id, rule]) => ({
     subject: Number(id),
     ruleId: String(rule),
@@ -298,5 +309,44 @@ export function evaluatePolicy(input: PolicyFacts, options: PolicyOptions = {}):
     decisions,
     denials,
     datoms: facts.length,
+  };
+}
+
+/** Pure target-check diagnostic seam; all readiness clauses and reasons live in native EDN. */
+export function evaluateCheckPolicy(input: import("./check-types.js").CheckEvidence): {
+  ready: boolean;
+  blockers: string[];
+  reasons: { ruleId: string; text: string }[];
+  policyVersion: number;
+  rulesHash: string;
+} {
+  const facts: Datom[] = [[100, "required-evidence-complete", input.complete]];
+  for (const gap of input.gaps) facts.push([100, "required-evidence-gap", gap]);
+  for (const name of input.missing) facts.push([100, "missing-required", name]);
+  for (const [i, check] of input.checks.entries()) {
+    const id = 101 + i;
+    facts.push(
+      [100, "check", id],
+      [id, "name", check.name],
+      [id, "outcome", check.outcome],
+      [id, "required", check.required],
+    );
+  }
+  const db = ds.init_db(facts, bundle.schema);
+  const ready = ds.q(bundle.queries["check-ready"], db, bundle.clauses) as unknown[][];
+  const blockers = ds.q(bundle.queries["check-blockers"], db, bundle.clauses) as [
+    number,
+    string,
+    string,
+  ][];
+  const reasons = blockers
+    .map(([, ruleId, text]) => ({ ruleId, text }))
+    .sort((a, b) => a.text.localeCompare(b.text));
+  return {
+    ready: ready.some(([id]) => id === 100),
+    blockers: reasons.map((reason) => reason.text),
+    reasons,
+    policyVersion,
+    rulesHash,
   };
 }

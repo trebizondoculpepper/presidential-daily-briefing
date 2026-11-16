@@ -1,3 +1,5 @@
+import { evaluateCheckPolicy } from "../rules/datalog/engine.js";
+import { requiredCheckEvidence } from "./requiredchecks.js";
 /**
  * #497: every PR evidence source's completeness reaches the shared follow-up facts, and the
  * TypeScript snapshot, `pr N` report and native Datalog projections agree on unknown versus
@@ -41,6 +43,13 @@ function pr(n: number, shape: Shape = {}): PullRequest {
     labels: page(),
     comments: page(shape.reviewed === false ? [] : [receipt(head, false)]),
     headRefOid: head,
+    requiredChecks: {
+      head: head,
+      base: "main",
+      expected: [{ context: "verify", appId: null }],
+      checks: [{ name: "verify", databaseId: null, appId: null, required: "required" }],
+      gaps: [],
+    },
     headRefName: "branch",
     baseRefName: "main",
     isDraft: false,
@@ -109,6 +118,7 @@ function report(p: PullRequest, warnings: string[] = []): PrStatusReport {
       reviewDecision: p.reviewDecision,
     },
     checks: {
+      policy: evaluateCheckPolicy(requiredCheckEvidence(p)),
       required: { outcome: f.verified ? "SUCCESS" : f.failing ? "FAILURE" : "" },
       counts: { failed: f.failing ? 1 : 0, pending: f.pending ? 1 : 0, unknown: 0 },
     },
@@ -180,14 +190,11 @@ describe("PR evidence completeness across every source (#497)", () => {
         expect(nativeAccepts(p)).toBe(false);
       });
 
-  it("treats a null check rollup as no checks (verify rule), not as an unread source", () => {
+  it("treats a null check rollup as no checks and waits for the explicit requirement", () => {
     const p = pr(5);
     p.commits.nodes[0].commit.statusCheckRollup = null;
     expect(prEvidenceGaps(p, [])).toEqual([]);
-    expect(follow(p)).toEqual([
-      "unknown",
-      "the verify check is missing or has an unrecognised outcome",
-    ]);
+    expect(follow(p)).toEqual(["waiting", "awaiting checks"]);
     expect(nativeAccepts(p)).toBe(false);
   });
 

@@ -23,7 +23,7 @@ import type { DeclaredReviewPolicy } from "../workflow/reviewpolicy.js";
  * in their own modules and are never reachable through this service.
  */
 import { collect, ghQuery, IssueUnavailable, permissionLookup } from "../github/github.js";
-import { classifyChecks } from "../github/requiredchecks.js";
+import { classifyChecks, requiredCheckEvidence } from "../github/requiredchecks.js";
 import type { IssueDiagnosis, Query, Rest } from "../github/github.js";
 import type { GraphQuery } from "../workflow/claims.js";
 import type { readRetained } from "../workflow/retained.js";
@@ -128,7 +128,11 @@ export interface PresentedBriefing {
  * classifier the TypeScript rules use, so both engines decide waiting from one model.
  */
 export const datalogCheckFacts = (snapshot: Snapshot) =>
-  new Map(snapshot.pullRequests.map((pr) => [pr.url, classifyChecks(pr)] as const));
+  new Map(
+    snapshot.pullRequests.map(
+      (pr) => [pr.url, { ...classifyChecks(pr), evidence: requiredCheckEvidence(pr) }] as const,
+    ),
+  );
 
 /** Build the briefing (compact unless `full`) for an already collected snapshot. */
 export async function presentBriefing(

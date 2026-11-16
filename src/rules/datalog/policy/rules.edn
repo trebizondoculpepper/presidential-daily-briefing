@@ -77,7 +77,17 @@
 [(pr-unknown ?t) [?t "check" ?c] [?c "outcome" ?o] (not [1 "known-check" ?o])]
 [(pr-review ?t) [?t "review-decision" "CHANGES_REQUESTED"]]
 [(pr-review ?t) [?t "thread" ?c] [?c "resolved" false]]
-[(verified ?t) [?t "check" ?c] [?c "name" "verify"] [?c "outcome" "SUCCESS"]]
+;; Required-check readiness is target evidence, never a universal check name (#676).
+[(required-unsatisfied ?t) [?t "check" ?c] [?c "required" "required"] [?c "outcome" ?o] [(not= ?o "SUCCESS")]]
+[(required-unknown ?t) [?t "check" ?c] [?c "required" "unknown"]]
+[(requirements-satisfied ?t) [?t "required-evidence-complete" true] (not (required-unsatisfied ?t)) (not (required-unknown ?t)) (not [?t "missing-required" _])]
+;; The engine materializes the native check-ready query once; hosts cannot supply this fact.
+[(verified ?t) [?t "native-checks-satisfied" true]]
+[(check-blocker ?t ?code ?reason) [(str "RC-COVERAGE") ?code] [?t "required-evidence-complete" false] (not [?t "required-evidence-gap" _]) [(str "Required-check evidence incomplete") ?reason]]
+[(check-blocker ?t ?code ?reason) [(str "RC-REQUIREDNESS") ?code] [?t "check" ?c] [?c "required" "unknown"] [?c "name" ?name] [(str "Requiredness unknown: " ?name) ?reason]]
+[(check-blocker ?t ?code ?reason) [(str "RC-GAP") ?code] [?t "required-evidence-gap" ?gap] [(str "Required-check evidence unknown: " ?gap) ?reason]]
+[(check-blocker ?t ?code ?reason) [(str "RC-MISSING") ?code] [?t "missing-required" ?name] [(str "Required check not yet reported: " ?name) ?reason]]
+[(check-blocker ?t ?code ?reason) [(str "RC-OUTCOME") ?code] [?t "check" ?c] [?c "required" "required"] [?c "name" ?name] [?c "outcome" ?o] [(not= ?o "SUCCESS")] [(str "Required check " ?name " is " ?o) ?reason]]
 [(clean-pr ?t) (pr ?t) [?t "pr-complete" true] [?t "draft" false] [?t "mergeable" "MERGEABLE"] [?t "merge-state" ?m] [1 "merge-state" ?m] (verified ?t) (not (pr-failure ?t)) (not (pr-pending ?t)) (not (pr-unknown ?t)) (not (pr-review ?t))]
 ;; Review coverage (#301): legacy unless the repository declared a registered policy. Absent
 ;; review-coverage is legacy; `unknown` accepts nothing. Provider facts are host-normalized:

@@ -139,6 +139,7 @@ async function setup(
   const base: ServeReadRuntime["collect"] = (repository, options) =>
     collect(repository, options, query, () => clock.now());
   const read: ServeReadRuntime = {
+    engineClock: () => 0,
     // The focused `who` read over the same facts (#367).
     collectIssueFocus:
       overrides.collectIssueFocus ??
@@ -259,6 +260,7 @@ async function cliJson(args: string[]): Promise<Record<string, unknown>> {
       estimation: { fs: files, git, cwd: root },
       guide: { fs: files, git, cwd: root },
       now: () => new Date(start),
+      engineClock: () => 0,
       updateCheck: async () => ({ status: "disabled" }) as never,
     },
   );

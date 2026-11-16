@@ -1,3 +1,5 @@
+import { evaluateCheckPolicy } from "../rules/datalog/engine.js";
+import { requiredCheckEvidence } from "../github/requiredchecks.js";
 /**
  * Delivery, responsibility and closure for the shared read surfaces (#192): briefing JSON and the
  * MCP read tools (one service, so they agree), `who`, `team` and `pr`.
@@ -83,7 +85,7 @@ export interface FollowUpFacts {
   pending: boolean;
   /** A check outcome outside the known pass/failure/unfinished sets. */
   unknownChecks: boolean;
-  /** The repository's verify check passed on the head. */
+  /** Native target required-check readiness on this head. */
   verified: boolean;
   changesRequested: boolean;
   unresolvedThreads: boolean;
@@ -119,8 +121,7 @@ export function classifyFollowUp(f: FollowUpFacts): [FollowUp, string] {
     return ["actionable", "Codex reports unresolved findings on the current head"];
   if (workflow.conflicts.includes(f.mergeable)) return ["actionable", "merge conflict"];
   if (f.pending) return ["waiting", "awaiting checks"];
-  if (f.unknownChecks || !f.verified)
-    return ["unknown", "the verify check is missing or has an unrecognised outcome"];
+  if (f.unknownChecks || !f.verified) return ["unknown", "required-check evidence is unproven"];
   if (f.mergeState === "BEHIND")
     return [
       "actionable",
@@ -175,9 +176,7 @@ export function snapshotFollowUpFacts(
       classifyChecks(pr),
     ),
     unknownChecks: checks.some((c) => !known.includes(c.outcome)),
-    verified: checks.some(
-      (c) => c.name === workflow.verify && workflow.verifySuccess.includes(c.outcome),
-    ),
+    verified: evaluateCheckPolicy(requiredCheckEvidence(pr)).ready,
     changesRequested: workflow.changesRequested.includes(pr.reviewDecision ?? ""),
     unresolvedThreads: (pr.reviewThreads?.nodes ?? []).some((t) => !t.isResolved),
     mergeable: pr.mergeable,
@@ -196,8 +195,8 @@ export function reportFollowUpFacts(r: PrStatusReport): FollowUpFacts {
     failing: count("failed") + count("cancelled") > 0,
     pending: count("pending") > 0,
     unknownChecks: count("unknown") > 0,
-    // As the snapshot rule and prstatus: only a successful verify, never SKIPPED or NEUTRAL.
-    verified: workflow.verifySuccess.includes(r.checks.required?.outcome ?? ""),
+    // Consume the native target-check result; a legacy report without it is unproven.
+    verified: r.checks.policy?.ready ?? false,
     changesRequested: workflow.changesRequested.includes(r.pullRequest.reviewDecision ?? ""),
     unresolvedThreads: r.threads.unresolved.length + r.threads.omitted > 0,
     mergeable: r.pullRequest.mergeable,

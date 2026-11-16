@@ -38,6 +38,8 @@ export interface ServeReadRuntime {
   collectShortlist?: ReadRuntime["collectShortlist"];
   /** Test seam for the lazily loaded Datalog engine (#346). */
   loadEngine?: ReadRuntime["loadEngine"];
+  /** Monotonic engine-budget clock; independent of the evidence wall clock. */
+  engineClock?: ReadRuntime["engineClock"];
   /** Focused `who` read (issue-detail-v1, #367); default: the gh collector over queryWith. */
   collectIssueFocus?: typeof CollectIssueFocus;
   dependencyReport: typeof DependencyReportFn;

@@ -190,7 +190,7 @@ export function ticketRenderers(): TicketRenderers {
           `intended ${escapeHtml(p.intendedTarget)}${p.targetMismatch === true ? ' <strong class="warn">target mismatch</strong>' : p.targetMismatch === null ? " (comparison unknown)" : ""}`,
         );
       const checks = record(p.checks);
-      facts.push(`checks ${p.checks ? known(checks.verify) : "unknown"}`);
+      facts.push(`checks ${p.checks ? known(checks.requirements ?? checks.verify) : "unknown"}`);
       const review = record(p.review);
       facts.push(
         p.review

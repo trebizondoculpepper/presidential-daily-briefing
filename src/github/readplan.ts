@@ -56,8 +56,9 @@ export const readProfiles = {
   },
   /** One PR's head, checks, reviews and threads, plus delivery of the issues it closes. */
   "pr-status-v1": {
-    version: 1,
+    version: 2,
     sources: [
+      "required-checks",
       "pull-request",
       "checks",
       "review-threads",
@@ -74,8 +75,9 @@ export const readProfiles = {
    * `--limit-prs`; the report states the bound actually used.
    */
   "ticket-status-v1": {
-    version: 1,
+    version: 2,
     sources: [
+      "required-checks",
       "issue",
       "labels",
       "comments",

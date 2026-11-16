@@ -1,3 +1,4 @@
+import { requiredCheckEvidence } from "../../github/requiredchecks.js";
 /**
  * Host adapter for the rules engine (doc/design/rules-component.md, "Component boundary").
  * Turns a collected Snapshot, assessments and viewer options into engine facts, runs the engine
@@ -78,7 +79,11 @@ export interface DatalogOptions {
    */
   checkRequiredness?: ReadonlyMap<
     string,
-    { readonly advisoryPending: readonly string[]; readonly missingRequired: readonly string[] }
+    {
+      readonly advisoryPending: readonly string[];
+      readonly missingRequired: readonly string[];
+      readonly evidence?: import("./check-types.js").CheckEvidence;
+    }
   >;
   /**
    * Retained claims (#413): each of the viewer's own claims' activity per issue URL, read by the
@@ -267,12 +272,14 @@ function normalize(
         // lazily loaded chunk does not import; previdence.test.ts holds the two in agreement.
         "pr-complete":
           !snapshot.warnings.some((w) => w.startsWith(`${pr.url}:`)) &&
-          !!rollup &&
-          [pr.comments, pr.reviews, pr.reviewThreads, rollup.contexts].every((c) => {
-            const info: { hasNextPage?: boolean; hasPreviousPage?: boolean } | undefined =
-              c?.pageInfo;
-            return !!info && !info.hasNextPage && !info.hasPreviousPage;
-          }),
+          rollup !== undefined &&
+          [pr.comments, pr.reviews, pr.reviewThreads, ...(rollup ? [rollup.contexts] : [])].every(
+            (c) => {
+              const info: { hasNextPage?: boolean; hasPreviousPage?: boolean } | undefined =
+                c?.pageInfo;
+              return !!info && !info.hasNextPage && !info.hasPreviousPage;
+            },
+          ),
       }))
         put(id, k, v);
       for (const ref of pr.closingIssuesReferences.nodes) {
@@ -281,6 +288,10 @@ function normalize(
       }
       const requiredness = options.checkRequiredness?.get(pr.url);
       const advisory = new Set(requiredness?.advisoryPending ?? []);
+      const checkEvidence = requiredness?.evidence ?? requiredCheckEvidence(pr);
+      put(id, "required-evidence-complete", checkEvidence?.complete ?? false);
+      for (const gap of checkEvidence?.gaps ?? ["required-check evidence was not read"])
+        put(id, "required-evidence-gap", gap);
       for (const check of rollup?.contexts.nodes ?? []) {
         const c = nextId++;
         const checkName = check.name ?? check.context ?? "unnamed";
@@ -288,7 +299,12 @@ function normalize(
         put(c, "name", checkName);
         put(c, "outcome", check.conclusion ?? check.state ?? check.status ?? "UNKNOWN");
         // #343: a pending check GitHub reports as not required for this PR does not make it wait.
-        if (advisory.has(checkName)) put(c, "required", "advisory");
+        put(
+          c,
+          "required",
+          checkEvidence?.checks[(rollup?.contexts.nodes ?? []).indexOf(check)]?.required ??
+            (advisory.has(checkName) ? "advisory" : "unknown"),
+        );
       }
       for (const missing of requiredness?.missingRequired ?? [])
         put(id, "missing-required", missing);

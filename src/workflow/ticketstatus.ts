@@ -71,7 +71,7 @@ export interface TicketPullRequest {
   intendedTarget: string | null;
   /** The live base differs from the intended target's branch; null when not comparable. */
   targetMismatch: boolean | null;
-  checks: { verify: string; counts: Record<string, number> } | null;
+  checks: { verify: string; requirements?: string; counts: Record<string, number> } | null;
   review: {
     decision: string | null;
     headReviewed: boolean;
@@ -326,6 +326,7 @@ function withStatus(
     }),
     checks: {
       verify: r.checks.required ? r.checks.required.class : "missing",
+      requirements: r.checks.policy?.ready ? "satisfied" : "unproven",
       counts: r.checks.counts,
     },
     review: {
@@ -494,6 +495,7 @@ export async function readTicketStatus(
             i.repository.toLowerCase() === repository.toLowerCase()
               ? who.snapshot.reviewPolicy
               : undefined,
+            boundaries.live?.rest,
           ),
         { concurrency: readProfiles["ticket-status-v1"].bounds.hydrationConcurrency, signal },
       );
@@ -809,7 +811,7 @@ function prLine(r: TicketPullRequest): string {
     r.state === "OPEN" && r.blockers.length
       ? ` · blockers: ${r.blockers.slice(0, ticketLimits.rowBlockers).join("; ")}${r.blockers.length > ticketLimits.rowBlockers ? ` (+${r.blockers.length - ticketLimits.rowBlockers})` : ""}`
       : "";
-  return `  #${r.number} ${r.repository} [${rel}] ${r.state}${r.draft ? " draft" : ""} ${short(r.head)} → ${r.base}${target} · verify ${r.checks?.verify ?? "?"} · ${review}${threads}${r.memberState ? ` · member ${r.memberState}` : ""}${follow}${extra}${r.complete ? "" : " · INCOMPLETE"}`;
+  return `  #${r.number} ${r.repository} [${rel}] ${r.state}${r.draft ? " draft" : ""} ${short(r.head)} → ${r.base}${target} · required checks ${r.checks?.requirements ?? "unknown"} · ${review}${threads}${r.memberState ? ` · member ${r.memberState}` : ""}${follow}${extra}${r.complete ? "" : " · INCOMPLETE"}`;
 }
 
 const metric = (name: string, v: MetricView) =>

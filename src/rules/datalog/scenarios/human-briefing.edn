@@ -13,7 +13,7 @@
           {:e 102 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "not-a-pr" "label" "design:decision-needed"}
           {:e 103 "kind" "issue" "state" "OPEN" "number" 2 "target" "https://github.com/o/r/issues/2" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "not-a-pr" "label" "question" "question-record" 202}
           {:e 202 "record-trust" "unverified" "record-to" "owner"}
-          {:e 104 "kind" "pr" "state" "OPEN" "number" 4 "target" "https://github.com/o/r/pull/4" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "head4" "draft" false "mergeable" "MERGEABLE" "merge-state" "CLEAN" "review-decision" "APPROVED" "pr-complete" true "check" 203 "review" 204}
+          {:e 104 "kind" "pr" "state" "OPEN" "number" 4 "target" "https://github.com/o/r/pull/4" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "head4" "draft" false "mergeable" "MERGEABLE" "merge-state" "CLEAN" "review-decision" "APPROVED" "pr-complete" true "required-evidence-complete" true "check" 203 "review" 204}
           {:e 203 "name" "verify" "outcome" "SUCCESS"}
           {:e 204 "review-state" "APPROVED" "review-commit" "head4"}
           {:e 105 "kind" "issue" "state" "OPEN" "number" 6 "target" "https://github.com/o/r/issues/6" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" false "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "not-a-pr" "label" ["status:ready" "attention:owner"] "attention" "owner"}
@@ -35,7 +35,7 @@
               :why "Labelled design:decision-needed without a trusted question record. Inferred: a decision may be needed."
               :overridden []}
             {:subject 104 :rule "D-HUMAN-SIGNOFF" :kind "sign-off" :band 3
-              :why "Accepted at head head4: verify passed, head reviewed, no findings. Inferred: merge sign-off candidate; nobody asked explicitly."
+              :why "Accepted at head head4: required checks satisfied, head reviewed, no findings. Inferred: merge sign-off candidate; nobody asked explicitly."
               :overridden []}]
            :denials #{[105 "D-DENY-NATIVE-UNKNOWN"]}}}
 
