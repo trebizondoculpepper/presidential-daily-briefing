@@ -7,6 +7,8 @@ import { legacyTreeText, treeIncompleteText, type TreeBounds } from "../github/d
 import { leanRow } from "../briefing/leanrows.js";
 import { catchUpLimits, catchUpText } from "../briefing/catchup.js";
 import { dependencyFacts } from "../github/dependencies.js";
+import { humanContextText } from "../config/humancontext.js";
+import type { HumanContext } from "../config/humancontext.js";
 import type { CatchUpReport } from "../briefing/catchup.js";
 import { warningsList } from "./bounded.js";
 import type { BoundedView, Next, PrunableList, Selection } from "./bounded.js";
@@ -73,6 +75,7 @@ const briefingFields = [
   "process",
   "decisionEngine",
   "human",
+  "employingHuman",
 ] as const;
 
 const itemsLine = (prefix: string, rows: unknown[]): string[] =>
@@ -135,7 +138,7 @@ export function briefingView(
     data,
     // Completeness is carried once, in the envelope's bounded sourceCompleteness.
     // The shortlist's coverage (#368) is already bounded and is never pruned away.
-    protectedPaths: ["guidance", "shortlist"],
+    protectedPaths: ["guidance", "shortlist", "employingHuman"],
     // #311: pruning may drop focus rows; `shown` is what this response actually returns.
     fixup: (d) => {
       if (d.focus) {
@@ -181,6 +184,7 @@ export function briefingView(
       const ranked = obj(d.rankedActions);
       const role = obj(d.role);
       const lines = [
+        ...(d.employingHuman ? [humanContextText(d.employingHuman as HumanContext)] : []),
         `Presidential Daily Briefing: ${base.repository} — fetched ${str(freshness.fetchedAt)}${freshness.offline ? " (OFFLINE CACHE)" : ""}`,
       ];
       // #368: unread shortlist items make the ordering provisional; said before any row.
