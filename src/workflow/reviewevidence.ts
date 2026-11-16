@@ -41,14 +41,37 @@ export function codexReviewReceipt(body: string | null | undefined): CodexReceip
   return { commitSha, clean };
 }
 
-/** Match a full 40-char head SHA against a full SHA or a 7-40 char receipt commit prefix. */
+/** Match a full commit SHA (exact match, case-insensitive for 40-char hex SHAs). */
 export function codexCommitMatches(head: string, sha: string | null | undefined): boolean {
   if (!sha) return false;
   if (sha === head) return true;
   return (
-    /^[0-9a-f]{7,39}$/i.test(sha) &&
+    /^[0-9a-f]{40}$/i.test(sha) &&
     /^[0-9a-f]{40}$/i.test(head) &&
-    head.toLowerCase().startsWith(sha.toLowerCase())
+    sha.toLowerCase() === head.toLowerCase()
+  );
+}
+
+/**
+ * Match a receipt commit against `head` for reconciling a full-SHA `running` summary (#647).
+ * An abbreviated 7-39 char prefix only matches when `head` is 40 hex chars and no other known
+ * commit on the PR shares that prefix.
+ */
+export function codexReceiptMatchesPrefix(
+  head: string,
+  sha: string | null | undefined,
+  knownCommits: readonly (string | null | undefined)[] = [],
+): boolean {
+  if (!sha) return false;
+  if (codexCommitMatches(head, sha)) return true;
+  if (!/^[0-9a-f]{7,39}$/i.test(sha) || !/^[0-9a-f]{40}$/i.test(head)) return false;
+  const prefix = sha.toLowerCase();
+  if (!head.toLowerCase().startsWith(prefix)) return false;
+  return !knownCommits.some(
+    (c) =>
+      typeof c === "string" &&
+      c.toLowerCase() !== head.toLowerCase() &&
+      c.toLowerCase().startsWith(prefix),
   );
 }
 
@@ -91,6 +114,10 @@ export function headAccepted(
     .map((c) => c.state);
   // As in prstatus.ts: Codex findings on the current head block, whatever else approves it.
   if (codex.some((s) => s?.commit_sha === head && s.has_unresolved_findings === true)) return false;
+  const hasRunningHead = codex.some(
+    (s) => s?.commit_sha === head && typeof s.status === "string" && s.status !== "completed",
+  );
+  const knownCommits = [...reviews.map((r) => r.commit), ...codex.map((s) => s?.commit_sha)];
   return (
     reviews.some((r) => r.state === "APPROVED" && r.commit === head) ||
     codex.some(
@@ -101,7 +128,8 @@ export function headAccepted(
       (c) =>
         c.by.replace(/\[bot\]$/, "") === codexReviewer &&
         c.receipt?.clean === true &&
-        codexCommitMatches(head, c.receipt.commitSha),
+        (codexCommitMatches(head, c.receipt.commitSha) ||
+          (hasRunningHead && codexReceiptMatchesPrefix(head, c.receipt.commitSha, knownCommits))),
     )
   );
 }

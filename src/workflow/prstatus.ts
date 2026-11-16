@@ -10,7 +10,12 @@
  * approval.
  */
 import { workflow } from "./definition.js";
-import { codexCommitMatches, codexMarker, codexReviewReceipt } from "./reviewevidence.js";
+import {
+  codexCommitMatches,
+  codexMarker,
+  codexReceiptMatchesPrefix,
+  codexReviewReceipt,
+} from "./reviewevidence.js";
 import type { CodexMarker } from "./reviewevidence.js";
 import {
   evaluateReviewPolicy,
@@ -326,10 +331,20 @@ export function prStatus(
   const requested =
     reviewerFor[(requestPattern.exec(lastRequest?.body ?? "")?.[1] ?? "").toLowerCase()];
   const answerer = (login: string | undefined): string => (login ?? "").replace(/\[bot\]$/, "");
+  const knownCommits = [
+    ...pr.reviews.nodes.map((r) => r.commit?.oid),
+    ...receipts.map((r) => r.codexState?.code_review?.commit_sha),
+  ];
+  const hasRunningHeadCodex =
+    codex?.commit_sha === head && typeof codex.status === "string" && codex.status !== "completed";
   const codexCleanReceipt = comments.some((c) => {
     if (answerer(c.author?.login) !== reviewerFor.codex) return false;
     const r = codexReviewReceipt(c.body);
-    return Boolean(r?.clean && codexCommitMatches(head, r.commitSha));
+    return Boolean(
+      r?.clean &&
+      (codexCommitMatches(head, r.commitSha) ||
+        (hasRunningHeadCodex && codexReceiptMatchesPrefix(head, r.commitSha, knownCommits))),
+    );
   });
   const newerReceipt = (at: string): boolean =>
     receipts.some((r) => answerer(r.by) === requested && (r.at ?? "") > at && !r.codexState) ||

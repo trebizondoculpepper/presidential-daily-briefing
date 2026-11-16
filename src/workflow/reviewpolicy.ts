@@ -16,6 +16,7 @@
 import {
   codexCommitMatches,
   codexMarker,
+  codexReceiptMatchesPrefix,
   codexReviewReceipt,
   headAccepted,
   headCodexFindings,
@@ -197,11 +198,16 @@ export function observeProvider(
     return id === "codex" && r ? [{ url: c.url, r }] : [];
   });
   const headMarkers = markers.filter(({ m }) => m.commit_sha === e.head);
-  const headCleanReceipts = receipts.filter(
-    ({ r }) => r.clean && codexCommitMatches(e.head, r.commitSha),
+  const hasRunningHeadMarker = headMarkers.some(
+    ({ m }) => typeof m.status === "string" && m.status !== "completed",
   );
+  const knownCommits = [...e.reviews.map((r) => r.commit), ...markers.map(({ m }) => m.commit_sha)];
+  const receiptMatchesHead = (sha: string | null) =>
+    codexCommitMatches(e.head, sha) ||
+    (hasRunningHeadMarker && codexReceiptMatchesPrefix(e.head, sha, knownCommits));
+  const headCleanReceipts = receipts.filter(({ r }) => r.clean && receiptMatchesHead(r.commitSha));
   const ambiguousHeadReceipts = receipts.filter(
-    ({ r }) => !r.clean && codexCommitMatches(e.head, r.commitSha),
+    ({ r }) => !r.clean && receiptMatchesHead(r.commitSha),
   );
   const checks = (e.checks ?? []).filter((c) => c.app !== null && p.apps.includes(c.app));
 

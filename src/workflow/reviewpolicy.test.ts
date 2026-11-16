@@ -466,12 +466,41 @@ describe("Codex receipt reconciliation (#647) and Copilot normalization (#694)",
     expect(run(e, legacy).headReviewed).toBe(true);
   });
 
+  it("does not grant coverage from an abbreviated receipt without a unique full-SHA running summary", () => {
+    const bareShort = evidence({
+      comments: [
+        {
+          author: bot("chatgpt-codex-connector"),
+          body: cleanReceiptBody(head.slice(0, 10)),
+          url: "https://github.com/o/r/pull/1#bare-short",
+        },
+      ],
+    });
+    expect(observeProvider("codex", bareShort).state).toBe("stale");
+    expect(run(bareShort, legacy).headReviewed).toBe(false);
+
+    const collidingOld = `${head.slice(0, 12)}${"c".repeat(28)}`;
+    const colliding = evidence({
+      comments: [
+        codexReceipt(collidingOld, "completed", false),
+        codexReceipt(head, "running", false),
+        {
+          author: bot("chatgpt-codex-connector"),
+          body: cleanReceiptBody(head.slice(0, 10)),
+          url: "https://github.com/o/r/pull/1#colliding",
+        },
+      ],
+    });
+    expect(observeProvider("codex", colliding).state).toBe("pending");
+    expect(run(colliding, legacy).headReviewed).toBe(false);
+  });
+
   it("keeps ambiguous codex-review-receipt prose unknown and ignores forged receipts", () => {
     const ambiguous = evidence({
       comments: [
         {
           author: bot("chatgpt-codex-connector"),
-          body: `<!-- codex-review-receipt:v1 -->\n\nLooks interesting.\n\n**Reviewed commit:** \`${head.slice(0, 10)}\``,
+          body: `<!-- codex-review-receipt:v1 -->\n\nLooks interesting.\n\n**Reviewed commit:** \`${head}\``,
           url: "https://github.com/o/r/pull/1#ambiguous",
         },
       ],
