@@ -46,6 +46,13 @@ export type ReleaseOutcome =
 /** A held lock: call it to release; `owned()` rechecks that it still holds this writer's token. */
 export type HeldLock = (() => Promise<ReleaseOutcome>) & { owned(): Promise<boolean> };
 
+/** Factual acquisition result: contention is distinct from an I/O failure or replaced token. */
+export type FileLockAcquisition =
+  | { status: "acquired"; lock: HeldLock }
+  | { status: "busy" }
+  | { status: "replaced" }
+  | { status: "failed"; phase: "create" | "verify"; code: string };
+
 /** The operator message for a lock that was not released within the wait. */
 export const stuckLockMessage = (lock: string): string =>
   `${basename(lock)} is held by another writer, or was left behind by one that stopped; it is never removed automatically. Make sure no pdb process is writing this file, then delete ${lock} yourself and retry.`;
@@ -61,6 +68,18 @@ export async function acquireFileLock(
   now: () => number,
   sleep: (ms: number) => Promise<void>,
 ): Promise<HeldLock | null> {
+  const result = await acquireFileLockResult(fs, lock, timing, now, sleep);
+  return result.status === "acquired" ? result.lock : null;
+}
+
+/** Preserve the acquisition failure phase/code without changing the non-stealing protocol. */
+export async function acquireFileLockResult(
+  fs: LockFs,
+  lock: string,
+  timing: LockTiming,
+  now: () => number,
+  sleep: (ms: number) => Promise<void>,
+): Promise<FileLockAcquisition> {
   const token = randomBytes(16).toString("hex");
   const deadline = now() + timing.waitMs;
   const holder = async (): Promise<string | undefined> => {
@@ -99,7 +118,7 @@ export async function acquireFileLock(
       });
       // Proceed only if the lock still holds our token.
       try {
-        if ((await holder()) !== token) return null;
+        if ((await holder()) !== token) return { status: "replaced" };
         // `owned` lets a writer recheck, just before its commit point, that the lock is still its.
         const owned = async () => {
           try {
@@ -108,16 +127,28 @@ export async function acquireFileLock(
             return false;
           }
         };
-        return Object.assign(release, { owned });
-      } catch {
-        return null;
+        return { status: "acquired", lock: Object.assign(release, { owned }) };
+      } catch (error) {
+        return { status: "failed", phase: "verify", code: codeText(error) };
       }
     } catch (error) {
-      if (code(error) !== "EEXIST") return null;
+      if (code(error) !== "EEXIST")
+        return { status: "failed", phase: "create", code: codeText(error) };
     }
-    if (now() >= deadline) return null;
+    if (now() >= deadline) return { status: "busy" };
     await sleep(timing.pollMs);
   }
+}
+
+/** Local operator detail; an unexpected filesystem error is not evidence of a stuck holder. */
+export function acquisitionProblem(
+  lock: string,
+  outcome: Exclude<FileLockAcquisition, { status: "acquired" }>,
+): string {
+  if (outcome.status === "busy") return stuckLockMessage(lock);
+  if (outcome.status === "replaced")
+    return `${basename(lock)} changed while ownership was being verified; this attempt did not write the target.`;
+  return `${basename(lock)} could not be acquired (${outcome.phase}: ${outcome.code}); this attempt did not write the target.`;
 }
 
 /** Whether a release left something for an operator to look at. */

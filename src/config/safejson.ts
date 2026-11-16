@@ -13,7 +13,7 @@
 import { randomBytes } from "node:crypto";
 import { mkdir, open, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
-import { acquireFileLock, releaseProblem, stuckLockMessage } from "./filelock.js";
+import { acquireFileLockResult, acquisitionProblem, releaseProblem } from "./filelock.js";
 
 /** The current state of the target, read under its lock. */
 export type CurrentState =
@@ -157,14 +157,16 @@ export async function updateTextFile(
   } catch (error) {
     return { status: "not-written", reason: `cannot create ${dir} (${code(error)})`, cleanup };
   }
-  const release = await acquireFileLock(
+  const acquisition = await acquireFileLockResult(
     fs.lock,
     lockPath,
     { waitMs: options.lockWaitMs ?? 5000, pollMs: 50 },
     now,
     sleep,
   );
-  if (!release) return { status: "not-written", reason: stuckLockMessage(lockPath), cleanup };
+  if (acquisition.status !== "acquired")
+    return { status: "not-written", reason: acquisitionProblem(lockPath, acquisition), cleanup };
+  const release = acquisition.lock;
   const finish = async (outcome: WriteOutcome): Promise<WriteOutcome> => {
     const problem = releaseProblem(lockPath, await release());
     return problem ? { ...outcome, cleanup: [...outcome.cleanup, problem] } : outcome;

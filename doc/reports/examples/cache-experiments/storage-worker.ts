@@ -128,6 +128,7 @@ async function main(argv: string[]): Promise<void> {
       writer,
       written: 0,
       notWritten: {} as Record<string, number>,
+      failures: [] as { status: string; reason: string; step?: string; detail: string }[],
       renameRetries: 0,
       /** Lock attempts that found the lock already held (EEXIST): evidence of real overlap. */
       lockBusy: 0,
@@ -178,7 +179,10 @@ async function main(argv: string[]): Promise<void> {
       if (r.status === "written") {
         tally.written++;
         tally.renameRetries += r.renameRetries;
-      } else tally.notWritten[r.reason] = (tally.notWritten[r.reason] ?? 0) + 1;
+      } else {
+        tally.notWritten[r.reason] = (tally.notWritten[r.reason] ?? 0) + 1;
+        tally.failures.push({ status: r.status, reason: r.reason, step: r.step, detail: r.detail });
+      }
     }
     tally.lastWriteAt = Date.now();
     print(tally);
