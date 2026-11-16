@@ -65,7 +65,13 @@ describe("dashboard renderers (#374)", () => {
     expect(html).toContain(
       `<a href="${url(1)}" rel="noreferrer">#1 Fix &lt;b&gt;bold&lt;/b&gt; &amp; things</a>`,
     );
-    expect(html).toContain('<span class="kind">implement</span>');
+    expect(html).toContain('<span class="kind implement">implement</span>');
+    // The badge sits on its own line below the title (the title link and the badge are
+    // separated by a line break, so long titles wrap before the badge).
+    const titleEnd = html.indexOf("</a>");
+    const kindStart = html.indexOf('<span class="kind implement">', titleEnd);
+    expect(kindStart).toBeGreaterThan(titleEnd);
+    expect(html.slice(titleEnd, kindStart)).toContain("<br>");
     expect(html).toContain(
       "Eligible implementation: impact M, complexity M. <small>(D-ORDINARY)</small>",
     );
