@@ -81,10 +81,11 @@ Review/merge this documentation contract first; then mark #91 ready for a focuse
 
 ## Root launcher allowlist
 
-- `build.sh`: owner-requested executable POSIX shell convenience launcher at the
-  repository root. It changes to its own directory and delegates to `npm run build`;
+- `install-from-source-global.sh`: owner-requested executable POSIX shell convenience launcher at the
+  repository root. It changes to its own directory and runs `npm run build`, then `npm install -g .`;
   no TypeScript imports it and it contains no application or workflow policy.
   Requires POSIX `sh`, Node/npm and installed project dependencies. Supports
-  macOS/Linux and POSIX shells on Windows; native Windows uses `npm run build`.
-  Validate with `sh -n build.sh` and a build invoked from outside the checkout.
+  macOS/Linux and POSIX shells on Windows; native Windows runs `npm run build` followed by `npm install -g .`.
+  Validate with `sh -n install-from-source-global.sh` and an isolated npm-prefix
+  installation invoked from outside the checkout.
   This root launcher is outside the source/helper language-scan directories.
