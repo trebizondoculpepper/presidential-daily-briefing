@@ -117,4 +117,79 @@
               :facts {"impact" "unknown" "complexity" "unknown" "impactState" "unknown" "complexityState" "unknown" "head" "head2" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "mergeable" "MERGEABLE" "mergeState" "BEHIND" "requiredChecksComplete" true}
               :overridden [] :unlocks 0 :unknown [] :other-claims []}]
            :denials #{}}}
+
+ {:id "codex-or-copilot-codex-accepted"
+  :doc "Declared Codex-or-Copilot coverage: a clean current-head Codex receipt accepts the PR without CodeRabbit (#695)."
+  :viewer {:role "implementer"}
+  :facts [{:e 1 "forward-complete" true "review-coverage" "any"}
+          {:e 100 "kind" "pr" "state" "OPEN" "number" 2 "target" "https://github.com/o/r/pull/2" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "head2" "draft" false "pr-complete" true "required-evidence-complete" true "review-decision" "" "mergeable" "MERGEABLE" "merge-state" "BEHIND" "check" 101 "provider-review" [102 103]}
+          {:e 101 "name" "verify" "outcome" "SUCCESS"}
+          {:e 102 "provider" "codex" "provider-state" "accepted" "provider-commit" "head2"}
+          {:e 103 "provider" "copilot" "provider-state" "pending" "provider-commit" "head2"}]
+  :expect {:actions [{:subject 100 :rule "D-PR-INTEGRATE" :kind "pr-follow-up" :band 2
+              :why "Accepted at head head2 (required checks satisfied, head reviewed, no fetched findings) but merge state is BEHIND, mergeable MERGEABLE; refresh mergeability or update the branch, then recheck before considering merge."
+              :facts {"impact" "unknown" "complexity" "unknown" "impactState" "unknown" "complexityState" "unknown" "head" "head2" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "mergeable" "MERGEABLE" "mergeState" "BEHIND" "requiredChecksComplete" true}
+              :overridden [] :unlocks 0 :unknown [] :other-claims []}]
+           :denials #{}}}
+
+ {:id "codex-or-copilot-copilot-accepted"
+  :doc "Declared Codex-or-Copilot coverage: an accepted current-head Copilot review accepts the PR although Codex is stale (#695)."
+  :viewer {:role "implementer"}
+  :facts [{:e 1 "forward-complete" true "review-coverage" "any"}
+          {:e 100 "kind" "pr" "state" "OPEN" "number" 2 "target" "https://github.com/o/r/pull/2" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "head2" "draft" false "pr-complete" true "required-evidence-complete" true "review-decision" "" "mergeable" "MERGEABLE" "merge-state" "BEHIND" "check" 101 "provider-review" [102 103]}
+          {:e 101 "name" "verify" "outcome" "SUCCESS"}
+          {:e 102 "provider" "codex" "provider-state" "stale" "provider-commit" "head1"}
+          {:e 103 "provider" "copilot" "provider-state" "accepted" "provider-commit" "head2"}]
+  :expect {:actions [{:subject 100 :rule "D-PR-INTEGRATE" :kind "pr-follow-up" :band 2
+              :why "Accepted at head head2 (required checks satisfied, head reviewed, no fetched findings) but merge state is BEHIND, mergeable MERGEABLE; refresh mergeability or update the branch, then recheck before considering merge."
+              :facts {"impact" "unknown" "complexity" "unknown" "impactState" "unknown" "complexityState" "unknown" "head" "head2" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "mergeable" "MERGEABLE" "mergeState" "BEHIND" "requiredChecksComplete" true}
+              :overridden [] :unlocks 0 :unknown [] :other-claims []}]
+           :denials #{}}}
+
+ {:id "codex-or-copilot-commented-unknown-not-accepted"
+  :doc "Declared Codex-or-Copilot coverage: Copilot COMMENTED without a passing outcome (unknown) neither accepts nor emits findings (#695)."
+  :viewer {:role "implementer"}
+  :facts [{:e 1 "forward-complete" true "review-coverage" "any"}
+          {:e 100 "kind" "pr" "state" "OPEN" "number" 2 "target" "https://github.com/o/r/pull/2" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "head2" "draft" false "pr-complete" true "required-evidence-complete" true "review-decision" "" "mergeable" "MERGEABLE" "merge-state" "BEHIND" "check" 101 "provider-review" [102 103]}
+          {:e 101 "name" "verify" "outcome" "SUCCESS"}
+          {:e 102 "provider" "codex" "provider-state" "unknown" "provider-commit" "head2"}
+          {:e 103 "provider" "copilot" "provider-state" "unknown" "provider-commit" "head2"}]
+  :expect {:actions []
+           :denials #{}}}
+
+ {:id "codex-or-copilot-clean-plus-findings-conflict"
+  :doc "Declared Codex-or-Copilot coverage: a Copilot finding on the head vetoes despite clean Codex acceptance (#695)."
+  :viewer {:role "implementer"}
+  :facts [{:e 1 "forward-complete" true "review-coverage" "any"}
+          {:e 100 "kind" "pr" "state" "OPEN" "number" 2 "target" "https://github.com/o/r/pull/2" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "head2" "draft" false "pr-complete" true "required-evidence-complete" true "review-decision" "" "mergeable" "MERGEABLE" "merge-state" "BEHIND" "check" 101 "provider-review" [102 103]}
+          {:e 101 "name" "verify" "outcome" "SUCCESS"}
+          {:e 102 "provider" "codex" "provider-state" "accepted" "provider-commit" "head2"}
+          {:e 103 "provider" "copilot" "provider-state" "findings" "provider-commit" "head2"}]
+  :expect {:actions []
+           :denials #{}}}
+
+ {:id "codex-or-copilot-execution-failure-not-accepted"
+  :doc "Declared Codex-or-Copilot coverage: Copilot execution failure (error) and skipped Codex do not satisfy coverage (#695)."
+  :viewer {:role "implementer"}
+  :facts [{:e 1 "forward-complete" true "review-coverage" "any"}
+          {:e 100 "kind" "pr" "state" "OPEN" "number" 2 "target" "https://github.com/o/r/pull/2" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "head2" "draft" false "pr-complete" true "required-evidence-complete" true "review-decision" "" "mergeable" "MERGEABLE" "merge-state" "BEHIND" "check" 101 "provider-review" [102 103]}
+          {:e 101 "name" "verify" "outcome" "SUCCESS"}
+          {:e 102 "provider" "codex" "provider-state" "skipped" "provider-commit" "head2"}
+          {:e 103 "provider" "copilot" "provider-state" "error" "provider-commit" "head2"}]
+  :expect {:actions []
+           :denials #{}}}
+
+ {:id "codex-or-copilot-required-check-still-blocks"
+  :doc "Declared Codex-or-Copilot coverage: accepted provider coverage preserves independent required-check failure rules (#695)."
+  :viewer {:role "implementer"}
+  :facts [{:e 1 "forward-complete" true "review-coverage" "any"}
+          {:e 100 "kind" "pr" "state" "OPEN" "number" 2 "target" "https://github.com/o/r/pull/2" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "head2" "draft" false "pr-complete" true "required-evidence-complete" true "review-decision" "" "mergeable" "MERGEABLE" "merge-state" "CLEAN" "check" 101 "provider-review" [102 103]}
+          {:e 101 "name" "verify" "outcome" "FAILURE"}
+          {:e 102 "provider" "codex" "provider-state" "accepted" "provider-commit" "head2"}
+          {:e 103 "provider" "copilot" "provider-state" "unknown" "provider-commit" "head2"}]
+  :expect {:actions [{:subject 100 :rule "D-PR-FAIL" :kind "pr-follow-up" :band 2
+              :why "PR checks failed at head head2; inspect and repair before merge."
+              :facts {"impact" "unknown" "complexity" "unknown" "impactState" "unknown" "complexityState" "unknown" "head" "head2" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "failedChecks" "verify:FAILURE"}
+              :overridden [] :unlocks 0 :unknown [] :other-claims []}]
+           :denials #{}}}
 ]}

@@ -641,4 +641,46 @@ describe("Codex receipt reconciliation (#647) and Copilot normalization (#694)",
       observeProvider("copilot", evidence({ reviews: [copilotReview("COMMENTED", old)] })),
     ).toMatchObject({ provider: "copilot", state: "stale", head: old });
   });
+
+  it("evaluates declared codex-or-copilot policy without requiring CodeRabbit", () => {
+    const codexOrCopilot: DeclaredReviewPolicy = { state: "declared", policy: "codex-or-copilot" };
+    const cleanCodex = run(evidence({ comments: [codexReceipt()] }), codexOrCopilot);
+    expect(cleanCodex.headReviewed).toBe(true);
+    expect(cleanCodex.detail.providers.map((o) => o.provider)).toEqual(["codex", "copilot"]);
+    expect(cleanCodex.detail.satisfiedBy).toEqual([
+      { provider: "codex", head, source: codexReceipt().url },
+    ]);
+
+    const copilotFindings = run(
+      evidence({
+        comments: [codexReceipt()],
+        unresolvedThreads: [
+          {
+            author: bot("copilot-pull-request-reviewer"),
+            url: "https://github.com/o/r/pull/1#copilot-thread",
+          },
+        ],
+      }),
+      codexOrCopilot,
+    );
+    expect(copilotFindings.headReviewed).toBe(false);
+    expect(copilotFindings.headFindings).toBe(true);
+
+    const commentedOnly = run(
+      evidence({
+        reviews: [
+          {
+            author: bot("copilot-pull-request-reviewer"),
+            state: "COMMENTED",
+            commit: head,
+            at: "2026-11-16T00:00:00Z",
+            url: "https://github.com/o/r/pull/1#copilot-commented",
+          },
+        ],
+      }),
+      codexOrCopilot,
+    );
+    expect(commentedOnly.headReviewed).toBe(false);
+    expect(commentedOnly.headFindings).toBe(false);
+  });
 });

@@ -293,7 +293,7 @@ ${crashDisclosure()}
                         --metric impact records a benefit estimate as impact:S
   pr N                  Why is pull request N not progressing? Every blocker at once
                         under the declared review.policy (pdb config help): with
-                        codex-or-coderabbit either provider's current-head acceptance
+                        codex-or-coderabbit / codex-or-copilot either provider's current-head acceptance
                         covers review; a finding from either still blocks
   pr N --history        Why does PR N keep failing review? Rounds, findings, recurring files
   claim N --agent NAME [--branch B] [--platform P] [--rework] [--dry-run]  Claim an eligible ticket;

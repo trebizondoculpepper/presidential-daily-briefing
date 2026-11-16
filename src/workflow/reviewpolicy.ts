@@ -25,7 +25,7 @@ import { prEvidenceGaps } from "../github/previdence.js";
 import type { PullRequest, Snapshot } from "../github/types.js";
 
 /** Registered `review.policy` values; absent configuration is "undeclared", never one of these. */
-export const reviewPolicyIds = ["legacy", "codex-or-coderabbit"] as const;
+export const reviewPolicyIds = ["legacy", "codex-or-coderabbit", "codex-or-copilot"] as const;
 export type ReviewPolicyId = (typeof reviewPolicyIds)[number];
 export type ProviderId = "codex" | "coderabbit" | "copilot";
 
@@ -43,6 +43,12 @@ export const reviewPolicies: Readonly<Record<ReviewPolicyId, RegisteredReviewPol
     id: "codex-or-coderabbit",
     coverage: "any",
     providers: ["codex", "coderabbit"],
+    findings: "all-known-substantive",
+  },
+  "codex-or-copilot": {
+    id: "codex-or-copilot",
+    coverage: "any",
+    providers: ["codex", "copilot"],
     findings: "all-known-substantive",
   },
 };
@@ -346,7 +352,7 @@ export function evaluateReviewPolicy(
   const effective = effectivePolicy(declared);
   const unknowns: string[] = [];
   const activeProviders =
-    effective === "codex-or-coderabbit"
+    effective !== "legacy" && effective !== "unknown"
       ? reviewPolicies[effective].providers
       : (Object.keys(reviewProviders) as ProviderId[]);
   const providers = activeProviders.map((id) => observeProvider(id, e, unknowns));
