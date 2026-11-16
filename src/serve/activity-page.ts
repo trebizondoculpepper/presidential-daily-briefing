@@ -154,13 +154,11 @@ export function activityRenderers(base: DashboardRenderers): ActivityRenderers {
     // ticket edit, another comment or a PR update can set it), so it is never participation.
     return str(src.since);
   };
-  /** The claim's agent-attributed activity state; empty when not read for this agent. */
-  const attributedState = (c: unknown): string => str(record(record(c).activity).state);
-  /** Agents with evidence attributed to them in the window. */
+  /** Agents with an attributed event timestamp in the window. Activity state alone describes
+   * claim disposition, not recency: it is never counted as recent participation. */
   const agentsActive = (agents: unknown[], window: number, nowMs: number): unknown[] =>
     agents.filter((a) =>
       [...list(record(a).claims), ...list(record(a).responsibilities)].some((c) => {
-        if (attributedState(c) !== "" && attributedState(c) !== "unknown") return true;
         const at = attributedAt(c);
         return at !== "" && Number.isFinite(Date.parse(at)) && nowMs - Date.parse(at) <= ms(window);
       }),

@@ -269,15 +269,30 @@ describe("activity renderers (#456)", () => {
   it("lists only agents with evidenced activity in the window, in server order", () => {
     const html = view.renderAgents(
       teamEnvelope([
-        // alpha has agent-attributed activity; beta only has an unattributed timestamp.
-        agent("alpha", [
-          claim(1, hours(2), {
-            title: "Alpha work",
-            activity: { state: "active", reason: "" },
-          }),
-        ]),
-        // beta only has an unattributed timestamp, so it is listed as undetermined, never
-        // silently dropped; `unlisted` has nothing at all and is not listed.
+        // alpha has an attributed responsibility timestamp in the window; beta only has a claim
+        // with an unattributed timestamp, so it is undetermined, never silently dropped;
+        // `unlisted` has nothing at all and is not listed.
+        agent(
+          "alpha",
+          [
+            claim(1, hours(2), {
+              title: "Alpha work",
+            }),
+          ],
+          {
+            responsibilities: [
+              {
+                number: 1,
+                url: url(1),
+                scope: "ticket",
+                deliverable: null,
+                delivery: "delivered",
+                followUp: "none",
+                since: hours(2),
+              },
+            ],
+          },
+        ),
         agent("beta", [claim(2, hours(200), { title: "Beta stale work" })]),
         agent("unlisted", []),
       ]),
@@ -483,7 +498,19 @@ describe("activity renderers (#456)", () => {
     expect(view.renderCoverage(teamEnvelope([]), 1, start)).toContain("0 of 0 agent(s)");
     const coverage = view.renderCoverage(
       teamEnvelope([
-        agent("alpha", [claim(1, hours(2), { activity: { state: "active", reason: "" } })]),
+        agent("alpha", [claim(1, hours(2))], {
+          responsibilities: [
+            {
+              number: 1,
+              url: url(1),
+              scope: "ticket",
+              deliverable: null,
+              delivery: "delivered",
+              followUp: "none",
+              since: hours(2),
+            },
+          ],
+        }),
         agent("beta", [claim(2, hours(200))]),
       ]),
       1,
@@ -549,7 +576,19 @@ describe("activity browser script (#456)", () => {
     expect(b.fetched[0]!.path).toContain("/api/v1/team?repo=example%2Fparity&staleHours=48");
     b.pending[0]!(
       teamEnvelope([
-        agent("alpha", [claim(1, hours(2), { activity: { state: "active", reason: "" } })]),
+        agent("alpha", [claim(1, hours(2))], {
+          responsibilities: [
+            {
+              number: 1,
+              url: url(1),
+              scope: "ticket",
+              deliverable: null,
+              delivery: "delivered",
+              followUp: "none",
+              since: hours(2),
+            },
+          ],
+        }),
         agent("beta", [claim(2, hours(200))]),
       ]),
     );
