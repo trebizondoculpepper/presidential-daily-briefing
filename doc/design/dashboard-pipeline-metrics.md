@@ -83,25 +83,25 @@ What does not exist: any per-ticket history ledger across tickets, any day-bucke
 
 Proposed. One shell (#605) renders the toolbar on every HTML page; pages differ only in their main region.
 
-| Page                  | Route                                                            | Data                                      | Ticket                                      |
-| --------------------- | ---------------------------------------------------------------- | ----------------------------------------- | ------------------------------------------- |
-| Overview / News       | `/overview?repo=R&news=6h&days=7d`                               | Event ledger, window aggregates           | #574                                        |
-| Work                  | `/?repo=R&role=…&agent=…` (existing), human view `/human?repo=R` | Existing briefing projections             | #374 (shipped), #458                        |
-| Pipeline health       | `/pipeline?repo=R&from=YYYY-MM-DD&through=YYYY-MM-DD`            | Ledger cohort flow plus current inventory | #575                                        |
-| Timing                | `/timing?repo=R&days=7d`                                         | Ledger durations                          | #576                                        |
-| Agents                | `/activity?repo=R&window=1d`                                     | `/api/v1/team` plus ledger activity       | #456                                        |
-| Quotas (utility)      | `/quotas` (account-scoped, no `repo`)                            | Quota service                             | #548                                        |
-| Rules (utility)       | `/rules?repo=R` (existing)                                       | Compiled policy                           | shipped                                     |
-| Setup (utility)       | `/setup?repo=R` (existing)                                       | Local only                                | shipped                                     |
-| Settings (utility)    | `/settings?repo=R`; no `repo` means Global                       | Settings service                          | #584, [contract](serve-settings-page.md)    |
-| Diagnostics (utility) | `/diagnostics?repo=R&tab=doctor\|ticket-doctor`                  | Doctor and Ticket Doctor runs             | #585, [contract](serve-diagnostics-page.md) |
-| Ticket detail         | `/ticket?repo=R&n=N` (existing)                                  | Ticket read                               | shipped                                     |
+| Page                  | Route                                                                             | Data                                      | Ticket                                      |
+| --------------------- | --------------------------------------------------------------------------------- | ----------------------------------------- | ------------------------------------------- |
+| Overview / News       | `/overview?repo=R&news=6h&days=7d`                                                | Event ledger, window aggregates           | #574                                        |
+| Work                  | `/?repo=R&role=…&agent=…` (existing), human view `/human?repo=R`                  | Existing briefing projections             | #374 (shipped), #458                        |
+| Pipeline health       | `/pipeline?repo=R&from=YYYY-MM-DD&through=YYYY-MM-DD`                             | Ledger cohort flow plus current inventory | #575                                        |
+| Timing                | `/timing?repo=R&days=7d`                                                          | Ledger durations                          | #576                                        |
+| Agents                | `/activity?repo=R&window=1d`                                                      | `/api/v1/team` plus ledger activity       | #456                                        |
+| Quotas (utility)      | `/quotas` (account-scoped; retains `repo`/`role`/`agent` navigation context only) | Quota service                             | #548, #732                                  |
+| Rules (utility)       | `/rules?repo=R` (existing)                                                        | Compiled policy                           | shipped                                     |
+| Setup (utility)       | `/setup?repo=R` (existing)                                                        | Local only                                | shipped                                     |
+| Settings (utility)    | `/settings?repo=R`; no `repo` means Global                                        | Settings service                          | #584, [contract](serve-settings-page.md)    |
+| Diagnostics (utility) | `/diagnostics?repo=R&tab=doctor\|ticket-doctor`                                   | Doctor and Ticket Doctor runs             | #585, [contract](serve-diagnostics-page.md) |
+| Ticket detail         | `/ticket?repo=R&n=N` (existing)                                                   | Ticket read                               | shipped                                     |
 
 Shell rules that #605 implements and the page tickets consume:
 
 1. The selected project lives only in the `repo` query parameter, validated through `selectRepository`. No cookie, local storage or server-side session holds it. A missing or unserved value shows the selector and a no-selection state; it never falls back to the server's working directory.
 2. Every toolbar link carries the current `repo`, URL-encoded, and drops page-specific parameters. Ticket and PR drill-downs carry `repo` and `n`.
-3. Quotas is account-scoped and says so; the toolbar shows "account-wide" instead of a project there, and the link to it carries no `repo`.
+3. Quotas is account-scoped and says so; the toolbar shows "account-wide" instead of a project there, while carrying `repo` (plus `role` and `agent`) as navigation context so returning to Work/Rules/Setup preserves the selected project.
 4. Rendering the toolbar performs no GitHub read. Only the visible page's main region reads, on load or on Refresh.
 5. Switching project or window aborts the in-flight `fetch` and discards any late response by comparing a request generation with the current selection, as already required in [serve-dashboard-read-views.md](serve-dashboard-read-views.md).
 6. Each new page route extends the `src/serve.ts` page allowlist with exactly its parameters, keeps `dashboardSecurityPolicy`, and ships its script as a same-origin file.
