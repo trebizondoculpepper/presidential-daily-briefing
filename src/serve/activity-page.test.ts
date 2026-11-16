@@ -153,6 +153,7 @@ const teamEnvelope = (
     stale: false,
     refreshError: null,
   },
+  ...over,
   result: {
     schemaVersion: 1,
     kind: "team-view",
@@ -165,8 +166,8 @@ const teamEnvelope = (
     conflicts: [],
     completeness: { complete: true, warnings: [] },
     guidance: "",
+    ...(over.result as Record<string, unknown> | undefined),
   },
-  ...over,
 });
 
 const agent = (name: string, claims: unknown[], extra: Record<string, unknown> = {}) => ({
@@ -320,30 +321,56 @@ describe("activity renderers (#456)", () => {
 
   it("renders the shared model's continuing responsibilities separately from claims", () => {
     const html = view.renderAgents(
-      teamEnvelope([
-        agent("alpha", [], {
-          responsibilities: [
-            {
-              number: 10,
-              url: url(10),
-              scope: "ticket",
-              deliverable: null,
-              delivery: "delivered",
-              followUp: "actionable",
-              since: hours(3),
+      teamEnvelope(
+        [
+          agent("alpha", [], {
+            responsibilities: [
+              {
+                number: 10,
+                url: url(10),
+                scope: "ticket",
+                deliverable: null,
+                delivery: "delivered",
+                followUp: "actionable",
+                since: hours(3),
+              },
+              {
+                number: 11,
+                url: url(11),
+                scope: "deliverable",
+                deliverable: "final report",
+                delivery: "pending",
+                followUp: null,
+                since: null,
+              },
+            ],
+          }),
+        ],
+        {
+          result: {
+            delivery: {
+              tickets: [
+                {
+                  number: 11,
+                  url: url(11),
+                  deliverables: [
+                    {
+                      deliverable: "final report",
+                      url: `https://github.com/${repo}/pull/99`,
+                      target: `${repo}#99`,
+                      state: "open",
+                      why: "",
+                      responsible: "alpha",
+                      followUp: "waiting",
+                      followUpWhy: "",
+                    },
+                  ],
+                },
+              ],
             },
-            {
-              number: 11,
-              url: url(11),
-              scope: "deliverable",
-              deliverable: "final report",
-              delivery: "pending",
-              followUp: null,
-              since: null,
-            },
-          ],
-        }),
-      ]),
+          },
+        },
+      ),
       1,
       start,
     );
@@ -351,6 +378,8 @@ describe("activity renderers (#456)", () => {
     expect(html).toContain("Continuing responsibility");
     expect(html).toContain("#10 ticket");
     expect(html).toContain("#11 final report");
+    // The deliverable links to its actual submitted PR, not only the ticket.
+    expect(html).toContain(`href="https://github.com/${repo}/pull/99"`);
     expect(html).toContain("follow-up: actionable");
     // The no-follow-up deliverable renders without a follow-up clause.
     expect(html.match(/follow-up:/g)).toHaveLength(1);

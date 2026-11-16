@@ -244,7 +244,7 @@ export function activityRenderers(base: DashboardRenderers): ActivityRenderers {
   };
 
   /** The shared model's continuing responsibilities (S18), separate from claimed work. */
-  const renderResponsibilities = (raw: unknown): string => {
+  const renderResponsibilities = (raw: unknown, urls: Map<string, string>): string => {
     const items = list(raw);
     if (!items.length) return "";
     const rows = items.map((r) => {
@@ -252,11 +252,17 @@ export function activityRenderers(base: DashboardRenderers): ActivityRenderers {
       const deliverable = str(item.deliverable);
       const number = numberOf(item.url);
       const label = item.scope === "ticket" ? `#${number} ticket` : `#${number} ${deliverable}`;
+      // ResponsibilityItem.url is the ticket (responsibilityInventory fills it with t.url);
+      // a deliverable's actual inbox link comes from the delivery projection and is preferred.
+      const target =
+        item.scope === "deliverable"
+          ? (urls.get(`${number}:${deliverable}`) ?? str(item.url))
+          : str(item.url);
       // FollowUp is a string enum from the shared inventory: none, waiting, actionable, unknown.
       const followUp = str(item.followUp);
       const followUpText =
         followUp && followUp !== "none" ? `; follow-up: ${escapeHtml(followUp)}` : "";
-      return `<li>${link(item.url, label)} · delivery ${escapeHtml(str(item.delivery))}${followUpText}</li>`;
+      return `<li>${link(target, label)} · delivery ${escapeHtml(str(item.delivery))}${followUpText}</li>`;
     });
     return `<h4>Continuing responsibility</h4><ol>${rows.join("")}</ol>`;
   };
@@ -266,6 +272,19 @@ export function activityRenderers(base: DashboardRenderers): ActivityRenderers {
     if (e.status === "error") return "";
     const agents = list(team(envelope));
     if (!agents.length) return "";
+    // Resolve each continuing deliverable to its actual URL from the delivery projection
+    // (result.delivery.tickets[].deliverables[].url), keyed by "ticketNumber:deliverable".
+    const deliverableUrls = new Map<string, string>();
+    const delivery = record(record(e.result).delivery);
+    for (const ticket of list(delivery.tickets)) {
+      const t = record(ticket);
+      const num = numberOf(t.url);
+      for (const m of list(t.deliverables)) {
+        const d = record(m);
+        const url = str(d.url);
+        if (url) deliverableUrls.set(`${num}:${str(d.deliverable)}`, url);
+      }
+    }
     const repository = str(record(e.selection).repository);
     const active = agentsActive(agents, window, nowMs);
     const undetermined = agentsUndetermined(agents, window, nowMs);
@@ -289,9 +308,9 @@ export function activityRenderers(base: DashboardRenderers): ActivityRenderers {
       });
       return `<li><h3>${name}</h3>${
         claims.length
-          ? `<ol>${claims.map((c) => renderClaim(c, repository)).join("")}</ol>${renderResponsibilities(responsibilities)}`
+          ? `<ol>${claims.map((c) => renderClaim(c, repository)).join("")}</ol>${renderResponsibilities(responsibilities, deliverableUrls)}`
           : responsibilities.length
-            ? renderResponsibilities(responsibilities)
+            ? renderResponsibilities(responsibilities, deliverableUrls)
             : "<p>No recorded claims or responsibilities.</p>"
       }${undeterminedNote}${warnings.length ? `<ul>${warnings.join("")}</ul>` : ""}</li>`;
     });
