@@ -48,7 +48,8 @@
     "rules:test": "tsx src/rules/datalog/runner.ts",
     "test:report": "tsx scripts/test-report.ts",
     "website:preview:build": "tsx scripts/website/build.ts --preview",
-    "website:capture": "tsx scripts/website/run-capture.ts"
+    "website:capture": "tsx scripts/website/run-capture.ts",
+    "test:manual:formal": "vp test run --config vite.manual.config.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/server": "2.4.0",
