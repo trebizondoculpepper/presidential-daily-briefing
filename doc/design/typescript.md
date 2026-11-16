@@ -78,3 +78,13 @@ Run formatting/lint/type checks, the existing test suite, build, smoke tests and
 Verify no maintained handwritten JavaScript module remains in the scoped directories and that every converted file is checked. Record intentionally ancillary-language files and their purpose; enforce the first-party TypeScript boundary without banning those deliberate integrations. Preserve useful archive allowlist assertions while allowing only intentional compiled artifacts. Update package scripts, CI, active architecture/help examples, README and AGENTS instructions to the new commands once implementation ships. Historical research may retain its provenance with a pointer to this superseding decision.
 
 Review/merge this documentation contract first; then mark #91 ready for a focused implementation. Existing JavaScript remains the current implementation until that migration lands. No production code or live release/configuration changes are made by this contract.
+
+## Root launcher allowlist
+
+- `build.sh`: owner-requested executable POSIX shell convenience launcher at the
+  repository root. It changes to its own directory and delegates to `npm run build`;
+  no TypeScript imports it and it contains no application or workflow policy.
+  Requires POSIX `sh`, Node/npm and installed project dependencies. Supports
+  macOS/Linux and POSIX shells on Windows; native Windows uses `npm run build`.
+  Validate with `sh -n build.sh` and a build invoked from outside the checkout.
+  This root launcher is outside the source/helper language-scan directories.
