@@ -86,6 +86,25 @@ export function activityFact(number: number, read: RetainedRead): ClaimActivityF
   }
 }
 
+/** Read one recorded claim directly, including a ticket closed since the inventory snapshot. */
+export async function readClaimActivity(
+  repository: string,
+  number: number,
+  agent: string,
+  live: { query: GraphQuery; permission: PermissionLookup },
+  read: typeof readRetained = readRetained,
+): Promise<ClaimActivityFact> {
+  try {
+    return activityFact(number, await read(repository, number, agent, live.query, live.permission));
+  } catch (error) {
+    return {
+      state: "unknown",
+      reason: short(`its activity could not be read (${(error as Error).message})`),
+      number,
+    };
+  }
+}
+
 /** Collect the retained-claim facts for `agent`. Live activity needs both boundaries. */
 export async function readRetainedFacts(
   snapshot: Snapshot,
@@ -99,20 +118,7 @@ export async function readRetainedFacts(
   const claimActivity = new Map<string, ClaimActivityFact>();
   for (const url of owned.urls) {
     const number = Number(url.slice(url.lastIndexOf("/") + 1));
-    try {
-      const fact = activityFact(
-        number,
-        await read(snapshot.repository, number, agent, live.query, live.permission),
-      );
-      claimActivity.set(url, fact);
-    } catch (error) {
-      // A failed read is unknown, never waiting and never silently active.
-      claimActivity.set(url, {
-        state: "unknown",
-        reason: short(`its activity could not be read (${(error as Error).message})`),
-        number,
-      });
-    }
+    claimActivity.set(url, await readClaimActivity(snapshot.repository, number, agent, live, read));
   }
   // A claim observed released is no longer in the inventory the review counts.
   const urls = owned.urls.filter((u) => claimActivity.get(u)?.state !== "not-owned");

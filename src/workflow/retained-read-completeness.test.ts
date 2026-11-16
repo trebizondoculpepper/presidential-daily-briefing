@@ -28,3 +28,34 @@ it("failed live activity reads make team/who incomplete even when delivery evide
     expect(result.text).toContain("activity request timed out");
   }
 });
+
+it("who directly verifies a closed ticket's recorded owner without inventing unknown activity", async () => {
+  const closed = { ...issue(2, ["agent:reader"]), state: "CLOSED" };
+  let requests = 0;
+  const result = await readWho(
+    snapshot([closed], []),
+    2,
+    { staleHours: 48, now: new Date(time), offline: false },
+    {
+      live: {
+        query: async () => {
+          requests++;
+          return {
+            repository: {
+              issueOrPullRequest: { ...closed, __typename: "Issue" },
+              claims: { nodes: [], pageInfo: { hasNextPage: false } },
+            },
+          };
+        },
+        rest: async () => {
+          throw new Error("unexpected REST request");
+        },
+      },
+    },
+  );
+  expect(requests).toBe(1);
+  expect(result.complete).toBe(true);
+  expect(result.report.claimActivity).toEqual([
+    { agent: "reader", state: "not-owned", reason: "reader has no open claim on #2" },
+  ]);
+});

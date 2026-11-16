@@ -117,6 +117,9 @@ describe("Ticket Doctor v1 (#66, doc/design/diagnostics.md)", () => {
     // Unknown is never waiting: flagged with an inspection route.
     const unknown = report({ claimActivity: activity("waiting", "unknown") });
     expect(kinds(unknown, 9)).toContain("definite:claim-activity-unknown");
+    expect(unknown.completeness.complete).toBe(false);
+    expect(unknown.completeness.warnings.join(" ")).toContain("could not be verified: r9");
+    expect(ticketDoctorText(unknown)).toContain("could not be verified: r9");
   });
   it("names agents whose claim activity was skipped, and marks the scan incomplete (#413)", () => {
     const skipped = report({ omittedAgents: ["big_agent", "alpha"] });
