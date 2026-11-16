@@ -211,6 +211,11 @@ describe("dashboard page and script (#374)", () => {
     expect(page).toContain('<a href="/rules">Rules</a>');
     expect(page).not.toMatch(/<script>|<style|\sstyle=|\son[a-z]+=|https?:\/\//);
     expect(dashboardCss).not.toMatch(/url\(|@import/);
+    // Action-kind badge palette (#597) has light and dark variants with a neutral fallback.
+    expect(dashboardCss).toMatch(
+      /@media \(prefers-color-scheme: dark\)[\s\S]*\.kind\.pr-follow-up/,
+    );
+    expect(dashboardCss).toMatch(/\.kind\.implement \{ color: #1a5fb4;/);
     expect(dashboardSecurityPolicy).toContain("default-src 'none'");
     expect(dashboardSecurityPolicy).toContain("script-src 'self'");
     expect(dashboardSecurityPolicy).not.toContain("unsafe");

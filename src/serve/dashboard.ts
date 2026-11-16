@@ -62,6 +62,17 @@ li { margin: 0 0 1rem; }
 .kind.estimate-complexity, .kind.assess-impact { color: #00793c; border-color: #00793c; }
 .kind.resume-claim, .kind.review-owned-work, .kind.wait-claim { color: #613a8e; border-color: #613a8e; }
 .kind.addressed-response { color: #005b57; border-color: #005b57; }
+/* Dark canvases need lighter badge text: the default palette's dark foregrounds lose contrast
+   on the supported dark colour scheme. Hues stay per-kind; only lightness rises. */
+@media (prefers-color-scheme: dark) {
+  .kind.implement, .kind.continue-implementation { color: #8ab4ff; border-color: #8ab4ff; }
+  .kind.pr-follow-up { color: #ff8a94; border-color: #ff8a94; }
+  .kind.inspect, .kind.inspect-ownership, .kind.inspect-assessment { color: #c9a5ff; border-color: #c9a5ff; }
+  .kind.decide, .kind.design, .kind.design-review, .kind.document { color: #ffd28a; border-color: #ffd28a; }
+  .kind.estimate-complexity, .kind.assess-impact { color: #8af0b0; border-color: #8af0b0; }
+  .kind.resume-claim, .kind.review-owned-work, .kind.wait-claim { color: #e6a5ff; border-color: #e6a5ff; }
+  .kind.addressed-response { color: #9ce6df; border-color: #9ce6df; }
+}
 .why { margin: .2rem 0; }
 code { font-size: .85rem; word-break: break-all; }
 footer { margin-top: 2rem; font-size: .8rem; color: GrayText; }
