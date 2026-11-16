@@ -7,3 +7,5 @@ Implemented one pure served-page registry, URL/resource binding, toolbar and sha
 Work now reads only its selected briefing, aborts superseded requests, rejects foreign answers and restores history. Ticket refresh cancels older reads. Shared navigation carries updated in-page role/agent values instead of stale startup values. Added route, client and packaged smoke regressions and actual native-Chrome visual evidence, including dark-error contrast correction. The acceptance report records the screenshot matrix and exact remaining VoiceOver verification.
 
 No root TODO.md exists. Native browser screenshots are synthetic fixture artifacts; no live issue snapshot, credentials or identity file is included.
+
+Implementation merged as `d09eb06` through #717 after Ubuntu/Windows verify and a completed clean current-head Codex review. The owner explicitly deferred VoiceOver testing to a later accessibility mission; recorded #719 and confirmed VoiceOver remained off. No screen-reader pass is claimed.
