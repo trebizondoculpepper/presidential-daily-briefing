@@ -6,6 +6,21 @@ exit codes, and the single required `verify` check keeps its meaning. No new per
 no third-party reporting action, no privileged `workflow_run` job and no live production
 behavior change.
 
+## Documentation-only verification
+
+Owner decision (2026-11-16): pull requests changing only root Markdown, Markdown under `doc/` or `diary/`, or GitHub
+Markdown templates (excluding `doc/reports/examples/`) use a documentation formatting job instead of the unit,
+native-rule, build, smoke and package jobs, including the optional FreeBSD trial.
+Executable examples, fixtures, dependencies, workflow/configuration changes and
+mixed changes retain full verification. Renames inspect both old and new paths;
+empty diffs and main pushes retain full verification. Classification failure fails
+`verify`; skipped or failed required work cannot satisfy it. No workflow-level path
+filter may leave the required check pending.
+
+The stable `verify` check succeeds only after classification and the selected job
+succeed. Automated review remains a separate required policy, including addressing
+substantive findings; this fast path does not itself authorize an unchecked merge.
+
 ## Validation (2026-11-15)
 
 - Toolchain: Vite+ `vp` 1.5.0 with Vitest 5.1.0. Vitest's built-in `junit` reporter works
