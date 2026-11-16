@@ -359,6 +359,8 @@ describe("quota renderers (#548)", () => {
     expect(later.state).toContain("stale");
     expect(later.state).toContain("120s old");
     expect(later.notes).toContain("older than the 60-second freshness window");
+    // Ordinary ageing must not report a nonexistent clock rollback.
+    expect(later.notes).not.toContain("clock change");
   });
 
   it("keeps a clock-rollback age unknown and never shows it fresh", () => {

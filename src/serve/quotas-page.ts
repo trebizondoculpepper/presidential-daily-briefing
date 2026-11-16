@@ -309,9 +309,14 @@ ${meter}
     const age = currentAge === null || rolledBack ? null : Math.max(0, Math.round(currentAge));
     const freshness =
       expired || (view.freshness === "live" && rolledBack) ? "stale" : str(view.freshness);
-    const staleNotice =
-      expired || (view.freshness === "live" && rolledBack)
-        ? `<li class="warn">This ${expired ? "reading is older than the 60-second freshness window" : "reading"}'s age is unknown after a clock change; ${expired ? "it is shown only because no newer reading is held. " : ""}Press Refresh for current numbers.</li>`
+    // Expiry and clock rollback are distinct conditions: ordinary ageing never reports a
+    // nonexistent clock problem, and a rollback never claims a readable age.
+    const staleNotice = expired
+      ? `<li class="warn">This reading is older than the 60-second freshness window; it is shown only because no newer reading is held. Press Refresh for current numbers.</li>`
+      : "";
+    const rollbackNotice =
+      view.freshness === "live" && rolledBack
+        ? `<li class="warn">This reading's age is unknown after a clock change. Press Refresh for current numbers.</li>`
         : "";
     const state = `<p>Observed ${escapeHtml(str(view.observedAt))} via GET /rate_limit (${escapeHtml(freshness)}${age === null ? ", age unknown" : `, ${escapeHtml(age)}s old`}) for <strong>${escapeHtml(str(view.account) || "an unverified login")}</strong> on ${escapeHtml(str(view.host))}.</p>${
       coverage.complete === false
@@ -331,7 +336,10 @@ ${meter}
           : '<p class="warn">GitHub reported no resources; their allowance is unknown.</p>'
       }`,
       secondary: secondaryHtml(view),
-      notes: notes || staleNotice ? `<h2>Notes</h2><ul>${staleNotice}${notes}</ul>` : "",
+      notes:
+        notes || staleNotice || rollbackNotice
+          ? `<h2>Notes</h2><ul>${staleNotice}${rollbackNotice}${notes}</ul>`
+          : "",
     };
   };
 
