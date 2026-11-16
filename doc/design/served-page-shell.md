@@ -247,7 +247,7 @@ It does not write its own header, project list, selector or parameter allowlist.
 
 1. **Shell module.** `src/serve/shell.ts` with the registry for the four shipped pages, `resolvePageSelection`, `pageHref`, `renderToolbar` and `shellPage`, plus the toolbar CSS added to `dashboardCss`. Unit tests:
    - every selection state in the table, including a case-variant repo, an empty repo, a repeated key and an unknown key;
-   - carry rules: `repo` on every project page, nothing on Quotas or from Global, `role` and `agent` only between Work and Ticket, page keys never carried;
+   - carry rules: `repo` across every shell page (including Quotas as navigation context, nothing from Global), `role` and `agent` between Work, Ticket, and Quotas, page keys never carried;
    - link encoding with hostile values (`<`, `"`, `&`, `#`, `?`, `/`, spaces and non-ASCII);
    - `aria-current` on the active page and the current project, with no link to an unshipped page;
    - a spy on an injected GitHub runtime and cache shows zero calls while rendering any toolbar state.
