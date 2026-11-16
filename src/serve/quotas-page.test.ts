@@ -130,7 +130,23 @@ describe("quota page and API (#548)", () => {
       await get(s.running.port, "/api/v1/diagnostics/errors");
       expect(s.calls).toEqual([]);
       expect(s.collects()).toBe(0);
-      expect((await get(s.running.port, "/quotas?repo=example%2Fone")).status).toBe(400);
+      expect((await get(s.running.port, "/quotas?extra=x")).status).toBe(400);
+      expect((await get(s.running.port, "/quotas?repo=unserved%2Frepo")).status).toBe(403);
+      expect((await get(s.running.port, "/quotas?repo=..%2Fx")).status).toBe(400);
+      const preserved = await get(
+        s.running.port,
+        "/quotas?repo=example%2Fone&role=designer&agent=a.b",
+      );
+      expect(preserved.status).toBe(200);
+      expect(preserved.headers["content-security-policy"]).toBe(dashboardSecurityPolicy);
+      expect(preserved.body).toContain(
+        "Account-wide: your GitHub login&#39;s quotas, not a project&#39;s",
+      );
+      expect(preserved.body).not.toContain("Change project");
+      expect(preserved.body).toContain(
+        'href="/?repo=example%2Fone&amp;role=designer&amp;agent=a.b"',
+      );
+      expect(preserved.body).toContain('href="/rules?repo=example%2Fone"');
       expect((await get(s.running.port, "/quotas", { method: "POST" })).status).toBe(405);
     } finally {
       await s.running.close();

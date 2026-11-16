@@ -23,8 +23,7 @@ preserve the target, unverified/replaced locks, deadlines and diagnostic privacy
 No retry or deadline change is made before observing the Windows failure cause.
 The Windows concurrent-writer fixture now runs ten independent batches, each with
 four processes and exactly twenty updates, and asserts that no temporary or lock
-files remain. This
-bounded diagnostic coverage retains all original assertions and budgets.
+files remain. This bounded diagnostic coverage retains all original assertions and budgets.
 
 Platform hypothesis only: Microsoft documents that opening a path pending deletion
 can fail with ERROR_ACCESS_DENIED, and libuv maps that native code to EPERM. This
@@ -32,3 +31,19 @@ makes a create-phase EPERM plausible, but does not establish the cause of the
 original CI failure. The diagnostic Windows run must supply that evidence.
 Sources: [CreateFileW](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew),
 [libuv Windows errors](https://github.com/libuv/libuv/blob/v1.x/src/win/error.c).
+
+After #722 merged, resumed #729. Its first Windows CI attempt also exposed one
+failed write in the separate cache-storage experiment. That worker only reported
+aggregate counts, and `toMatchObject({ notWritten: {} })` did not verify an empty
+failure map or print its keys. The experiment now consumes typed acquisition facts,
+and workers retain failure status, step and detail (including post-commit failures)
+for assertion diagnostics. Exact empty-map and fifteen-write assertions remain,
+with ten independent two-writer batches on Windows and unchanged per-case budgets.
+Injected create/verify errors preserve the prior target and unverified lock.
+The #722 run passed on its bounded unchanged-head rerun; that does not identify the
+original failure's phase or cause. No production contention retry was added.
+
+Validation of the expanded diagnostic slice: check and build passed; the complete
+suite passed 134 files / 2,491 tests (one skipped), using one worker with existing
+per-test limits. This is diagnostic evidence, not a claim that the original Windows
+cause or its reliability acceptance has been established.

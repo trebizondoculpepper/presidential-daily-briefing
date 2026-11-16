@@ -32,6 +32,7 @@ import {
   readRetainedFacts,
   type ClaimActivityFact,
 } from "../workflow/retainedfacts.js";
+import { humanContextText, type HumanContext } from "../config/humancontext.js";
 import { diagnoseDelivery } from "../workflow/deliverydoctor.js";
 import { deliveryRead } from "../workflow/deliveryread.js";
 import type { DeliveryRead } from "../workflow/deliveryread.js";
@@ -70,6 +71,8 @@ import type { BriefingProcess, GuideRuntime } from "./process.js";
 export const defaultEngineRole = "implementer";
 
 export interface PresentOptions extends Omit<BriefingOptions, "estimation" | "assessments"> {
+  /** The employing human (#664), when the caller resolved it; added to the report. */
+  employingHuman?: HumanContext;
   /** Expanded version-1 report instead of the compact briefing. */
   full?: boolean;
   engineSetting?: EngineSetting;
@@ -135,7 +138,27 @@ export const datalogCheckFacts = (snapshot: Snapshot) =>
   );
 
 /** Build the briefing (compact unless `full`) for an already collected snapshot. */
+/**
+ * Present a briefing, with the employing human (#664) when the caller resolved one: an
+ * `employingHuman` field in the report and one leading text line inside the same character budget.
+ * Callers that resolve no human (tests, focused reads) get the report unchanged.
+ */
 export async function presentBriefing(
+  ...args: Parameters<typeof presentBriefingFor>
+): ReturnType<typeof presentBriefingFor> {
+  const employingHuman = args[1].employingHuman;
+  if (!employingHuman) return presentBriefingFor(...args);
+  const line = `${humanContextText(employingHuman)}\n`;
+  const options = { ...args[1], maxChars: Math.max(0, args[1].maxChars - line.length) };
+  const presented = await presentBriefingFor(args[0], options, ...(args.slice(2) as []));
+  return {
+    ...presented,
+    report: { ...presented.report, employingHuman },
+    text: line + presented.text,
+  } as unknown as Awaited<ReturnType<typeof presentBriefingFor>>;
+}
+
+async function presentBriefingFor(
   snapshot: Snapshot,
   options: PresentOptions,
   estimationRuntime?: LabelEstimationRuntime,
@@ -569,6 +592,11 @@ async function presentHuman(
 export interface ReadRuntime {
   collect: typeof collect;
   /**
+   * The employing human (#664) for this read; absent: not resolved, and the report carries no
+   * \`human\` field. Production front ends resolve it from the signed-in gh account.
+   */
+  humanContext?: (signal?: AbortSignal) => Promise<HumanContext>;
+  /**
    * Routine shortlist collection (#368, briefing-shortlist-v1). Absent: the routine briefing
    * reads the full snapshot, as before.
    */
@@ -726,7 +754,11 @@ export async function readBriefing(
   const process = briefingProcess(
     redact ? { ...setting, diagnostics: setting.diagnostics.map(redact) } : setting,
   );
+  const employingHuman = runtime.humanContext
+    ? await runtime.humanContext(request.signal)
+    : undefined;
   const options: PresentOptions = {
+    ...(employingHuman ? { employingHuman } : {}),
     limit: request.limit,
     maxChars: request.maxChars,
     context: request.context,

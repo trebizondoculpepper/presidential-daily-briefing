@@ -7,13 +7,11 @@ import { servedPages, shellContext, selectionErrorPage } from "./serve/shell.js"
  * shutdown. Every outside boundary (gh, clock, output, signals, exit) is injected so tests run
  * on an ephemeral port without GitHub.
  */
-import { execFile } from "node:child_process";
 import { createServer as createHttpServer } from "node:http";
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { isIP } from "node:net";
-import { promisify } from "node:util";
-import { AuthenticationError, currentRepository, ghQueryFailure } from "./github/github.js";
+import { AuthenticationError, currentRepository } from "./github/github.js";
 import { systemClock } from "./mcp/polling.js";
 import { installedVersion } from "./updates/updates.js";
 import { defaultReadRuntime, readServices } from "./serve/services.js";
@@ -77,25 +75,9 @@ export type {
   StatusSource,
 } from "./serve/types.js";
 
-const execute = promisify(execFile);
-
-/** Production authentication context: `gh api user` through the argument-array runner. */
-export async function ghAuthContext(signal?: AbortSignal): Promise<AuthContext> {
-  let stdout: string;
-  try {
-    ({ stdout } = await execute("gh", ["api", "user"], { timeout: 30_000, signal }));
-  } catch (error) {
-    signal?.throwIfAborted();
-    // Typed: an authentication failure, a rate limit, or anything else (outage, timeout, 5xx).
-    throw ghQueryFailure(error);
-  }
-  const login: unknown = (JSON.parse(stdout) as { login?: unknown }).login;
-  if (typeof login !== "string" || !/^[\w.-]+$/.test(login))
-    throw new Error("gh api user returned no login.");
-  // GH_HOST selects the host gh talks to; without it gh uses github.com.
-  const host = process.env.GH_HOST?.trim() || "github.com";
-  return { host, login };
-}
+// Production authentication context: `gh api user`, shared with the human resolver (#664).
+import { ghAuthContext } from "./github/ghauth.js";
+export { ghAuthContext };
 
 export const defaultServeRuntime = (): ServeRuntime => ({
   currentRepository,
@@ -407,10 +389,14 @@ export async function startServe(
           throw new HttpFailure(405, "METHOD_NOT_ALLOWED", "Use GET.", [], {
             allow: "GET, HEAD",
           });
-        const page = quotasPage(context.url.searchParams, {
-          host: facts.auth.host,
-          login: facts.auth.login,
-        });
+        const page = quotasPage(
+          context.url.searchParams,
+          {
+            host: facts.auth.host,
+            login: facts.auth.login,
+          },
+          served,
+        );
         response.writeHead(page.status, {
           "content-type": "text/html; charset=utf-8",
           "cache-control": "no-store",

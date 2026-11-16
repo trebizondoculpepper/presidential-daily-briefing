@@ -103,7 +103,13 @@ import { complexityGuidanceJson, complexityGuidanceText } from "./estimation/com
 import { impactGuidanceJson, impactGuidanceText } from "./estimation/impact.js";
 import { declaredRulesContext } from "./rules/declared-context.js";
 import { runConfig, runSetup } from "./config/configcli.js";
+import { runContributors } from "./config/contributors.js";
 import { quotaRefusal } from "./github/readplan.js";
+import {
+  humanContextEnabled,
+  resolveHumanContext,
+  type HumanContext,
+} from "./config/humancontext.js";
 import { STALE_WINDOW_MS } from "./serve/options.js";
 import { nodeGit, resolveRepositoryTarget } from "./config/config.js";
 import {
@@ -239,6 +245,8 @@ export interface Runtime {
   updateCheck?: typeof cachedCheckForUpdate;
   /** Local-Git freshness of a source checkout (#309). */
   checkoutCheck?: typeof checkoutFreshness;
+  /** #664: the employing human for a briefing; absent: not resolved (no \`human\` field). */
+  briefingHuman?: (offline: boolean) => Promise<HumanContext>;
   /** First-use onboarding hint store (#351); tests inject it so no real cache is touched. */
   firstUseHint?: (project: string, version: string) => Promise<boolean>;
   stderr?: (text: string) => void;
@@ -354,6 +362,9 @@ ${crashDisclosure()}
   onboard [--repo owner/name] [--role implementer|designer] [--server URL] [--install] [--json]
                         New here? How an agent starts with pdb: rules, identity, commands and
                         a prompt to give it; --install adds the pdb section to AGENTS.md
+  contributors [--repo owner/name] [--json]  Read-only: the verified checkout's CONTRIBUTORS.md
+                        routing guidance (accounts, areas, an explicit "Default: @login"),
+                        with its digest and revision; missing or unsafe guidance exits 2
   --repo owner/name     Repository (default: current gh checkout)
   --json                Versioned structured output (from a checkout: npm run --silent pdb)
   --issue N             Include full issue body/history, even if closed; diagnoses
@@ -1170,6 +1181,9 @@ export async function main(
   runtime: Runtime = {
     collect,
     collectShortlist,
+    ...(humanContextEnabled()
+      ? { briefingHuman: (offline: boolean) => resolveHumanContext(ghAuthContext, { offline }) }
+      : {}),
     currentRepository,
     dependencyReport,
     rest: ghRest,
@@ -1515,6 +1529,7 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
   if (args[0] === "config") return runConfig(args.slice(1), output, runtime.config);
   if (args[0] === "setup") return runSetup(args.slice(1), output, runtime.config);
   if (args[0] === "onboard") return runOnboard(args.slice(1), output, runtime.config);
+  if (args[0] === "contributors") return runContributors(args.slice(1), output, runtime.config);
   if (args[0] === "doctor") {
     const { values } = parseArgs({
       args: args.slice(1),
@@ -2156,6 +2171,8 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
     await output(help);
     return 0;
   }
+  // #664: the employing human, once per run; offline reads use only the last-known record.
+  const human = runtime.briefingHuman ? await runtime.briefingHuman(!!options.offline) : undefined;
   /**
    * The briefing presentation for `repository`, resolved once: configuration, label filter and
    * one per-run permission cache shared by the shortlist's ranking passes and the final report.
@@ -2199,6 +2216,7 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
       : undefined;
     const presentOptions = {
       ...options,
+      ...(human ? { employingHuman: human } : {}),
       ...(labels ? { labels } : {}),
       process: guideProcess,
       engineClock: runtime.engineClock,
@@ -2409,6 +2427,7 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
             snapshot,
             {
               ...options,
+              ...(human ? { employingHuman: human } : {}),
               ...(labels ? { labels } : {}),
               ...(stale ? { stale } : {}),
               process: guideProcess,

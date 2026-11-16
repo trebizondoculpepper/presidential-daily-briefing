@@ -353,6 +353,46 @@ describe("locking", () => {
     return { now: () => t, sleep: async (ms: number) => void (t += ms) };
   };
 
+  it.each(["create", "verify"] as const)(
+    "preserves immediate %s-phase lock failure evidence",
+    async (phase) => {
+      const root = newRoot();
+      await write(root, 1);
+      const before = readFileSync(file(root), "utf8");
+      const code = phase === "create" ? "EPERM" : "EIO";
+      const injected = () => Object.assign(new Error("private filesystem detail"), { code });
+      const fs: StorageFs = {
+        ...realFs,
+        writeFile: async (path, data, options) => {
+          if (phase === "create" && path.endsWith(LOCK_FILE)) throw injected();
+          return realFs.writeFile(path, data, options);
+        },
+        readFile: async (path, encoding) => {
+          if (phase === "verify" && path.endsWith(LOCK_FILE)) throw injected();
+          return realFs.readFile(path, encoding);
+        },
+      };
+      const clock = virtual(0);
+      const result = await storeSnapshot(root, ctx, () => syntheticObservation(2, at()), {
+        fs,
+        now: () => T0,
+        lockNow: clock.now,
+        sleep: clock.sleep,
+      });
+      expect(result).toMatchObject({
+        status: "not-written",
+        reason: "lock-error",
+        step: "lock",
+        detail: expect.stringContaining(`${phase}: ${code}`),
+      });
+      expect(clock.now()).toBe(0);
+      expect(readFileSync(file(root), "utf8")).toBe(before);
+      expect(existsSync(join(file(root), "..", LOCK_FILE))).toBe(phase === "verify");
+      if (result.status === "not-written")
+        expect(result.detail).not.toContain("private filesystem detail");
+    },
+  );
+
   it("never breaks an old lock by age; times out after five seconds instead", async () => {
     const root = newRoot();
     await write(root, 1);
@@ -427,27 +467,33 @@ describe("locking", () => {
 });
 
 describe("separate processes", () => {
-  it("two concurrent writers lose no records", async () => {
-    const root = newRoot();
-    // Readiness barrier: both report ready, then start together on the go file.
-    const go = join(root, "go");
-    const a = spawnWorker(["write", root, JSON.stringify(ctx), "a", "15", "0", go]);
-    const b = spawnWorker(["write", root, JSON.stringify(ctx), "b", "15", "1000", go]);
-    expect(await releaseTogether([a, b], go)).toEqual({ ok: true });
-    const [ra, rb] = await Promise.all([a.done, b.done]);
-    expect(ra.code, ra.stderr).toBe(0);
-    expect(rb.code, rb.stderr).toBe(0);
-    expect(ra.result).toMatchObject({ written: 15, notWritten: {} });
-    expect(rb.result).toMatchObject({ written: 15, notWritten: {} });
-    const loaded = await loadSnapshot(root, ctx, { access: "confirmed" });
-    expect(loaded.status).toBe("hit");
-    if (loaded.status === "hit") expect(loaded.snapshot.records).toHaveLength(30);
-    // The pass needs evidence of real overlap, not just correct totals.
-    expect(writersVerdict(15, [ra, rb]), JSON.stringify([ra.result, rb.result])).toBe(
-      "every writer exit 0 with 15 written, none failed; overlapped",
-    );
-    expect(readdirSync(join(file(root), ".."))).toEqual([SNAPSHOT_FILE]);
-  }, 60_000);
+  it.each(Array.from({ length: process.platform === "win32" ? 10 : 1 }, (_, i) => i + 1))(
+    "two concurrent writers lose no records (batch %i)",
+    async () => {
+      const root = newRoot();
+      // Readiness barrier: both report ready, then start together on the go file.
+      const go = join(root, "go");
+      const a = spawnWorker(["write", root, JSON.stringify(ctx), "a", "15", "0", go]);
+      const b = spawnWorker(["write", root, JSON.stringify(ctx), "b", "15", "1000", go]);
+      expect(await releaseTogether([a, b], go)).toEqual({ ok: true });
+      const [ra, rb] = await Promise.all([a.done, b.done]);
+      expect(ra.code, ra.stderr).toBe(0);
+      expect(rb.code, rb.stderr).toBe(0);
+      for (const worker of [ra, rb]) {
+        expect(worker.result, JSON.stringify(worker.result)).toMatchObject({ written: 15 });
+        expect((worker.result as { notWritten: unknown }).notWritten).toEqual({});
+      }
+      const loaded = await loadSnapshot(root, ctx, { access: "confirmed" });
+      expect(loaded.status).toBe("hit");
+      if (loaded.status === "hit") expect(loaded.snapshot.records).toHaveLength(30);
+      // The pass needs evidence of real overlap, not just correct totals.
+      expect(writersVerdict(15, [ra, rb]), JSON.stringify([ra.result, rb.result])).toBe(
+        "every writer exit 0 with 15 written, none failed; overlapped",
+      );
+      expect(readdirSync(join(file(root), ".."))).toEqual([SNAPSHOT_FILE]);
+    },
+    60_000,
+  );
 
   it("readers during repeated renames never see a torn file", async () => {
     const root = newRoot();

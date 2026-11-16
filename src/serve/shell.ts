@@ -63,8 +63,8 @@ export const servedPages: readonly ServedPage[] = [
     path: "/quotas",
     label: "Quotas",
     scope: "account",
-    parameters: [],
-    carries: [],
+    parameters: ["repo", "role", "agent"],
+    carries: ["role", "agent"],
     shipped: true,
   },
 ];
@@ -113,7 +113,7 @@ export function resolvePageSelection(
     ![
       "implementer",
       "designer",
-      ...(page.id === "work" || page.id === "ticket" ? ["human"] : []),
+      ...(page.id === "work" || page.id === "ticket" || page.id === "quotas" ? ["human"] : []),
     ].includes(role)
   )
     return error(400, "malformed", "role must be a supported role for this page.");
@@ -153,7 +153,12 @@ export function resolvePageSelection(
     );
   const canonical = new URLSearchParams(query);
   canonical.set("repo", found.repository);
-  return { status: 200, state: "selected", repository: found.repository, query: canonical };
+  return {
+    status: 200,
+    state: page.scope === "account" ? "account" : "selected",
+    repository: found.repository,
+    query: canonical,
+  };
 }
 export interface ShellContext {
   page: string;
@@ -175,7 +180,7 @@ export function pageHref(
   samePage = false,
 ): string {
   const query = new URLSearchParams();
-  if (page.scope !== "account" && selection.repository) query.set("repo", selection.repository);
+  if (selection.repository) query.set("repo", selection.repository);
   for (const key of page.parameters) {
     if (key === "repo") continue;
     if (
