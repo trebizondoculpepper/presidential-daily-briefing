@@ -273,6 +273,23 @@ Tests: `scenarios/retained-claims.edn` and `src/workflow/retainedranking.test.ts
 engine agreement and the review row inside the top ten ahead of eleven assessments. Projections in
 `who`/`team`/Ticket Doctor are slice 2.
 
+Implementation note (#413, slice 2: projections). On a live read, `team` and Ticket Doctor read
+every agent's claim activity with the same reader. They stop at 30 claims per view; skipped agents
+are named and the view is incomplete. `who N` reads the activity of the ticket's recorded owners.
+
+- **Team view:** each claim shows `activity`. An agent's several claims become one of:
+  - a definite `multiple-active-claims` when more than one is not verified waiting, with explicit
+    recovery: finish one, `pdb claim wait`, or release;
+  - a `retained-claims` review candidate when all but one are verified waiting;
+  - a `multiple-claims` candidate when their activity was not read.
+
+  An `unknown` claim is flagged `claim-activity-unknown`. A claim found released counts for
+  nothing.
+
+- **Ticket Doctor:** `agent-multiple-active-claims` (definite) and `claim-activity-unknown`
+  (definite) or `agent-multiple-claims` (candidate). It suggests release steps and the `claim wait`
+  command, and never repairs anything itself.
+
 Use a separate `github-triage:claim-activity v1` JSON marker. Required fields:
 `v: 1`, `op: wait|resume`, `opId`, `repository`, `issue`, `agent`, `claimStartedAt`,
 `previousActivity` (comment node ID or null), and `reason`. A wait also carries
