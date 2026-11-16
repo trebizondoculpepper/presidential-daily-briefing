@@ -7,8 +7,8 @@ describe("offline formal comprehension preparation", () => {
   beforeAll(
     async () => {
       pack = await prepareExperiment(resolve(import.meta.dirname, "../../.."));
-      // Exhaustive preparation evaluates every native case and its formal projection, then
-      // compiles the engine. Windows main runs exceeded the former 60s under suite contention.
+      // Manual local research validation: replay every native case and its formal projection,
+      // then compile the engine. This exhaustive setup is not part of npm test or CI.
     },
     process.platform === "win32" ? 180_000 : 60_000,
   );
