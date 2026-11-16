@@ -32,6 +32,7 @@ export const commandKinds: Record<string, string> = {
   "sign-off": "pr",
   "resume-claim": "resume",
   "review-owned-work": "team",
+  "inspect-ownership": "team",
   // A wait is followed with a focused read, never a claim, merge or resubmit (#413).
   "wait-claim": "detail",
 };

@@ -36,7 +36,8 @@
  ;; or witness lacks a phrase here, or if an entry here is unused. Constant sets need none.
  ;; :viewer names the viewer facts the engine asserts on entity 1.
  {:attributes
-  {"claim-activity" "activity of your retained claim (active, waiting, resume-required or unknown)"
+  {"ownership-inventory" "repository ownership inventory context"
+   "claim-activity" "activity of your retained claim (active, waiting, resume-required or unknown)"
    "wait-reason" "what your retained claim waits on, or why its activity is unknown"
    "owned-claims" "number of implementation claims you retain"
    "owned-claims-complete" "completeness of your claim inventory"

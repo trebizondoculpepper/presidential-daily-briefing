@@ -230,6 +230,57 @@ describe("both engines rank retained claims alike (#413)", () => {
     }
   });
 
+  it("offers repository ownership inspection without inventing a ticket, even for an empty snapshot", async () => {
+    for (const engine of ["datalog", "typescript"] as const) {
+      const presented = await presentBriefing(
+        snapshot([], []),
+        {
+          maxChars: 100_000,
+          limit: 10,
+          role: "implementer",
+          agent: me,
+          retained: { ownedClaims: { urls: [], complete: false } },
+          engineSetting: { requested: engine, source: "config" },
+        },
+        local(),
+        new Date(Date.UTC(2026, 5, 1)),
+      );
+      const report = presented.report as {
+        subjects: { url: string }[];
+        rankedActions: { items: { kind: string; target: string; nextCommand: string }[] };
+      };
+      expect(report.rankedActions.items).toMatchObject([
+        {
+          kind: "inspect-ownership",
+          target: "https://github.com/example/project",
+          nextCommand: "pdb team --repo example/project",
+        },
+      ]);
+      expect(report.subjects).toEqual([]);
+      expect(presented.text).toContain("Inspect ownership: Repository ownership inventory");
+      expect(presented.text).not.toMatch(/#0|#undefined/);
+    }
+  });
+
+  it("never treats observed waiting claims as proof an incomplete inventory has no active claim", async () => {
+    for (const engine of ["datalog", "typescript"] as const) {
+      const view = only(s, [1, 4]);
+      const waiting = { state: "waiting" as const, reason: "awaiting human answer" };
+      const retained = {
+        ownedClaims: { urls: [url(1)], complete: false },
+        claimActivity: new Map([[url(1), waiting]]),
+      };
+      const partial = await ranked(view, engine, retained);
+      expect(partial.some((row) => row.startsWith("wait-claim #1"))).toBe(true);
+      expect(partial.some((row) => row.startsWith("implement #4"))).toBe(false);
+      const complete = await ranked(view, engine, {
+        ...retained,
+        ownedClaims: { ...retained.ownedClaims, complete: true },
+      });
+      expect(complete.some((row) => row.startsWith("implement #4"))).toBe(true);
+    }
+  });
+
   it("orders resume and review ahead of new work, and waits after it", async () => {
     const order = (await ranked(s, "datalog", cases["waiting, resume-required and unknown"])).map(
       (r) => r.split(" | ")[0]!,

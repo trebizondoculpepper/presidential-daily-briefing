@@ -1,0 +1,9 @@
+;; Spike only: role is a ranking input, never a membership filter.
+[
+ [(rank ?a ?r ?owned ?affinity ?base)
+  [?a "owned" ?owned] [?a "role" ?r] [?a "base" ?base]
+  [(+ 0 0) ?affinity]]
+ [(rank ?a ?r ?owned ?affinity ?base)
+  [?a "owned" ?owned] [?a "role" ?other] [?a "base" ?base]
+  [(not= ?r ?other)] [(+ 0 1) ?affinity]]
+]

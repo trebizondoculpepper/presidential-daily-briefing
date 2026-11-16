@@ -211,13 +211,13 @@ describe("English policy compiler (#416)", () => {
         compileEnglish({ ...bundle, clauses: bundle.clauses.replace(/\]$/, ` ${extra}]`) }),
       );
     expect(withClauses('[(odd ?t) [?t "number" ?n] [(odd? ?n)]]')).toEqual([
-      "policy/rules.edn[107] odd[1]: unsupported function clause (odd?)",
+      "policy/rules.edn[108] odd[1]: unsupported function clause (odd?)",
     ]);
     expect(withClauses("[(any ?t) [?t 42 ?v]]")).toEqual([
-      "policy/rules.edn[107] any[0]: a dynamic attribute must be a variable or wildcard",
+      "policy/rules.edn[108] any[0]: a dynamic attribute must be a variable or wildcard",
     ]);
     expect(withClauses('[(first ?t) [?t "label" ?l] [(count ?l) ?n]]')).toEqual([
-      "policy/rules.edn[107] first[1]: unsupported function clause (count)",
+      "policy/rules.edn[108] first[1]: unsupported function clause (count)",
     ]);
     const q2 = '[:find ?t (max ?d) :where [?t "unlocks-dependent" ?d]]';
     expect(
@@ -235,7 +235,7 @@ describe("English policy compiler (#416)", () => {
         ),
       ),
     ).toEqual([
-      'policy/rules.edn[28] blocked[0]: attribute "open-blockers" has no phrase in schema.edn :lexicon',
+      'policy/rules.edn[29] blocked[0]: attribute "open-blockers" has no phrase in schema.edn :lexicon',
 
       'policy/schema.edn :eligibility-witnesses "openBlockers"[0]: attribute "open-blockers" has no phrase in schema.edn :lexicon',
       'policy/queries.edn :q1 where[3]: attribute "open-blockers" has no phrase in schema.edn :lexicon',
