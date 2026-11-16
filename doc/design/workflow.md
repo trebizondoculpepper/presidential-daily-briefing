@@ -1,5 +1,9 @@
 # Claims, questions and handoff
 
+## Native workflow-policy amendment (#679)
+
+[workflow-policy-boundary.md](workflow-policy-boundary.md) defines the sole native decision source, target-specific criteria, explicit trusted human direction over opinionated defaults, outage/unknown-fact behavior and the TypeScript mechanics boundary. It supersedes any interpretation below that permits independent imperative workflow policy or treats every default as unoverrideable. Runtime changes follow in focused PRs; this amendment does not claim they have shipped or weaken actual permissions, provenance or protocol validation.
+
 Contract for #2/#3 and separately delivered #62. Planned commands below are interface contracts, not claims that they are available today. Help/recovery suggestions must be generated from the implemented command registry.
 
 ## One active contribution
