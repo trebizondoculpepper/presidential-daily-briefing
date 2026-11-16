@@ -169,11 +169,12 @@ const teamEnvelope = (
   ...over,
 });
 
-const agent = (name: string, claims: unknown[]): Record<string, unknown> => ({
+const agent = (name: string, claims: unknown[], extra: Record<string, unknown> = {}) => ({
   agent: name,
   presence: "unknown",
   claims,
   warnings: [],
+  ...extra,
 });
 const claim = (n: number, at: string | null, extra: Record<string, unknown> = {}) => ({
   number: n,
@@ -209,6 +210,21 @@ describe("activity page route (#456)", () => {
       expect(script.headers["content-type"]).toBe("text/javascript; charset=utf-8");
       expect(script.body).toBe(activityScript());
       // Rendering the page (and its script) reads nothing from GitHub.
+      expect(s.collected).toEqual([]);
+    } finally {
+      await s.running.close();
+    }
+  });
+
+  it("defaults the window to one day when the parameter is omitted", async () => {
+    const s = await setup();
+    try {
+      const reply = await get(s.running.port, `/activity?repo=${encodeURIComponent(repo)}`);
+      expect(reply.status).toBe(200);
+      expect(reply.body).toContain('value="1" selected');
+      const empty = await get(s.running.port, "/activity");
+      expect(empty.status).toBe(200);
+      expect(empty.body).toContain("No project selected");
       expect(s.collected).toEqual([]);
     } finally {
       await s.running.close();
@@ -302,6 +318,42 @@ describe("activity renderers (#456)", () => {
     expect(html).toContain("Latest:");
   });
 
+  it("renders the shared model's continuing responsibilities separately from claims", () => {
+    const html = view.renderAgents(
+      teamEnvelope([
+        agent("alpha", [], {
+          responsibilities: [
+            {
+              number: 10,
+              url: url(10),
+              scope: "ticket",
+              deliverable: null,
+              delivery: "delivered",
+              followUp: { detail: "verify on staging" },
+              since: hours(3),
+            },
+            {
+              number: 11,
+              url: url(11),
+              scope: "deliverable",
+              deliverable: "final report",
+              delivery: "pending",
+              followUp: null,
+              since: null,
+            },
+          ],
+        }),
+      ]),
+      1,
+      start,
+    );
+    // The responsibilities render even with no remaining claim.
+    expect(html).toContain("Continuing responsibility");
+    expect(html).toContain("#10 ticket");
+    expect(html).toContain("#11 final report");
+    expect(html).toContain("follow-up: verify on staging");
+  });
+
   it("escapes agent, title and warning text and links only GitHub URLs", () => {
     const html = view.renderAgents(
       teamEnvelope([
@@ -367,9 +419,10 @@ describe("activity browser script (#456)", () => {
     const fetched: { path: string; signal: AbortSignal }[] = [];
     const pending: ((body: unknown) => void)[] = [];
     const pushed: string[] = [];
+    const location = { search: "" };
     const sandbox = {
       document: { getElementById: (id: string) => elements.get(id) ?? null },
-      location: { search: "" },
+      location,
       history: { pushState: (_s: unknown, _t: string, to: string) => void pushed.push(to) },
       addEventListener: (type: string, fn: () => void) => listeners.set(`window:${type}`, fn),
       Date: class extends Date {
@@ -384,7 +437,7 @@ describe("activity browser script (#456)", () => {
         return new Promise((done) => pending.push((body) => done({ json: async () => body })));
       },
     };
-    return { sandbox, elements, fetched, pending, pushed, listeners };
+    return { sandbox, elements, fetched, pending, pushed, listeners, location };
   }
   const settle = () => new Promise((done) => setTimeout(done, 0));
 
@@ -410,5 +463,17 @@ describe("activity browser script (#456)", () => {
     b.pending[0]!(teamEnvelope([], { selection: { repository: "example/other" } }));
     await settle();
     expect(b.elements.get("agents")!.innerHTML).not.toContain("alpha");
+  });
+
+  it("restores the window from the URL on history navigation", async () => {
+    const b = fakeBrowser(repo, "7");
+    runInNewContext(activityScript(), b.sandbox);
+    await settle();
+    // Change the URL to a window the select does not currently show, then go Back.
+    b.location.search = "?repo=example%2Fparity&window=2";
+    b.listeners.get("window:popstate")!();
+    await settle();
+    expect(b.elements.get("window")!.value).toBe("2");
+    expect(b.fetched.at(-1)!.path).toContain("staleHours=48"); // 2 days
   });
 });

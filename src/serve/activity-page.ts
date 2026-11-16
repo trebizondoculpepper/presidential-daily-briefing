@@ -19,10 +19,13 @@ import { escapeHtml } from "./rules-page.js";
 /** Query parameters the page accepts (the shell's registry entry). */
 export const activityPageParameters = pageById("activity").parameters;
 
-/** The participation window in days, one to seven; anything else is refused by the page. */
+/** The participation window in days, one to seven; anything else is refused by the page.
+ * An absent parameter selects the documented one-day default; only explicit invalid values
+ * (a non-number, or outside 1..7) are rejected. */
 const windowDays = (value: string | null): number | null => {
+  if (value === null) return 1;
   const n = Number(value);
-  return value !== null && Number.isInteger(n) && n >= 1 && n <= 7 ? n : null;
+  return Number.isInteger(n) && n >= 1 && n <= 7 ? n : null;
 };
 type Served = { repository: string; project?: string };
 
@@ -146,8 +149,9 @@ export function activityRenderers(base: DashboardRenderers): ActivityRenderers {
   /** Agents with an evidenced event in the window. */
   const agentsActive = (agents: unknown[], window: number, nowMs: number): unknown[] =>
     agents.filter((a) =>
-      list(record(a).claims).some((c) => {
-        const at = str(record(record(c).latestActivity).at);
+      [...list(record(a).claims), ...list(record(a).responsibilities)].some((c) => {
+        const src = record(c);
+        const at = str(record(src.latestActivity).at) || str(src.since);
         return at !== "" && Number.isFinite(Date.parse(at)) && nowMs - Date.parse(at) <= ms(window);
       }),
     );
@@ -229,6 +233,24 @@ export function activityRenderers(base: DashboardRenderers): ActivityRenderers {
     }${candidates.length ? `<ul>${candidates.map((x) => `<li class="warn">${escapeHtml(x)}</li>`).join("")}</ul>` : ""}</li>`;
   };
 
+  /** The shared model's continuing responsibilities (S18), separate from claimed work. */
+  const renderResponsibilities = (raw: unknown): string => {
+    const items = list(raw);
+    if (!items.length) return "";
+    const rows = items.map((r) => {
+      const item = record(r);
+      const deliverable = str(item.deliverable);
+      const number = numberOf(item.url);
+      const label = item.scope === "ticket" ? `#${number} ticket` : `#${number} ${deliverable}`;
+      const followUp = record(item.followUp);
+      const followUpText = str(followUp.detail)
+        ? `; follow-up: ${escapeHtml(str(followUp.detail))}`
+        : "";
+      return `<li>${link(item.url, label)} · delivery ${escapeHtml(str(item.delivery))}${followUpText}</li>`;
+    });
+    return `<h4>Continuing responsibility</h4><ol>${rows.join("")}</ol>`;
+  };
+
   const renderAgents = (envelope: unknown, window: number, nowMs: number = Date.now()) => {
     const e = record(envelope);
     if (e.status === "error") return "";
@@ -243,14 +265,17 @@ export function activityRenderers(base: DashboardRenderers): ActivityRenderers {
       const agent = record(a);
       const name = escapeHtml(str(agent.agent));
       const claims = list(agent.claims);
+      const responsibilities = list(agent.responsibilities);
       const warnings = list(agent.warnings).map((w) => {
         const wr = record(w);
         return `<li class="warn">${escapeHtml(str(wr.detail))}</li>`;
       });
       return `<li><h3>${name}</h3>${
         claims.length
-          ? `<ol>${claims.map((c) => renderClaim(c, repository)).join("")}</ol>`
-          : "<p>No recorded claims or responsibilities.</p>"
+          ? `<ol>${claims.map((c) => renderClaim(c, repository)).join("")}</ol>${renderResponsibilities(responsibilities)}`
+          : responsibilities.length
+            ? renderResponsibilities(responsibilities)
+            : "<p>No recorded claims or responsibilities.</p>"
       }${warnings.length ? `<ul>${warnings.join("")}</ul>` : ""}</li>`;
     });
     return `<ol class="agents">${rows.join("")}</ol>`;
@@ -288,6 +313,13 @@ export function activityClient(base: DashboardRenderers, view: ActivityRenderers
   const parseWindow = (): number => {
     const n = Number(window?.value);
     return Number.isInteger(n) && n >= 1 && n <= 7 ? n : 1;
+  };
+  /** Restore the window the URL identifies, and keep the control in sync on history moves. */
+  const syncFromUrl = (): number => {
+    const n = Number(new URLSearchParams(location.search).get("window"));
+    const days = Number.isInteger(n) && n >= 1 && n <= 7 ? n : 1;
+    if (window) window.value = String(days);
+    return days;
   };
 
   const render = (envelope: unknown) => {
@@ -339,9 +371,15 @@ export function activityClient(base: DashboardRenderers, view: ActivityRenderers
     void show(false, true);
   });
   byId("refresh")!.addEventListener("click", () => void show(true, false));
-  addEventListener("popstate", () => void show(false, false));
+  addEventListener("popstate", () => {
+    syncFromUrl();
+    void show(false, false);
+  });
   addEventListener("pageshow", (event: PageTransitionEvent) => {
-    if (event.persisted) void show(false, false);
+    if (event.persisted) {
+      syncFromUrl();
+      void show(false, false);
+    }
   });
   // Only this view is read: one project, on load or on request.
   void show(false, false);
