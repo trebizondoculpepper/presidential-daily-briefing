@@ -680,6 +680,13 @@ describe("pr status: bot instructions are not review requests", () => {
       reviewDecision: null,
       headRefName: "feat/x",
       headRefOid: head,
+      requiredChecks: {
+        head,
+        base: "main",
+        expected: [{ context: "verify", appId: null }],
+        gaps: [],
+        checks: [{ name: "verify", databaseId: null, appId: null, required: "required" as const }],
+      },
       baseRefName: "main",
       commits: {
         nodes: [
