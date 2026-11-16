@@ -2,6 +2,12 @@
 
 Status: proposed contract for #588, delivered under #589. Nothing here is implemented by this document. Sections headed "Shipped today" describe current behaviour and cite the implementing file; everything else is a proposal. The read-only human view (#458) does not wait for this feature.
 
+## Human-ownership amendment (#662 / #663)
+
+The proposed [human-assignment contract](human-assignment-safeguard.md) supersedes the earlier coupling of agent claim release and GitHub assignee removal once reviewed and merged. GitHub assignees are human owners; agent labels are independent claims. The later owner explicitly requires preserving human assignment, blockers, questions and workflow state when an agent is unassigned. Existing `release --as` readiness changes are not a state-preserving alias.
+
+If a ticket's human assignees positively exclude the agent's employer, the narrow recovery parks unfinished work, releases only that agent's claim and posts the reason. A transient unreadable assignment is not proof of reassignment. Do not implement the older assignee-removal options below on an agent-facing path; a separate human ownership editor is not part of this mission. The earlier sections below preserve design history and require reconciliation before #588 runtime work.
+
 ## Owner decisions (settled)
 
 From #588 and its owner comments, adopted without reopening:

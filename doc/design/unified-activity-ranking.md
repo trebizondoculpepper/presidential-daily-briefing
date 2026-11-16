@@ -31,6 +31,12 @@ For owned PRs whose checks/reviews are only pending, do not invent repair or mer
 
 Multiple-claim review and incomplete-inventory inspection retain #413's aggregate semantics and individual links. One issue is not duplicated merely to inflate the ownership signal. Unassign follows #588: terminate responsibility only, preserving current state, blockers and independent questions. Existing `release --as …` has explicit readiness side effects and must not be advertised as a state-preserving Unassign alias. Until the #588 service is shipped, identify that option as unavailable and offer another supported next step; do not duplicate its workflow in #652. Existing delivery facts survive according to their own contract. No automatic release, reassignment, reopening, closure or switch of active work is introduced.
 
+## Human ownership and routing-first amendment (#662 / #663)
+
+The proposed [human-assignment contract](human-assignment-safeguard.md), once reviewed and merged, adds an eligibility prerequisite and a leading assignment-triage class before the ordinary comparator below. Implementers route completely unassigned issues using `CONTRIBUTORS.md`, or raise a routing-guidance question when it is insufficient. The owner explicitly places this class above owned commitments and estimation. Unknown or nonempty assignment is not permission to route; only humans change existing human assignments.
+
+Ordinary agent work remains eligible only when its employing human is among the ticket's assignees. Multiple human assignees are valid when set by humans. Ownership no longer authorizes an executable continuation if the human assignment excludes that employer: show the narrowly approved park/own-claim-release/reason-comment recovery instead. The comparator below describes ordinary eligible work after these prerequisites; it does not supersede the routing-first exception. Known unresolved routing questions are waiting, not repeatedly executable top-priority work.
+
 ## Explicit comparator
 
 Apply this lexicographic comparison to the complete candidate pool before any display limit. Each earlier key dominates all later ones:
