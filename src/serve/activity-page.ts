@@ -239,7 +239,10 @@ export function activityRenderers(base: DashboardRenderers): ActivityRenderers {
         : "";
     return `<li>${link(c.url, `#${number} ${str(c.title)}`)}${ticket}
 <p class="why">${activity ? `Activity: ${escapeHtml(activity)}; ` : ""}Latest: ${latestText}.${co.length ? ` Co-owned with ${co.map(escapeHtml).join(", ")}.` : ""}</p>${
-      prs.length ? `<p>Submitted responsibilities: ${prs.join(", ")}.</p>` : ""
+      // claim.pullRequests are PRs that close this claimed issue; they are linked work, not
+      // necessarily this agent's responsibility. The canonical responsibility inventory is
+      // rendered separately (renderResponsibilities), so this wording never claims ownership.
+      prs.length ? `<p>Linked PRs: ${prs.join(", ")}.</p>` : ""
     }${candidates.length ? `<ul>${candidates.map((x) => `<li class="warn">${escapeHtml(x)}</li>`).join("")}</ul>` : ""}</li>`;
   };
 

@@ -317,6 +317,10 @@ describe("activity renderers (#456)", () => {
     expect(html).toContain("APPROVED");
     expect(html).toContain("waiting: needs review");
     expect(html).toContain("Latest:");
+    // Linked PRs are labelled as linked, not as this claimant's responsibility (the canonical
+    // responsibility inventory is the separate group).
+    expect(html).toContain("Linked PRs: ");
+    expect(html).not.toContain("Submitted responsibilities:");
   });
 
   it("renders the shared model's continuing responsibilities separately from claims", () => {
