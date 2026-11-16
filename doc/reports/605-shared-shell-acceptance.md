@@ -30,4 +30,4 @@ Additional native-browser observations:
 - Actual browser zoom at 200% and 400%, with device emulation closed, reflows navigation without horizontal overflow. At 400% the short-height rule makes the toolbar static. Browser zoom was restored to 100%.
 - Setup without a selection shows generic placeholders and the same navigation. No implicit single-project selection was made.
 
-VoiceOver audio/announcement verification is pending explicit permission to temporarily enable and restore the Mac accessibility setting. Accessibility-tree and keyboard inspection are recorded above and are not represented as a VoiceOver audio pass.
+On 2026-11-16 the owner explicitly deferred VoiceOver testing to a later accessibility mission. [Follow-up #719](https://github.com/trebizondoculpepper/presidential-daily-briefing/issues/719) records that remaining verification. macOS Settings confirmed VoiceOver was off; no announcement check was completed. The keyboard and accessibility-tree observations above are not represented as a VoiceOver audio pass. This owner-approved deferral completes the scoped #605 acceptance.
