@@ -319,6 +319,50 @@ export async function collectShortlist(
   const hydratedOrder: string[] = [];
   const isHydrated = (url: string) => hydratedIssues.has(url) || hydratedPrs.has(url);
 
+  /** Discovered open items whose full snapshot fields were not read, in discovery order. */
+  const notHydrated = (): ShortlistRecord["notHydrated"] =>
+    order
+      .filter((url) => !isHydrated(url) && !gone.has(url))
+      .map((url) => ({
+        number: stubs.get(url)!.number,
+        url,
+        kind: kinds.get(url)!,
+        reason: unhydratable.get(url) ?? "not-shortlisted",
+      }));
+  const discoveredComplete = () => issueInventory.complete && prInventory.complete;
+  /** The omission notice, or null when every item was hydrated. */
+  const shortlistNotice = (items: ShortlistRecord["notHydrated"]): string | null => {
+    if (!items.length) return null;
+    const sample = items
+      .slice(0, 5)
+      .map((item) => `#${item.number}`)
+      .join(", ");
+    return `Shortlist: ${items.length} of ${order.length - gone.size} open item(s) were discovered but not hydrated (${sample}${items.length > 5 ? ", ..." : ""}); their comments, reviews, checks and records are unknown, not empty, so this ordering is provisional${capped ? " (hydration bound reached)" : ""}. Inspect one with pdb --issue N, or read everything with --full.`;
+  };
+  /**
+   * The shortlist record for the current state. Selection passes and the final snapshot both
+   * carry it, so the ranking and the retained-claim inventory see the same completeness facts:
+   * capped discovery or unhydrated items are never silently "complete" during selection.
+   */
+  const shortlistRecord = (): ShortlistRecord => {
+    const items = notHydrated();
+    const complete = discoveredComplete();
+    return {
+      schemaVersion: 1,
+      profile: "briefing-shortlist-v1",
+      discovered: {
+        issues: issueInventory.nodes.length,
+        pullRequests: prInventory.nodes.length,
+        complete,
+      },
+      hydrated: [...hydratedOrder],
+      notHydrated: items,
+      rounds,
+      provisional: items.length > 0 || !complete,
+      notice: shortlistNotice(items),
+    };
+  };
+
   const build = (): Snapshot => {
     const issues: Issue[] = [];
     const pullRequests: PullRequest[] = [];
@@ -353,6 +397,7 @@ export async function collectShortlist(
       since: null,
       warnings: [...warnings],
       rateLimit: null,
+      shortlist: shortlistRecord(),
     };
   };
 
@@ -694,15 +739,8 @@ export async function collectShortlist(
   }
 
   const snapshot = build();
-  const notHydrated: ShortlistRecord["notHydrated"] = order
-    .filter((url) => !isHydrated(url) && !gone.has(url))
-    .map((url) => ({
-      number: stubs.get(url)!.number,
-      url,
-      kind: kinds.get(url)!,
-      reason: unhydratable.get(url) ?? "not-shortlisted",
-    }));
-  for (const item of notHydrated)
+  const unhydrated = notHydrated();
+  for (const item of unhydrated)
     if (item.reason === "not-shortlisted" || item.reason === "hydration-cap")
       meter.cover(
         item.kind === "issue" ? "issue" : "pull-request",
@@ -715,19 +753,10 @@ export async function collectShortlist(
               : "not on the briefing shortlist",
         },
       );
-  const discoveredComplete = issueInventory.complete && prInventory.complete;
-  let notice: string | null = null;
-  if (notHydrated.length) {
-    const sample = notHydrated
-      .slice(0, 5)
-      .map((item) => `#${item.number}`)
-      .join(", ");
-    notice = `Shortlist: ${notHydrated.length} of ${order.length - gone.size} open item(s) were discovered but not hydrated (${sample}${notHydrated.length > 5 ? ", ..." : ""}); their comments, reviews, checks and records are unknown, not empty, so this ordering is provisional${capped ? " (hydration bound reached)" : ""}. Inspect one with pdb --issue N, or read everything with --full.`;
-  }
   // Interim default (#368 owner question): unread shortlist items alone leave the briefing
   // complete for what it shows, but provisional. A failed or quota-stopped read of an item the
   // briefing wanted is real incompleteness.
-  const failed = notHydrated.filter(
+  const failed = unhydrated.filter(
     (i) => i.reason === "failed" || i.reason === "not-attempted" || i.reason === "unavailable",
   );
   if (failed.length)
@@ -754,19 +783,6 @@ export async function collectShortlist(
       durationMs: Date.parse(now().toISOString()) - Date.parse(startedAt),
     },
     collection,
-    shortlist: {
-      schemaVersion: 1,
-      profile: "briefing-shortlist-v1",
-      discovered: {
-        issues: issueInventory.nodes.length,
-        pullRequests: prInventory.nodes.length,
-        complete: discoveredComplete,
-      },
-      hydrated: [...hydratedOrder],
-      notHydrated,
-      rounds,
-      provisional: notHydrated.length > 0 || !discoveredComplete,
-      notice,
-    },
+    shortlist: shortlistRecord(),
   };
 }

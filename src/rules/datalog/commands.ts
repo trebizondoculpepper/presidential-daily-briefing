@@ -11,6 +11,9 @@ export const commandTemplates: Record<string, string> = {
   complexity:
     "pdb estimate {number} --metric complexity --size SIZE --rationale TEXT --repo {repo}",
   impact: "pdb estimate {number} --metric impact --size SIZE --rationale TEXT --repo {repo}",
+  // #413: an explicit resume; the read-only team inventory for reviewing several claims.
+  resume: "pdb claim resume {number} --repo {repo} --agent {agent}",
+  team: "pdb team --repo {repo}",
 };
 export const commandKinds: Record<string, string> = {
   "estimate-complexity": "complexity",
@@ -27,4 +30,9 @@ export const commandKinds: Record<string, string> = {
   "answer-questions": "detail",
   "orphaned-question": "detail",
   "sign-off": "pr",
+  "resume-claim": "resume",
+  "review-owned-work": "team",
+  "inspect-ownership": "team",
+  // A wait is followed with a focused read, never a claim, merge or resubmit (#413).
+  "wait-claim": "detail",
 };

@@ -29,7 +29,7 @@
  :denials
  [:find ?t ?r :in $ % :where (implementation-permit ?t) (implementation-deny ?t ?r)]
  :other-claims
- [:find ?t ?other :in $ % :where [?t "kind" "issue"] (own-issue ?other) [(not= ?t ?other)]]
+ [:find ?t ?other :in $ % :where [?t "kind" "issue"] (own-issue ?other) [(not= ?t ?other)] (not [?other "claim-activity" "waiting"])]
  :active-count
  [:find ?t (count-distinct ?d) :where [?t "active-dependent" ?d]]
  :missing-active-count

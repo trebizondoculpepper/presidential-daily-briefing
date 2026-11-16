@@ -34,10 +34,18 @@ export type ActionKind =
   | "assess-impact"
   | "inspect-assessment"
   | "inspect"
-  | "design";
+  | "design"
+  // Retained claims (#413): an explicit resume, the owned-work review and a visible wait.
+  | "resume-claim"
+  | "review-owned-work"
+  | "inspect-ownership"
+  | "wait-claim";
 export type BlendedRole = "implementer" | "designer";
-/** 1 addressed, 2 PR follow-up, 3 designer duties, 4 easy win, 5 assessment, 6 ordinary, 7 unfavorable. */
-export type Band = 1 | 2 | 3 | 4 | 5 | 6 | 7;
+/**
+ * 1 addressed, 2 PR follow-up, 3 designer duties and owned-work review/resume, 4 easy win,
+ * 5 assessment, 6 ordinary, 7 unfavorable, 8 waiting (#413: shown, never work).
+ */
+export type Band = 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8;
 
 const small: readonly ComplexitySize[] = ["XS", "S"];
 const large: readonly ComplexitySize[] = ["L", "XL", "XXL"];
@@ -75,6 +83,8 @@ export interface ActionFacts {
   extraReasonCodes?: string[];
   /** Why there is no command (inspection only); null when `nextCommand` is set. */
   inspection: string | null;
+  /** The rule's explanation when the builder knows it (#413 retained-claim rows), as Datalog's. */
+  why?: string;
 }
 
 const isCurrent = (m: ActionFacts["impact"], sizes: readonly ComplexitySize[]): boolean =>
@@ -94,7 +104,19 @@ export function classify(
     decide: [3, "designer-duty"],
     document: [3, "designer-duty"],
     "design-review": [3, "designer-duty"],
+    // Retained claims (#413), as decisions.edn D-OWN-RESUME, D-REVIEW-OWNED and D-OWN-WAIT.
+    "resume-claim": [3, "resume-required"],
+    "review-owned-work": [3, "review-owned-work"],
+    "inspect-ownership": [3, "inspection"],
+    "wait-claim": [8, "waiting"],
   };
+  // An own claim whose activity is unknown is inspected ahead of new work (D-OWN-UNKNOWN).
+  if (
+    a.kind === "inspect" &&
+    (a.extraReasonCodes?.includes("own-claim-unknown") ||
+      a.extraReasonCodes?.includes("owned-incomplete"))
+  )
+    return { band: 3, boosted: false, reasonCodes: ["own-claim", "inspection"] };
   const known = fixed[a.kind];
   if (known) return { band: known[0], boosted: false, reasonCodes: [known[1]] };
   if (assessmentKinds.includes(a.kind)) {
@@ -143,6 +165,18 @@ const identity = (a: ActionFacts, b: ActionFacts): number =>
  * unstarted and creation time; explicit age order uses creation time alone for band 6. Stable
  * identity breaks every remaining tie.
  */
+/** decisions.edn preferences of the band-3 retained-claim rows; other rows keep their order. */
+const retainedPreference = (a: ActionFacts): number =>
+  a.kind === "resume-claim"
+    ? 0
+    : a.kind === "review-owned-work"
+      ? 1
+      : a.kind === "inspect" && a.extraReasonCodes?.includes("own-claim-unknown")
+        ? 2
+        : a.kind === "inspect" && a.extraReasonCodes?.includes("owned-incomplete")
+          ? 3
+          : 4;
+
 export function compareActions(order: PickupOrder = "impact") {
   return (a: ActionFacts, b: ActionFacts): number => {
     const ca = classify(a, order);
@@ -150,6 +184,8 @@ export function compareActions(order: PickupOrder = "impact") {
     if (ca.band !== cb.band) return ca.band - cb.band;
     if (ca.band <= 3)
       return (
+        // #413: retained-claim rows follow the rules' preferences (resume, review, unknown).
+        retainedPreference(a) - retainedPreference(b) ||
         (a.sequence ?? Number.MAX_SAFE_INTEGER) - (b.sequence ?? Number.MAX_SAFE_INTEGER) ||
         identity(a, b)
       );
@@ -237,6 +273,7 @@ export function rankActions(
         impact: { state: a.impact.state, size: a.impact.size },
         unlocks: a.unlocks,
         unlocksUnknown: a.unlocksUnknown,
+        ...(a.why ? { why: { text: a.why, ruleIds: [], facts: {}, overriddenRuleIds: [] } } : {}),
       },
     ];
   });
@@ -317,6 +354,14 @@ export interface CandidateInput {
   isParked: (url: string) => boolean;
   urgency: (url: string) => 0 | 1 | 2;
   ownedByViewer: (url: string) => boolean;
+  /**
+   * Retained claims (#413), the same facts the Datalog rules read: the viewer's open claims and,
+   * on a live read, each one's activity. Absent: not read, so ordinary continuation applies.
+   */
+  retained?: {
+    ownedClaims: { urls: readonly string[]; complete: boolean };
+    claimActivity?: ReadonlyMap<string, { state: string; reason: string }>;
+  };
 }
 
 /**
@@ -329,9 +374,18 @@ export interface CandidateInput {
 export function roleCandidates(input: CandidateInput): ActionFacts[] {
   const metric = input.role === "implementer" ? "complexity" : "impact";
   const agent = input.agent ?? "NAME";
-  // The viewer's active claims: open issues carrying the viewer's agent label.
+  const activity = (url: string) => input.retained?.claimActivity?.get(url)?.state;
+  // The viewer's claims that block another claim: open issues carrying the viewer's agent label,
+  // except those verified waiting, which the claim guard admits alongside (#412/#413).
   const ownActive = [...input.subjects.values()]
-    .filter((s) => s.isIssue && s.state === "OPEN" && input.ownedByViewer(s.url))
+    .filter(
+      (s) =>
+        s.isIssue &&
+        s.state === "OPEN" &&
+        input.ownedByViewer(s.url) &&
+        activity(s.url) !== "waiting" &&
+        activity(s.url) !== "not-owned",
+    )
     .map((s) => s.number);
   const facts = (url: string, kind: ActionKind, sequence?: number): ActionFacts | null => {
     const s = input.subjects.get(url);
@@ -356,6 +410,8 @@ export function roleCandidates(input: CandidateInput): ActionFacts[] {
         : null;
     const command: Partial<Record<ActionKind, string | null>> = {
       implement: otherClaims.length ? handoff : claim,
+      "resume-claim": `pdb claim resume ${s.number} --repo ${input.repository} --agent ${agent}`,
+      "review-owned-work": `pdb team --repo ${input.repository}`,
       "estimate-complexity": estimate("complexity"),
       "assess-impact": estimate("impact"),
       // Inspection of known bad evidence carries the Ticket Doctor fix for the role's metric
@@ -401,14 +457,128 @@ export function roleCandidates(input: CandidateInput): ActionFacts[] {
     };
   };
   const out: ActionFacts[] = [];
+  if (
+    input.role === "implementer" &&
+    input.retained?.ownedClaims.complete === false &&
+    input.retained.ownedClaims.urls.length === 0
+  ) {
+    const target = `https://github.com/${input.repository}`;
+    out.push({
+      repository: input.repository,
+      target,
+      number: 0,
+      kind: "inspect-ownership",
+      role: input.role,
+      sequence: 0,
+      complexity: unknownAssessments.complexity,
+      impact: unknownAssessments.impact,
+      urgency: 1,
+      unlocks: 0,
+      unlocksUnknown: [],
+      own: false,
+      incomplete: true,
+      createdAt: new Date(0).toISOString(),
+      evidence: [target],
+      nextCommand: `pdb team --repo ${input.repository}`,
+      inspection: null,
+      why: "Your claim inventory is incomplete and no claim was observed; inspect your ownership before claiming more work.",
+    });
+  }
   let sequence = 0;
+  // #413: an own claim's activity decides its row, as decisions.edn does for the Datalog engine.
+  // The texts are decisions.edn's templates; retainedranking.test.ts compares the two engines.
+  const reason = (url: string) => input.retained?.claimActivity?.get(url)?.reason ?? "";
+  const ownKind = (url: string): [ActionKind, string[], string?] | null => {
+    switch (activity(url)) {
+      case "resume-required":
+        return [
+          "resume-claim",
+          [],
+          `What your claim waited on has cleared (${reason(url)}); resume it explicitly before starting other work.`,
+        ];
+      case "waiting":
+        return [
+          "wait-claim",
+          [],
+          `Waiting: ${reason(url)}. You keep this claim; nothing to do on it until that clears.`,
+        ];
+      case "unknown":
+        return [
+          "inspect",
+          ["own-claim-unknown"],
+          `Your claim's activity is unknown (${reason(url)}); inspect its wait evidence. Unknown is never waiting, so no other claim is admitted.`,
+        ];
+      case "not-owned":
+        // Released or transferred since the snapshot: no longer this viewer's to rank.
+        return null;
+      default:
+        return ["continue-implementation", []];
+    }
+  };
   for (const section of input.sections) {
     const kind = sectionKinds[section.name];
     if (section.background || !kind) continue;
+    // #413: observed waiting claims cannot rule out unseen active claims in an incomplete
+    // inventory; new pickup is denied rather than inviting a claim the guard may refuse.
+    const inventoryUnknown =
+      input.role === "implementer" &&
+      section.name === "pickup" &&
+      input.retained?.ownedClaims.complete === false;
+    if (inventoryUnknown) continue;
     for (const row of section.rows) {
-      const f = facts(row.url, kind, sequence++);
-      if (f) out.push(f);
+      const mapped =
+        kind === "continue-implementation" && input.role === "implementer"
+          ? ownKind(row.url)
+          : ([kind, []] as [ActionKind, string[]]);
+      if (!mapped) continue;
+      const [k, codes, why] = mapped;
+      const f = facts(row.url, k, sequence++);
+      if (f)
+        out.push({
+          ...f,
+          ...(codes.length ? { extraReasonCodes: codes } : {}),
+          ...(why ? { why } : {}),
+        });
     }
+  }
+  const owned = input.retained?.ownedClaims;
+  // An incomplete inventory with one observed claim: inspect ownership (D-OWNED-INCOMPLETE).
+  const only = owned?.urls[0];
+  if (
+    input.role === "implementer" &&
+    owned &&
+    owned.urls.length === 1 &&
+    !owned.complete &&
+    only &&
+    (!input.isParked(only) || input.isAddressed(only))
+  ) {
+    const f = facts(only, "inspect");
+    if (f)
+      out.push({
+        ...f,
+        extraReasonCodes: ["owned-incomplete"],
+        why: "Your claim inventory is incomplete and only this claim was observed; inspect your ownership before claiming more work.",
+      });
+  }
+  // One review row on the first listed claim (unparked first), shown when it is foreground, as
+  // the Datalog rule's owned-review-subject.
+  const first = owned?.urls[0];
+  if (
+    input.role === "implementer" &&
+    owned &&
+    owned.urls.length > 1 &&
+    first &&
+    (!input.isParked(first) || input.isAddressed(first))
+  ) {
+    const f = facts(first, "review-owned-work");
+    const n = owned.urls.length;
+    if (f)
+      out.push({
+        ...f,
+        why: owned.complete
+          ? `You retain ${n} implementation claims; review which to finish, justify as waiting, release or reassign before starting more work.`
+          : `You retain at least ${n} implementation claims (the claim inventory is incomplete); review which to finish, justify as waiting, release or reassign before starting more work.`,
+      });
   }
   for (const [url, a] of input.assessments) {
     const s = input.subjects.get(url);

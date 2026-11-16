@@ -1,7 +1,7 @@
 {
   "modelVersion": 2,
   "policyVersion": 1,
-  "rulesHash": "62fdc2f6976d89099a5819d5f13ed927919a6a791a128810ba90df4a723ca3b0",
+  "rulesHash": "aa7601860fd18d985cc212664ecd44332037a1079d6025254283a7c977bfc8e3",
   "sources": [
     "policy/schema.edn",
     "policy/rules.edn",
@@ -11,6 +11,12 @@
   ],
   "lexicon": {
     "attributes": {
+      "ownership-inventory": "repository ownership inventory context",
+      "claim-activity": "activity of your retained claim (active, waiting, resume-required or unknown)",
+      "wait-reason": "what your retained claim waits on, or why its activity is unknown",
+      "owned-claims": "number of implementation claims you retain",
+      "owned-claims-complete": "completeness of your claim inventory",
+      "owned-review-subject": "the claim the owned-work review is attached to",
       "active-count": "number of active dependents",
       "active-dependent": "active dependent",
       "assessment-kind": "assessment action kind",
@@ -1396,7 +1402,7 @@
         },
         {
           "type": "call",
-          "predicate": "own-issue",
+          "predicate": "own-active",
           "args": [
             {
               "var": "?t"
@@ -1414,7 +1420,7 @@
         }
       ],
       "templateClauses": 1,
-      "calls": ["foreground", "own-issue", "easy"],
+      "calls": ["foreground", "own-active", "easy"],
       "evidence": [],
       "source": {
         "file": "policy/decisions.edn",
@@ -1861,7 +1867,7 @@
         },
         {
           "type": "call",
-          "predicate": "own-issue",
+          "predicate": "own-active",
           "args": [
             {
               "var": "?t"
@@ -1870,7 +1876,7 @@
         }
       ],
       "templateClauses": 1,
-      "calls": ["foreground", "own-issue"],
+      "calls": ["foreground", "own-active"],
       "evidence": [],
       "source": {
         "file": "policy/decisions.edn",
@@ -2057,7 +2063,7 @@
         },
         {
           "type": "call",
-          "predicate": "own-issue",
+          "predicate": "own-active",
           "args": [
             {
               "var": "?t"
@@ -2075,11 +2081,657 @@
         }
       ],
       "templateClauses": 1,
-      "calls": ["foreground", "own-issue", "unfavorable"],
+      "calls": ["foreground", "own-active", "unfavorable"],
       "evidence": [],
       "source": {
         "file": "policy/decisions.edn",
         "index": 21
+      }
+    },
+    {
+      "id": "D-OWN-RESUME",
+      "kind": "resume-claim",
+      "band": 3,
+      "preference": 0,
+      "codes": ["own-claim", "resume-required"],
+      "roles": ["implementer"],
+      "clauses": [
+        {
+          "type": "call",
+          "predicate": "foreground",
+          "args": [
+            {
+              "var": "?t"
+            }
+          ]
+        },
+        {
+          "type": "fact",
+          "scope": "viewer",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "role",
+          "value": {
+            "lit": "implementer"
+          },
+          "phrase": "role",
+          "many": false
+        },
+        {
+          "type": "call",
+          "predicate": "own-issue",
+          "args": [
+            {
+              "var": "?t"
+            }
+          ]
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?t"
+          },
+          "attribute": "claim-activity",
+          "value": {
+            "lit": "resume-required"
+          },
+          "phrase": "activity of your retained claim (active, waiting, resume-required or unknown)",
+          "many": false
+        }
+      ],
+      "templateClauses": 1,
+      "calls": ["foreground", "own-issue"],
+      "evidence": [
+        {
+          "name": "waitReason",
+          "scope": "rule",
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "wait-reason",
+              "value": {
+                "var": "?value"
+              },
+              "phrase": "what your retained claim waits on, or why its activity is unknown",
+              "many": false
+            }
+          ]
+        }
+      ],
+      "source": {
+        "file": "policy/decisions.edn",
+        "index": 22
+      }
+    },
+    {
+      "id": "D-REVIEW-OWNED",
+      "kind": "review-owned-work",
+      "band": 3,
+      "preference": 1,
+      "codes": ["own-claim", "review-owned-work"],
+      "roles": ["implementer"],
+      "clauses": [
+        {
+          "type": "call",
+          "predicate": "foreground",
+          "args": [
+            {
+              "var": "?t"
+            }
+          ]
+        },
+        {
+          "type": "fact",
+          "scope": "viewer",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "role",
+          "value": {
+            "lit": "implementer"
+          },
+          "phrase": "role",
+          "many": false
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "owned-review-subject",
+          "value": {
+            "var": "?t"
+          },
+          "phrase": "the claim the owned-work review is attached to",
+          "many": false
+        },
+        {
+          "type": "call",
+          "predicate": "own-issue",
+          "args": [
+            {
+              "var": "?t"
+            }
+          ]
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "owned-claims",
+          "value": {
+            "var": "?n"
+          },
+          "phrase": "number of implementation claims you retain",
+          "many": false
+        },
+        {
+          "type": "compare",
+          "op": ">",
+          "args": [
+            {
+              "var": "?n"
+            },
+            {
+              "lit": 1
+            }
+          ]
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "owned-claims-complete",
+          "value": {
+            "lit": true
+          },
+          "phrase": "completeness of your claim inventory",
+          "many": false
+        }
+      ],
+      "templateClauses": 1,
+      "calls": ["foreground", "own-issue"],
+      "evidence": [
+        {
+          "name": "ownedClaims",
+          "scope": "rule",
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "context",
+              "entity": {
+                "lit": 1
+              },
+              "attribute": "owned-claims",
+              "value": {
+                "var": "?value"
+              },
+              "phrase": "number of implementation claims you retain",
+              "many": false
+            }
+          ]
+        }
+      ],
+      "source": {
+        "file": "policy/decisions.edn",
+        "index": 23
+      }
+    },
+    {
+      "id": "D-REVIEW-OWNED-PARTIAL",
+      "kind": "review-owned-work",
+      "band": 3,
+      "preference": 1,
+      "codes": ["own-claim", "review-owned-work", "inspection"],
+      "roles": ["implementer"],
+      "clauses": [
+        {
+          "type": "call",
+          "predicate": "foreground",
+          "args": [
+            {
+              "var": "?t"
+            }
+          ]
+        },
+        {
+          "type": "fact",
+          "scope": "viewer",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "role",
+          "value": {
+            "lit": "implementer"
+          },
+          "phrase": "role",
+          "many": false
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "owned-review-subject",
+          "value": {
+            "var": "?t"
+          },
+          "phrase": "the claim the owned-work review is attached to",
+          "many": false
+        },
+        {
+          "type": "call",
+          "predicate": "own-issue",
+          "args": [
+            {
+              "var": "?t"
+            }
+          ]
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "owned-claims",
+          "value": {
+            "var": "?n"
+          },
+          "phrase": "number of implementation claims you retain",
+          "many": false
+        },
+        {
+          "type": "compare",
+          "op": ">",
+          "args": [
+            {
+              "var": "?n"
+            },
+            {
+              "lit": 1
+            }
+          ]
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "owned-claims-complete",
+          "value": {
+            "lit": false
+          },
+          "phrase": "completeness of your claim inventory",
+          "many": false
+        }
+      ],
+      "templateClauses": 1,
+      "calls": ["foreground", "own-issue"],
+      "evidence": [
+        {
+          "name": "ownedClaims",
+          "scope": "rule",
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "context",
+              "entity": {
+                "lit": 1
+              },
+              "attribute": "owned-claims",
+              "value": {
+                "var": "?value"
+              },
+              "phrase": "number of implementation claims you retain",
+              "many": false
+            }
+          ]
+        }
+      ],
+      "source": {
+        "file": "policy/decisions.edn",
+        "index": 24
+      }
+    },
+    {
+      "id": "D-INVENTORY-UNKNOWN",
+      "kind": "inspect-ownership",
+      "band": 3,
+      "preference": 3,
+      "codes": ["inspection", "inventory-unknown"],
+      "roles": ["implementer"],
+      "clauses": [
+        {
+          "type": "call",
+          "predicate": "foreground",
+          "args": [
+            {
+              "var": "?t"
+            }
+          ]
+        },
+        {
+          "type": "fact",
+          "scope": "viewer",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "role",
+          "value": {
+            "lit": "implementer"
+          },
+          "phrase": "role",
+          "many": false
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?t"
+          },
+          "attribute": "ownership-inventory",
+          "value": {
+            "lit": true
+          },
+          "phrase": "repository ownership inventory context",
+          "many": false
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "owned-claims",
+          "value": {
+            "lit": 0
+          },
+          "phrase": "number of implementation claims you retain",
+          "many": false
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "owned-claims-complete",
+          "value": {
+            "lit": false
+          },
+          "phrase": "completeness of your claim inventory",
+          "many": false
+        }
+      ],
+      "templateClauses": 1,
+      "calls": ["foreground"],
+      "evidence": [],
+      "source": {
+        "file": "policy/decisions.edn",
+        "index": 25
+      }
+    },
+    {
+      "id": "D-OWNED-INCOMPLETE",
+      "kind": "inspect",
+      "band": 3,
+      "preference": 3,
+      "codes": ["own-claim", "inspection"],
+      "roles": ["implementer"],
+      "clauses": [
+        {
+          "type": "call",
+          "predicate": "foreground",
+          "args": [
+            {
+              "var": "?t"
+            }
+          ]
+        },
+        {
+          "type": "fact",
+          "scope": "viewer",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "role",
+          "value": {
+            "lit": "implementer"
+          },
+          "phrase": "role",
+          "many": false
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "owned-review-subject",
+          "value": {
+            "var": "?t"
+          },
+          "phrase": "the claim the owned-work review is attached to",
+          "many": false
+        },
+        {
+          "type": "call",
+          "predicate": "own-issue",
+          "args": [
+            {
+              "var": "?t"
+            }
+          ]
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "owned-claims",
+          "value": {
+            "lit": 1
+          },
+          "phrase": "number of implementation claims you retain",
+          "many": false
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "owned-claims-complete",
+          "value": {
+            "lit": false
+          },
+          "phrase": "completeness of your claim inventory",
+          "many": false
+        }
+      ],
+      "templateClauses": 1,
+      "calls": ["foreground", "own-issue"],
+      "evidence": [],
+      "source": {
+        "file": "policy/decisions.edn",
+        "index": 26
+      }
+    },
+    {
+      "id": "D-OWN-UNKNOWN",
+      "kind": "inspect",
+      "band": 3,
+      "preference": 2,
+      "codes": ["own-claim", "inspection"],
+      "roles": ["implementer"],
+      "clauses": [
+        {
+          "type": "call",
+          "predicate": "foreground",
+          "args": [
+            {
+              "var": "?t"
+            }
+          ]
+        },
+        {
+          "type": "fact",
+          "scope": "viewer",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "role",
+          "value": {
+            "lit": "implementer"
+          },
+          "phrase": "role",
+          "many": false
+        },
+        {
+          "type": "call",
+          "predicate": "own-issue",
+          "args": [
+            {
+              "var": "?t"
+            }
+          ]
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?t"
+          },
+          "attribute": "claim-activity",
+          "value": {
+            "lit": "unknown"
+          },
+          "phrase": "activity of your retained claim (active, waiting, resume-required or unknown)",
+          "many": false
+        }
+      ],
+      "templateClauses": 1,
+      "calls": ["foreground", "own-issue"],
+      "evidence": [
+        {
+          "name": "waitReason",
+          "scope": "rule",
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "wait-reason",
+              "value": {
+                "var": "?value"
+              },
+              "phrase": "what your retained claim waits on, or why its activity is unknown",
+              "many": false
+            }
+          ]
+        }
+      ],
+      "source": {
+        "file": "policy/decisions.edn",
+        "index": 27
+      }
+    },
+    {
+      "id": "D-OWN-WAIT",
+      "kind": "wait-claim",
+      "band": 8,
+      "preference": 0,
+      "codes": ["own-claim", "waiting"],
+      "roles": ["implementer"],
+      "clauses": [
+        {
+          "type": "call",
+          "predicate": "foreground",
+          "args": [
+            {
+              "var": "?t"
+            }
+          ]
+        },
+        {
+          "type": "fact",
+          "scope": "viewer",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "role",
+          "value": {
+            "lit": "implementer"
+          },
+          "phrase": "role",
+          "many": false
+        },
+        {
+          "type": "call",
+          "predicate": "own-issue",
+          "args": [
+            {
+              "var": "?t"
+            }
+          ]
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?t"
+          },
+          "attribute": "claim-activity",
+          "value": {
+            "lit": "waiting"
+          },
+          "phrase": "activity of your retained claim (active, waiting, resume-required or unknown)",
+          "many": false
+        }
+      ],
+      "templateClauses": 1,
+      "calls": ["foreground", "own-issue"],
+      "evidence": [
+        {
+          "name": "waitReason",
+          "scope": "rule",
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "wait-reason",
+              "value": {
+                "var": "?value"
+              },
+              "phrase": "what your retained claim waits on, or why its activity is unknown",
+              "many": false
+            }
+          ]
+        }
+      ],
+      "source": {
+        "file": "policy/decisions.edn",
+        "index": 28
       }
     },
     {
@@ -2268,7 +2920,7 @@
       ],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 22
+        "index": 29
       }
     },
     {
@@ -2357,7 +3009,7 @@
       ],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 23
+        "index": 30
       }
     },
     {
@@ -2452,7 +3104,7 @@
       ],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 24
+        "index": 31
       }
     },
     {
@@ -2542,7 +3194,7 @@
       ],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 25
+        "index": 32
       }
     },
     {
@@ -2623,7 +3275,7 @@
       ],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 26
+        "index": 33
       }
     },
     {
@@ -2703,7 +3355,7 @@
       ],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 27
+        "index": 34
       }
     },
     {
@@ -2798,7 +3450,7 @@
       ],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 28
+        "index": 35
       }
     },
     {
@@ -2878,7 +3530,7 @@
       ],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 29
+        "index": 36
       }
     },
     {
@@ -2944,7 +3596,7 @@
       "evidence": [],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 30
+        "index": 37
       }
     }
   ],
@@ -3318,6 +3970,28 @@
           "params": ["?t"],
           "clauses": [
             {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "ownership-inventory",
+              "value": {
+                "lit": true
+              },
+              "phrase": "repository ownership inventory context",
+              "many": false
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 11
+          }
+        },
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
               "type": "call",
               "predicate": "open",
               "args": [
@@ -3338,7 +4012,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 11
+            "index": 12
           }
         },
         {
@@ -3369,7 +4043,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 12
+            "index": 13
           }
         },
         {
@@ -3400,7 +4074,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 13
+            "index": 17
           }
         }
       ],
@@ -3440,6 +4114,25 @@
                   "var": "?t"
                 }
               ]
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "fact",
+                  "scope": "entity",
+                  "entity": {
+                    "var": "?t"
+                  },
+                  "attribute": "claim-activity",
+                  "value": {
+                    "lit": "not-owned"
+                  },
+                  "phrase": "activity of your retained claim (active, waiting, resume-required or unknown)",
+                  "many": false
+                }
+              ]
             }
           ],
           "source": {
@@ -3449,6 +4142,82 @@
         }
       ],
       "calls": ["issue", "open", "mine"],
+      "set": "rules"
+    },
+    {
+      "name": "own-active",
+      "params": ["?t"],
+      "alternatives": [
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
+              "type": "call",
+              "predicate": "own-issue",
+              "args": [
+                {
+                  "var": "?t"
+                }
+              ]
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "fact",
+                  "scope": "entity",
+                  "entity": {
+                    "var": "?t"
+                  },
+                  "attribute": "claim-activity",
+                  "value": {
+                    "wild": true
+                  },
+                  "phrase": "activity of your retained claim (active, waiting, resume-required or unknown)",
+                  "many": false
+                }
+              ]
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 15
+          }
+        },
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
+              "type": "call",
+              "predicate": "own-issue",
+              "args": [
+                {
+                  "var": "?t"
+                }
+              ]
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "claim-activity",
+              "value": {
+                "lit": "active"
+              },
+              "phrase": "activity of your retained claim (active, waiting, resume-required or unknown)",
+              "many": false
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 16
+          }
+        }
+      ],
+      "calls": ["own-issue"],
       "set": "rules"
     },
     {
@@ -3493,7 +4262,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 15
+            "index": 18
           }
         },
         {
@@ -3528,7 +4297,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 16
+            "index": 19
           }
         }
       ],
@@ -3571,7 +4340,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 17
+            "index": 20
           }
         }
       ],
@@ -3601,7 +4370,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 18
+            "index": 21
           }
         },
         {
@@ -3623,7 +4392,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 19
+            "index": 22
           }
         }
       ],
@@ -3666,7 +4435,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 20
+            "index": 23
           }
         }
       ],
@@ -3696,7 +4465,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 21
+            "index": 24
           }
         },
         {
@@ -3727,7 +4496,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 22
+            "index": 25
           }
         }
       ],
@@ -3757,7 +4526,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 23
+            "index": 26
           }
         },
         {
@@ -3792,7 +4561,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 24
+            "index": 27
           }
         }
       ],
@@ -3912,7 +4681,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 25
+            "index": 28
           }
         }
       ],
@@ -3963,7 +4732,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 26
+            "index": 29
           }
         },
         {
@@ -3998,7 +4767,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 27
+            "index": 30
           }
         }
       ],
@@ -4042,7 +4811,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 28
+            "index": 31
           }
         }
       ],
@@ -4087,7 +4856,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 29
+            "index": 32
           }
         },
         {
@@ -4124,7 +4893,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 30
+            "index": 33
           }
         },
         {
@@ -4161,7 +4930,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 31
+            "index": 34
           }
         },
         {
@@ -4198,7 +4967,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 32
+            "index": 35
           }
         },
         {
@@ -4239,7 +5008,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 33
+            "index": 36
           }
         },
         {
@@ -4280,7 +5049,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 34
+            "index": 37
           }
         },
         {
@@ -4323,7 +5092,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 35
+            "index": 38
           }
         },
         {
@@ -4366,7 +5135,81 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 36
+            "index": 39
+          }
+        },
+        {
+          "params": ["?t", "?r"],
+          "clauses": [
+            {
+              "type": "call",
+              "predicate": "issue",
+              "args": [
+                {
+                  "var": "?t"
+                }
+              ]
+            },
+            {
+              "type": "call",
+              "predicate": "open",
+              "args": [
+                {
+                  "var": "?t"
+                }
+              ]
+            },
+            {
+              "type": "call",
+              "predicate": "available",
+              "args": [
+                {
+                  "var": "?t"
+                }
+              ]
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "call",
+                  "predicate": "claimed",
+                  "args": [
+                    {
+                      "var": "?t"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "fact",
+              "scope": "context",
+              "entity": {
+                "lit": 1
+              },
+              "attribute": "owned-claims-complete",
+              "value": {
+                "lit": false
+              },
+              "phrase": "completeness of your claim inventory",
+              "many": false
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "D-DENY-INVENTORY-UNKNOWN"
+                }
+              ],
+              "result": "?r"
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 40
           }
         }
       ],
@@ -4377,7 +5220,9 @@
         "has-closing",
         "blocked",
         "closing-complete",
-        "platform-ok"
+        "platform-ok",
+        "open",
+        "available"
       ],
       "set": "rules"
     },
@@ -4403,7 +5248,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 37
+            "index": 41
           }
         }
       ],
@@ -4444,7 +5289,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 38
+            "index": 42
           }
         }
       ],
@@ -4572,7 +5417,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 39
+            "index": 43
           }
         }
       ],
@@ -4658,7 +5503,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 40
+            "index": 44
           }
         },
         {
@@ -4723,7 +5568,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 41
+            "index": 45
           }
         }
       ],
@@ -4753,7 +5598,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 42
+            "index": 46
           }
         },
         {
@@ -4775,7 +5620,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 43
+            "index": 47
           }
         },
         {
@@ -4812,7 +5657,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 44
+            "index": 48
           }
         },
         {
@@ -4830,7 +5675,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 45
+            "index": 49
           }
         }
       ],
@@ -4886,7 +5731,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 46
+            "index": 50
           }
         }
       ],
@@ -4942,7 +5787,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 47
+            "index": 51
           }
         }
       ],
@@ -4977,7 +5822,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 48
+            "index": 52
           }
         }
       ],
@@ -5072,7 +5917,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 49
+            "index": 53
           }
         }
       ],
@@ -5115,7 +5960,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 50
+            "index": 54
           }
         }
       ],
@@ -5158,7 +6003,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 51
+            "index": 55
           }
         }
       ],
@@ -5201,7 +6046,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 52
+            "index": 56
           }
         }
       ],
@@ -5244,7 +6089,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 53
+            "index": 57
           }
         }
       ],
@@ -5296,7 +6141,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 54
+            "index": 58
           }
         },
         {
@@ -5353,7 +6198,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 55
+            "index": 59
           }
         }
       ],
@@ -5409,7 +6254,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 56
+            "index": 60
           }
         }
       ],
@@ -5484,7 +6329,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 57
+            "index": 61
           }
         },
         {
@@ -5506,7 +6351,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 58
+            "index": 62
           }
         }
       ],
@@ -5568,7 +6413,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 59
+            "index": 63
           }
         }
       ],
@@ -5598,7 +6443,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 60
+            "index": 64
           }
         },
         {
@@ -5633,7 +6478,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 61
+            "index": 65
           }
         }
       ],
@@ -5689,7 +6534,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 62
+            "index": 66
           }
         }
       ],
@@ -5849,7 +6694,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 63
+            "index": 67
           }
         }
       ],
@@ -5917,7 +6762,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 64
+            "index": 68
           }
         }
       ],
@@ -5995,7 +6840,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 65
+            "index": 69
           }
         },
         {
@@ -6078,7 +6923,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 66
+            "index": 70
           }
         },
         {
@@ -6152,7 +6997,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 67
+            "index": 71
           }
         }
       ],
@@ -6230,7 +7075,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 68
+            "index": 72
           }
         },
         {
@@ -6291,7 +7136,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 69
+            "index": 73
           }
         }
       ],
@@ -6446,7 +7291,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 70
+            "index": 74
           }
         }
       ],
@@ -6497,7 +7342,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 71
+            "index": 75
           }
         },
         {
@@ -6532,7 +7377,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 72
+            "index": 76
           }
         }
       ],
@@ -6567,7 +7412,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 73
+            "index": 77
           }
         }
       ],
@@ -6593,7 +7438,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 74
+            "index": 78
           }
         },
         {
@@ -6611,7 +7456,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 75
+            "index": 79
           }
         },
         {
@@ -6642,7 +7487,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 76
+            "index": 80
           }
         },
         {
@@ -6660,7 +7505,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 77
+            "index": 81
           }
         },
         {
@@ -6678,7 +7523,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 78
+            "index": 82
           }
         }
       ],
@@ -6713,7 +7558,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 79
+            "index": 83
           }
         }
       ],
@@ -6752,7 +7597,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 80
+            "index": 84
           }
         },
         {
@@ -6792,7 +7637,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 81
+            "index": 85
           }
         }
       ],
@@ -6835,7 +7680,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 82
+            "index": 86
           }
         }
       ],
@@ -6878,7 +7723,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 83
+            "index": 87
           }
         }
       ],
@@ -6921,7 +7766,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 84
+            "index": 88
           }
         }
       ],
@@ -6951,7 +7796,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 85
+            "index": 89
           }
         },
         {
@@ -6982,7 +7827,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 86
+            "index": 90
           }
         },
         {
@@ -7032,7 +7877,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 87
+            "index": 91
           }
         }
       ],
@@ -7088,7 +7933,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 88
+            "index": 92
           }
         }
       ],
@@ -7117,7 +7962,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 89
+            "index": 93
           }
         }
       ],
@@ -7161,7 +8006,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 90
+            "index": 94
           }
         }
       ],
@@ -7220,7 +8065,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 91
+            "index": 95
           }
         }
       ],
@@ -7275,7 +8120,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 92
+            "index": 96
           }
         }
       ],
@@ -7305,7 +8150,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 93
+            "index": 97
           }
         }
       ],
@@ -7335,7 +8180,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 94
+            "index": 98
           }
         },
         {
@@ -7357,7 +8202,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 95
+            "index": 99
           }
         }
       ],
@@ -7429,7 +8274,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 96
+            "index": 100
           }
         }
       ],
@@ -7501,7 +8346,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 97
+            "index": 101
           }
         },
         {
@@ -7596,7 +8441,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 98
+            "index": 102
           }
         }
       ],
@@ -7632,7 +8477,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 99
+            "index": 103
           }
         }
       ],
@@ -7661,7 +8506,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 100
+            "index": 104
           }
         }
       ],
@@ -7687,7 +8532,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 101
+            "index": 105
           }
         },
         {
@@ -7705,7 +8550,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 102
+            "index": 106
           }
         }
       ],
@@ -7760,7 +8605,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 103
+            "index": 107
           }
         }
       ],
@@ -8205,7 +9050,7 @@
           ],
           "source": {
             "file": "policy/ordering.edn :rules",
-            "index": 7
+            "index": 8
           }
         },
         {
@@ -8444,7 +9289,7 @@
           ],
           "source": {
             "file": "policy/ordering.edn :rules",
-            "index": 8
+            "index": 9
           }
         }
       ],
@@ -8595,6 +9440,79 @@
               "type": "fact",
               "scope": "entity",
               "entity": {
+                "var": "?t"
+              },
+              "attribute": "ownership-inventory",
+              "value": {
+                "lit": true
+              },
+              "phrase": "repository ownership inventory context",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?r"
+              },
+              "attribute": "band",
+              "value": {
+                "var": "?b"
+              },
+              "phrase": "band",
+              "many": false
+            },
+            {
+              "type": "compare",
+              "op": "=",
+              "args": [
+                {
+                  "var": "?b"
+                },
+                {
+                  "lit": 3
+                }
+              ]
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?r"
+              },
+              "attribute": "preference",
+              "value": {
+                "var": "?g"
+              },
+              "phrase": "preference",
+              "many": false
+            },
+            {
+              "type": "bind",
+              "fn": "+",
+              "args": [
+                {
+                  "lit": 0
+                },
+                {
+                  "lit": 0
+                }
+              ],
+              "result": "?p"
+            }
+          ],
+          "source": {
+            "file": "policy/ordering.edn :rules",
+            "index": 6
+          }
+        },
+        {
+          "params": ["?t", "?r", "?b", "?g", "?p"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
                 "var": "?r"
               },
               "attribute": "band",
@@ -8658,7 +9576,7 @@
           ],
           "source": {
             "file": "policy/ordering.edn :rules",
-            "index": 6
+            "index": 7
           }
         }
       ],
@@ -8886,6 +9804,68 @@
         }
       ],
       "calls": ["issue", "platform-ok"]
+    },
+    {
+      "id": "D-DENY-INVENTORY-UNKNOWN",
+      "predicate": "implementation-deny",
+      "clauses": [
+        {
+          "type": "call",
+          "predicate": "issue",
+          "args": [
+            {
+              "var": "?t"
+            }
+          ]
+        },
+        {
+          "type": "call",
+          "predicate": "open",
+          "args": [
+            {
+              "var": "?t"
+            }
+          ]
+        },
+        {
+          "type": "call",
+          "predicate": "available",
+          "args": [
+            {
+              "var": "?t"
+            }
+          ]
+        },
+        {
+          "type": "not",
+          "join": null,
+          "body": [
+            {
+              "type": "call",
+              "predicate": "claimed",
+              "args": [
+                {
+                  "var": "?t"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "owned-claims-complete",
+          "value": {
+            "lit": false
+          },
+          "phrase": "completeness of your claim inventory",
+          "many": false
+        }
+      ],
+      "calls": ["issue", "open", "available", "claimed"]
     }
   ],
   "ordering": {
@@ -10336,6 +11316,25 @@
               "var": "?other"
             }
           ]
+        },
+        {
+          "type": "not",
+          "join": null,
+          "body": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?other"
+              },
+              "attribute": "claim-activity",
+              "value": {
+                "lit": "waiting"
+              },
+              "phrase": "activity of your retained claim (active, waiting, resume-required or unknown)",
+              "many": false
+            }
+          ]
         }
       ],
       "calls": ["own-issue"],
@@ -10406,16 +11405,16 @@
     }
   ],
   "coverage": {
-    "decisions": 31,
-    "predicates": 70,
-    "alternatives": 113,
-    "denials": 8,
+    "decisions": 38,
+    "predicates": 71,
+    "alternatives": 118,
+    "denials": 9,
     "queries": 15,
     "keyQueries": 4,
-    "evidence": 34,
+    "evidence": 39,
     "overrides": 4,
     "constants": 14,
-    "attributes": 68,
-    "clauses": 602
+    "attributes": 74,
+    "clauses": 661
   }
 }
