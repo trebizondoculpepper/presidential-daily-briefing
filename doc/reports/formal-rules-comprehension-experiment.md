@@ -10,9 +10,11 @@ Run from the repository root:
 
 ```sh
 npx tsx scripts/formal-comprehension.ts prepare reports/formal-comprehension
-npx vp test run doc/reports/examples/formal-comprehension.test.ts
+npm run test:manual:formal
 npx tsx scripts/formal-comprehension.ts score reports/formal-comprehension responses.json
 ```
+
+The exhaustive validation is **manual and local only**. Run `npm run test:manual:formal` when designing/changing the engine's formal representation, editing the experiment preparation/scoring helper, or regenerating experiment inputs after relevant policy changes. It replays the native scenarios against both policy forms and compiles an engine bundle, so it is deliberately outside `npm test` and all CI jobs. It uses `vite.manual.config.ts` to select `formal-comprehension.manual.ts`; the ordinary test globs select only `*.test.ts`. It makes no model or GitHub calls. This check does not replace the normal rules-only tests, product tests or package checks in CI.
 
 The preparation directory must be new. It contains `manifest.json`, evaluator-only `oracle.json`, and twelve `model-input/cNN.json` files. Send only the `prompt` string to a model. Never send the manifest, source fixture names, development/held-out split or oracle. Responses are a JSON array of `{ "caseId": "c01", "raw": "<unmodified response text>" }` objects; keep repetitions in separate response files. Supply every frozen case exactly once; use an empty raw string for a failed attempt so it remains in the denominator.
 
