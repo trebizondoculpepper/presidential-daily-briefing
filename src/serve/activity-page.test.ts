@@ -329,7 +329,7 @@ describe("activity renderers (#456)", () => {
               scope: "ticket",
               deliverable: null,
               delivery: "delivered",
-              followUp: { detail: "verify on staging" },
+              followUp: "actionable",
               since: hours(3),
             },
             {
@@ -351,7 +351,9 @@ describe("activity renderers (#456)", () => {
     expect(html).toContain("Continuing responsibility");
     expect(html).toContain("#10 ticket");
     expect(html).toContain("#11 final report");
-    expect(html).toContain("follow-up: verify on staging");
+    expect(html).toContain("follow-up: actionable");
+    // The no-follow-up deliverable renders without a follow-up clause.
+    expect(html.match(/follow-up:/g)).toHaveLength(1);
   });
 
   it("escapes agent, title and warning text and links only GitHub URLs", () => {

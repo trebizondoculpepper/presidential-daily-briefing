@@ -242,10 +242,10 @@ export function activityRenderers(base: DashboardRenderers): ActivityRenderers {
       const deliverable = str(item.deliverable);
       const number = numberOf(item.url);
       const label = item.scope === "ticket" ? `#${number} ticket` : `#${number} ${deliverable}`;
-      const followUp = record(item.followUp);
-      const followUpText = str(followUp.detail)
-        ? `; follow-up: ${escapeHtml(str(followUp.detail))}`
-        : "";
+      // FollowUp is a string enum from the shared inventory: none, waiting, actionable, unknown.
+      const followUp = str(item.followUp);
+      const followUpText =
+        followUp && followUp !== "none" ? `; follow-up: ${escapeHtml(followUp)}` : "";
       return `<li>${link(item.url, label)} · delivery ${escapeHtml(str(item.delivery))}${followUpText}</li>`;
     });
     return `<h4>Continuing responsibility</h4><ol>${rows.join("")}</ol>`;
