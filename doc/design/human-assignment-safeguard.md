@@ -101,3 +101,21 @@ The dashboard states whose work is being processed and separates human ownership
 Do not activate partial strict-ownership enforcement that strands the unassigned backlog without routing/attention or invalidates current work without the agreed handoff/continuity path. Implementation slices may be separate, but final activation is verified coherently. Maintain the current owner-review hold, native dependency graph and visible readiness; no bulk reassignment, real contributor map, hidden automatic claim or new credentials are authorized by this document.
 
 Use native EDN tests for policy and injected tests for evidence/operations. Required scenarios include human membership and valid multiple owners; one active claim; creator assignment and partial creation; unrelated checkout fallback; routing before owned/estimate work; missing guidance attention on the original without duplicate issues/comments; changed assignment before routing; wrong-human takeover versus valid-claim protection; preserved-work draft PR and open issue; removed agent respecting the new claim; explicit human removal without automatic reclaim; technical error without false success; cached/no-cache outages and explicit human overrides; linked PR conflicts; and CLI/STDIO/HTTP/rebrief/dashboard parity. Never treat a draft PR as merged delivery or a human instruction as fabricated GitHub state.
+
+Implementation note (#672, `src/config/contributors.ts`, `pdb contributors`): the guidance reader
+recognises, in the verified checkout's root `CONTRIBUTORS.md`:
+
+- **accounts:** GitHub mentions `@login`, including backticked mentions; not emails, URLs or paths;
+- **areas:** each `##` or `###` heading starts one, owned by the mentions in its section, with an
+  optional `Paths:`/`Subtrees:` line of backticked subtrees;
+- **default:** only an explicit `Default: @login` line, which never counts as area ownership. Prose
+  such as "use this account as the default" is not interpreted, and two different defaults are
+  `ambiguous`, never resolved by order.
+
+Code blocks are ignored. It reports `available` (with a sha256 digest, the checkout's HEAD and
+evidence problems such as an area naming no account), or `missing`, `truncated` (over 64 KiB, not
+read), `unsafe` (a symbolic link or a non-file) or `unreadable`. `guidanceChanged` compares digests
+before acting; anything not available counts as changed. Guidance is read only from a checkout of
+the requested repository, never borrowed from another. The reader assigns nothing and decides
+nothing; #673 uses it. The project's `CONTRIBUTORS.md` gained `Default: @trebizondoculpepper`,
+restating its existing prose default.
