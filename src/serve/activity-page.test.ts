@@ -269,25 +269,26 @@ describe("activity renderers (#456)", () => {
   it("lists only agents with evidenced activity in the window, in server order", () => {
     const html = view.renderAgents(
       teamEnvelope([
-        agent("alpha", [claim(1, hours(2), { title: "Alpha work" })]),
+        // alpha has agent-attributed activity; beta only has an unattributed timestamp.
+        agent("alpha", [
+          claim(1, hours(2), {
+            title: "Alpha work",
+            activity: { state: "active", reason: "" },
+          }),
+        ]),
+        // beta only has an unattributed timestamp, so it is listed as undetermined, never
+        // silently dropped; `unlisted` has nothing at all and is not listed.
         agent("beta", [claim(2, hours(200), { title: "Beta stale work" })]),
+        agent("unlisted", []),
       ]),
       1,
       start,
     );
     expect(html).toContain("alpha");
-    expect(html).not.toContain("beta");
+    expect(html).toContain("beta");
+    expect(html).not.toContain("unlisted");
+    expect(html).toContain("Participation cannot be determined");
     expect(html).toContain("#1 Alpha work");
-    // A longer window includes the stale agent too.
-    const wide = view.renderAgents(
-      teamEnvelope([
-        agent("alpha", [claim(1, hours(2), { title: "Alpha work" })]),
-        agent("beta", [claim(2, hours(100), { title: "Beta stale work" })]),
-      ]),
-      7,
-      start,
-    );
-    expect(wide).toContain("beta");
   });
 
   it("separates claimed work from submitted responsibility and shows activity", () => {
@@ -461,7 +462,15 @@ describe("activity renderers (#456)", () => {
   });
 
   it("says no agent fits only when none has activity; an error renders no list", () => {
-    const none = view.renderAgents(teamEnvelope([agent("beta", [claim(2, hours(200))])]), 1, start);
+    // A claim with neither attributed state nor an attributed since is undetermined, so it is
+    // listed with the note; an agent with nothing at all is not listed.
+    const undetermined = view.renderAgents(
+      teamEnvelope([agent("beta", [claim(2, hours(200))])]),
+      1,
+      start,
+    );
+    expect(undetermined).toContain("Participation cannot be determined");
+    const none = view.renderAgents(teamEnvelope([agent("gamma", [])]), 1, start);
     expect(none).toContain("No agent has evidenced activity");
     expect(view.renderAgents({ status: "error" }, 1, start)).toBe("");
   });
@@ -473,7 +482,10 @@ describe("activity renderers (#456)", () => {
     ).toBe(false);
     expect(view.renderCoverage(teamEnvelope([]), 1, start)).toContain("0 of 0 agent(s)");
     const coverage = view.renderCoverage(
-      teamEnvelope([agent("alpha", [claim(1, hours(2))]), agent("beta", [claim(2, hours(200))])]),
+      teamEnvelope([
+        agent("alpha", [claim(1, hours(2), { activity: { state: "active", reason: "" } })]),
+        agent("beta", [claim(2, hours(200))]),
+      ]),
       1,
       start,
     );
@@ -508,7 +520,10 @@ describe("activity browser script (#456)", () => {
     const sandbox = {
       document: { getElementById: (id: string) => elements.get(id) ?? null },
       location,
-      history: { pushState: (_s: unknown, _t: string, to: string) => void pushed.push(to) },
+      history: {
+        pushState: (_s: unknown, _t: string, to: string) => void pushed.push(to),
+        replaceState: (_s: unknown, _t: string, to: string) => void pushed.push(to),
+      },
       addEventListener: (type: string, fn: () => void) => listeners.set(`window:${type}`, fn),
       Date: class extends Date {
         static override now() {
@@ -533,11 +548,16 @@ describe("activity browser script (#456)", () => {
     expect(b.fetched).toHaveLength(1);
     expect(b.fetched[0]!.path).toContain("/api/v1/team?repo=example%2Fparity&staleHours=48");
     b.pending[0]!(
-      teamEnvelope([agent("alpha", [claim(1, hours(2))]), agent("beta", [claim(2, hours(200))])]),
+      teamEnvelope([
+        agent("alpha", [claim(1, hours(2), { activity: { state: "active", reason: "" } })]),
+        agent("beta", [claim(2, hours(200))]),
+      ]),
     );
     await settle();
     expect(b.elements.get("agents")!.innerHTML).toContain("alpha");
-    expect(b.elements.get("agents")!.innerHTML).not.toContain("beta");
+    // beta is undetermined (no attributed evidence), so it is listed with the note.
+    expect(b.elements.get("agents")!.innerHTML).toContain("beta");
+    expect(b.elements.get("agents")!.innerHTML).toContain("Participation cannot be determined");
     expect(b.elements.get("coverage")!.innerHTML).toContain("1 of 2 agent(s)");
   });
 

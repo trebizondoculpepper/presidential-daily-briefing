@@ -146,24 +146,34 @@ export function activityRenderers(base: DashboardRenderers): ActivityRenderers {
     typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
   const str = (value: unknown): string => (typeof value === "string" ? value : "");
   const list = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
-  const eventAt = (c: unknown): string => {
+  /** An attributed participation timestamp for a claim/responsibility; empty when unattributed. */
+  const attributedAt = (c: unknown): string => {
     const src = record(c);
-    return str(record(src.latestActivity).at) || str(src.since);
+    // responsibilityInventory pushes each item to its responsible agent, so `since` is that
+    // agent's attributed start of responsibility. `latestActivity` is NOT actor-attributed (a
+    // ticket edit, another comment or a PR update can set it), so it is never participation.
+    return str(src.since);
   };
-  /** Agents with an evidenced event in the window. */
+  /** The claim's agent-attributed activity state; empty when not read for this agent. */
+  const attributedState = (c: unknown): string => str(record(record(c).activity).state);
+  /** Agents with evidence attributed to them in the window. */
   const agentsActive = (agents: unknown[], window: number, nowMs: number): unknown[] =>
     agents.filter((a) =>
       [...list(record(a).claims), ...list(record(a).responsibilities)].some((c) => {
-        const at = eventAt(c);
+        if (attributedState(c) !== "" && attributedState(c) !== "unknown") return true;
+        const at = attributedAt(c);
         return at !== "" && Number.isFinite(Date.parse(at)) && nowMs - Date.parse(at) <= ms(window);
       }),
     );
-  /** Agents whose participation cannot be determined: responsibility with no event timestamp. */
+  /** Agents whose participation cannot be determined: work held but no attributed evidence. */
   const agentsUndetermined = (agents: unknown[], window: number, nowMs: number): unknown[] =>
     agents.filter(
       (a) =>
         !agentsActive([a], window, nowMs).length &&
-        list(record(a).responsibilities).some((c) => eventAt(c) === ""),
+        [...list(record(a).claims), ...list(record(a).responsibilities)].some((c) => {
+          const at = attributedAt(c);
+          return at === "";
+        }),
     );
   const safeLink = (url: unknown): string | null =>
     typeof url === "string" && /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\//.test(url) ? url : null;
@@ -303,7 +313,7 @@ export function activityRenderers(base: DashboardRenderers): ActivityRenderers {
       const claims = list(agent.claims);
       const responsibilities = list(agent.responsibilities);
       const undeterminedNote = undetermined.includes(a)
-        ? '<p class="warn">Participation cannot be determined: this agent holds responsibility, but no event timestamp is in the available evidence.</p>'
+        ? '<p class="warn">Participation cannot be determined: this agent holds work, but no activity attributed to them is in the available evidence.</p>'
         : "";
       const warnings = list(agent.warnings).map((w) => {
         const wr = record(w);
@@ -329,7 +339,7 @@ export function activityRenderers(base: DashboardRenderers): ActivityRenderers {
     const undetermined = agentsUndetermined(all, window, nowMs).length;
     const gap =
       undetermined > 0
-        ? `<p class="warn">${undetermined} agent(s) hold responsibility but their participation could not be determined (no event timestamp in the evidence).</p>`
+        ? `<p class="warn">${undetermined} agent(s) hold work but participation could not be determined (no activity attributed to them in the evidence).</p>`
         : "";
     return `<h2>Evidence</h2><p>${complete ? "Coverage complete." : '<span class="warn">Coverage incomplete: missing evidence is unknown, never absent.</span>'}</p><p>${
       active
@@ -366,23 +376,22 @@ export function activityClient(base: DashboardRenderers, view: ActivityRenderers
     return days;
   };
 
-  const render = (envelope: unknown) => {
+  const render = (envelope: unknown, days: number) => {
     state.innerHTML = base.renderState(envelope, false);
     notices.innerHTML = view.renderNotices(envelope);
-    agents.innerHTML = view.renderAgents(envelope, parseWindow());
-    coverage.innerHTML = view.renderCoverage(envelope, parseWindow());
+    agents.innerHTML = view.renderAgents(envelope, days);
+    coverage.innerHTML = view.renderCoverage(envelope, days);
     agents.classList.remove("provisional");
     coverage.classList.remove("provisional");
   };
 
   const show = async (refresh: boolean, push: boolean) => {
     const days = parseWindow();
-    if (push)
-      history.pushState(
-        null,
-        "",
-        `?${new URLSearchParams({ repo, window: String(days) }).toString()}`,
-      );
+    const query = `?${new URLSearchParams({ repo, window: String(days) }).toString()}`;
+    // Keep the URL identifying the view shown: push on an explicit Show, replace on Refresh so
+    // a reload or bookmark restores the same window.
+    if (push) history.pushState(null, "", query);
+    else history.replaceState(null, "", query);
     controller?.abort();
     const mine = new AbortController();
     controller = mine;
@@ -407,7 +416,7 @@ export function activityClient(base: DashboardRenderers, view: ActivityRenderers
         status: "error",
         error: { code: "SELECTION_MISMATCH", message: "The answer was for another project." },
       };
-    render(envelope);
+    render(envelope, days);
   };
 
   byId("selection")!.addEventListener("submit", (event) => {
