@@ -108,4 +108,29 @@
           {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "t1" "created" 1 "label" "status:ready" "labels-complete" true "native-complete" true "reverse-complete" true "blocking-complete" true "open-blockers" 0 "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "owner" "other" "claim-activity" "waiting" "wait-reason" "theirs"}]
   :expect {:actions []
            :denials #{[100 "D-DENY-CLAIM"]}}}
+
+ {:id "zero-observed-claims-in-an-incomplete-inventory-deny-new-pickup"
+  :doc "Zero observed claims with an incomplete inventory cannot establish that the viewer has no claim: new pickup is denied, not offered. Codex finding on #606."
+  :viewer {:role "implementer" :agent "me"}
+  :facts [{:e 1 "forward-complete" true "owned-claims" 0 "owned-claims-complete" false}
+          {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "t1" "created" 1 "label" "status:ready" "labels-complete" true "native-complete" true "reverse-complete" true "blocking-complete" true "open-blockers" 0 "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M"}]
+  :expect {:actions []
+           :denials #{[100 "D-DENY-INVENTORY-UNKNOWN"]}}}
+
+ {:id "empty-incomplete-inventory-has-a-repository-inspection"
+  :doc "No ticket is invented when zero claims and zero subjects were observed."
+  :viewer {:role "implementer" :agent "me"}
+  :facts [{:e 1 "ownership-inventory" true "number" 0 "target" "https://github.com/o/r" "owned-claims" 0 "owned-claims-complete" false}]
+  :expect {:actions [{:subject 1 :rule "D-INVENTORY-UNKNOWN" :kind "inspect-ownership" :band 3
+    :why "Your claim inventory is incomplete and no claim was observed; inspect your ownership before claiming more work."}]
+    :denials #{}}}
+ {:id "observed-waits-do-not-complete-an-incomplete-inventory"
+  :doc "A known wait does not rule out an omitted active claim: deny new pickup."
+  :viewer {:role "implementer" :agent "me"}
+  :facts [{:e 1 "forward-complete" true "owned-claims" 1 "owned-claims-complete" false "owned-review-subject" 100}
+    {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "t1" "created" 1 "label" "status:ready" "labels-complete" true "native-complete" true "reverse-complete" true "blocking-complete" true "open-blockers" 0 "owner" "me" "claim-activity" "waiting" "wait-reason" "question q"}
+    {:e 101 "kind" "issue" "state" "OPEN" "number" 2 "target" "t2" "created" 2 "label" "status:ready" "labels-complete" true "native-complete" true "reverse-complete" true "blocking-complete" true "open-blockers" 0 "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M"}]
+  :expect {:actions [{:subject 100 :rule "D-OWNED-INCOMPLETE" :kind "inspect" :band 3}
+    {:subject 100 :rule "D-OWN-WAIT" :kind "wait-claim" :band 8}]
+    :denials #{[100 "D-DENY-CLAIM"] [101 "D-DENY-INVENTORY-UNKNOWN"]}}}
  ]}

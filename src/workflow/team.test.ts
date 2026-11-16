@@ -109,6 +109,13 @@ describe("team view (#41, doc/design/diagnostics.md)", () => {
     expect(valid.warnings.find((w) => w.kind === "retained-claims")?.detail).toContain(
       "all but one verified waiting",
     );
+    const released = read(["active", "not-owned", "not-owned"]);
+    expect(released.warnings.map((w) => w.kind)).not.toContain("retained-claims");
+    expect(released.warnings.map((w) => w.kind)).not.toContain("multiple-active-claims");
+    const twoRetained = read(["waiting", "not-owned", "active"]);
+    const review = twoRetained.warnings.find((w) => w.kind === "retained-claims");
+    expect(review?.detail).toContain("2 retained claims");
+    expect(review?.detail).not.toContain(`#${twoRetained.claims[1]!.number}`);
     expect(valid.claims[0]!.activity).toEqual({ state: "waiting", reason: "r0" });
     // Two not waiting: a definite contradiction with explicit, non-automatic recovery.
     const two = read(["active", "resume-required", "waiting"]);

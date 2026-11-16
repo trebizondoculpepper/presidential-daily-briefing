@@ -225,6 +225,14 @@
    :codes ["own-claim" "review-owned-work" "inspection"]
    :witnesses {"ownedClaims" [[1 "owned-claims" ?value]]}}
 
+  {:id "D-INVENTORY-UNKNOWN"
+   :kind "inspect-ownership"
+   :band 3
+   :preference 3
+   :when [[1 "role" "implementer"] [?t "ownership-inventory" true] [1 "owned-claims" 0] [1 "owned-claims-complete" false]]
+   :why "Your claim inventory is incomplete and no claim was observed; inspect your ownership before claiming more work."
+   :codes ["inspection" "inventory-unknown"]}
+
   {:id "D-OWNED-INCOMPLETE"
    :kind "inspect"
    :band 3
@@ -341,4 +349,5 @@
   "D-DENY-LABELS-UNKNOWN" "Label evidence is incomplete."
   "D-DENY-NATIVE-UNKNOWN" "Native dependency evidence is incomplete."
   "D-DENY-CLOSING-UNKNOWN" "Closing pull request evidence is incomplete."
-  "D-DENY-PLATFORM" "The ticket names a platform the viewer is not known to run on."}}
+  "D-DENY-PLATFORM" "The ticket names a platform the viewer is not known to run on."
+  "D-DENY-INVENTORY-UNKNOWN" "The viewer's claim inventory is incomplete: unseen active claims cannot be ruled out."}}

@@ -7,6 +7,7 @@ import { resolveProjectRulesSetting } from "./config/project-rules-setting.js";
 import { projectRulesContext } from "./rules/project-context.js";
 /** One read-only intake command. Contract: doc/pdb-cli.md. */
 import { realpathSync } from "node:fs";
+import { crashDisclosure } from "./telemetry/crash-setting.js";
 import { initializeCrashes } from "./telemetry/crashes.js";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
@@ -267,6 +268,7 @@ export const help = `Usage: pdb [options]
 Presidential Daily Briefing: evidence-linked actions for coding agents. Requires authenticated gh and Node 26+.
 Next-action default: Datalog, implementer view; --role designer selects design work.
 Rollback: pdb config set briefing.engine typescript.
+${crashDisclosure()}
   briefing [--last 24h | --since ISO | --checkpoint PATH]  Read-only repository catch-up:
                         what changed and what needs attention (briefing --help)
   issue create --title TEXT [--body TEXT | --body-file PATH|-] [--label L]... [--dry-run]

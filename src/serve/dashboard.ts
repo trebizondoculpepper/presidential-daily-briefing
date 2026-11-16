@@ -193,10 +193,13 @@ export function dashboardRenderers(): DashboardRenderers {
       const target = String(item.target ?? "");
       const number = target.split("/").pop() ?? "";
       const link = safeLink(target);
-      const title = escapeHtml(titles.get(target) ?? target);
+      const inventory = item.kind === "inspect-ownership";
+      const title = escapeHtml(
+        inventory ? "Repository ownership inventory" : (titles.get(target) ?? target),
+      );
       const name = link
-        ? `<a href="${escapeHtml(link)}" rel="noreferrer">#${escapeHtml(number)} ${title}</a>`
-        : `#${escapeHtml(number)} ${title}`;
+        ? `<a href="${escapeHtml(link)}" rel="noreferrer">${inventory ? "" : `#${escapeHtml(number)} `}${title}</a>`
+        : `${inventory ? "" : `#${escapeHtml(number)} `}${title}`;
       const commands = [item.nextCommand, item.thenCommand, item.inspection]
         .filter((c) => typeof c === "string" && c)
         .map((c) => `<div><code>${escapeHtml(c)}</code></div>`)

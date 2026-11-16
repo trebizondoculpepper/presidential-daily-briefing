@@ -755,32 +755,36 @@ export async function readBriefing(
   const trust = rest
     ? markerTrust(permissionLookup(request.repository, rest, request.signal))
     : undefined;
-  // #413: claim activity is read once (live), before the first shortlist ranking, so every
-  // selection pass and the final presentation rank the same retained-claim rows: hydration then
-  // covers whatever those rows bring into view. The inventory is recomputed per snapshot.
-  let activity: Promise<ReadonlyMap<string, ClaimActivityFact> | undefined> | undefined;
+  // #413: claim activity is read live, before the first shortlist ranking, so every selection
+  // pass and the final presentation rank the same retained-claim rows: hydration then covers
+  // whatever those rows bring into view. The inventory is recomputed per snapshot; a claim
+  // first revealed by hydration (an ownership label discovery did not see) is read then, so a
+  // waiting or resume-required claim is never treated as active legacy work.
+  let activity: ReadonlyMap<string, ClaimActivityFact> | undefined;
+  let activityReadFor = new Set<string>();
   const retainedFor = async (collected: Snapshot): Promise<PresentOptions["retained"]> => {
     if (!request.agent || (request.role ?? defaultEngineRole) !== "implementer") return undefined;
-    activity ??=
-      rest && liveQuery
-        ? readRetainedFacts(
-            collected,
-            request.agent,
-            {
-              query: liveQuery as GraphQuery,
-              permission: permissionLookup(request.repository, rest, request.signal),
-            },
-            runtime.claimActivityReader,
-          ).then((f) => f?.claimActivity)
-        : Promise.resolve(undefined);
-    const claimActivity = await activity;
     const owned = ownedClaims(collected, request.agent);
+    const fresh = owned.urls.filter((url) => !activityReadFor.has(url));
+    if (fresh.length && rest && liveQuery) {
+      const facts = await readRetainedFacts(
+        { ...collected, issues: collected.issues.filter((i) => fresh.includes(i.url)) },
+        request.agent,
+        {
+          query: liveQuery as GraphQuery,
+          permission: permissionLookup(request.repository, rest, request.signal),
+        },
+        runtime.claimActivityReader,
+      );
+      for (const url of fresh) activityReadFor.add(url);
+      if (facts?.claimActivity) activity = new Map([...(activity ?? []), ...facts.claimActivity]);
+    }
     return {
       ownedClaims: {
         ...owned,
-        urls: owned.urls.filter((u) => claimActivity?.get(u)?.state !== "not-owned"),
+        urls: owned.urls.filter((u) => activity?.get(u)?.state !== "not-owned"),
       },
-      ...(claimActivity ? { claimActivity } : {}),
+      ...(activity ? { claimActivity: activity } : {}),
     };
   };
   const present = async (collected: Snapshot, live: boolean, reserve = 0) =>

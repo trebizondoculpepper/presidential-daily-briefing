@@ -219,6 +219,68 @@ describe("both engines rank retained claims alike (#413)", () => {
       expect(datalog.length).toBeGreaterThan(0);
     });
 
+  it("suppresses new pickup in both engines when zero claims and an incomplete inventory meet", async () => {
+    // The inventory cannot establish that the viewer holds no claim, so neither engine offers
+    // an `implement` row for the otherwise-eligible ticket #4 (D-DENY-INVENTORY-UNKNOWN).
+    for (const engine of ["datalog", "typescript"] as const) {
+      const order = (
+        await ranked(only(s, [4]), engine, { ownedClaims: { urls: [], complete: false } })
+      ).map((r) => r.split(" | ")[0]!);
+      expect(order.filter((r) => r.startsWith("implement #4"))).toEqual([]);
+    }
+  });
+
+  it("offers repository ownership inspection without inventing a ticket, even for an empty snapshot", async () => {
+    for (const engine of ["datalog", "typescript"] as const) {
+      const presented = await presentBriefing(
+        snapshot([], []),
+        {
+          maxChars: 100_000,
+          limit: 10,
+          role: "implementer",
+          agent: me,
+          retained: { ownedClaims: { urls: [], complete: false } },
+          engineSetting: { requested: engine, source: "config" },
+        },
+        local(),
+        new Date(Date.UTC(2026, 5, 1)),
+      );
+      const report = presented.report as {
+        subjects: { url: string }[];
+        rankedActions: { items: { kind: string; target: string; nextCommand: string }[] };
+      };
+      expect(report.rankedActions.items).toMatchObject([
+        {
+          kind: "inspect-ownership",
+          target: "https://github.com/example/project",
+          nextCommand: "pdb team --repo example/project",
+        },
+      ]);
+      expect(report.subjects).toEqual([]);
+      expect(presented.text).toContain("Inspect ownership: Repository ownership inventory");
+      expect(presented.text).not.toMatch(/#0|#undefined/);
+    }
+  });
+
+  it("never treats observed waiting claims as proof an incomplete inventory has no active claim", async () => {
+    for (const engine of ["datalog", "typescript"] as const) {
+      const view = only(s, [1, 4]);
+      const waiting = { state: "waiting" as const, reason: "awaiting human answer" };
+      const retained = {
+        ownedClaims: { urls: [url(1)], complete: false },
+        claimActivity: new Map([[url(1), waiting]]),
+      };
+      const partial = await ranked(view, engine, retained);
+      expect(partial.some((row) => row.startsWith("wait-claim #1"))).toBe(true);
+      expect(partial.some((row) => row.startsWith("implement #4"))).toBe(false);
+      const complete = await ranked(view, engine, {
+        ...retained,
+        ownedClaims: { ...retained.ownedClaims, complete: true },
+      });
+      expect(complete.some((row) => row.startsWith("implement #4"))).toBe(true);
+    }
+  });
+
   it("orders resume and review ahead of new work, and waits after it", async () => {
     const order = (await ranked(s, "datalog", cases["waiting, resume-required and unknown"])).map(
       (r) => r.split(" | ")[0]!,
@@ -322,5 +384,76 @@ describe("shortlist selection sees retained-claim activity (#413)", () => {
     const report = (presented as { report: { rankedActions: { items: { kind: string }[] } } })
       .report;
     expect(report.rankedActions.items[0]?.kind).toBe("resume-claim");
+  });
+
+  it("reads activity for a claim first revealed during hydration, never as active legacy work", async () => {
+    const { readBriefing } = await import("../briefing/service.js");
+    const claim = ticket(1, [`agent:${me}`, "impact:M", "complexity:M"]);
+    const other = ticket(2, ["impact:L", "complexity:S"]);
+    // Discovery knows only the stub: the claim's ownership label appears after hydration.
+    const discovered = {
+      ...snapshot([other], []),
+      shortlist: {
+        schemaVersion: 1 as const,
+        profile: "briefing-shortlist-v1" as const,
+        discovered: { issues: 2, pullRequests: 0, complete: true },
+        hydrated: [other.url],
+        notHydrated: [
+          { number: 1, url: claim.url, kind: "issue" as const, reason: "not-shortlisted" as const },
+        ],
+        rounds: 1,
+        provisional: true,
+        notice: null,
+      },
+    };
+    const hydrated = snapshot([claim, other], []);
+    const reads: string[] = [];
+    const presented = await readBriefing(
+      {
+        collect: async () => {
+          throw new Error("not used");
+        },
+        collectShortlist: async (
+          _repository: string,
+          options: { select: (s: Snapshot) => Promise<string[]> },
+        ) => {
+          // First pass sees the discovery snapshot (claim absent); final returns hydrated.
+          await options.select(discovered);
+          return hydrated;
+        },
+        claimActivityReader: async (_repo: string, n: number) => {
+          reads.push(String(n));
+          return read({
+            state: "resume-required",
+            blocker: { kind: "dependency", repository: "o/r", issue: 9 },
+            reason: "parser",
+            lastActivity: "1",
+            cleared: "o/r#9 no longer blocks #1",
+          });
+        },
+        dependencyReport: async () => {
+          throw new Error("not used");
+        },
+        rest: async () => ({ status: 200, body: { permission: "write" } }),
+        query: async () => ({ repository: {} }),
+        now: () => new Date(Date.UTC(2026, 5, 1)),
+        guide: local(),
+        estimation: local(),
+        env: {},
+      } as never,
+      {
+        repository: hydrated.repository,
+        agent: me,
+        role: "implementer",
+        limit: 10,
+        maxChars: 100_000,
+      },
+    );
+    // The claim first revealed by hydration had its activity read, not treated as active.
+    expect(reads).toContain("1");
+    const report = (presented as { report: { rankedActions: { items: { kind: string }[] } } })
+      .report;
+    expect(report.rankedActions.items[0]?.kind).toBe("resume-claim");
+    expect(report.rankedActions.items.map((i) => i.kind)).not.toContain("continue-implementation");
   });
 });

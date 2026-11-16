@@ -33,6 +33,7 @@ jobs:
       contents: write # tag and GitHub release for official versions
       id-token: write # npm trusted publishing (OIDC); no npm token is stored
     env:
+      SENTRY_DISABLED: "1"
       CHANNEL: ${{ inputs.channel }}
       SHA: ${{ inputs.sha }}
     steps:
