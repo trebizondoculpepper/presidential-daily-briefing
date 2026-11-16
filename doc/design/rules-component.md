@@ -1,5 +1,9 @@
 # Rules component: native EDN sources, build and test boundary
 
+## Native workflow-policy amendment (#679)
+
+[workflow-policy-boundary.md](workflow-policy-boundary.md) defines the sole native decision source, target-specific criteria, explicit trusted human direction over opinionated defaults, outage/unknown-fact behavior and the TypeScript mechanics boundary. It supersedes any interpretation below that permits independent imperative workflow policy or treats every default as unoverrideable. Runtime changes follow in focused PRs; this amendment does not claim they have shipped or weaken actual permissions, provenance or protocol validation.
+
 Status: architecture contract for #348. All migration steps are implemented: the policy lives in `src/rules/datalog/policy/*.edn` and `policy.ts` is gone. The inventory below describes the code before extraction. Implementation follows in the small PRs listed under "Migration plan". It refines, and does not replace, the owner decisions in [local service and isolated rule testing](local-service-and-rule-testing.md) and the engine contract in [Datalog decisions and explanations](datalog-live-experiment.md). Source placement follows [source layout by capability](source-layout.md) (#335).
 
 ## Summary

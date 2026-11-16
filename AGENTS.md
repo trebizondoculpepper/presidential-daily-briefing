@@ -43,7 +43,7 @@ Use this project's own toolchain for ticket intake, prioritization, claims, hand
 
 Use this repository's issues, not the old poker_blocks issue numbers. Recheck current ownership and native blockers before claiming. Keep one issue/PR focused; preserve another agent's work. An unanswered question goes on its ticket with the concrete blocker.
 
-Before committing run `npm run check`, `npm test` and `npm run build`. Use the installed Vite+ pre-commit hook; do not bypass it. Keep the developer diary in `diary/` for significant work.
+For documentation-only changes (root Markdown, `doc/`, `diary/` and GitHub Markdown templates, excluding `doc/reports/examples/`), run `npx vp fmt --check`; unit tests, builds and package tests are not required. Mixed changes and all executable/configuration changes retain the full checks. Before committing those changes run `npm run check`, `npm test` and `npm run build`. Use the installed Vite+ pre-commit hook; do not bypass it. Keep the developer diary in `diary/` for significant work.
 
 ## Commands
 

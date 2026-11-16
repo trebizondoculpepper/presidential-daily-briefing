@@ -59,6 +59,9 @@ export interface ErrorEventDiagnostic {
     limit: number | null;
     remaining: number | null;
     resetAt: string | null;
+    /** From the same response's Retry-After (seconds or HTTP date); only when actually seen. */
+    retryAfterSeconds: number | null;
+    retryAt: string | null;
   } | null;
 }
 /** The request facts a diagnostic read needs. */
