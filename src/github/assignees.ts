@@ -137,6 +137,11 @@ function isPullRequest(subject: Issue | PullRequest): subject is PullRequest {
   return "closingIssuesReferences" in subject && "headRefOid" in subject;
 }
 
+export interface CollectAssignmentOptions extends AssignmentOptions {
+  /** Optional per-subject observation time override (e.g. from cached shortlist coverage). */
+  observedAtFor?: (subject: Issue | PullRequest) => string | undefined;
+}
+
 /**
  * Collect normalized assignment evidence for an issue or pull request.
  * For pull requests, linked-issue scope uses explicit `closingIssuesReferences` only,
@@ -145,9 +150,13 @@ function isPullRequest(subject: Issue | PullRequest): subject is PullRequest {
 export function collectAssignmentEvidence(
   subject: Issue | PullRequest,
   issuesByUrl: ReadonlyMap<string, Issue>,
-  options: AssignmentOptions = {},
+  options: CollectAssignmentOptions = {},
 ): AssignmentEvidence {
-  const direct = normalizeSubjectAssignment(subject, options);
+  const observedFor = (item: Issue | PullRequest): AssignmentOptions => ({
+    ...options,
+    observedAt: options.observedAtFor?.(item) ?? options.observedAt,
+  });
+  const direct = normalizeSubjectAssignment(subject, observedFor(subject));
   if (!isPullRequest(subject)) {
     return {
       subject: direct,
@@ -171,7 +180,7 @@ export function collectAssignmentEvidence(
       number: ref.number,
       url: ref.url,
       resolved: Boolean(issue),
-      assignment: issue ? normalizeSubjectAssignment(issue, options) : null,
+      assignment: issue ? normalizeSubjectAssignment(issue, observedFor(issue)) : null,
     };
   });
 
@@ -191,9 +200,11 @@ export function collectAssignmentEvidence(
           .join(","),
       ),
   );
+  // Only positively established human-unassigned states (unassigned / non-human) conflict with
+  // assigned states; missing account-type evidence (state === "unknown") stays unknown.
   const hasAssignedAndUnassigned =
     resolvedStates.some((a) => a.completeness === "complete" && a.humans.length > 0) &&
-    resolvedStates.some((a) => a.completeness === "complete" && a.humans.length === 0);
+    resolvedStates.some((a) => a.state === "unassigned");
   const directVsLinkedConflict =
     direct.completeness === "complete" &&
     direct.humans.length > 0 &&
@@ -238,6 +249,24 @@ export function collectAssignmentEvidence(
   };
 }
 
+function subjectObservedAt(subject: Issue | PullRequest, snapshot: Snapshot): string {
+  const coverage = snapshot.collection?.coverage;
+  if (!coverage?.length) return snapshot.fetchedAt;
+  const slug = `${snapshot.repository}#${subject.number}`;
+  const direct = coverage.findLast(
+    (c) => c.observedAt !== null && (c.subject === subject.url || c.subject === slug),
+  );
+  if (direct?.observedAt) return direct.observedAt;
+  const discoverySource = isPullRequest(subject) ? "pullRequests" : "issues";
+  const discovery = coverage.findLast(
+    (c) =>
+      c.observedAt !== null &&
+      (c.source === discoverySource || c.source === "discovery") &&
+      c.subject === snapshot.repository,
+  );
+  return discovery?.observedAt ?? snapshot.fetchedAt;
+}
+
 /** Convenience index over a collected snapshot. */
 export function snapshotAssignmentEvidence(
   snapshot: Snapshot,
@@ -246,10 +275,11 @@ export function snapshotAssignmentEvidence(
   } = {},
 ): Map<string, AssignmentEvidence> {
   const issuesByUrl = new Map(snapshot.issues.map((i) => [i.url, i] as const));
-  const opts: AssignmentOptions = {
+  const opts: CollectAssignmentOptions = {
     ...options,
     warnings: snapshot.warnings,
     observedAt: snapshot.fetchedAt,
+    observedAtFor: (s) => subjectObservedAt(s, snapshot),
     source: options.source ?? "observed",
   };
   const result = new Map<string, AssignmentEvidence>();

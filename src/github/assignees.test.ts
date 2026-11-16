@@ -223,6 +223,99 @@ describe("human assignment evidence (#665)", () => {
     );
     expect(conflictingPr.conflict).toBe(true);
     expect(conflictingPr.effective).toBe("conflicting");
+
+    const untypedIssue = baseIssue({
+      number: 4,
+      url: "https://github.com/o/r/issues/4",
+      assignees: { nodes: [{ login: "alice" }], pageInfo: { hasNextPage: false, endCursor: null } },
+    });
+    const mapWithUntyped = new Map<string, Issue>([
+      [aliceIssue.url, aliceIssue],
+      [untypedIssue.url, untypedIssue],
+    ]);
+    const untypedPr = collectAssignmentEvidence(
+      basePr({
+        closingIssuesReferences: {
+          nodes: [
+            { number: 1, url: aliceIssue.url },
+            { number: 4, url: untypedIssue.url },
+          ],
+          pageInfo: { hasNextPage: false, endCursor: null },
+        },
+      }),
+      mapWithUntyped,
+      { employingHuman: "alice" },
+    );
+    expect(untypedPr.conflict).toBe(false);
+    expect(untypedPr.effective).toBe("unknown");
+  });
+
+  it("preserves per-subject observation times from cached shortlist coverage", () => {
+    const issue = baseIssue({
+      assignees: {
+        nodes: [{ __typename: "User", login: "alice" }],
+        pageInfo: { hasNextPage: false, endCursor: null },
+      },
+    });
+    const pr = basePr({
+      closingIssuesReferences: {
+        nodes: [{ number: 1, url: issue.url }],
+        pageInfo: { hasNextPage: false, endCursor: null },
+      },
+    });
+    const snap: Snapshot = {
+      schemaVersion: 1,
+      repository: "o/r",
+      startedAt: "2026-11-16T10:09:59Z",
+      fetchedAt: "2026-11-16T10:10:00Z",
+      since: null,
+      issues: [issue],
+      pullRequests: [pr],
+      dependencies: [],
+      changed: [],
+      warnings: [],
+      rateLimit: null,
+      collection: {
+        schemaVersion: 1,
+        profile: "briefing-shortlist-v1",
+        profileVersion: 1,
+        operation: "briefing",
+        bounds: {},
+        notAttempted: [],
+        coverage: [
+          {
+            source: "issue",
+            subject: issue.url,
+            state: "complete",
+            observedAt: "2026-11-16T10:05:00Z",
+            omission: null,
+            failure: null,
+            profileVersion: 1,
+          },
+          {
+            source: "pull-request",
+            subject: "o/r#2",
+            state: "complete",
+            observedAt: "2026-11-16T10:08:00Z",
+            omission: null,
+            failure: null,
+            profileVersion: 1,
+          },
+        ],
+        quota: null,
+      } as unknown as Snapshot["collection"],
+    };
+    const evidence = snapshotAssignmentEvidence(snap, {
+      employingHuman: "alice",
+      now: new Date("2026-11-16T10:10:00Z"),
+    });
+    expect(evidence.get(issue.url)?.subject.freshness.observedAt).toBe("2026-11-16T10:05:00Z");
+    expect(evidence.get(issue.url)?.subject.freshness.ageMs).toBe(300_000);
+    expect(evidence.get(pr.url)?.subject.freshness.observedAt).toBe("2026-11-16T10:08:00Z");
+    expect(evidence.get(pr.url)?.subject.freshness.ageMs).toBe(120_000);
+    expect(evidence.get(pr.url)?.linkedIssues[0]?.assignment?.freshness.observedAt).toBe(
+      "2026-11-16T10:05:00Z",
+    );
   });
 
   it("collects assignees in github.ts and warns when truncated", async () => {
