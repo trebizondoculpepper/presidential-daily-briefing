@@ -181,14 +181,14 @@ export function teamView(
     const read = claimActivity?.has(entry.agent) ?? false;
     // #412/#413: more than one claim is valid only while all but one are verified waiting.
     // A claim the live read found released since the snapshot counts for nothing.
-    const notWaiting = entry.claims.filter(
-      (c) => c.activity?.state !== "waiting" && c.activity?.state !== "not-owned",
-    );
-    if (entry.claims.length > 1 && !read)
+    // Preserve the snapshot row with its live annotation, but count only retained ownership.
+    const retained = entry.claims.filter((c) => c.activity?.state !== "not-owned");
+    const notWaiting = retained.filter((c) => c.activity?.state !== "waiting");
+    if (retained.length > 1 && !read)
       entry.warnings.push({
         kind: "multiple-claims",
         certainty: "candidate",
-        detail: `${entry.claims.length} retained claims (${list(entry.claims)}); their activity was not read, so whether all but one are verified waiting is unknown.`,
+        detail: `${retained.length} retained claims (${list(retained)}); their activity was not read, so whether all but one are verified waiting is unknown.`,
       });
     else if (notWaiting.length > 1)
       entry.warnings.push({
@@ -196,11 +196,11 @@ export function teamView(
         certainty: "definite",
         detail: `${list(notWaiting)} are not verified waiting; the claim guard admits at most one such claim. Recover explicitly: finish one, record a wait (pdb claim wait N), or release one. Nothing is released automatically.`,
       });
-    else if (entry.claims.length > 1)
+    else if (retained.length > 1)
       entry.warnings.push({
         kind: "retained-claims",
         certainty: "candidate",
-        detail: `${entry.claims.length} retained claims (${list(entry.claims)}), all but one verified waiting; review which to finish, justify as waiting, release or reassign.`,
+        detail: `${retained.length} retained claims (${list(retained)}), all but one verified waiting; review which to finish, justify as waiting, release or reassign.`,
       });
     for (const c of entry.claims)
       if (c.activity?.state === "unknown")

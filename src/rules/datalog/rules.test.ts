@@ -93,6 +93,8 @@ const audience: Record<
   "D-REVIEW-OWNED": { role: "implementer", kind: "issue" },
   "D-REVIEW-OWNED-PARTIAL": { role: "implementer", kind: "issue" },
   "D-OWN-UNKNOWN": { role: "implementer", kind: "issue" },
+  // Repository context has no GitHub issue/PR kind.
+  "D-INVENTORY-UNKNOWN": { role: "implementer", kind: "any" },
   "D-OWNED-INCOMPLETE": { role: "implementer", kind: "issue" },
   "D-OWN-WAIT": { role: "implementer", kind: "issue" },
   "D-HUMAN-ASK-YOU": { role: "human", kind: "issue" },

@@ -1,5 +1,9 @@
 # Three briefing policies and shared ranking
 
+## Ownership-first shared-pool amendment (#651)
+
+[unified-activity-ranking.md](unified-activity-ranking.md) is the reviewed replacement for agent role-exclusive membership and assessment-over-owned-work priority, to be implemented separately in #652. Both roles receive the same pre-limit activity pool; ownership precedes role affinity and existing within-role bands. It explicitly supersedes #378, including the single owned M/M exception below. Human briefing, eligibility, mutation authority and retained-claim admission remain separate and unchanged. Conflicting ranking passages below describe the pre-#652 baseline, not additional exceptions to the amendment.
+
 Owner-confirmed contract for #1/#40/#43/#45. Use shared normalized facts and declarative tier/key policies, not separate collectors or opaque weighted scores. The research in ../reports/next-action-ranking.md is evidence, not authority over later owner decisions.
 
 ## Opt-in Datalog experiment

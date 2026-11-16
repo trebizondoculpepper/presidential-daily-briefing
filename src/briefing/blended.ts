@@ -38,6 +38,7 @@ export type ActionKind =
   // Retained claims (#413): an explicit resume, the owned-work review and a visible wait.
   | "resume-claim"
   | "review-owned-work"
+  | "inspect-ownership"
   | "wait-claim";
 export type BlendedRole = "implementer" | "designer";
 /**
@@ -106,6 +107,7 @@ export function classify(
     // Retained claims (#413), as decisions.edn D-OWN-RESUME, D-REVIEW-OWNED and D-OWN-WAIT.
     "resume-claim": [3, "resume-required"],
     "review-owned-work": [3, "review-owned-work"],
+    "inspect-ownership": [3, "inspection"],
     "wait-claim": [8, "waiting"],
   };
   // An own claim whose activity is unknown is inspected ahead of new work (D-OWN-UNKNOWN).
@@ -455,6 +457,33 @@ export function roleCandidates(input: CandidateInput): ActionFacts[] {
     };
   };
   const out: ActionFacts[] = [];
+  if (
+    input.role === "implementer" &&
+    input.retained?.ownedClaims.complete === false &&
+    input.retained.ownedClaims.urls.length === 0
+  ) {
+    const target = `https://github.com/${input.repository}`;
+    out.push({
+      repository: input.repository,
+      target,
+      number: 0,
+      kind: "inspect-ownership",
+      role: input.role,
+      sequence: 0,
+      complexity: unknownAssessments.complexity,
+      impact: unknownAssessments.impact,
+      urgency: 1,
+      unlocks: 0,
+      unlocksUnknown: [],
+      own: false,
+      incomplete: true,
+      createdAt: new Date(0).toISOString(),
+      evidence: [target],
+      nextCommand: `pdb team --repo ${input.repository}`,
+      inspection: null,
+      why: "Your claim inventory is incomplete and no claim was observed; inspect your ownership before claiming more work.",
+    });
+  }
   let sequence = 0;
   // #413: an own claim's activity decides its row, as decisions.edn does for the Datalog engine.
   // The texts are decisions.edn's templates; retainedranking.test.ts compares the two engines.
@@ -489,6 +518,13 @@ export function roleCandidates(input: CandidateInput): ActionFacts[] {
   for (const section of input.sections) {
     const kind = sectionKinds[section.name];
     if (section.background || !kind) continue;
+    // #413: observed waiting claims cannot rule out unseen active claims in an incomplete
+    // inventory; new pickup is denied rather than inviting a claim the guard may refuse.
+    const inventoryUnknown =
+      input.role === "implementer" &&
+      section.name === "pickup" &&
+      input.retained?.ownedClaims.complete === false;
+    if (inventoryUnknown) continue;
     for (const row of section.rows) {
       const mapped =
         kind === "continue-implementation" && input.role === "implementer"

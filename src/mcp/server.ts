@@ -1,3 +1,4 @@
+import { crashDisclosure } from "../telemetry/crash-setting.js";
 import {
   BriefingEngineError,
   safeEngineCause,
@@ -140,6 +141,8 @@ Tools: triage_briefing, triage_issue, triage_dependencies, triage_events. Never 
                         Minutes between completed polls (default 30, 1 to 1440; needs --poll)
   --help                Show usage
 Stdout carries only the MCP protocol; diagnostics go to stderr.
+
+${crashDisclosure()}
 
 ${impactGuidanceSummary()}`;
 

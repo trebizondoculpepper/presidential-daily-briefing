@@ -639,6 +639,13 @@ export function briefing(snapshot: Snapshot, options: BriefingOptions, now: Date
     ...issues
       .filter((issue) => !nativeKnown(issue))
       .map((issue) => `${issue.url}: native dependency evidence missing; readiness unknown.`),
+    ...(options.retained &&
+    options.retained.ownedClaims.urls.length === 0 &&
+    !options.retained.ownedClaims.complete
+      ? [
+          "Your claim inventory is incomplete and no claim was observed: whether you already hold a claim is unknown, so new pickup is not offered. Read one with pdb team or pdb who N.",
+        ]
+      : []),
   ];
   return {
     schemaVersion: 1 as const,

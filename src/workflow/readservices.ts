@@ -96,6 +96,20 @@ export async function readTeam(
         `Claim activity not read for ${activity.omitted.join(", ")}: more than ${teamActivityCap} claims in this view; read one with pdb who N.`,
       ],
     };
+  const unknownActivity = activity
+    ? [...activity.activity].flatMap(([agent, claims]) =>
+        [...claims.values()]
+          .filter((f) => f.state === "unknown")
+          .map(
+            (f) => `Claim activity for ${agent} on #${f.number} could not be verified: ${f.reason}`,
+          ),
+      )
+    : [];
+  if (unknownActivity.length)
+    view.completeness = {
+      complete: false,
+      warnings: [...view.completeness.warnings, ...unknownActivity],
+    };
   // #192: responsibilities per agent (S18 inventory), including agents with no claim.
   const read = deliveryRead(snapshot, await diagnoseDelivery(snapshot, boundaries));
   const report = withDeliveryCompleteness(
@@ -146,6 +160,18 @@ export async function readWho(
           }),
         )
       : null;
+  const unknownActivity = (claimActivity ?? []).filter((f) => f.state === "unknown");
+  if (unknownActivity.length)
+    ownership.completeness = {
+      complete: false,
+      warnings: [
+        ...ownership.completeness.warnings,
+        ...unknownActivity.map(
+          (f) =>
+            `Claim activity for ${f.agent} on #${number} could not be verified${f.reason ? `: ${f.reason}` : "."}`,
+        ),
+      ],
+    };
   const report = withDeliveryCompleteness(
     issue
       ? { ...ownership, claimActivity, ...deliveryFields(issue, view) }
