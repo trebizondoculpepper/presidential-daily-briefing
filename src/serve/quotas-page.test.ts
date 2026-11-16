@@ -361,6 +361,16 @@ describe("quota renderers (#548)", () => {
     expect(later.notes).toContain("older than the 60-second freshness window");
   });
 
+  it("keeps a clock-rollback age unknown and never shows it fresh", () => {
+    // A redraw whose rendering clock is earlier than the observation time is a rollback: the
+    // age is unknown ("age unknown"), not "0s old", and a live reading must not look fresh.
+    const rolledBack = view.render(viewOf(body().resources), T0 - 10_000);
+    expect(rolledBack.state).toContain("age unknown");
+    expect(rolledBack.state).not.toContain("0s old");
+    expect(rolledBack.state).toContain("stale");
+    expect(rolledBack.notes).toContain("age is unknown after a clock change");
+  });
+
   it("escapes every string and states unreachable failures without numbers", () => {
     const parts = view.renderUnreachable("TypeError: <img src=x onerror=alert(1)>");
     expect(parts.state).not.toContain("<img");
