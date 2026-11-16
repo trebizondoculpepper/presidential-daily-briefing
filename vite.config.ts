@@ -9,6 +9,7 @@ export default defineConfig({
     options: { typeAware: true, typeCheck: true },
   },
   test: {
+    // *.manual.ts research validations are opt-in via vite.manual.config.ts, never CI tests.
     include: [
       "src/**/*.test.ts",
       "doc/reports/examples/**/*.test.ts",
