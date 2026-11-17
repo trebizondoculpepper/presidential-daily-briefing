@@ -67,6 +67,7 @@ import {
 import { ticketPage, ticketScript } from "./serve/ticket-page.js";
 import { humanPage, humanScript } from "./serve/human-page.js";
 import { activityPage, activityScript } from "./serve/activity-page.js";
+import { diagnosticsPage, diagnosticsScript } from "./serve/diagnostics-page.js";
 import { quotasPage, quotasScript } from "./serve/quotas-page.js";
 
 export { serveHelp } from "./serve/options.js";
@@ -200,6 +201,7 @@ const dashboardFiles = (): Map<string, { type: string; body: string }> =>
     ["/activity.js", { type: "text/javascript; charset=utf-8", body: activityScript() }],
     // The account-scoped quota meters (#548): the page reads nothing until Refresh.
     ["/quotas.js", { type: "text/javascript; charset=utf-8", body: quotasScript() }],
+    ["/diagnostics.js", { type: "text/javascript; charset=utf-8", body: diagnosticsScript() }],
   ]);
 
 /**
@@ -480,6 +482,20 @@ export async function startServe(
             ? undefined
             : withProcessIdentity(page.html, processIdentity, selectedPage ?? undefined),
         );
+        return;
+      }
+      if (path === "/diagnostics") {
+        if (request.method !== "GET" && request.method !== "HEAD")
+          throw new HttpFailure(405, "METHOD_NOT_ALLOWED", "Use GET.", [], { allow: "GET, HEAD" });
+        const page = diagnosticsPage(context.url.searchParams, served);
+        response.writeHead(page.status, {
+          "content-type": "text/html; charset=utf-8",
+          "cache-control": "no-store",
+          "x-content-type-options": "nosniff",
+          "referrer-policy": "no-referrer",
+          "content-security-policy": dashboardSecurityPolicy,
+        });
+        response.end(request.method === "HEAD" ? undefined : page.html);
         return;
       }
       if (path === "/quotas") {
