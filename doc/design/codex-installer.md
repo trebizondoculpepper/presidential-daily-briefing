@@ -1,5 +1,7 @@
 # Codex installer: `pdb install codex` and `pdb uninstall codex`
 
+Current delivery clarification: [small attended installer delivery](attended-installer-delivery.md) supersedes the stale product-budget questions and broad platform gating below. Hook availability/provenance remains a factual implementation boundary, not a new owner decision.
+
 Status: proposed contract for #581, delivered under #589. Nothing here is implemented by this document. Sections headed "Shipped today" describe current behaviour and cite the implementing file; everything else is a proposal. #582 (Claude) and #583 (Ori) reuse the shared boundary defined here but verify their own native formats; they never block Codex.
 
 ## Owner decisions (settled)
@@ -39,7 +41,7 @@ The reviewed adapter contract cannot serve an installed hook as it stands. These
 4. **State directory location.** `withPrivateState` requires a directory under `os.tmpdir()`, which the OS may clean; a fixed path in a trusted hook definition would then fail silently. Proposed: the adapter derives and creates its state directory itself (below), so the definition carries no path.
 5. **TOML layout.** `smol-toml` rewrites lose comments and ordering, which would damage a user's `config.toml`. MCP edits therefore use the bounded text edit below, verified by parsing, never a parse-and-stringify rewrite.
 
-Until questions 1 and 2 are answered, the installer **does not write a hook**: installing a nonfunctional hook is forbidden by #581. The MCP part does not depend on them and proceeds.
+The installer **does not write a nonfunctional hook**. The shared manifest/identity/MCP slices proceed independently, while installed binding and native hook availability remain separate technical work under attended-installer-delivery.md. The product decisions are settled; do not ask the owner the same budget questions again.
 
 ## CLI contract
 
@@ -146,7 +148,7 @@ Supported and unsupported client version; missing, nested and ambiguous project;
 
 #582 and #583 start from slices 1–2's shared manifest, preview and result types, adding their own native-format verification.
 
-## Open questions for the owner
+## Historical questions, superseded by owner decisions
 
 1. **May the first eligible Stop of an unknown session create its session budget** (cap 3, deadline, reentry rules unchanged) when the hook was installed by `pdb install codex`? The reviewed contract forbids it, and without it an installed hook never briefs.
 2. **Which Codex Stop events may an installed hook treat as eligible?** Options: (a) every Stop with `stop_hook_active == false`, relying on Interrupt being a separate event and on the cap and deadline; (b) keep requiring proof of natural completion, which leaves installed hooks inert until Codex exposes a cause; (c) gather native evidence for error/budget/disconnect Stops first, as a bounded trial needing its own allowance.
