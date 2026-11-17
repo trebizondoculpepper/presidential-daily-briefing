@@ -2041,4 +2041,29 @@ describe("pipeline metrics endpoint (#573 slice 5b)", () => {
       await s.close();
     }
   });
+  it("labels a read with per-ticket gaps incomplete and does not cache it", async () => {
+    const counter = { n: 0 };
+    const base = metricsQuery(counter)();
+    const s = await setup(["--repo", repo], {
+      // The one issue has more comments than the first page: its evidence is partial.
+      queryWith: (() => async (q: string) => {
+        const r = (await base(q)) as {
+          repository?: { issues?: { nodes: { comments: { totalCount: number } }[] } };
+        };
+        if (q.includes("issues(first:50"))
+          r.repository!.issues!.nodes[0]!.comments.totalCount = 150;
+        return r;
+      }) as never,
+      rest: (async () => null) as never,
+    });
+    try {
+      const first = await call(s.running.port, "/api/v1/metrics?view=daily");
+      expect(first.json.status).toBe("incomplete");
+      const before = counter.n;
+      await call(s.running.port, "/api/v1/metrics?view=daily");
+      expect(counter.n).toBeGreaterThan(before);
+    } finally {
+      await s.close();
+    }
+  });
 });
