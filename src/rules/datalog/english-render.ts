@@ -4,7 +4,14 @@
  * come from the lexicon phrase each fact carries. Negation reads as "no match for", which is
  * what DataScript evaluates, so absent evidence never reads as a positive claim.
  */
-import type { Clause, Term } from "./english-model.js";
+import type {
+  Clause,
+  Term,
+  CompiledDecision,
+  CompiledDenial,
+  CompiledEvidence,
+  CompiledQuery,
+} from "./english-model.js";
 
 export const termText = (t: Term): string =>
   "var" in t
@@ -138,3 +145,69 @@ export function clauseLines(clauses: Clause[], indent = "  "): string[] {
 /** A predicate head with the given alternative's own variables, e.g. `blocked(?t)`. */
 export const predicateHead = (name: string, params: string[]): string =>
   `${name}(${params.join(", ")})`;
+
+export const queryHeader = (q: CompiledQuery) =>
+  `${q.name}: find ${q.find.join(", ")}${q.inputs.length ? ` given ${q.inputs.join(" ")}` : ""}${q.ruleSet ? ` (predicates from ${q.ruleSet === "ordering" ? "ordering.edn" : "rules.edn"})` : ""}`;
+
+export function evidenceLines(e: CompiledEvidence[], indent: string): string[] {
+  return e.map((x) => `${indent}${x.name} (${x.scope}): ${conjunctionText(x.clauses as Clause[])}`);
+}
+
+type FormalDecision = CompiledDecision & { overriddenBy: string[]; overrides: string[] };
+interface FormalPreference {
+  id: string;
+  why: string;
+  clauses: { when: Clause[]; priority: Clause[]; witnesses: Record<string, Clause[]> };
+}
+
+/** Shared formal text for one decision; authored purposes are projected separately. */
+export function decisionFormalLines(d: FormalDecision): string[] {
+  const lines = [
+    `  ${d.id}: action ${d.kind}; preference ${d.preference}; codes ${d.codes.join(", ")}`,
+    "    When all of:",
+    ...clauseLines(d.clauses, "      "),
+  ];
+  if (d.overriddenBy.length)
+    lines.push(
+      `    Declared override: ${d.overriddenBy.join(", ")} win(s) over ${d.id} when both match.`,
+    );
+  if (d.overrides.length)
+    lines.push(
+      `    Declared override: ${d.id} wins over ${d.overrides.join(", ")} when both match.`,
+    );
+  if (d.evidence.length) lines.push("    Evidence shown:", ...evidenceLines(d.evidence, "      "));
+  return lines;
+}
+export const denialFormalLines = (d: CompiledDenial): string[] => [
+  `  ${d.id} (from ${d.predicate}) when all of:`,
+  ...clauseLines(d.clauses, "      "),
+];
+export const denialQueryLines = (q: CompiledQuery): string[] => [
+  "Denials query:",
+  `  ${queryHeader(q)}`,
+  ...clauseLines(q.clauses, "    "),
+];
+export function preferenceFormalLines(p: FormalPreference): string[] {
+  const lines = [
+    `  ${p.id}: reason "${p.why}"`,
+    "    Matches an admitted action ?a when all of:",
+    ...clauseLines(p.clauses.when, "      "),
+    "    Priority (?value, higher sorts first) when all of:",
+    ...clauseLines(p.clauses.priority, "      "),
+  ];
+  for (const [name, cs] of Object.entries(p.clauses.witnesses))
+    lines.push(`    Witness ${name} (?value) when all of:`, ...clauseLines(cs, "      "));
+  return lines;
+}
+
+/** Display order of the formal rule definitions, shared by CLI and web. */
+export function decisionGroups<T extends FormalDecision>(decisions: T[]) {
+  return [...new Set(decisions.map((d) => d.band))]
+    .sort((a, b) => a - b)
+    .map((band) => ({
+      band,
+      decisions: decisions
+        .filter((d) => d.band === band)
+        .sort((a, b) => a.preference - b.preference || a.source.index - b.source.index),
+    }));
+}

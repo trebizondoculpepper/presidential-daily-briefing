@@ -13,7 +13,7 @@
  */
 import { readOne } from "./edn.js";
 import type { PolicyBundle } from "./bundle.js";
-import { rulesHashOf } from "./hash.js";
+import { rulesHashOf, narrationHashOf } from "./hash.js";
 import { ENGLISH_MODEL_VERSION } from "./english-model.js";
 import type {
   Clause,
@@ -50,7 +50,7 @@ const bindings = new Set(["+", "-", "*", "/", "str"]);
 export const viewerFacts = ["agent", "role", "platform", "order"] as const;
 
 interface Context {
-  bundle: Pick<PolicyBundle, "lexicon" | "schema" | "constants" | "denials">;
+  bundle: Pick<PolicyBundle, "lexicon" | "schema" | "constants" | "denials" | "denialPurposes">;
   problems: string[];
   /** Literal attributes seen, for the lexicon completeness check. */
   attributes: Set<string>;
@@ -409,6 +409,9 @@ function compileDenials(predicates: CompiledPredicate[], ctx: Context): Compiled
         const clauses = alt.clauses.filter((x) => x !== c);
         out.push({
           id: String(c.args[0].lit),
+          ...(ctx.bundle.denialPurposes?.[String(c.args[0].lit)] !== undefined
+            ? { purpose: ctx.bundle.denialPurposes[String(c.args[0].lit)] }
+            : {}),
           predicate: p.name,
           clauses,
           calls: callsOf(clauses),
@@ -477,6 +480,7 @@ export function compileEnglish(bundle: PolicyBundle): EnglishPolicy {
     }));
     return {
       id: d.id,
+      ...(d.purpose !== undefined ? { purpose: d.purpose } : {}),
       kind: d.kind,
       band: d.band,
       preference: d.preference,
@@ -535,6 +539,7 @@ export function compileEnglish(bundle: PolicyBundle): EnglishPolicy {
     modelVersion: ENGLISH_MODEL_VERSION,
     policyVersion: bundle.policyVersion,
     rulesHash: rulesHashOf(bundle),
+    ...(narrationHashOf(bundle) === null ? {} : { narrationHash: narrationHashOf(bundle) }),
     sources: [
       "policy/schema.edn",
       "policy/rules.edn",
