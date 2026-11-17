@@ -64,6 +64,55 @@ describe("compact briefing contract", () => {
       "Conflicting sizing and unknown provenance require inspection.",
     );
   });
+
+  it("never exceeds --max-chars, counting header, warnings and notice, at any limit (#379)", async () => {
+    const { compactBriefing, compactText } = await import("./compact.js");
+    const items = Array.from({ length: 5 }, (_, i) => issue(i + 1, ["status:ready"]));
+    const data = {
+      ...snapshot(items, [pr()]),
+      warnings: Array.from(
+        { length: 6 },
+        (_, i) => `Warning ${i + 1}: pagination truncated while reading repository evidence.`,
+      ),
+    };
+    const expanded = briefing(data, { limit: 100 }, new Date(time));
+    const roleReport = compactBriefing(
+      data,
+      { limit: 10, role: "implementer", agent: "reader" },
+      expanded,
+    );
+    const sectionReport = compactBriefing(
+      data,
+      { limit: 10, role: "implementer", section: "pickup", agent: "reader" },
+      expanded,
+    );
+    for (const [label, report, context] of [
+      ["default brief", roleReport, false],
+      ["expanded context", roleReport, true],
+      ["focused section", sectionReport, false],
+    ] as const) {
+      const full = compactText(report, 100_000, { context });
+      for (const max of [1, 2, 5, 12, 20, 31, 46, 90, 150, 250, 400, 600, 1200, full.length - 1]) {
+        const text = compactText(report, max, { context });
+        expect(text.length, `${label} limit ${max}`).toBeLessThanOrEqual(max);
+        expect(text.length, `${label} limit ${max}`).toBeGreaterThan(0);
+        expect(text, `${label} limit ${max}`).toMatch(
+          /…|\[truncated\]|Truncated due to maximum size/,
+        );
+      }
+      expect(compactText(report, 1, { context })).toBe("…");
+      expect(compactText(report, 20, { context })).toBe("[truncated]\n");
+      expect(compactText(report, 31, { context })).toBe("Truncated due to maximum size.\n");
+      expect(compactText(report, full.length, { context })).toBe(full);
+    }
+    // Preserve incomplete-evidence status in both structured metadata and small-budget text.
+    expect(roleReport.completeness.complete).toBe(false);
+    const tight = compactText(roleReport, 190);
+    expect(tight.length).toBeLessThanOrEqual(190);
+    expect(tight).toContain("INCOMPLETE:");
+    expect(tight).toMatch(/Truncated due to maximum size.*\(0 of \d+ shown\)/);
+  });
+
   it("bounds independent requests, retains order and propagates failure", async () => {
     const { concurrentMap } = await import("../github/github.js");
     let active = 0;

@@ -132,18 +132,27 @@ describe("workflow guide in help and briefings (#71, doc/design/workflow-guide.m
     expect(out).toContain("Workflow guide omitted by text budget. Full guide: pdb process");
   });
 
-  it("never exceeds --max-chars with the guide on or off (reserved footer)", async () => {
+  it("never exceeds --max-chars with the guide on or off, including small budgets (#71, #379)", async () => {
     const off = '{"schemaVersion":1,"processGuide":false}';
     for (const raw of ['{"schemaVersion":1,"processGuide":true}', off]) {
-      // The header and required footer are irreducible; every budget above them must hold.
-      const floor = (await run(["--max-chars", "1"], raw)).out.length;
-      for (let max = floor; max <= floor + 3000; max += 97) {
+      for (const max of [
+        1,
+        2,
+        12,
+        31,
+        80,
+        175,
+        ...Array.from({ length: 32 }, (_, i) => 200 + i * 97),
+      ]) {
         const { out } = await run(["--max-chars", String(max)], raw);
-        expect(out.length, `max-chars ${max}, guide ${raw ? "off" : "on"}`).toBeLessThanOrEqual(
-          max,
-        );
+        expect(
+          out.length,
+          `max-chars ${max}, guide ${raw === off ? "off" : "on"}`,
+        ).toBeLessThanOrEqual(max);
+        expect(out.length, `max-chars ${max}`).toBeGreaterThan(0);
         if (raw === off) expect(out).not.toContain("Workflow guide off");
-        else expect(out).toContain("pdb process");
+        else if (max >= 350) expect(out).toContain("pdb process");
+        else expect(out).toMatch(/…|\[truncated\]|Truncated due to maximum size/);
       }
     }
   });
