@@ -289,7 +289,6 @@ export async function runBriefing(
     await output(briefingHelp);
     return 0;
   }
-  if (runtime.prepareViewer) options.agent = await runtime.prepareViewer(options);
   const stderr = runtime.stderr ?? ((text: string) => void process.stderr.write(text));
   const now = runtime.now ?? (() => new Date());
   try {
@@ -350,6 +349,10 @@ async function deliver(
         `Refresh it live: pdb briefing${options.repo ? ` --repo ${options.repo}` : ""} --cache ${cache}`,
       );
     }
+    if (runtime.prepareViewer) {
+      options.repo ??= snapshot.repository;
+      options.agent = await runtime.prepareViewer(options);
+    }
   } else {
     const repository = options.repo ?? (await runtime.currentRepository());
     let checkpoint: { through: string | null } | undefined;
@@ -367,6 +370,10 @@ async function deliver(
           `Inspect or move the file, or run once with --since ISO --repo ${repository}; a missing file starts a new baseline.`,
         );
       }
+    }
+    if (runtime.prepareViewer) {
+      options.repo ??= repository;
+      options.agent = await runtime.prepareViewer(options);
     }
     // One anchor T0 before collection; a future checkpoint or --since is rejected here.
     ({ snapshot } = await collectBriefing(

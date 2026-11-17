@@ -547,6 +547,51 @@ describe("effective identity in actual CLI results (#677)", () => {
       expect(await readdir(f.root)).toEqual([]);
     }));
 
+  it.each(["missing", "corrupt", "unsupported"] as const)(
+    "preserves the structured offline catch-up cache refusal for %s input",
+    async (kind) =>
+      fixture(async (f) => {
+        const cache = f.root + "/cache.json";
+        if (kind !== "missing")
+          await f.fs.writeText(
+            cache,
+            kind === "corrupt"
+              ? "not JSON"
+              : JSON.stringify({ ...snapshot([], []), schemaVersion: 999 }),
+          );
+        const runtime = runtimeFor(f, []);
+        let preparations = 0;
+        const report = await invoke(
+          {
+            ...runtime,
+            prepareIdentity: async (options) => {
+              preparations++;
+              return runtime.prepareIdentity!(options);
+            },
+            currentRepository: async () => {
+              throw new Error("must not resolve a live offline target");
+            },
+            collect: async () => {
+              throw new Error("must not collect offline");
+            },
+          },
+          ["briefing", "--offline", "--cache", cache, "--json"],
+        );
+        expect(report.code).toBe(1);
+        expect(report.document).toMatchObject({
+          schemaVersion: 1,
+          kind: "repository-briefing-refusal",
+          file: "cache",
+          path: cache,
+          checkpointAdvanced: false,
+          next: expect.stringContaining("pdb briefing"),
+        });
+        expect(preparations).toBe(0);
+        expect(await f.fs.readText(f.file)).toBeNull();
+        expect(await readdir(f.root)).toEqual(kind === "missing" ? [] : ["cache.json"]);
+      }),
+  );
+
   it("help and rules do not prepare an identity", async () =>
     fixture(async (f) => {
       const runtime = {
