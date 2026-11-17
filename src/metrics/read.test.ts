@@ -81,9 +81,18 @@ function fake(
   prs: Record<number, string | null> = {},
   merged: MergedPr[] = [],
   extra: Issue[] = [],
+  open: Issue[] = [],
 ) {
   const calls: string[] = [];
   const query = async (q: string, v: Record<string, string | number>) => {
+    if (q.includes("states:[OPEN]")) {
+      calls.push("open");
+      return {
+        repository: {
+          issues: { nodes: open.map(node), pageInfo: { hasNextPage: false, endCursor: null } },
+        },
+      };
+    }
     if (q.includes("pullRequests(first:50")) {
       calls.push("pr-walk");
       const start = Number(v.cursor ?? 0);
@@ -460,5 +469,21 @@ describe("bounded metrics read (#573 slice 5b)", () => {
     expect(r.historyNotRead.members).toEqual(
       expect.arrayContaining([`${repo}#40`, `${repo}#41`, `${repo}#42`]),
     );
+  });
+  it("includes quiet open tickets from the open inventory", async () => {
+    const { calls, rt } = fake(
+      [{ number: 1, updatedAt: "2026-11-16T00:00:00Z" }],
+      50,
+      {},
+      [],
+      [],
+      [
+        { number: 1, updatedAt: "2026-11-16T00:00:00Z" },
+        { number: 7, updatedAt: "2026-10-01T00:00:00Z" },
+      ],
+    );
+    const r = await readMetrics(repo, FROM, NOW, rt);
+    expect(calls).toContain("open");
+    expect(r.tickets.map((t) => t.member)).toEqual([`${repo}#1`, `${repo}#7`]);
   });
 });

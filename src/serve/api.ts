@@ -57,6 +57,10 @@ import { readProfiles } from "../github/readplan.js";
 import type { Snapshot } from "../github/types.js";
 import { localPaths, redactLocalText, redactPaths } from "../mcp/redact.js";
 import { markerTrust } from "../workflow/delivery.js";
+import { ledgerTrust } from "../metrics/ledger.js";
+import { readMetrics, type MetricsRead } from "../metrics/read.js";
+import { dailyView, newsView, timingView } from "../metrics/views.js";
+import { trailingWindow } from "../metrics/windows.js";
 import {
   readPullRequest,
   readReviewHistory,
@@ -174,7 +178,15 @@ export async function servedReviewPolicy(
   return readers.reviewPolicy ?? resolveReviewPolicy(repository, readers.guide ?? {});
 }
 
-type View = "briefing" | "issue" | "dependencies" | "pull-request" | "who" | "team" | "ticket";
+type View =
+  | "briefing"
+  | "issue"
+  | "dependencies"
+  | "pull-request"
+  | "who"
+  | "team"
+  | "ticket"
+  | "metrics";
 type Status = "complete" | "incomplete" | "error";
 
 /** Envelope `selection`, the MCP `selectionSchema` shape. */
@@ -305,6 +317,24 @@ const liveNow = (cache: ServeCache, now: Date): Freshness => ({
   refreshError: null,
 });
 
+/**
+ * Whether a metrics read is a definitive answer (#573): history complete back to the window
+ * start, nothing unread, no warnings, and every ticket's own evidence complete (comments,
+ * timeline, delivery records, required PRs) with a known verdict and complexity group. Used both
+ * to label the response and to decide whether it may be cached.
+ */
+export function metricsReadComplete(read: MetricsRead, from: string): boolean {
+  if (read.coverage.completeFrom === null) return false;
+  if (Date.parse(read.coverage.completeFrom) > Date.parse(from)) return false;
+  if (read.historyNotRead.count > 0 || read.warnings.length > 0) return false;
+  return read.tickets.every(
+    (t) =>
+      Object.values(t.ledger.coverage).every((c) => c === "complete") &&
+      t.verdict !== "unknown" &&
+      t.complexity !== "unknown",
+  );
+}
+
 /** The CLI command that inspects the same read, for error guidance. */
 function cliCommand(view: View, repository: string, number?: number): string {
   const repo = `--repo ${repository}`;
@@ -323,6 +353,9 @@ function cliCommand(view: View, repository: string, number?: number): string {
       return `pdb team ${repo} --json`;
     case "ticket":
       return `pdb ticket ${number} ${repo} --json`;
+    case "metrics":
+      // No CLI equivalent yet (#573): the same read is only served.
+      return `GET /api/v1/metrics?repo=${repository}`;
   }
 }
 
@@ -337,6 +370,8 @@ const refreshScopes = {
   prs: ["pr", "pr-history"],
   // The consolidated ticket detail (#454) is its own whole result.
   tickets: ["ticket"],
+  // Pipeline metrics (#573) read their own bounded window.
+  metrics: ["metrics"],
 } as const;
 
 /**
@@ -866,6 +901,73 @@ export function readApi(
               status: read.complete ? "complete" : "incomplete",
               // The CLI's --json briefing is the report plus its checkpoint field.
               result: { ...read.report, checkpoint: null },
+            };
+          },
+        );
+        return true;
+      }
+      if (path === "/api/v1/metrics") {
+        // Pipeline metrics (#573 slice 5b, doc/design/dashboard-pipeline-metrics.md): one bounded
+        // read per window, cached by window start; the pure views are computed per request.
+        await dataRoute(
+          context,
+          "metrics",
+          ["view", "days", "hours"],
+          undefined,
+          async (values, served) => {
+            const view = values.get("view") ?? "daily";
+            if (view !== "news" && view !== "daily" && view !== "timing")
+              throw invalid("view must be news, daily or timing.");
+            const nowIso = runtime.now().toISOString();
+            let from: string;
+            let span: number;
+            if (view === "news") {
+              span = Number(values.get("hours") ?? 6);
+              if (span !== 1 && span !== 6) throw invalid("hours must be 1 or 6.");
+              if (values.has("days")) throw invalid("days applies to daily and timing views only.");
+              from = new Date(Date.parse(nowIso) - span * 3_600_000).toISOString();
+            } else {
+              span = Number(values.get("days") ?? 7);
+              if (span !== 7 && span !== 30) throw invalid("days must be 7 or 30.");
+              if (values.has("hours")) throw invalid("hours applies to the news view only.");
+              from = `${trailingWindow(nowIso, span).days[0]}T00:00:00.000Z`;
+            }
+            if (!guardedQueryWith || !guardedRest)
+              throw new CollectionError("GITHUB_UNAVAILABLE", "No GitHub reader is configured.");
+            const read = await cache.read<MetricsRead>(
+              {
+                repository: served.repository,
+                collector: "metrics",
+                // Daily and timing windows start at a UTC midnight, so a key is stable for the day.
+                coverage: { from: view === "news" ? `news-${span}h` : from, span },
+              },
+              (inner) =>
+                readMetrics(served.repository, from, nowIso, {
+                  query: guardedQueryWith!(inner),
+                  rest: (p, o) => guardedRest!(p, { ...o, signal: o?.signal ?? inner }),
+                  trust: ledgerTrust(permissionLookup(served.repository, guardedRest!, inner)),
+                  signal: inner,
+                }),
+              context.signal,
+              // Partial results are answers for this request only, never stored (contract).
+              (r) => metricsReadComplete(r, from),
+            );
+            const unread = read.historyNotRead.members;
+            const result =
+              view === "news"
+                ? newsView(nowIso, span, read.tickets, read.coverage, 200, unread, read.merges)
+                : view === "daily"
+                  ? dailyView(nowIso, span, read.tickets, read.coverage, unread, read.merges)
+                  : timingView(nowIso, span, read.tickets, read.coverage);
+            const complete = metricsReadComplete(read, from);
+            return {
+              status: complete ? "complete" : "incomplete",
+              result: {
+                ...result,
+                limitations: read.limitations,
+                historyNotRead: read.historyNotRead,
+              },
+              warnings: read.warnings,
             };
           },
         );
