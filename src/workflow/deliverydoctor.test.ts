@@ -279,6 +279,44 @@ const finding = (r: TicketDoctorReport, n: number, kind: string) => {
 };
 
 describe("delivery-aware Ticket Doctor (#192)", () => {
+  it("reports completed live evaluation counts and stops progress on cancellation (#585)", async () => {
+    const issues = [1, 2].map((n) =>
+      issue(
+        n,
+        ["bug"],
+        [
+          post(
+            record(n, "submit", {
+              deliverables: [pr(5)],
+              membership: "complete",
+            }),
+          ),
+        ],
+      ),
+    );
+    const counts: number[] = [];
+    const controller = new AbortController();
+    await expect(
+      diagnoseDelivery(snapshot(issues), {
+        trust,
+        live: live({ 5: "open" }).rt,
+        signal: controller.signal,
+        onProgress: (count) => {
+          counts.push(count);
+          controller.abort();
+        },
+      }),
+    ).rejects.toMatchObject({ name: "AbortError" });
+    expect(counts).toEqual([1]);
+    counts.length = 0;
+    await diagnoseDelivery(snapshot(issues), {
+      trust,
+      live: live({ 5: "open" }).rt,
+      onProgress: (count) => counts.push(count),
+    });
+    expect(counts).toEqual([1, 2]);
+  });
+
   it("leaves a ticket without delivery or release records exactly as before", async () => {
     const issues = [issue(1, ["bug", "status:awaiting-review"])];
     const plain = ticketDoctor(snapshot(issues), { now: new Date(time) });

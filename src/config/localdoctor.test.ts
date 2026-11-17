@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile, readFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -460,5 +460,142 @@ describe("local configuration doctor (#64)", () => {
     );
     expect(JSON.parse(out)).toMatchObject({ schemaVersion: 1, scope: "local-configuration" });
     expect(code).toBe(1);
+  });
+});
+
+describe("Doctor run cancellation and observed progress (#585)", () => {
+  const dependencies = async () => ({
+    id: "install.dependencies",
+    status: "ok" as const,
+    source: "test",
+    detail: "Installed dependencies available.",
+    next: [],
+  });
+
+  it("runs only host checks when no verified checkout is available and records skipped groups", async () => {
+    const steps: unknown[] = [];
+    const calls: string[] = [];
+    const report = await localDoctor(
+      {},
+      {
+        cwd: "/unused",
+        nodeVersion: "26.1.0",
+        dependencies,
+        projectUnavailable: "Select a registered project with a local checkout.",
+        onStep: (step) => steps.push(step),
+        probe: async (command, args) => {
+          expect(command).toBe("gh");
+          calls.push(args.join(" "));
+          return { code: 0, stdout: "PRIVATE PROBE OUTPUT" };
+        },
+        fs: {
+          ...nodeFileSystem,
+          readText: async () => {
+            throw new Error("unexpected filesystem read");
+          },
+        },
+      },
+    );
+    expect(report.checks.map((c) => c.id)).toEqual([
+      "runtime.node",
+      "install.dependencies",
+      "gh.available",
+      "gh.auth",
+    ]);
+    expect(report.summary.ok).toBe(4);
+    expect(report.repository).toBeNull();
+    expect(calls).toEqual(["--version", "auth status --active --hostname github.com"]);
+    expect(steps).toEqual([
+      { step: "runtime", state: "running", detail: null },
+      { step: "runtime", state: "done", detail: null },
+      { step: "dependencies", state: "running", detail: null },
+      { step: "dependencies", state: "done", detail: null },
+      { step: "gh", state: "running", detail: null },
+      { step: "gh", state: "done", detail: null },
+      {
+        step: "project",
+        state: "skipped",
+        detail: "Select a registered project with a local checkout.",
+      },
+      {
+        step: "identity",
+        state: "skipped",
+        detail: "Select a registered project with a local checkout.",
+      },
+    ]);
+    expect(JSON.stringify(report)).not.toContain("PRIVATE PROBE OUTPUT");
+  });
+
+  it("propagates cancellation through a probe instead of reporting missing or healthy evidence", async () => {
+    const controller = new AbortController();
+    const steps: string[] = [];
+    await expect(
+      localDoctor(
+        {},
+        {
+          signal: controller.signal,
+          dependencies,
+          onStep: (s) => steps.push(`${s.step}:${s.state}`),
+          probe: async (_command, _args, _cwd, signal) => {
+            expect(signal).toBe(controller.signal);
+            controller.abort();
+            signal!.throwIfAborted();
+            return { code: 0, stdout: "" };
+          },
+        },
+      ),
+    ).rejects.toMatchObject({ name: "AbortError" });
+    expect(steps).toContain("gh:running");
+    expect(steps).not.toContain("gh:done");
+    await expect(
+      localDoctor(
+        {},
+        {
+          signal: AbortSignal.abort(),
+          probe: async () => {
+            throw new Error("must not probe");
+          },
+        },
+      ),
+    ).rejects.toMatchObject({ name: "AbortError" });
+  });
+
+  it("terminates its real probe child when cancelled", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "pdb-doctor-probe-"));
+    const marker = join(dir, "pid");
+    const controller = new AbortController();
+    const child = nodeProbe(
+      process.execPath,
+      [
+        "-e",
+        `require('node:fs').writeFileSync(${JSON.stringify(marker)}, String(process.pid)); setInterval(() => {}, 1000);`,
+      ],
+      dir,
+      controller.signal,
+    );
+    // Observe rejection immediately, even if setup fails before awaiting the child.
+    const outcome = child.then(
+      () => null,
+      (error: unknown) => error,
+    );
+    try {
+      let pid: number | null = null;
+      for (let n = 0; n < 200; n++) {
+        try {
+          pid = Number(await readFile(marker, "utf8"));
+          break;
+        } catch {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+      }
+      expect(pid).not.toBeNull();
+      controller.abort();
+      expect(await outcome).toMatchObject({ name: "AbortError" });
+      expect(() => process.kill(pid!, 0)).toThrow();
+    } finally {
+      controller.abort();
+      await outcome;
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });
