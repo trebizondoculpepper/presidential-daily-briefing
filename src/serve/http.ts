@@ -28,7 +28,10 @@ export type ServeErrorCode =
   | "SHUTTING_DOWN"
   | "INTERNAL"
   | "RESULT_TOO_LARGE"
-  | "DIAGNOSTIC_CURSOR_EXPIRED";
+  | "DIAGNOSTIC_CURSOR_EXPIRED"
+  | "RUNS_BUSY"
+  | "RUN_TIMEOUT"
+  | "PROJECT_REQUIRED";
 
 export interface ServeError {
   code: ServeErrorCode;

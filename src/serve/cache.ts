@@ -258,6 +258,7 @@ export class ServeCache {
   private readonly epochs = new Map<string, number>();
   private auth: AuthContext;
   private authCheckedAt: number;
+  private authVerified = true;
   private authCheck: Promise<void> | null = null;
   private cooldownUntil = 0;
   private cooldownError: CollectionError | null = null;
@@ -375,6 +376,11 @@ export class ServeCache {
 
   currentAuth(): AuthContext {
     return this.auth;
+  }
+
+  /** Held observation only: never probes or renews authentication (#585 latest run lookup). */
+  currentVerifiedAuth(): AuthContext | null {
+    return this.authVerified ? this.auth : null;
   }
 
   /**
@@ -694,6 +700,7 @@ export class ServeCache {
       try {
         const auth = await this.options.authContext(this.lifetime.signal);
         this.authCheckedAt = this.now();
+        this.authVerified = true;
         if (auth.host !== this.auth.host || auth.login !== this.auth.login) {
           this.auth = auth;
           this.cooldownUntil = 0;
@@ -707,6 +714,7 @@ export class ServeCache {
           observedAt: new Date(this.authCheckedAt),
         });
       } catch (error) {
+        this.authVerified = false;
         this.options.onAuthObservation?.({
           state: error instanceof AuthenticationError ? "refused" : "unavailable",
         });
