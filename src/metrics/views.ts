@@ -226,10 +226,16 @@ export interface TimingResult extends Envelope<"timing"> {
   groups: Record<string, DurationStats>;
 }
 
+/** Whether any pickup source proved there was none, rather than being unread. */
+function pickupStatus(ledger: TicketLedger): "none" | "other" {
+  const c = ledger.firstPickup;
+  return c["claim-marker"].status === "none" && c.label.status === "none" ? "none" : "other";
+}
+
 /**
  * Population: tickets delivered within the window (completed samples), work still open now
  * (lower bounds), tickets closed undelivered within the window, and tickets with unknown
- * endpoints that had any recorded event in the window. Completed deliveries outside the
+ * endpoints that are still open or had any recorded event in the window. Completed deliveries outside the
  * window are excluded, never counted.
  */
 export function timingView(
@@ -238,8 +244,10 @@ export function timingView(
   tickets: readonly MetricTicket[],
   coverage: HistoryCoverage,
 ): TimingResult {
-  const through = new Date(Date.parse(now)).toISOString();
-  const from = new Date(Date.parse(now) - days * 86_400_000).toISOString();
+  // The same trailing UTC-day window as the daily view: complete days plus the partial day.
+  const days_ = trailingWindow(now, days);
+  const from = `${days_.days[0]}T00:00:00.000Z`;
+  const through = days_.partial.observedThrough;
   const window = { from, through };
   const samples = [];
   for (const t of tickets) {
@@ -261,7 +269,12 @@ export function timingView(
         break;
       }
       case "unknown":
-        include = anyEventInWindow;
+        // Open (or unknown-state) work stays in the population with an unknown endpoint, so
+        // missing history never makes it disappear; proven never-picked-up tickets belong to
+        // the creation-to-pickup metric instead.
+        include =
+          anyEventInWindow ||
+          (t.ledger.currentState !== "closed" && pickupStatus(t.ledger) !== "none");
         break;
     }
     if (include) samples.push({ ...s, group: t.complexity });
@@ -272,7 +285,7 @@ export function timingView(
     view: "timing",
     window,
     coverage: { historyCompleteFrom: coverage.completeFrom, note: coverageNote(from, coverage) },
-    cohort: `delivered-in(${from}, ${through}) + open now + closed-undelivered-in + unknown-with-event-in`,
+    cohort: `delivered-in(${from}, ${through}) + open now + closed-undelivered-in + unknown open or with event-in`,
     groupBasis: "latest-valid-complexity",
     groups: Object.fromEntries(groupedDurations(samples)),
   };
