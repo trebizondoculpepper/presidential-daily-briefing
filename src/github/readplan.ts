@@ -189,8 +189,13 @@ export const readProfiles = {
       pages: 10,
       maxHydrated: 40,
       rounds: 4,
-      issuesPerRequest: 10,
-      hydrationConcurrency: 3,
+      // #803: the shortlist briefing did 19 small hydration requests at concurrency 3 with 10
+      // issues per request (14-15s vs 7-10s for the full read on the same repo). Raising the
+      // batch size to 20 and concurrency to 5 roughly halves the request count while staying
+      // within GitHub's node/point bounds and the secondary-limit guidance. Owner-approved
+      // experimental default; measurements are recorded on #803.
+      issuesPerRequest: 20,
+      hydrationConcurrency: 5,
     },
   },
   /** The explicit `pr N --history` diagnosis; never implicit in a routine read. */
