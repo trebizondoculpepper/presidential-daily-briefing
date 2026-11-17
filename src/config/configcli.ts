@@ -52,6 +52,7 @@ import {
   writeGlobalConfig,
   type EffectiveGlobalSetting,
   type GlobalValue,
+  type ProjectRootVerifier,
 } from "./globalconfig.js";
 import type {
   ConfigFormat,
@@ -449,7 +450,14 @@ export async function runConfig(
     return 0;
   } catch (caught) {
     const error = filesystemRefusal(caught) ?? caught;
-    if (!(error instanceof ConfigError || error instanceof ConfigUsageError)) throw error;
+    if (
+      !(
+        error instanceof ConfigError ||
+        error instanceof ConfigUsageError ||
+        error instanceof GlobalConfigError
+      )
+    )
+      throw error;
     if (!json) throw new Error(`${error.message}\n${error.recovery}`, { cause: error });
     await output(
       JSON.stringify(
@@ -669,7 +677,12 @@ async function runIdentity(
  * it. Port parses as a decimal integer; ttl and projects are validated text (projects are not
  * settable from one CLI string; use `pdb config set serve.projects ...` with a JSON array).
  */
-function parsedGlobalValue(kind: string, key: string, text: string): GlobalValue {
+async function parsedGlobalValue(
+  kind: string,
+  key: string,
+  text: string,
+  verifyProjectRoot?: ProjectRootVerifier,
+): Promise<GlobalValue> {
   if (kind === "port") {
     if (!/^\d{1,5}$/.test(text.trim()))
       throw new GlobalConfigError(
@@ -677,7 +690,7 @@ function parsedGlobalValue(kind: string, key: string, text: string): GlobalValue
         `Invalid value for "${key}": expected an integer 1-65535, got ${JSON.stringify(text)}.`,
         `pdb config set ${key} 1-65535 --scope global`,
       );
-    return validateGlobalValue(key, Number(text.trim()));
+    return validateGlobalValue(key, Number(text.trim()), verifyProjectRoot);
   }
   if (kind === "projects") {
     let parsed: unknown;
@@ -690,9 +703,9 @@ function parsedGlobalValue(kind: string, key: string, text: string): GlobalValue
         `pdb config set ${key} '[{"repository":"owner/name"}]' --scope global`,
       );
     }
-    return validateGlobalValue(key, parsed);
+    return validateGlobalValue(key, parsed, verifyProjectRoot);
   }
-  return validateGlobalValue(key, text);
+  return validateGlobalValue(key, text, verifyProjectRoot);
 }
 
 /**
@@ -759,7 +772,7 @@ async function runGlobal(
       `Unknown global configuration key "${parsed.key}".`,
       `Supported keys: ${GLOBAL_KEYS.map((k) => k.key).join(", ")}.`,
     );
-  const value = parsedGlobalValue(entry.kind, parsed.key, parsed.value);
+  const value = await parsedGlobalValue(entry.kind, parsed.key, parsed.value);
   const write = await writeGlobalConfig(dir, new Map([[parsed.key, value]]), { fs });
   const setting = write.config.settings.find((s) => s.key === parsed.key)!;
   const result = {
