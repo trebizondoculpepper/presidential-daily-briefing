@@ -106,11 +106,14 @@ export function newsView(
   limit = 200,
   /** Tickets in the window the read could not ledger: their events are missing. */
   unread: readonly string[] = [],
+  /** Merges from the pull request walk, standalone PRs included; deduplicated by PR. */
+  walkedMerges: readonly { at: string; key: string }[] = [],
 ): NewsResult {
   const through = new Date(Date.parse(now)).toISOString();
   const from = new Date(Date.parse(now) - hours * 3_600_000).toISOString();
   const window = { from, through };
   const seen = new Set<string>();
+  const mergedPrs = new Set<string>();
   const all: NewsItem[] = [];
   const gaps = new Set<string>(unread);
   for (const t of tickets) {
@@ -118,8 +121,20 @@ export function newsView(
     for (const e of t.ledger.events) {
       if (inWindow(e.at, window) !== true || seen.has(e.key)) continue;
       seen.add(e.key);
+      if (e.kind === "pr-merged") mergedPrs.add(`${e.pr.repository}#${e.pr.number}`.toLowerCase());
       all.push({ at: e.at, kind: e.kind, member: t.member, key: e.key, detail: detailOf(e) });
     }
+  }
+  for (const m of walkedMerges) {
+    if (inWindow(m.at, window) !== true || mergedPrs.has(m.key.toLowerCase())) continue;
+    mergedPrs.add(m.key.toLowerCase());
+    all.push({
+      at: m.at,
+      kind: "pr-merged",
+      member: m.key,
+      key: `pr-merged:${m.key}`,
+      detail: m.key,
+    });
   }
   all.sort((a, b) => Date.parse(b.at) - Date.parse(a.at) || (a.key < b.key ? -1 : 1));
   return {
