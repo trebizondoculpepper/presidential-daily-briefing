@@ -15,6 +15,7 @@ import {
  * issues and their explicit owners. Green evidence means "inspect / consider merging", never
  * approval.
  */
+import { prEvidenceGaps } from "../github/previdence.js";
 import { workflow } from "./definition.js";
 import {
   codexCommitMatches,
@@ -767,13 +768,13 @@ export function snapshotPrReadiness(
     },
     reviewRequestStatus,
   });
-  const threadsIncomplete = !pr.reviewThreads || !!pr.reviewThreads.pageInfo?.hasNextPage;
-  const blockers = threadsIncomplete
-    ? [...readiness.blockers, "review thread evidence is incomplete"]
+  const gaps = prEvidenceGaps(pr, warnings);
+  const blockers = gaps.length
+    ? [...readiness.blockers, ...gaps.map((gap) => `PR evidence is incomplete (${gap})`)]
     : readiness.blockers;
   return {
     ...readiness,
-    ready: readiness.ready && !threadsIncomplete,
+    ready: readiness.ready && gaps.length === 0,
     blockers,
     requirements: (checkPolicy.ready ? "satisfied" : "unproven") as "satisfied" | "unproven",
   };

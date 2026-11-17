@@ -252,6 +252,23 @@ describe("team view (#41, doc/design/diagnostics.md)", () => {
     expect(truncatedThreads.agents[0]?.claims[0]?.pullRequests[0]?.ready).toBe(false);
     expect(contributionFinished(withTruncatedThreads)).toBe(false);
 
+    // Truncated comments or reviews also keep readiness unproven under legacy policy.
+    const withTruncatedComments = {
+      ...prNoVerify,
+      comments: {
+        nodes: [],
+        pageInfo: { hasNextPage: true, hasPreviousPage: true, endCursor: "c1" },
+      },
+    };
+    const truncatedComments = teamView(snapshot([claimed], [withTruncatedComments]), {
+      now: new Date(time),
+    });
+    expect(truncatedComments.agents[0]?.claims[0]?.pullRequests[0]).toMatchObject({
+      ready: false,
+      blockers: ["PR evidence is incomplete (comments)"],
+    });
+    expect(contributionFinished(withTruncatedComments)).toBe(false);
+
     // Unanswered @codex review request under legacy policy blocks readiness.
     const withUnansweredReviewRequest = {
       ...prNoVerify,
