@@ -47,6 +47,11 @@ export interface MetricsRead {
   /** Requests made by this read. */
   requests: number;
   warnings: string[];
+  /**
+   * Every in-window merge from the pull request walk, keyed by PR: the PR-merge series is its
+   * own unit, independent of delivery membership (standalone PRs included).
+   */
+  merges: { at: string; key: string }[];
   /** Structural limits of this read, always stated so an absence is never assumed. */
   limitations: string[];
 }
@@ -193,6 +198,7 @@ export async function readMetrics(
   // tickets closed by an in-window merge are added even when the issue walk did not reach them.
   const member = (n: number) => `${repository}#${n}`;
   const linked = new Set<number>();
+  const merges: { at: string; key: string }[] = [];
   // Population the read knows about but could not ledger; passed on as unread.
   const unreadLinked: string[] = [];
   let prCursor: string | null = null;
@@ -213,6 +219,12 @@ export async function readMetrics(
         prReachedStart = true;
         break;
       }
+      if (
+        pr.mergedAt &&
+        Date.parse(pr.mergedAt) >= fromMs &&
+        Date.parse(pr.mergedAt) < Date.parse(now)
+      )
+        merges.push({ at: pr.mergedAt, key: `${repository}#${pr.number}` });
       if (
         pr.mergedAt &&
         Date.parse(pr.mergedAt) >= fromMs &&
@@ -323,10 +335,14 @@ export async function readMetrics(
     const legacyHandoff =
       !fold.hasTrustedRecord &&
       !!(await legacyRelease(comments as DeliveryComment[], rt.trust.comment)).trusted;
+    rt.signal?.throwIfAborted();
     const facts = await collectDeliveryFacts(
       { repository, issue: issue.number, issueOpen: issue.state === "OPEN", fold, legacyHandoff },
       counted,
     );
+    // Evidence readers turn failed requests (aborts included) into missing evidence, so a
+    // cancellation during collection must be re-checked here, not mistaken for a partial result.
+    rt.signal?.throwIfAborted();
     tickets.push({
       member: member(issue.number),
       ledger,
@@ -339,6 +355,7 @@ export async function readMetrics(
       `${skipped.length} ticket(s) beyond the ${bounds.maxTickets}-ticket bound were not read`,
     );
 
+  rt.signal?.throwIfAborted();
   return {
     tickets,
     // A ticket's events are never later than its updatedAt, and skipped tickets are the least
@@ -354,6 +371,7 @@ export async function readMetrics(
     },
     requests,
     warnings,
+    merges,
     limitations: [
       "a deliverable in another repository that merges without updating or closing its ticket is not discovered",
     ],
