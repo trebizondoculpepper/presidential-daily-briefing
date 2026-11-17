@@ -55,6 +55,11 @@ export interface PolicyExplanation {
   facts: Record<string, Value>;
   overriddenRuleIds: string[];
 }
+export interface HumanAttentionSection {
+  section: "input" | "waiting";
+  ruleId: string;
+  reason: string;
+}
 export interface PolicyDecision {
   subject: number;
   ruleId: string;
@@ -66,6 +71,8 @@ export interface PolicyDecision {
   unlocksUnknown: string[];
   /** For implementation decisions: other open issues the viewer already owns. */
   otherClaims: number[];
+  /** For human decisions (#643): native section grouping (`input` vs `waiting`) and its reason. */
+  attentionSection?: HumanAttentionSection;
 }
 export interface PolicyResult {
   policyVersion: number;
@@ -254,6 +261,19 @@ export function evaluatePolicy(input: PolicyFacts, options: PolicyOptions = {}):
     "assessment-kind": { ":db/cardinality": ":db.cardinality/many" },
   });
   const rows = ds.q(queries.q4, db, sortClauses);
+  const humanSections =
+    input.viewer.role === "human"
+      ? new Map(
+          query(db, queries["human-sections"]).map(([subject, section, ruleId, reason]) => [
+            Number(subject),
+            {
+              section: (String(section) === "waiting" ? "waiting" : "input") as "input" | "waiting",
+              ruleId: String(ruleId),
+              reason: String(reason),
+            },
+          ]),
+        )
+      : null;
   options.signal?.throwIfAborted();
   const decisions = rows
     .sort((a, b) => compareKeys(a.slice(2), b.slice(2)))
@@ -281,6 +301,7 @@ export function evaluatePolicy(input: PolicyFacts, options: PolicyOptions = {}):
         return String(bindings[key]);
       });
       const ruleIds = [definition.id];
+      const attentionSection = humanSections?.get(Number(t));
       return {
         subject: Number(t),
         ruleId: definition.id,
@@ -301,6 +322,7 @@ export function evaluatePolicy(input: PolicyFacts, options: PolicyOptions = {}):
                 .filter(([id]) => Number(id) === Number(t))
                 .map(([, id]) => Number(id))
             : [],
+        ...(attentionSection ? { attentionSection } : {}),
       };
     });
   options.signal?.throwIfAborted();

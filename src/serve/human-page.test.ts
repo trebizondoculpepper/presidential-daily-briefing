@@ -262,6 +262,11 @@ const item = (n: number, over: Record<string, unknown> = {}) => ({
   nextCommand: `pdb --repo ${repo} --issue ${n}`,
   warnings: [],
   sourceState: "open",
+  attentionSection: "input",
+  attentionSectionReason: {
+    ruleId: "HS-INPUT-ACTIONABLE",
+    text: "Requires human input or review from the observed evidence.",
+  },
   ...over,
 });
 const humanEnvelope = (
@@ -314,7 +319,7 @@ describe("human attention renderers (#458)", () => {
     ).toEqual({ actionable: "", waiting: "" });
   });
 
-  it("puts only items whose resolution is unknown under Waiting, keeping server order", () => {
+  it("puts only items whose native attentionSection is waiting under Waiting, keeping server order (#643)", () => {
     const sections = view.renderSections(
       humanEnvelope([
         item(5, {
@@ -322,12 +327,18 @@ describe("human attention renderers (#458)", () => {
           explicit: true,
           sourceState: "closed",
           resolution: "unresolved",
+          attentionSection: "input",
         }),
         item(6, {
           kind: "orphaned-question",
           explicit: true,
           sourceState: "closed",
           resolution: "unknown",
+          attentionSection: "waiting",
+          attentionSectionReason: {
+            ruleId: "HS-WAITING-UNKNOWN",
+            text: "Whether this question was resolved could not be established; shown under Waiting for inspection, not as answered.",
+          },
         }),
         item(7),
       ]),

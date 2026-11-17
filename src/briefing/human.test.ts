@@ -739,5 +739,100 @@ describe("human briefing role (#457)", () => {
       expect(complete).toBe(false);
       expect(view.coverage.records).toMatchObject({ unknown: 1 });
     });
+
+    it("projects native attentionSection and reason consistently across CLI, MCP and web (#643)", async () => {
+      const { briefingView } = await import("../mcp/views.js");
+      const openUnanswered = withComments(issue(61, ["question"]), [
+        record("owner", ["Open unanswered?"], { v2: 61 }),
+      ]);
+      const resolvedQ = record("owner", ["Resolved?"], { v2: 62 });
+      const openResolved = withComments(issue(62, []), [
+        resolvedQ,
+        outcome(62, resolvedQ, "resolve"),
+      ]);
+      const closedUnanswered = closedIssue(
+        63,
+        [],
+        [record("owner", ["Closed unanswered?"], { v2: 63 })],
+      );
+      const editedQ = record("owner", ["Edited by outsider?"], { v2: 64 });
+      const editedOutcome: Comment = {
+        ...outcome(64, editedQ, "resolve"),
+        lastEditedAt: "2026-11-12T13:00:00Z",
+        editor: { __typename: "User", login: "outsider" },
+      };
+      const closedUntrustedEdit = closedIssue(64, [], [editedQ, editedOutcome]);
+      const unknownOutcomeQ = record("owner", ["Unknown author outcome?"], { v2: 65 });
+      const closedUnknownOutcome = closedIssue(
+        65,
+        [],
+        [unknownOutcomeQ, outcome(65, unknownOutcomeQ, "resolve", { author: "ghost" })],
+      );
+      const closedIncompleteHistory: Issue = {
+        ...closedIssue(66, [], [record("owner", ["Labels truncated?"])]),
+        labels: page([{ name: "status:ready" }], true),
+      };
+      const openIncompleteHistory = withComments(
+        issue(67, ["status:needs-human"]),
+        [record("owner", ["Comments truncated?"], { v2: 67 })],
+        true,
+      );
+      const { view, report, text } = await human(
+        [openUnanswered, openResolved, openIncompleteHistory],
+        [],
+        {
+          closed: [
+            closedUnanswered,
+            closedUntrustedEdit,
+            closedUnknownOutcome,
+            closedIncompleteHistory,
+          ],
+          trust: trustAll({ outsider: "read", ghost: "unknown" }),
+        },
+      );
+      expect(
+        view.items.map((i) => [
+          i.target.split("/").pop(),
+          i.attentionSection,
+          i.attentionSectionReason.ruleId,
+        ]),
+      ).toEqual([
+        ["61", "input", "HS-INPUT-ACTIONABLE"],
+        ["63", "input", "HS-INPUT-ACTIONABLE"],
+        ["64", "input", "HS-INPUT-ACTIONABLE"],
+        ["67", "input", "HS-INPUT-ACTIONABLE"],
+        ["65", "waiting", "HS-WAITING-UNKNOWN"],
+        ["66", "waiting", "HS-WAITING-UNKNOWN"],
+      ]);
+      expect(text).toContain("Section: waiting (HS-WAITING-UNKNOWN)");
+      const mcp = briefingView(
+        {
+          repository: repo,
+          status: "incomplete",
+          selection: {
+            repository: repo,
+            agent: "owner",
+            identitySource: "client",
+            entry: null,
+            triageRole: "human",
+            identityDiagnostic: null,
+          },
+          notices: [],
+          maxChars: 10_000,
+        },
+        report as unknown as Record<string, unknown>,
+      );
+      const mcpText = mcp
+        .text(mcp.data, {
+          budgetBytes: 16384,
+          bytes: 0,
+          returned: {},
+          omitted: {},
+          truncatedFields: [],
+          next: null,
+        })
+        .join("\n");
+      expect(mcpText).toContain("[explicit, waiting] orphaned-question");
+    });
   });
 });
