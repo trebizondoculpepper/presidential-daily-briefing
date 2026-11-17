@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+import { resolveEffectiveHuman, disabledEffectiveHuman } from "./config/effectiveidentity.js";
+import { humanContextEnabled } from "./config/humancontext.js";
+import { ghAuthContext } from "./github/ghauth.js";
 /**
  * The stdio `pdb-mcp` entry point (doc/design/mcp.md, #25). The server itself lives in
  * src/mcp/server.ts so that `pdb serve` can build the same server without loading this entry.
@@ -8,7 +11,14 @@ import { initializeCrashes } from "./telemetry/crashes.js";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { serveStdio } from "@modelcontextprotocol/server/stdio";
-import { bindPolling, createServer, defaultRuntime, mcpArguments, mcpHelp } from "./mcp/server.js";
+import {
+  bindPolling,
+  createServer,
+  defaultRuntime,
+  mcpArguments,
+  mcpHelp,
+  prepareMcpIdentity,
+} from "./mcp/server.js";
 import { installedVersion } from "./updates/updates.js";
 
 export * from "./mcp/server.js";
@@ -34,6 +44,23 @@ if (isEntryPoint(process.argv[1])) {
     else {
       const { version } = await installedVersion();
       const runtime = defaultRuntime(options);
+      if (!process.env.PDB_NO_EFFECTIVE_IDENTITY)
+        await prepareMcpIdentity(
+          options,
+          runtime,
+          {
+            env: process.env,
+            fs: runtime.fs,
+            git: runtime.git,
+            human: () =>
+              humanContextEnabled()
+                ? resolveEffectiveHuman(ghAuthContext)
+                : Promise.resolve(disabledEffectiveHuman()),
+          },
+          (text) => {
+            process.stderr.write(text);
+          },
+        );
       await bindPolling(options, runtime);
       const watcher = runtime.watcher;
       const handle = serveStdio(() => createServer(options, runtime, version ?? "0.0.0"), {

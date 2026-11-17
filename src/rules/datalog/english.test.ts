@@ -316,7 +316,8 @@ describe("English policy compiler (#416)", () => {
         ),
       ),
     );
-    const strip = (m: EnglishPolicy) => ({ ...m, rulesHash: "" });
+    // Both revision identities change when a legacy hash input changes.
+    const strip = (m: EnglishPolicy) => ({ ...m, rulesHash: "", narrationHash: "" });
     expect(strip(why)).toEqual(strip(model));
 
     const overrides = compileEnglish(

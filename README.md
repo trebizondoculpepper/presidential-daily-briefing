@@ -42,14 +42,22 @@ pdb --help
 
 Run `pdb` inside a repository checkout, or pass `--repo owner/repository` explicitly. Update the global installation with the same `npm install -g` command. Add `@next` to the package name only when you want a development prerelease.
 
-This README describes the current repository version. Published releases may lag behind it; use your installed command's `--help` to confirm which features are available.
+This README describes the current repository version. Published releases may lag behind it; use your installed command's `--help` to confirm which features are available. The dated [rollout verification](doc/reports/pdb-rollout-verification.md) records the published version tested and its differences from source.
+
+Older releases that require an explicit agent support `pdb setup identity --role implementer --entry KEY --repo owner/repository`; follow its emitted commands. The automatic first-use flow below describes current source.
+
+For a one-off invocation without a global installation, name the executable explicitly:
+
+```sh
+npx --yes --package @trebizondoculpepper/presidential-daily-briefing pdb --help
+```
 
 ## Examples
 
 ### Find the next useful action
 
 ```sh
-pdb --repo owner/repository
+pdb --repo owner/repository --role implementer
 ```
 
 The briefing groups attention, PR follow-up, active work and eligible pickup. General pickup defaults to urgency and immediate-unlock impact; explicit age ordering is available for backlog cleanup:
@@ -61,13 +69,26 @@ pdb --repo owner/repository --order oldest
 
 `--agent` is an explicit workflow identity, not your GitHub login. It highlights attention addressed to that name and recorded ownership; it does not authenticate an agent or claim work.
 
-A new agent gets its own identity once, from the checkout, with:
+A new agent can start directly from the checkout:
 
 ```sh
-pdb setup identity --role implementer        # or --role designer; --dry-run previews
+pdb --repo owner/repository --role implementer  # or --role designer
 ```
 
-It generates a locally unique name for your harness's entry in the checkout's Git-ignored `pdb.toml`, keeps it on later runs, never reuses another harness's entry (under Ori, add `--entry ori.SERVER`), contacts no service and prints the `--agent` to use.
+Briefings and attributed CLI workflow commands reuse a safely selected local identity. When a verified session or an
+explicit `--entry KEY` selects a missing identity, PDB generates a name, saves it in the
+checkout's Git-ignored `pdb.toml`, reports what happened on stderr and continues the command.
+Returning commands need no name lookup or `--agent` echo. An existing unbound entry or an
+ambiguous session needs explicit entry selection before a verified binding can retain it.
+Unsupported sessions must keep passing `--entry KEY` on every invocation. PDB never borrows
+another agent's generic harness entry. A new name requires your explicit role.
+
+`--agent NAME` remains a per-call override. Explicit `pdb setup identity` remains available
+for identity management. Config reads, Doctor, rules, onboarding, help, offline reads and dry-run
+previews do not initialize identities. A dry-run needing a new name reports proposed setup
+without allocating or persisting one. Attributed CLI JSON adds `effectiveIdentity` separately
+from human attention and `employingHuman`; setup errors distinguish known persistence from
+uncertain outcomes. A saved identity survives a failure of the original command.
 
 ### Inspect a ticket or a blocked PR
 
@@ -133,13 +154,15 @@ Generic stdio configuration (install globally first; nothing registers a host au
 { "command": "pdb-mcp", "args": ["--project", "/absolute/project/path"] }
 ```
 
-`--repo owner/name` and `--agent NAME` set defaults; a tool's own `repo`/`agent` arguments win for that call. Without an agent, the server reads (never writes) the persisted `name` of an `[agents.KEY]` entry in the project's root `pdb.toml` (or, until that entry is imported, a matching legacy `agent-inbox.toml` entry, reported as `selection.identityStore: "legacy-not-imported"`), chosen by `--entry KEY`, else `--harness NAME`, else the MCP client (Ori's `ori-SERVER` client selects `ori.SERVER`), else the harness detected from the environment. `selection.identitySource` reports which of `tool`, `startup`, `entry`, `harness`, `client`, `environment` decided; when none does, the read is unfocused (`unresolved`) and `selection.identityDiagnostic` says why and how to fix it. Client roots remain follow-up work (#25); no external identity service is required.
+`--repo owner/name`, `--agent NAME` and `--role implementer|designer` set local startup defaults. With an explicitly selected matching `--project`, startup may prepare a missing identity using a verified session binding or explicit `--entry KEY`. A new identity requires an explicit or configured role. Unsupported sessions need `--entry KEY` on every invocation. Creation notices go to stderr; startup outcomes remain visible in later responses.
+
+Tool `repo`, `agent` and role arguments select a read-only display view. They cannot initialize an identity or replace the trusted startup context. Existing matching-project bindings are reused. Ori client entry selection remains a read-only focus; generic client names do not identify a logical agent. Existing `selection.identitySource` fields describe display focus. The separate `data.effectiveIdentity` describes effective agent, human, role and setup; `triage_events` carries it at the envelope's top level. Its `startup` field records the historical startup outcome, while current setup reports reuse. Client roots remain follow-up work (#25).
 
 Claude Code (temporary workaround for #266, kept until the bounded results pass the real-client retest): with older releases, the default `triage_briefing`, `triage_issue` and `triage_dependencies` results can exceed Claude Code's default MCP output limit of 25,000 tokens ([Claude Code documentation](https://code.claude.com/docs/en/mcp#mcp-output-limits-and-warnings), accessed 14 November 2026). Start Claude Code with a larger limit, for example `MAX_MCP_OUTPUT_TOKENS=60000 claude`. This is interim only; the fix is the bounded response contract in [doc/design/mcp-bounded-results.md](doc/design/mcp-bounded-results.md).
 
 ## Local server: `pdb serve`
 
-`pdb serve` runs a foreground local HTTP server from the same package: a read-only JSON API and HTTP MCP over one short-lived memory cache, so several agents on one machine share collected GitHub facts instead of each collecting them. It uses your authenticated `gh`, writes nothing to disk and never changes GitHub. Stop it with Ctrl-C; a restart clears the cache.
+`pdb serve` runs a foreground local HTTP server from the same package: a read-only JSON API and HTTP MCP over one short-lived memory cache, so several agents on one machine share collected GitHub facts instead of each collecting them. It uses your authenticated `gh` and never changes GitHub. Local startup may prepare an identity for one explicitly selected project; GETs, HTTP MCP calls and dashboard filters never initialize identities. Multiple local projects are not bulk initialized. Stop it with Ctrl-C; a restart clears the cache.
 
 ```sh
 pdb serve --project /absolute/project/path        # or --repo owner/name; both repeatable
@@ -164,7 +187,9 @@ is shown only when already known; PDB makes no external address-discovery reques
 The Doctor link appears only when that page is available. Updating files does not change
 an already-running process's captured identity; restart it to load a new build.
 
-Every data route wraps the unchanged CLI JSON in an envelope with `selection` and `freshness` (`source` is `live`, `cached` or `stale`, with `observedAt` and `ageSeconds`). `refresh=true` on any read bypasses a fresh entry. If GitHub fails, a result observed within the last 30 minutes is served as `stale` and `incomplete`, never as complete; otherwise the route answers 502 with the CLI command that inspects the same read. MCP results of `triage_briefing`, `triage_issue` and `triage_dependencies` carry the same block as `freshness.cache`; `triage_events` keeps its version-1 envelope, with no cache block.
+Every data route wraps the CLI JSON in an envelope with `selection`, `effectiveIdentity` and `freshness` (`source` is `live`, `cached` or `stale`, with `observedAt` and `ageSeconds`). `refresh=true` on any read bypasses a fresh entry. If GitHub fails, a result observed within the last 30 minutes is served as `stale` and `incomplete`, never as complete; otherwise the route answers 502 with the CLI command that inspects the same read. MCP results of `triage_briefing`, `triage_issue` and `triage_dependencies` carry the same block as `freshness.cache`; `triage_events` keeps its version-1 envelope, with no cache block.
+
+Effective identity follows the same startup/read boundaries as stdio MCP. Status reports the historical `identityStartup` outcome. Account observations update human metadata without changing the local agent binding; unavailable authentication remains explicit.
 
 HTTP MCP configuration (verified with Claude Code 2.1.325 on macOS; see [doc/reports/serve-http-mcp-acceptance.md](doc/reports/serve-http-mcp-acceptance.md)):
 

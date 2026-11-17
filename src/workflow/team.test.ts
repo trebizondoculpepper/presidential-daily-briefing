@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { atomicJson, main } from "../cli.js";
 import { teamText, teamView } from "./team.js";
+import { contributionFinished } from "./ticketdoctor.js";
 import type { Issue } from "../github/types.js";
 import { issue, page, pr, repo, snapshot, time } from "../testing/snapshots.js";
 
@@ -57,7 +58,8 @@ describe("team view (#41, doc/design/diagnostics.md)", () => {
     expect(ana.claims.map((c) => c.number)).toEqual([1, 2, 3]);
     expect(ana.claims[0].pullRequests[0]).toMatchObject({
       number: 40,
-      verify: "SUCCESS",
+      requirements: "satisfied",
+      ready: false,
       unresolvedThreads: 1,
     });
     expect(ana.claims[0].latestActivity!.source).toBe("PR #40 updated");
@@ -173,5 +175,122 @@ describe("team view (#41, doc/design/diagnostics.md)", () => {
     } finally {
       await rm(dir, { recursive: true });
     }
+  });
+
+  it("uses native PR readiness without requiring a verify check in team and Ticket Doctor (#711)", () => {
+    const claimed = issue(10, ["agent:ana", "status:in-progress"]);
+    const prNoVerify = {
+      ...pr(),
+      number: 41,
+      mergeable: "MERGEABLE",
+      mergeStateStatus: "CLEAN",
+      closingIssuesReferences: page([{ number: 10, url: claimed.url }]),
+    };
+    prNoVerify.requiredChecks = {
+      head: prNoVerify.headRefOid,
+      base: "main",
+      expected: [{ context: "lint", appId: null }],
+      checks: [{ name: "lint", databaseId: null, appId: null, required: "required" }],
+      gaps: [],
+    };
+    prNoVerify.commits = {
+      nodes: [
+        {
+          commit: {
+            statusCheckRollup: {
+              state: "SUCCESS",
+              contexts: page([
+                {
+                  name: "lint",
+                  status: "COMPLETED",
+                  conclusion: "SUCCESS",
+                  detailsUrl: "https://github.com/o/r/runs/1",
+                },
+              ]),
+            },
+          },
+        },
+      ],
+    };
+    const view = teamView(snapshot([claimed], [prNoVerify]), { now: new Date(time) });
+    const prRow = view.agents[0]?.claims[0]?.pullRequests[0];
+    expect(prRow).toMatchObject({
+      number: 41,
+      requirements: "satisfied",
+      ready: true,
+      blockers: [],
+    });
+    expect(contributionFinished(prNoVerify)).toBe(true);
+    const rendered = teamText(view);
+    expect(rendered).toContain("checks satisfied, ready");
+    expect(rendered).not.toContain("verify");
+
+    // Pending advisory check does not block readiness.
+    prNoVerify.requiredChecks!.checks.push({
+      name: "advisory-job",
+      databaseId: null,
+      appId: null,
+      required: "advisory",
+    });
+    prNoVerify.commits!.nodes[0]!.commit.statusCheckRollup!.contexts.nodes.push({
+      name: "advisory-job",
+      status: "IN_PROGRESS",
+      conclusion: undefined,
+      detailsUrl: "https://github.com/o/r/runs/2",
+    });
+    const withAdvisory = teamView(snapshot([claimed], [prNoVerify]), { now: new Date(time) });
+    expect(withAdvisory.agents[0]?.claims[0]?.pullRequests[0]?.ready).toBe(true);
+
+    // Truncated review threads keep readiness unproven (ready: false).
+    const withTruncatedThreads = {
+      ...prNoVerify,
+      reviewThreads: { nodes: [], pageInfo: { hasNextPage: true, endCursor: "c1" } },
+    };
+    const truncatedThreads = teamView(snapshot([claimed], [withTruncatedThreads]), {
+      now: new Date(time),
+    });
+    expect(truncatedThreads.agents[0]?.claims[0]?.pullRequests[0]?.ready).toBe(false);
+    expect(contributionFinished(withTruncatedThreads)).toBe(false);
+
+    // Truncated comments or reviews also keep readiness unproven under legacy policy.
+    const withTruncatedComments = {
+      ...prNoVerify,
+      comments: {
+        nodes: [],
+        pageInfo: { hasNextPage: true, hasPreviousPage: true, endCursor: "c1" },
+      },
+    };
+    const truncatedComments = teamView(snapshot([claimed], [withTruncatedComments]), {
+      now: new Date(time),
+    });
+    expect(truncatedComments.agents[0]?.claims[0]?.pullRequests[0]).toMatchObject({
+      ready: false,
+      blockers: ["PR evidence is incomplete (comments)"],
+    });
+    expect(contributionFinished(withTruncatedComments)).toBe(false);
+
+    // Unanswered @codex review request under legacy policy blocks readiness.
+    const withUnansweredReviewRequest = {
+      ...prNoVerify,
+      comments: {
+        nodes: [
+          {
+            author: { login: "alice" },
+            body: "@codex review",
+            createdAt: "2026-04-01T09:50:00Z",
+            url: "https://github.com/o/r/pull/41#issuecomment-1",
+          },
+        ],
+        pageInfo: { hasNextPage: false, endCursor: null },
+      },
+    };
+    const awaitingReview = teamView(snapshot([claimed], [withUnansweredReviewRequest]), {
+      now: new Date(time),
+    });
+    expect(awaitingReview.agents[0]?.claims[0]?.pullRequests[0]).toMatchObject({
+      ready: false,
+      blockers: ["a review was requested and has had no reaction"],
+    });
+    expect(contributionFinished(withUnansweredReviewRequest)).toBe(false);
   });
 });

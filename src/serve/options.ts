@@ -5,11 +5,11 @@
  * here, so changing it is a one-line edit with no hunt through the server.
  */
 import { isIP } from "node:net";
-import { isAbsolute, resolve } from "node:path";
+import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { parseDuration } from "../github/changes.js";
 import { validateHarness } from "../config/harness.js";
-import { validateEntryKey } from "../config/identity.js";
+import { TRIAGE_ROLES, validateEntryKey } from "../config/identity.js";
 
 /** Default listening port (owner question on #42; arbitrary but stable). */
 export const DEFAULT_PORT = 4372;
@@ -52,19 +52,20 @@ export interface ServeOptions {
   agent?: string;
   entry?: string;
   harness?: string;
+  role?: string;
   /** Which settings were given as arguments, even with a default value (#459 config sources). */
   given?: { port: boolean; ttl: boolean };
 }
 
 export const serveHelp = `Usage: pdb serve [--port N] [--host ADDR] [--allow-remote] [--ttl DURATION]
                  [--repo owner/name]... [--project PATH]...
-                 [--agent NAME] [--entry KEY | --harness NAME]
+                 [--agent NAME] [--entry KEY | --harness NAME] [--role implementer|designer]
 Foreground local HTTP server for Presidential Daily Briefing (doc/design/serve.md): a read-only
 JSON API and HTTP MCP over one memory-only cache of collected GitHub facts. Requires
 authenticated gh and Node 26+. Never changes GitHub. Stop it with Ctrl-C.
   --repo owner/name     Serve this repository (repeatable)
-  --project PATH        Serve the repository of this local checkout, and use its configuration
-                        and pdb.toml for identity (repeatable)
+  --project PATH        Serve the repository of this local checkout (absolute or relative path),
+                        and use its configuration and pdb.toml for identity (repeatable)
                         At least one --repo or --project is required; the working directory is
                         never used to choose a repository.
   --port N              Port to listen on, 0-65535 (default ${DEFAULT_PORT}; 0 picks a free port)
@@ -75,7 +76,11 @@ authenticated gh and Node 26+. Never changes GitHub. Stop it with Ctrl-C.
   --ttl DURATION        How long a collected result is reused, 1m to 10m (default 5m)
   --agent NAME          Default agent for focused reads (a request's agent wins)
   --entry KEY           Without an agent, use [agents.KEY] of the project's pdb.toml
-  --harness NAME        Without an agent or --entry, select that harness's entry
+  --harness NAME        Local harness; ambiguous/unverified selection needs --entry KEY
+  --role ROLE           Explicit local startup role; a missing identity needs it. A server
+                        with exactly one local startup project may initialize that identity.
+                        Multiple projects are never bulk initialized; GETs and MCP reads only
+                        resolve existing context. Unsupported sessions keep passing --entry
   --help                Show usage
 Routes (read-only; every data route accepts repo=owner/name and refresh=true):
   GET  /api/v1/briefing?role=implementer  CLI --json briefing (agent, role, order, since, limit)
@@ -109,7 +114,10 @@ export function isLoopback(host: string): boolean {
 }
 
 /** Parse and validate `pdb serve` arguments; throws {@link ServeUsageError}. */
-export function serveArguments(args: string[]): ServeOptions & { help?: boolean } {
+export function serveArguments(
+  args: string[],
+  cwd: string = process.cwd(),
+): ServeOptions & { help?: boolean } {
   let parsed;
   try {
     parsed = parseArgs({
@@ -124,6 +132,7 @@ export function serveArguments(args: string[]): ServeOptions & { help?: boolean 
         agent: { type: "string" },
         entry: { type: "string" },
         harness: { type: "string" },
+        role: { type: "string" },
         help: { type: "boolean" },
       },
     });
@@ -158,14 +167,11 @@ export function serveArguments(args: string[]): ServeOptions & { help?: boolean 
   for (const repo of repos)
     if (!repoPattern.test(repo)) throw new ServeUsageError("--repo must be owner/name.");
   const projects = (values.project ?? []).map((path) => {
-    if (!isAbsolute(path))
-      throw new ServeUsageError(`--project must be an absolute path: ${JSON.stringify(path)}.`);
-    return resolve(path);
+    if (!path.trim()) throw new ServeUsageError("--project must not be empty.");
+    return resolve(cwd, path);
   });
   if (!repos.length && !projects.length)
-    throw new ServeUsageError(
-      "pdb serve needs --repo owner/name or --project /absolute/project/path",
-    );
+    throw new ServeUsageError("pdb serve needs --repo owner/name or --project PATH");
   if (values.agent !== undefined && !agentPattern.test(values.agent))
     throw new ServeUsageError("--agent must be an agent name such as kavya_sabbagh.");
   if (values.entry !== undefined && values.harness !== undefined)
@@ -173,6 +179,10 @@ export function serveArguments(args: string[]): ServeOptions & { help?: boolean 
   try {
     if (values.entry !== undefined) validateEntryKey(values.entry);
     if (values.harness !== undefined) validateHarness(values.harness);
+    if (values.role !== undefined && !(TRIAGE_ROLES as readonly string[]).includes(values.role))
+      throw new ServeUsageError(
+        "--role must be implementer or designer for local identity preparation.",
+      );
   } catch (error) {
     throw new ServeUsageError(error instanceof Error ? error.message : String(error));
   }
@@ -187,5 +197,6 @@ export function serveArguments(args: string[]): ServeOptions & { help?: boolean 
     agent: values.agent,
     entry: values.entry,
     harness: values.harness,
+    ...(values.role !== undefined ? { role: values.role } : {}),
   };
 }

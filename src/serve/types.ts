@@ -1,3 +1,5 @@
+import type { EffectiveHuman, EffectiveIdentityRuntime } from "../config/effectiveidentity.js";
+import type { LocalIdentitySession } from "../config/serveridentity.js";
 /**
  * Shared `pdb serve` interfaces (#445). They live here, apart from the `serve.ts` entry module,
  * so `serve/*` modules can share them without importing `serve.ts`: this module imports no
@@ -55,6 +57,12 @@ export interface ServeReadRuntime {
 
 /** Injected boundaries of `pdb serve`. */
 export interface ServeRuntime {
+  /** Trusted local startup preparation; tests inject disposable boundaries. */
+  identityRuntime?: Omit<EffectiveIdentityRuntime, "human">;
+  /** Invoking working directory for resolving relative `--project` paths (#569). */
+  cwd?: string;
+  /** Git runner for resolving nested `--project` paths and worktrees to their root (#569). */
+  git?: GitRunner;
   /** Resolve a local checkout to its owner/name (startup only). */
   currentRepository: (cwd?: string, signal?: AbortSignal) => Promise<string>;
   /** The gh host and login (startup, and before live collections at most once per TTL). */
@@ -95,6 +103,9 @@ export interface ProcessIdentity extends BuildIdentity {
 
 /** Facts fixed at startup, shown by /api/v1/status. */
 export interface ServerFacts {
+  /** Process-local startup identity and the last actual gh-auth observation. */
+  identitySession?: LocalIdentitySession;
+  effectiveHuman?: EffectiveHuman;
   version: string | null;
   startedAt: Date;
   url: string;

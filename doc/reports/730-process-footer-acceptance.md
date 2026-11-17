@@ -27,3 +27,7 @@ browser profile was read. This is visual/layout evidence, not VoiceOver testing;
 #719 remains separate. Doctor is not implemented/linked by this change. A missing
 source build manifest remains unknown rather than being inferred from current Git
 or npm latest; installed package gitHead is used only for an actual package install.
+
+Morning integration with main through 3f935f7 retained the new effective identity
+startup and status fields alongside process provenance. Check, the combined suite
+(2,685 passed, one existing skip), and build passed after conflict resolution.

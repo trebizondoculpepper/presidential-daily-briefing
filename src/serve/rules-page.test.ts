@@ -21,7 +21,8 @@ import type { ServeRuntime } from "../serve.js";
 import { serveArguments } from "./options.js";
 import type { ServeReadRuntime } from "./api.js";
 import { readServices } from "./services.js";
-import { rulesPageHtml, rulesSections } from "./rules-page.js";
+import { rulesPageHtml, rulesSections, escapeHtml } from "./rules-page.js";
+import { compileProjectPolicy } from "../rules/datalog/project/compile.js";
 
 const checkout = resolve("/work/checkout");
 const unknown: EffectiveSettings = { status: "unknown", reason: "test: not read" };
@@ -36,11 +37,24 @@ const unescape = (html: string) =>
 
 /** The sections as the page shows them: each heading and its preformatted text, unescaped. */
 function pageSections(html: string): { title: string; lines: string[] }[] {
-  return [...html.matchAll(/<h2>(.*?)<\/h2>\n<pre class="rules">([\s\S]*?)<\/pre>/g)].map((m) => ({
+  return [
+    ...html.matchAll(/<section id="section-\d+"><h2>(.*?)<\/h2>\n([\s\S]*?)<\/section>/g),
+  ].map((m) => ({
     title: unescape(m[1]!),
-    lines: m[2] === "" ? [] : unescape(m[2]!).split("\n"),
+    lines: [
+      ...m[2]!.matchAll(
+        /<pre class="rules">([\s\S]*?)<\/pre>|<p class="formal-introduction">([\s\S]*?)<\/p>|<h3 class="rule-band">([\s\S]*?)<\/h3>/g,
+      ),
+    ]
+      .flatMap((part) => unescape(part[1] ?? part[2] ?? part[3] ?? "").split("\n"))
+      .filter((line) => line !== ""),
   }));
 }
+const formalSections = (text: string) =>
+  rulesSections(text).map((s) => ({
+    ...s,
+    lines: s.lines.filter((line) => line !== ""),
+  }));
 
 const page = { origin: "http://127.0.0.1:4372/", served: [], selected: null, filters: {} };
 
@@ -49,11 +63,11 @@ const editedModel = (file: string, edit: (text: string) => string) =>
   compileEnglish(buildPolicy((name) => (name === file ? edit(source(name)) : source(name))));
 
 describe("rules page rendering (#392)", () => {
-  it("shows exactly the sections and lines of the pdb rules text", () => {
+  it("retains every formal section and line beneath purpose-first controls", () => {
     const doc = rulesDocument({ ...declaredRulesContext(), effective: unknown });
     const text = rulesText(doc);
     const html = rulesPageHtml(doc, text, page);
-    expect(pageSections(html)).toEqual(rulesSections(text));
+    expect(pageSections(html)).toEqual(formalSections(text));
     // Nothing is lost by the split: every non-heading line of the text is on the page.
     const lines = text.split("\n").filter((l) => l !== "" && !/^== .+ ==$/.test(l));
     expect(pageSections(html).flatMap((s) => s.lines.filter((l) => l !== ""))).toEqual(lines);
@@ -73,7 +87,7 @@ describe("rules page rendering (#392)", () => {
     const doc = rulesDocument({ ...declaredRulesContext(), effective: unknown }, {}, model);
     const text = rulesText(doc);
     const html = rulesPageHtml(doc, text, page);
-    expect(pageSections(html)).toEqual(rulesSections(text));
+    expect(pageSections(html)).toEqual(formalSections(text));
     expect(text).toContain("unfavorable(?t)");
     expect(unescape(html)).toContain('the viewer\'s requested order is "oldest"');
     expect(html).toContain(`<code>${model.rulesHash}</code>`);
@@ -270,5 +284,118 @@ describe("GET /rules (#392)", () => {
     } finally {
       await running.close();
     }
+  });
+});
+
+describe("purpose-first rule presentation (#578)", () => {
+  it("shows sample purposes before closed native formal controls and retains human rules", () => {
+    const doc = rulesDocument(declaredRulesContext());
+    const html = rulesPageHtml(doc, rulesText(doc), page);
+    for (const id of [
+      "D-ATTENTION",
+      "D-PR-FAIL",
+      "D-EASY",
+      "D-COMPLEXITY-BOOST",
+      "D-INSPECT",
+      "D-HUMAN-ASK-YOU",
+    ]) {
+      const rule = doc.decisions.find((d) => d.id === id)!;
+      const start = html.indexOf(`data-rule-id="${id}"`);
+      const article = html.slice(start, html.indexOf("</article>", start));
+      expect(article.indexOf(escapeHtml(rule.purpose!))).toBeLessThan(article.indexOf("<details"));
+      expect(article).toContain(`<summary>Formal conditions for ${id}</summary>`);
+      expect(article).not.toMatch(/<details[^>]*\bopen\b/);
+    }
+    expect(html).toContain("Authored purposes: 47 of 47 rules in this view");
+    expect(html).toContain("not evidence that a rule matched a ticket");
+    expect(html).toContain("Mutation guards remain outside this listing");
+    expect(html).toContain("Not formalized here");
+    expect(pageSections(html)).toEqual(formalSections(rulesText(doc)));
+  });
+
+  it("keeps missing older metadata and newly introduced rule IDs visible with formal fallback", () => {
+    const older = structuredClone(shippedModel());
+    for (const rule of [...older.decisions, ...older.denials]) delete rule.purpose;
+    const oldDoc = rulesDocument(declaredRulesContext(), {}, older);
+    const oldPage = rulesPageHtml(oldDoc, rulesText(oldDoc), page);
+    expect(oldPage).toContain("Authored purposes: 0 of 47 rules in this view");
+    expect(oldPage).toContain("Purpose not supplied");
+    expect(pageSections(oldPage)).toEqual(formalSections(rulesText(oldDoc)));
+
+    const future = editedModel("decisions.edn", (t) =>
+      t.replace(':id "D-ATTENTION"', ':id "D-FUTURE"').replace(/\n   :purpose "[^"\n]*"/, ""),
+    );
+    const doc = rulesDocument(declaredRulesContext(), {}, future);
+    const html = rulesPageHtml(doc, rulesText(doc), page);
+    expect(doc.narration.missing).toContain("D-FUTURE");
+    expect(html).toContain('data-rule-id="D-FUTURE"');
+    expect(html).toContain("D-FUTURE: action addressed-response");
+    expect(html).toContain("Purpose not supplied");
+  });
+
+  it("uses metadata from the exact compiled revision and escapes it as literal text", () => {
+    const literal =
+      "<img src=x onerror=alert(1)> <script>alert(1)</script> & {head} ${secret} https://example.test/";
+    const revised = editedModel("decisions.edn", (t) =>
+      t.replace(/:purpose "[^"\n]*"/, `:purpose ${JSON.stringify(literal)}`),
+    );
+    const doc = rulesDocument(declaredRulesContext(), {}, revised);
+    const html = rulesPageHtml(doc, rulesText(doc), page);
+    expect(revised.rulesHash).toBe(shippedModel().rulesHash);
+    expect(revised.narrationHash).not.toBe(shippedModel().narrationHash);
+    expect(html).toContain(`<code>${revised.rulesHash}</code>`);
+    expect(html).toContain(`<code>${revised.narrationHash}</code>`);
+    expect(html).toContain(escapeHtml(literal));
+    expect(html).not.toMatch(/<img|<script/i);
+    expect(html).not.toContain('href="https://example.test/');
+    expect(html).not.toContain(escapeHtml(shippedModel().decisions[0].purpose!));
+    expect(html).toContain("{head} ${secret}");
+  });
+
+  it.each(["implementer", "designer"])(
+    "reports purpose coverage for the actual %s filtered view",
+    (role) => {
+      const doc = rulesDocument(declaredRulesContext(), { role });
+      const html = rulesPageHtml(doc, rulesText(doc), { ...page, filters: { role } });
+      expect(html).toContain("Filtered subset");
+      expect(html).toContain(
+        `Authored purposes: ${doc.narration.supplied} of ${doc.narration.total}`,
+      );
+      expect(doc.narration.total).toBeLessThan(47);
+      expect(doc.narration.missing).toEqual([]);
+      expect(pageSections(html)).toEqual(formalSections(rulesText(doc)));
+    },
+  );
+
+  it("carries project-purpose metadata with its own source revision and exposes missing project purposes", () => {
+    const model = shippedModel();
+    const base = { policyVersion: model.policyVersion, rulesHash: model.rulesHash };
+    const fixture = readFileSync(
+      new URL("../../doc/reports/fixtures/project-rules-v1.edn", import.meta.url),
+      "utf8",
+    ).replace(/:base-rules-hash "[a-f0-9]{64}"/, `:base-rules-hash "${model.rulesHash}"`);
+    const policy = compileProjectPolicy(
+      fixture
+        .replace(":format-version 1", ":format-version 2")
+        .replace(":why", ':purpose "Prefer the project priority label." :why'),
+      base,
+    );
+    const doc = rulesDocument({ ...declaredRulesContext(), project: { state: "active", policy } });
+    const html = rulesPageHtml(doc, rulesText(doc), page);
+    expect(html).toContain("Prefer the project priority label.");
+    expect(html).toContain(policy.effectiveRulesHash);
+    expect(html).toContain("<dt>Project source format</dt><dd>2 (projection 1)</dd>");
+    expect(html).toContain(
+      `<dt>Project source revision</dt><dd><code>${policy.projectRulesHash}</code>`,
+    );
+    expect(doc.project?.preferences[0].purpose).toBe(policy.preferences[0].purpose);
+    expect(pageSections(html)).toEqual(formalSections(rulesText(doc)));
+    const plain = compileProjectPolicy(fixture, base);
+    const missing = rulesDocument({
+      ...declaredRulesContext(),
+      project: { state: "active", policy: plain },
+    });
+    expect(missing.narration.missing).toContain(plain.preferences[0].id);
+    expect(rulesPageHtml(missing, rulesText(missing), page)).toContain("Purpose not supplied");
   });
 });

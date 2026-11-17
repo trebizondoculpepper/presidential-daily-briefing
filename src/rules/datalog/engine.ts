@@ -8,7 +8,7 @@ import ds from "datascript";
 import type { Datom, Value, Db } from "datascript";
 import bundleJson from "./policy.generated.json" with { type: "json" };
 import type { PolicyBundle } from "./bundle.js";
-import { rulesHashOf } from "./hash.js";
+import { rulesHashOf, narrationHashOf } from "./hash.js";
 
 /** The validated policy artifact written by `npm run rules:build` from policy/*.edn. */
 // Validated by the build and by `rules:build --check` in npm run check; JSON types are too wide.
@@ -16,6 +16,7 @@ const bundle = bundleJson as unknown as PolicyBundle;
 const { policyVersion } = bundle;
 
 export const rulesHash = rulesHashOf(bundle);
+export const narrationHash = narrationHashOf(bundle);
 export { policyVersion };
 
 /** Most datoms one evaluation accepts, including the policy's own constants and rule entities. */

@@ -1,4 +1,5 @@
 /** Native project grammar and English structure (#514). Grounding is a separate stage. */
+import { purposeText } from "../narration.js";
 import { compileEnglishClauses, callsOf } from "../english.js";
 import type { Clause } from "../english-model.js";
 import { parseProjectSource, ProjectSourceError } from "./source.js";
@@ -37,6 +38,7 @@ export interface ProjectHelper {
 }
 export interface ProjectPreference {
   id: string;
+  purpose?: string;
   when: Clause[];
   priority: Clause[];
   why: string;
@@ -55,7 +57,12 @@ function fail(code: string, where: string): never {
 }
 const symbol = (f: unknown): string | null =>
   f && typeof f === "object" && "sym" in f && typeof f.sym === "string" ? f.sym : null;
-function fields(form: unknown, allowed: readonly string[], where: string): Map<string, unknown> {
+function fields(
+  form: unknown,
+  allowed: readonly string[],
+  where: string,
+  optional: readonly string[] = [],
+): Map<string, unknown> {
   if (!form || typeof form !== "object" || !("map" in form) || !Array.isArray(form.map))
     return fail("native-map", where);
   const out = new Map<string, unknown>();
@@ -65,7 +72,7 @@ function fields(form: unknown, allowed: readonly string[], where: string): Map<s
       typeof key !== "object" ||
       !("key" in key) ||
       typeof key.key !== "string" ||
-      !allowed.includes(key.key)
+      (!allowed.includes(key.key) && !optional.includes(key.key))
     )
       fail("native-key", where);
     if (out.has(key.key)) fail("duplicate-key", where);
@@ -115,7 +122,12 @@ export function compileProjectGrammar(text: string, base: BaseIdentity): Project
     ids = new Set<string>();
   for (const [index, form] of source.preferences.entries()) {
     const where = `preferences[${index}]`,
-      f = fields(form, ["id", "when", "priority", "why", "witnesses"], where);
+      f = fields(
+        form,
+        ["id", "when", "priority", "why", "witnesses"],
+        where,
+        source.formatVersion === 2 ? ["purpose"] : [],
+      );
     const id = f.get("id"),
       why = f.get("why");
     if (typeof id !== "string" || !/^project-[a-z0-9][a-z0-9-]{0,62}$/.test(id) || ids.has(id))
@@ -144,8 +156,17 @@ export function compileProjectGrammar(text: string, base: BaseIdentity): Project
       /[{}]/.test(why.replace(/\{[^{}]*\}/g, ""))
     )
       fail("preference-placeholder", where);
+    let purpose: string | undefined;
+    if (f.has("purpose")) {
+      try {
+        purpose = purposeText(f.get("purpose"), `${where}.purpose`);
+      } catch {
+        fail("preference-purpose", where);
+      }
+    }
     preferences.push({
       id,
+      ...(purpose !== undefined ? { purpose } : {}),
       why,
       when: clauses(f.get("when"), `${where}.when`),
       priority: clauses(f.get("priority"), `${where}.priority`),

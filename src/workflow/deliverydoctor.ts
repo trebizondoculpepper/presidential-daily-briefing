@@ -37,6 +37,8 @@ export interface DeliveryDoctorRuntime {
   /** Live PR, default-branch and compare reads; absent means delivery is not evaluated. */
   live?: Pick<DeliverablesRuntime, "query" | "rest">;
   signal?: AbortSignal;
+  /** Completed live evaluations only, bounded by deliveryDoctorTicketCap. */
+  onProgress?: (evaluated: number) => void;
 }
 
 /** A known stale (rejected) responsibility transfer, with the records on both sides. */
@@ -155,6 +157,7 @@ export async function diagnoseDelivery(
   snapshot: Snapshot,
   rt: DeliveryDoctorRuntime,
 ): Promise<DeliveryDiagnosis> {
+  rt.signal?.throwIfAborted();
   const result: DeliveryDiagnosis = { issues: new Map(), warnings: [] };
   let evaluated = 0;
   let skipped = 0;
@@ -281,13 +284,16 @@ export async function diagnoseDelivery(
       },
       rt.live,
     );
+    rt.signal?.throwIfAborted();
     d.evaluation = evaluateDelivery(facts);
+    rt.onProgress?.(evaluated);
     d.coverageOmissions.push(...facts.coverage.omissions);
   }
   if (skipped)
     result.warnings.push(
       `delivery evaluated for ${deliveryDoctorTicketCap} tickets; ${skipped} more with delivery records were not evaluated`,
     );
+  rt.signal?.throwIfAborted();
   return result;
 }
 
