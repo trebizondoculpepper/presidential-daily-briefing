@@ -7,6 +7,7 @@ import type { CatchUpReport } from "./catchup.js";
 import { briefingArgumentsFor, fileIdentity, sameDestination } from "./catchupcli.js";
 import { help as cliHelp, main } from "../cli.js";
 import type { Runtime } from "../cli.js";
+import { snapshotPrReadiness } from "../workflow/prstatus.js";
 import { changeSubject, resolveWindow } from "../github/changes.js";
 import type { ChangeEvidence, EvidenceIssue, EvidencePullRequest } from "../github/changes.js";
 import { collect } from "../github/github.js";
@@ -65,6 +66,13 @@ const pr = (
   headRefOid: `sha${n}`,
   headRefName: `b${n}`,
   baseRefName: "main",
+  requiredChecks: {
+    head: `sha${n}`,
+    base: "main",
+    checks: [{ name: "verify", databaseId: null, appId: null, required: "required" }],
+    expected: [{ context: "verify", appId: null }],
+    gaps: [],
+  },
   isDraft: false,
   mergeable: "MERGEABLE",
   mergeStateStatus: "CLEAN",
@@ -328,7 +336,7 @@ describe("repository catch-up aggregation (#169)", () => {
     const ana = report.sections.activity.items.find((r) => r.subject.number === 30)!;
     expect(ana.related).toMatchObject([{ number: 40 }]);
     expect(ana.description).toContain("ongoing (not new)");
-    expect(ana.next).toContain("Fix failing checks");
+    expect(ana.next).toBe("Blocked: address every listed blocker.");
     expect(
       report.sections.activity.items.find((r) => r.subject.number === 31)!.description,
     ).toContain("started in window");
@@ -718,9 +726,9 @@ describe("repository catch-up aggregation (#169)", () => {
     const cancelled = pr(55, [], "CANCELLED");
     const report = catchUp(snap([], [cancelled], evidence([])), { now: clock, limit: 100 });
     const row = report.sections.activity.items.find((r) => r.subject.number === 55)!;
-    expect(row.description).toContain("checks cancelled; verification incomplete");
+    expect(row.description).toContain("check verify cancelled: verification incomplete");
     expect(row.description).not.toContain("failing");
-    expect(row.next).toBe("Rerun checks on PR #55.");
+    expect(row.next).toBe("Blocked: address every listed blocker.");
     const blockers = report.sections.blockers.items.filter((r) => r.subject.number === 55);
     expect(blockers.map((r) => r.kind)).toEqual(["cancelled-checks"]);
   });
@@ -731,7 +739,7 @@ describe("repository catch-up aggregation (#169)", () => {
     const row = report.sections.activity.items.find((r) => r.subject.number === 56)!;
     expect(row.description).toContain("changes requested");
     expect(row.description).not.toContain("checks passing");
-    expect(row.next).toBe("Address review findings on PR #56.");
+    expect(row.next).toBe("Blocked: address every listed blocker.");
   });
 
   it("treats an untimed claim/release comment on an open subject as unknown history", async () => {
@@ -831,7 +839,7 @@ describe("repository catch-up aggregation (#169)", () => {
     const odd = pr(82, [], "UNKNOWN");
     const report = catchUp(snap([], [odd], evidence([])), { now: clock, limit: 100 });
     const row = report.sections.activity.items.find((r) => r.subject.number === 82)!;
-    expect(row.description).toContain("checks unknown");
+    expect(row.description).toContain("Required check verify is UNKNOWN");
     expect(row.description).not.toContain("passing");
     const fine = catchUp(snap([], [pr(83, [])], evidence([])), { now: clock, limit: 100 });
     expect(fine.sections.activity.items[0]!.description).toContain("checks passing");
@@ -854,9 +862,9 @@ describe("repository catch-up aggregation (#169)", () => {
 
   it("reports a verification risk for an open PR with no checks", () => {
     const { row, blockers } = verificationOf(withChecks(180, []));
-    expect(row.description).toContain("verification not proven");
+    expect(row.description).toContain("Required check not yet reported: verify");
     expect(row.description).not.toContain("checks passing");
-    expect(row.next).toBe("Run or wait for the required verify check on PR #180.");
+    expect(row.next).toBe("Blocked: address every listed blocker.");
     expect(blockers.map((r) => r.kind)).toEqual(["verification-not-proven"]);
   });
 
@@ -864,7 +872,7 @@ describe("repository catch-up aggregation (#169)", () => {
     const { row, blockers } = verificationOf(
       withChecks(181, [{ name: "lint", status: "COMPLETED", conclusion: "SUCCESS" }]),
     );
-    expect(row.description).toContain("verification not proven");
+    expect(row.description).toContain("Required check not yet reported: verify");
     expect(row.description).not.toContain("checks passing");
     expect(blockers.map((r) => r.kind)).toEqual(["verification-not-proven"]);
   });
@@ -873,6 +881,71 @@ describe("repository catch-up aggregation (#169)", () => {
     const { row, blockers } = verificationOf(pr(182, []));
     expect(row.description).toContain("checks passing");
     expect(blockers).toEqual([]);
+  });
+
+  it("uses target requirements without inventing verify or waiting on advisory checks (#710)", () => {
+    const subject = withChecks(183, [
+      { name: "build", status: "COMPLETED", conclusion: "SUCCESS" },
+      { name: "optional-preview", status: "IN_PROGRESS", conclusion: null },
+      { name: "experimental", status: "COMPLETED", conclusion: "UNKNOWN" },
+    ]);
+    subject.requiredChecks = {
+      head: subject.headRefOid,
+      base: subject.baseRefName,
+      expected: [{ context: "build", appId: null }],
+      checks: [
+        { name: "build", databaseId: null, appId: null, required: "required" },
+        { name: "optional-preview", databaseId: null, appId: null, required: "advisory" },
+        { name: "experimental", databaseId: null, appId: null, required: "advisory" },
+      ],
+      gaps: [],
+    };
+    const { row, blockers } = verificationOf(subject);
+    expect(row.description).toContain("required checks passing");
+    expect(row.next).toBe(snapshotPrReadiness(subject).verdict);
+    expect(row.next).toContain("not approval");
+    expect(row.detailCommand).toBe(`pdb pr 183 --repo ${repo} --json`);
+    expect(blockers).toEqual([]);
+    expect(JSON.stringify({ row, blockers })).not.toContain("verify");
+  });
+
+  it("distinguishes a proven empty required set from absent or stale requirements (#710)", () => {
+    const subject = withChecks(184, []);
+    subject.requiredChecks = {
+      head: subject.headRefOid,
+      base: subject.baseRefName,
+      checks: [],
+      expected: [],
+      gaps: [],
+    };
+    expect(verificationOf(subject).blockers).toEqual([]);
+    for (const requirements of [undefined, { ...subject.requiredChecks, head: "older-head" }]) {
+      const { row, blockers } = verificationOf({ ...subject, requiredChecks: requirements });
+      expect(row.description).toContain(
+        "required-check evidence is absent or bound to another head/base",
+      );
+      expect(row.description).not.toContain("checks passing");
+      expect(blockers.map((r) => r.kind)).toContain("verification-not-proven");
+      expect(row.next).toBe("Blocked: address every listed blocker.");
+    }
+  });
+
+  it("retains every native blocker instead of picking a local worst status (#710)", () => {
+    const subject = pr(185, [], "FAILURE", {
+      mergeable: "CONFLICTING",
+      reviewDecision: "CHANGES_REQUESTED",
+    });
+    const data = snap([], [subject], evidence([]));
+    data.reviewPolicy = { state: "declared", policy: "codex-or-coderabbit" };
+    const native = snapshotPrReadiness(subject, data.warnings, data.reviewPolicy);
+    const report = catchUp(data, { now: clock, limit: 100 });
+    const row = report.sections.activity.items[0]!;
+    expect(row.description).toContain("check verify failed");
+    expect(row.description).toContain("merge conflicts with the base branch");
+    expect(row.description).toContain("changes requested");
+    expect(row.description).toContain("review policy codex-or-coderabbit");
+    for (const reason of native.blockers) expect(row.description).toContain(reason);
+    expect(row.next).toBe(native.verdict);
   });
 
   it("groups one PR closing two claimed issues into one contribution, in any order", () => {
@@ -1193,7 +1266,13 @@ describe("repository catch-up aggregation (#169)", () => {
 describe("briefing command: CLI, checkpoint and offline cache (#170)", () => {
   type Files = NonNullable<Runtime["briefingFiles"]>;
   /** In-memory checkpoint/cache files: tests never touch a real checkpoint. */
-  const harness = (options: { collect?: Runtime["collect"]; files?: Partial<Files> } = {}) => {
+  const harness = (
+    options: {
+      collect?: Runtime["collect"];
+      files?: Partial<Files>;
+      guide?: Runtime["guide"];
+    } = {},
+  ) => {
     const disk = new Map<string, string>();
     const calls: string[] = [];
     const errors: string[] = [];
@@ -1235,6 +1314,7 @@ describe("briefing command: CLI, checkpoint and offline cache (#170)", () => {
       stderr: (text) => errors.push(text),
       updateCheck: async () => ({ status: "skipped", reason: "test" }) as never,
       briefingFiles: files,
+      guide: options.guide,
     };
     const run = (args: string[], output?: (text: string) => Promise<void>) =>
       main(
@@ -1558,6 +1638,38 @@ describe("briefing command: CLI, checkpoint and offline cache (#170)", () => {
     h.stdout.length = 0;
     expect(await h.run(["--offline", "--cache", "cache.json"])).toBe(0);
     expect(h.stdout.join("").split("\n")[1]).toMatch(/^OFFLINE: cache from .*cannot advance/);
+  });
+
+  it("resolves target review policy live and retains it without rereading configuration offline", async () => {
+    let reads = 0;
+    const h = harness({
+      guide: {
+        cwd: "/checkout",
+        git: async (args) =>
+          args[0] === "rev-parse" ? "/checkout" : `origin https://github.com/${repo}.git (fetch)`,
+        fs: {
+          readText: async (path) => {
+            reads++;
+            return path.endsWith("triage.json")
+              ? JSON.stringify({ schemaVersion: 1, review: { policy: "codex-or-coderabbit" } })
+              : null;
+          },
+          writeText: async () => {},
+          rename: async () => {},
+          remove: async () => {},
+          makeDirectory: async () => {},
+        },
+      },
+    });
+    expect(await h.run(["--last", "24h", "--cache", "cache.json"])).toBe(0);
+    expect(JSON.parse(h.disk.get("cache.json")!).reviewPolicy).toEqual({
+      state: "declared",
+      policy: "codex-or-coderabbit",
+    });
+    const liveReads = reads;
+    expect(liveReads).toBeGreaterThan(0);
+    expect(await h.run(["--offline", "--cache", "cache.json", "--json"])).toBe(0);
+    expect(reads).toBe(liveReads);
   });
 
   it("reports a legacy cache without retained history as unavailable, not as no changes", async () => {

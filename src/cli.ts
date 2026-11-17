@@ -1638,6 +1638,7 @@ async function run(
   if (args[0] === "briefing")
     return runBriefing(args.slice(1), output, {
       ...runtime,
+      reviewPolicy: (repository) => resolveReviewPolicy(repository, runtime.guide ?? {}),
       ...(identity
         ? {
             prepareViewer: (values: import("./briefing/catchupcli.js").BriefingArguments) =>
