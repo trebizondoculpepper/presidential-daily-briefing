@@ -1635,17 +1635,8 @@ async function run(
       ...runtime,
       ...(identity
         ? {
-            prepareViewer: async (values: import("./briefing/catchupcli.js").BriefingArguments) => {
-              values.repo ??= values.offline
-                ? (
-                    await (runtime.briefingFiles?.cachedSnapshot ?? cachedSnapshot)(
-                      values.cache ?? "",
-                      undefined,
-                    )
-                  ).repository
-                : await runtime.currentRepository();
-              return commandViewer(values, identity);
-            },
+            prepareViewer: (values: import("./briefing/catchupcli.js").BriefingArguments) =>
+              commandViewer(values, identity),
           }
         : {}),
       files: runtime.briefingFiles ?? {

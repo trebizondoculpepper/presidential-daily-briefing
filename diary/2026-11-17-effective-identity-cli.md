@@ -55,3 +55,11 @@ Final review-correction validation: 141 files, 2,621 passed and one skipped; che
 source smoke and packed-install/package tests all passed. The production preview-composition
 acceptance records zero authentication calls, zero allocator calls, zero workflow queries and
 an unchanged empty disposable project.
+
+A later Codex pass found that preliminary offline catch-up target resolution bypassed its
+structured cache refusal path. Catch-up now validates the cache/checkpoint through its existing
+handler before invoking the identity adapter, and passes the already-known repository forward.
+Missing, corrupt and unsupported offline caches preserve repository-briefing-refusal JSON and
+recovery guidance with zero identity preparations. All three regressions fail on ef2f3f7 and
+pass after the fix. Full validation: 141 files, 2,624 passed and one skipped; check, build,
+source smoke and packed-install/package tests passed.
