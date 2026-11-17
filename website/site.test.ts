@@ -42,7 +42,7 @@ describe("public website presentation boundary", () => {
     });
     for (const html of site.values()) {
       expect(html).not.toContain(attack);
-      expect(html).not.toContain("<img");
+      expect(html).not.toContain("<img src=x");
       expect(html).toContain("&lt;img src=x onerror=&quot;alert(1)&quot;&gt;&amp;&#39;&quot;");
       expect(html).toContain('data-copy="example-0"');
       expect(html).toContain("Examples are dated observations, not a live view.");

@@ -192,6 +192,60 @@ footer {
   padding: 3rem 0;
   overflow-wrap: anywhere;
 }
+.conversation-link {
+  margin: 2rem 0;
+}
+.conversations {
+  padding: 3rem 0;
+  border-bottom: 1px solid var(--line);
+}
+.conversations > p {
+  max-width: 80ch;
+  color: var(--muted);
+}
+.conversation-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1.5rem;
+  margin-top: 2rem;
+}
+.conversation {
+  min-width: 0;
+  margin: 0;
+  border: 1px solid var(--line);
+  background: var(--panel);
+}
+.conversation-image {
+  display: block;
+  aspect-ratio: 3 / 4;
+  overflow: hidden;
+  border-bottom: 1px solid var(--line);
+  background: #000;
+}
+.conversation-image img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top;
+}
+.conversation figcaption {
+  padding: 1.25rem;
+  overflow-wrap: anywhere;
+}
+.conversation h3 {
+  margin: 0;
+  font-size: 1rem;
+  line-height: 1.5;
+  color: var(--accent);
+}
+.conversation figcaption p,
+.conversation figcaption a {
+  font-size: 0.85rem;
+}
+.conversation figcaption p {
+  color: var(--muted);
+}
 .empty {
   border: 1px dashed var(--line);
   padding: 1.7rem;
@@ -273,6 +327,10 @@ footer {
   display: none;
 }
 @media (max-width: 760px) {
+  .conversation-grid {
+    grid-template-columns: minmax(0, 1fr);
+    max-width: 32rem;
+  }
   .masthead {
     gap: 1.5rem;
     padding: 1.25rem;
