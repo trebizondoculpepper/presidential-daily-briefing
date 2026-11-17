@@ -429,3 +429,104 @@ describe("safe TOML table edits (#767)", () => {
     }
   });
 });
+
+describe("review regressions: scoped previews and TOML boundaries", () => {
+  it.each([true, false])(
+    "keeps unrelated JSON secrets out of every preview (dryRun=%s)",
+    async (dryRun) => {
+      const dir = await mkdtemp(join(tmpdir(), "pdb-preview-json-"));
+      try {
+        const file = join(dir, "config.json");
+        const secret = "UNRELATED_JSON_SECRET";
+        await writeFile(
+          file,
+          JSON.stringify({ mcpServers: { other: { env: { API_KEY: secret } } } }),
+        );
+        const common = { file, allowedRoot: dir, pdbVersion: "test", dryRun };
+        const created = await editJsonEntry({
+          ...common,
+          adapter: mcpJsonAdapter("pdb-mcp"),
+          manifestRecord: undefined,
+        });
+        expect(created.diff).toContain("pdb-mcp");
+        expect(created.diff).not.toContain(secret);
+        // Materialize only inside the disposable fixture when testing a dry-run preview.
+        const installed = dryRun
+          ? await editJsonEntry({
+              ...common,
+              dryRun: false,
+              adapter: mcpJsonAdapter("pdb-mcp"),
+              manifestRecord: undefined,
+            })
+          : created;
+        const replaced = await editJsonEntry({
+          ...common,
+          adapter: mcpJsonAdapter("pdb-mcp-next"),
+          manifestRecord: installed.manifestRecord!,
+        });
+        expect(replaced.diff).toContain("pdb-mcp-next");
+        expect(replaced.diff).not.toContain(secret);
+        const removed = await removeJsonEntry({
+          file,
+          allowedRoot: dir,
+          dryRun,
+          adapter: mcpJsonAdapter("pdb-mcp"),
+          manifestRecord: dryRun ? installed.manifestRecord! : replaced.manifestRecord!,
+        });
+        expect(removed.diff).toContain("pdb-mcp");
+        expect(removed.diff).not.toContain(secret);
+        expect(await nodeSafeFs.readFile(file)).toContain(secret);
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it.each([
+    "[[some_other_config]]",
+    "[mcp_servers.other] # user server",
+    '["other]name"] # quoted key',
+  ])("preserves unrelated TOML boundary %s and excludes its secret", async (header) => {
+    const dir = await mkdtemp(join(tmpdir(), "pdb-preview-toml-"));
+    try {
+      const file = join(dir, "config.toml");
+      const desiredBlock = '[mcp_servers.pdb]\ncommand = "pdb-mcp"';
+      const options = {
+        file,
+        allowedRoot: dir,
+        tablePath: ["mcp_servers", "pdb"],
+        desiredBlock,
+        pdbVersion: "test",
+      };
+      const created = await editTomlTable({ ...options, manifestRecord: undefined });
+      const unrelated = `\n${header}\nAPI_KEY = "UNRELATED_TOML_SECRET"\n`;
+      await writeFile(file, (await nodeSafeFs.readFile(file)) + unrelated);
+      const rerun = await editTomlTable({ ...options, manifestRecord: created.manifestRecord! });
+      expect(rerun.outcome).toBe("kept");
+      const replacement = await editTomlTable({
+        ...options,
+        desiredBlock: desiredBlock.replace("pdb-mcp", "pdb-mcp-next"),
+        manifestRecord: created.manifestRecord!,
+        dryRun: true,
+      });
+      expect(replacement.outcome).toBe("planned");
+      expect(replacement.diff).toContain("pdb-mcp-next");
+      expect(replacement.diff).not.toContain("UNRELATED_TOML_SECRET");
+      for (const dryRun of [true, false]) {
+        const removed = await removeTomlTable({
+          file,
+          allowedRoot: dir,
+          tablePath: options.tablePath,
+          manifestRecord: created.manifestRecord!,
+          dryRun,
+        });
+        expect(removed.outcome).toBe(dryRun ? "planned" : "applied");
+        expect(removed.diff).toContain("pdb-mcp");
+        expect(removed.diff).not.toContain("UNRELATED_TOML_SECRET");
+      }
+      expect(await nodeSafeFs.readFile(file)).toContain(unrelated.trim());
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
