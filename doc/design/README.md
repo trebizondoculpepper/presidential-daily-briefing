@@ -16,6 +16,7 @@ The tool reduces GitHub searching and encodes agreed lifecycle prerequisites and
 | [Human briefing](human-briefing.md)                                        | #457; dashboard #458                |
 | [Codex installer](codex-installer.md)                                      | #581; follow-ups #582, #583         |
 | [Settings page](serve-settings-page.md)                                    | #584                                |
+| [Serve application state](serve-application-state.md)                      | #816                                |
 | [Diagnostics page](serve-diagnostics-page.md)                              | #585                                |
 | [Human-view Unassign](human-unassign.md)                                   | #588                                |
 | [Dashboard navigation and pipeline metrics](dashboard-pipeline-metrics.md) | #573; pages #574–#576, #456, #605   |

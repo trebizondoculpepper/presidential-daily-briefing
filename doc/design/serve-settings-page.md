@@ -8,6 +8,8 @@ the superseding owner-approved layer split, reload/shutdown scope and delivery o
 
 Status: proposed contract for #584, delivered under #589. Nothing here is implemented by this document. Sections headed "Shipped today" describe current behaviour and cite the implementing file; everything else is a proposal. Implementation is blocked natively by #452 (global configuration and project registration) and must not claim a scope is editable before its underlying service ships.
 
+Reconciliation (#816): each row's `applies` value and the `restartRequired` list in save results come from the PDB serve application state service ([serve-application-state.md](serve-application-state.md)). This page and its settings service present them and never compute their own restart logic.
+
 ## Owner decisions (settled)
 
 From #584 and its owner-confirmed interaction comment, adopted without reopening:
