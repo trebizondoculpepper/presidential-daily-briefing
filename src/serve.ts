@@ -1,3 +1,4 @@
+import { projectSelectionScript } from "./serve/project-selection.js";
 import {
   captureProcessIdentity,
   readPackageBuildIdentity,
@@ -189,6 +190,10 @@ const urlHost = (host: string): string => (isIP(host) === 6 ? `[${host}]` : host
 /** The dashboard (#374): three same-origin static responses, built once per server. */
 const dashboardFiles = (): Map<string, { type: string; body: string }> =>
   new Map([
+    [
+      "/project-selection.js",
+      { type: "text/javascript; charset=utf-8", body: projectSelectionScript() },
+    ],
     ["/dashboard.css", { type: "text/css; charset=utf-8", body: dashboardCss }],
     ["/dashboard.js", { type: "text/javascript; charset=utf-8", body: dashboardScript() }],
     // The consolidated ticket detail (#454): another static page under the same policy.
