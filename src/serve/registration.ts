@@ -197,6 +197,15 @@ export async function resolveServeProjects(
   // serving it unverified, and the next startup re-checks it.
   for (const entry of stored) {
     const root = entry.localRoot;
+    // This build serves github.com only. Another registered host is kept in the configuration
+    // (never dropped by a read) but cannot be served as if it were github.com.
+    if (entry.host.toLowerCase() !== "github.com") {
+      diagnostics.push(
+        `saved project ${entry.repository} is registered for ${entry.host}, which this build cannot serve; it is kept in the configuration and not served.`,
+      );
+      saved.push(entry);
+      continue;
+    }
     const saved_without_root = (message: string): void => {
       diagnostics.push(message);
       saved.push({ ...entry, localRoot: undefined });
