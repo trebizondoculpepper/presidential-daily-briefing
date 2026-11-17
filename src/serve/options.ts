@@ -86,6 +86,8 @@ Routes (read-only; every data route accepts repo=owner/name and refresh=true):
   GET  /api/v1/briefing?role=implementer  CLI --json briefing (agent, role, order, since, limit)
   GET  /api/v1/issues/N[/deps|/who]       CLI --issue N, deps N, who N JSON
   GET  /api/v1/prs/N[?history=true]       CLI pr N JSON;  GET /api/v1/team  CLI team JSON
+  GET  /api/v1/metrics?view=daily|timing[&days=7|30], ?view=news[&hours=6|1]
+                                          Pipeline metrics over a bounded read (no CLI yet)
   POST /api/v1/refresh {"repo":"owner/name"}  Drop cached entries; the next read collects live
   GET  /api/v1/status, /healthz           Status and cache counters; liveness
   /mcp                                    HTTP MCP: the four pdb-mcp read-only tools
