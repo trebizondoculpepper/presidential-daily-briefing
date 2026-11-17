@@ -119,6 +119,7 @@ ${footer}`,
 <section id="state" aria-live="polite"></section>
 <section id="notices"></section>
 <section id="agents" aria-labelledby="agents-heading"></section>
+<section id="unknown" aria-labelledby="unknown-heading"></section>
 <section id="coverage"></section>
 </main>
 ${footer}`,
@@ -132,6 +133,8 @@ export interface ActivityRenderers {
   renderNotices(envelope: unknown): string;
   /** Agents holding recorded work, in server order; empty string when none hold work. */
   renderAgents(envelope: unknown): string;
+  /** Open tickets with unread/unverifiable responsibility, outside any named agent row. */
+  renderUnknown(envelope: unknown): string;
   renderCoverage(envelope: unknown): string;
 }
 
@@ -312,6 +315,24 @@ export function activityRenderers(base: DashboardRenderers): ActivityRenderers {
     return `<ol class="agents">${rows.join("")}</ol>`;
   };
 
+  /** Open tickets with unread or unverifiable responsibility, outside any named agent row. */
+  const renderUnknown = (envelope: unknown): string => {
+    const e = record(envelope);
+    if (e.status === "error") return "";
+    const tickets = list(record(record(e.result).delivery).tickets).filter((t) => {
+      const ticket = record(t);
+      return ticket.closure === "open" && !record(ticket.responsibility)?.ticket;
+    });
+    if (!tickets.length) return "";
+    const rows = tickets
+      .map((t) => {
+        const ticket = record(t);
+        return `<li>${link(ticket.url, `#${numberOf(ticket.url)}`)} <span class="warn">responsibility unread or unverifiable</span></li>`;
+      })
+      .join("");
+    return `<h2 id="unknown-heading">Unknown responsibility</h2><p class="warn">Open ticket(s) have unread or unverifiable delivery records; responsibility is unknown, never absent.</p><ul>${rows}</ul>`;
+  };
+
   const renderCoverage = (envelope: unknown) => {
     const e = record(envelope);
     const complete = e.status === "complete";
@@ -323,7 +344,7 @@ export function activityRenderers(base: DashboardRenderers): ActivityRenderers {
     } of ${total} agent(s) hold recorded work. Participation cannot be determined from the served model (no activity event attributed to an agent).</p>`;
   };
 
-  return { activityUrl, matches, renderNotices, renderAgents, renderCoverage };
+  return { activityUrl, matches, renderNotices, renderAgents, renderUnknown, renderCoverage };
 }
 
 /** The browser entry point; receives the renderers so it references no module-level names. */
@@ -337,6 +358,7 @@ export function activityClient(base: DashboardRenderers, view: ActivityRenderers
   const state = byId("state")!;
   const notices = byId("notices")!;
   const agents = byId("agents")!;
+  const unknown = byId("unknown")!;
   const coverage = byId("coverage")!;
   let generation = 0;
   let controller: AbortController | null = null;
@@ -357,8 +379,10 @@ export function activityClient(base: DashboardRenderers, view: ActivityRenderers
     state.innerHTML = base.renderState(envelope, false);
     notices.innerHTML = view.renderNotices(envelope);
     agents.innerHTML = view.renderAgents(envelope);
+    unknown.innerHTML = view.renderUnknown(envelope);
     coverage.innerHTML = view.renderCoverage(envelope);
     agents.classList.remove("provisional");
+    unknown.classList.remove("provisional");
     coverage.classList.remove("provisional");
   };
 
@@ -374,6 +398,7 @@ export function activityClient(base: DashboardRenderers, view: ActivityRenderers
     controller = mine;
     const current = ++generation;
     agents.classList.add("provisional");
+    unknown.classList.add("provisional");
     coverage.classList.add("provisional");
     state.innerHTML = base.renderState(null, true);
     let envelope: unknown;

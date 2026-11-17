@@ -445,6 +445,56 @@ describe("activity renderers (#456)", () => {
     expect(coverage).toContain("Participation cannot be determined");
   });
 
+  it("shows open tickets with unknown responsibility outside any named agent row", () => {
+    const html = view.renderUnknown(
+      teamEnvelope([], {
+        result: {
+          delivery: {
+            tickets: [
+              {
+                number: 30,
+                url: url(30),
+                closure: "open",
+                responsibility: null,
+                deliverables: [],
+              },
+            ],
+          },
+        },
+      }),
+    );
+    expect(html).toContain("Unknown responsibility");
+    expect(html).toContain("#30");
+    expect(html).toContain("unread or unverifiable");
+    // A closed ticket or a ticket with a responsibility is not unknown.
+    const none = view.renderUnknown(
+      teamEnvelope([], {
+        result: {
+          delivery: {
+            tickets: [
+              {
+                number: 31,
+                url: url(31),
+                closure: "closed",
+                responsibility: null,
+                deliverables: [],
+              },
+              {
+                number: 32,
+                url: url(32),
+                closure: "open",
+                responsibility: { ticket: "alpha", since: hours(1), members: [] },
+                deliverables: [],
+              },
+            ],
+          },
+        },
+      }),
+    );
+    expect(none).toBe("");
+    expect(view.renderUnknown({ status: "error" })).toBe("");
+  });
+
   it("escapes agent, title and warning text and links only GitHub URLs", () => {
     const html = view.renderAgents(
       teamEnvelope([
@@ -516,9 +566,17 @@ describe("activity browser script (#456)", () => {
       },
     });
     const elements = new Map(
-      ["content", "window", "state", "notices", "agents", "coverage", "selection", "refresh"].map(
-        (id) => [id, element(id)],
-      ),
+      [
+        "content",
+        "window",
+        "state",
+        "notices",
+        "agents",
+        "unknown",
+        "coverage",
+        "selection",
+        "refresh",
+      ].map((id) => [id, element(id)]),
     );
     elements.get("window")!.value = windowValue;
     const fetched: { path: string; signal: AbortSignal }[] = [];
