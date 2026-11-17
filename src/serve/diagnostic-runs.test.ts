@@ -24,6 +24,7 @@ async function setup(
     empty?: boolean;
     untrusted?: boolean;
     nativeCollector?: boolean;
+    ttl?: string;
     auxiliaryQuota?: "rest" | "secondary" | "thrown-rest" | "query" | "forbidden";
   } = {},
 ) {
@@ -221,6 +222,7 @@ async function setup(
   const args = [
     "--port",
     "0",
+    ...(options.ttl ? ["--ttl", options.ttl] : []),
     ...(options.local ? ["--project", SYNTHETIC_ROOT] : ["--repo", repo]),
   ];
   const serve = serveArguments(args);
@@ -258,10 +260,10 @@ async function setup(
     costs: () => ({ queries, auxiliaryRest, auxiliaryQuery }),
     read,
     release,
-    changeAuth: (next: string, error: Error | null = null) => {
+    changeAuth: (next: string, error: Error | null = null, elapsed = 6 * 60_000) => {
       login = next;
       authFailure = error;
-      advance(6 * 60_000);
+      advance(elapsed);
     },
     advance,
     setFailure: (error: Error) => {
@@ -616,6 +618,28 @@ describe("active diagnostic API (#585)", () => {
       expect(s.counts().collects).toBe(2);
       expect(s.costs().auxiliaryRest).toBe(2);
     } finally {
+      await s.close();
+    }
+  });
+  it("rejects a run that spans A to B to A even though its final login matches", async () => {
+    const s = await setup({ block: true, ttl: "1m" });
+    try {
+      const first = await s.post({ kind: "ticket-doctor", repo });
+      s.changeAuth("other", null, 61_000);
+      const b = await s.post({ kind: "doctor" });
+      await s.terminal(b.body.waiterId);
+      s.changeAuth("reader", null, 61_000);
+      const a = await s.post({ kind: "doctor" });
+      await s.terminal(a.body.waiterId);
+      s.release();
+      expect(await s.terminal(first.body.waiterId)).toMatchObject({
+        state: "failed",
+        result: null,
+        error: { code: "CACHE_INVALIDATED" },
+      });
+      expect((await s.call("api/v1/diagnostics/errors")).body.data.total).toBe(0);
+    } finally {
+      s.release();
       await s.close();
     }
   });
