@@ -16,36 +16,25 @@ import { ConfigError } from "../config/config.js";
 import type { ConfigRuntime } from "../config/configcli.js";
 import { resolveIdentityTarget } from "../config/identity.js";
 import { resolveProjectGitCommonDir } from "./manifest.js";
-import type { InstallItemKind } from "./manifest.js";
+import { manifestPath, type InstallScope } from "./manifest.js";
+import { installCodexMcp, resolveInstalledPdbMcp, uninstallCodexMcp } from "./codexmcp.js";
+import type { InstallEditErrorCode, InstallEditOutcome, InstallItemKind } from "./manifest.js";
 
 /** A registered installer client; only Codex is implemented in this slice. */
 export type InstallClient = "codex";
 
 export type InstallErrorCode =
+  | InstallEditErrorCode
   | "NO_PROJECT"
   | "IDENTITY_REQUIRED"
   | "IDENTITY_AMBIGUOUS"
   | "UNSUPPORTED_SCOPE"
   | "UNSUPPORTED_CLIENT_VERSION"
-  | "MALFORMED_CONFIG"
-  | "UNSUPPORTED_SCHEMA"
-  | "UNSAFE_TOML_EDIT"
-  | "UNSAFE_PATH"
-  | "CONFLICT"
   | "LOCKED"
-  | "OWNED_ENTRY_EDITED"
-  | "FOREIGN_ENTRY"
-  | "HOOK_NOT_AVAILABLE"
-  | "WRITE_FAILED";
+  | "HOOK_NOT_AVAILABLE";
 
 export type InstallItemAction = "create" | "replace" | "remove" | "kept" | "absent" | "skipped";
-export type InstallItemOutcome =
-  | "applied"
-  | "committed-with-error"
-  | "planned"
-  | "refused"
-  | "failed"
-  | "not-attempted";
+export type InstallItemOutcome = InstallEditOutcome | "not-attempted";
 
 export interface InstallItem {
   kind: InstallItemKind;
@@ -58,12 +47,17 @@ export interface InstallItem {
   retry: string | null;
 }
 
+/** The installer scope, with `repository` carried on the project variant for reporting. */
+export type CodexInstallScope =
+  | (Extract<InstallScope, { kind: "project" }> & { repository: string })
+  | Extract<InstallScope, { kind: "global" }>;
+
 export interface InstallResult {
   schemaVersion: 1;
   kind: "install-result";
   client: InstallClient;
   operation: "install" | "uninstall";
-  scope: { kind: "project"; root: string; repository: string } | { kind: "global"; home: string };
+  scope: CodexInstallScope;
   dryRun: boolean;
   items: InstallItem[];
   status: {
@@ -161,12 +155,12 @@ entries.`;
 export async function resolveInstallScope(
   args: InstallArguments,
   runtime: ConfigRuntime,
-): Promise<InstallResult["scope"]> {
+): Promise<CodexInstallScope> {
   if (args.global) {
     const homeDir = process.env.HOME ?? homedir();
     const codexHome = process.env.CODEX_HOME?.trim();
     const home = codexHome ? resolveHome(codexHome, homeDir) : homeDir;
-    return { kind: "global", home };
+    return { kind: "global", stateDir: home, homeDir: home };
   }
   try {
     const target = await resolveIdentityTarget(
@@ -181,8 +175,8 @@ export async function resolveInstallScope(
       throw new Error(
         "NO_PROJECT: the repository could not be resolved; run from the checkout or pass --repo owner/name.",
       );
-    await resolveProjectGitCommonDir(root, runtime.git);
-    return { kind: "project", root, repository };
+    const gitCommonDir = await resolveProjectGitCommonDir(root, runtime.git);
+    return { kind: "project", root, repository, gitCommonDir };
   } catch (error) {
     if (error instanceof ConfigError) throw new Error(`NO_PROJECT: ${error.message}`);
     throw error;
@@ -201,24 +195,103 @@ export async function runCodexInstallSurface(
   output: (text: string) => Promise<void>,
 ): Promise<number> {
   const scope = await resolveInstallScope(args, runtime);
+  const manifestPathForScope = manifestPath(scope, "codex");
+  const mcpFile =
+    scope.kind === "project" ? `${scope.root}/.codex/config.toml` : `${scope.homeDir}/config.toml`;
+  // A STDIO install needs the installed pdb-mcp command; refusing here avoids writing a
+  // command that cannot run (codex-installer.md "never a checkout, tsx, or .mjs helper").
+  const pdbMcp =
+    args.operation === "install" && args.transport === "stdio"
+      ? await resolveInstalledPdbMcp()
+      : null;
+  // Dry-run may still preview without a resolvable command; only a real write needs it.
+  if (!args.dryRun && args.operation === "install" && args.transport === "stdio" && !pdbMcp) {
+    const refused: InstallResult = {
+      schemaVersion: 1,
+      kind: "install-result",
+      client: args.client,
+      operation: args.operation,
+      scope,
+      dryRun: args.dryRun,
+      items: [
+        {
+          kind: "mcp",
+          file: mcpFile,
+          action: "kept",
+          outcome: "refused",
+          code: "UNSUPPORTED_SCOPE",
+          message:
+            "The running PDB is not an npm installation, so the installed pdb-mcp command cannot be resolved; refusing to write an entry that cannot run.",
+          diff: null,
+          retry: null,
+        },
+        {
+          kind: "hook",
+          file:
+            scope.kind === "project"
+              ? `${scope.root}/.codex/hooks.json`
+              : `${scope.homeDir}/hooks.json`,
+          action: "skipped",
+          outcome: "not-attempted",
+          code: "HOOK_NOT_AVAILABLE",
+          message:
+            "Installed hook adapter is a separate slice; withheld until it can bind a session.",
+          diff: null,
+          retry: null,
+        },
+      ],
+      status: {
+        configured: false,
+        trusted: "unknown",
+        executed: "unknown",
+        receiptVerified: "unknown",
+      },
+      next: ["Install or update PDB via npm, then re-run."],
+    };
+    if (args.json) await output(JSON.stringify(refused, null, 2) + "\n");
+    else
+      await output(
+        `pdb install codex: refused (UNSUPPORTED_SCOPE).\n${refused.items.map((i) => `  ${i.kind} (${i.outcome}, ${i.code}): ${i.message}`).join("\n")}\nNext:\n  ${refused.next.join("\n  ")}\n`,
+      );
+    return 2;
+  }
+  const performed =
+    args.operation === "install"
+      ? await installCodexMcp({
+          scope,
+          options: {
+            transport: args.transport,
+            url: args.url,
+            entry: args.entry,
+            projectRoot: scope.kind === "project" ? scope.root : undefined,
+          },
+          manifestPath: manifestPathForScope,
+          pdbVersion: "0.1.0",
+          dryRun: args.dryRun,
+        })
+      : await uninstallCodexMcp({
+          scope,
+          manifestPath: manifestPathForScope,
+          dryRun: args.dryRun,
+        });
+  const mcp = performed.mcp;
   const items: InstallItem[] = [
     {
       kind: "mcp",
-      file:
-        scope.kind === "project" ? `${scope.root}/.codex/config.toml` : `${scope.home}/config.toml`,
-      action: "create",
-      outcome: args.dryRun ? "planned" : "not-attempted",
-      code: args.dryRun ? null : "HOOK_NOT_AVAILABLE",
-      message: args.dryRun
-        ? "MCP entry planned (slice 2b implements the write)."
-        : "MCP entry write not implemented in this slice (slice 2b).",
-      diff: args.dryRun ? `[mcp_servers.pdb]\ncommand = "..."` : null,
+      file: mcpFile,
+      action: mcp.action,
+      outcome: mcp.outcome,
+      code: mcp.code,
+      message: mcp.message,
+      diff: mcp.diff,
       retry: null,
     },
     {
       kind: "hook",
       file:
-        scope.kind === "project" ? `${scope.root}/.codex/hooks.json` : `${scope.home}/hooks.json`,
+        scope.kind === "project"
+          ? `${scope.root}/.codex/hooks.json`
+          : `${scope.homeDir}/hooks.json`,
       action: "skipped",
       outcome: "not-attempted",
       code: "HOOK_NOT_AVAILABLE",
@@ -242,21 +315,23 @@ export async function runCodexInstallSurface(
       receiptVerified: "unknown",
     },
     next: [
-      "This slice only establishes the command surface; no Codex configuration was written.",
-      "Slice 2b implements the MCP entry; slice 2c the identity and next-step text.",
+      scope.kind === "project"
+        ? "Configured the Codex MCP server for this project (STDIO unless --transport http)."
+        : "Configured the Codex MCP server in your user-wide Codex home.",
       args.dryRun
-        ? "Remove --dry-run when the write slices ship."
-        : "Re-run once the write slices ship.",
-    ],
+        ? "Dry run: remove --dry-run to write."
+        : "Codex will start the PDB MCP server on the next session. Slice 2c wires identity and the remaining next-step text.",
+      args.transport === "http" ? "HTTP MCP transport is unverified for Codex (#397)." : "",
+    ].filter(Boolean),
   };
   if (args.json) {
     await output(JSON.stringify(result, null, 2) + "\n");
     return 0;
   }
   await output(
-    `pdb install codex: command surface only (no configuration written).\nScope: ${scope.kind === "project" ? `project ${scope.repository} at ${scope.root}` : `global ${scope.home}`}\nItems:\n${result.items
+    `pdb ${args.operation} codex\nScope: ${scope.kind === "project" ? `project ${scope.repository} at ${scope.root}` : `global ${scope.homeDir}`}\nItems:\n${result.items
       .map((i) => `  ${i.kind} (${i.outcome}${i.code ? `, ${i.code}` : ""}): ${i.message}`)
       .join("\n")}\nNext:\n${result.next.map((n) => `  - ${n}`).join("\n")}\n`,
   );
-  return 0;
+  return mcp.code === "CONFLICT" || mcp.outcome === "failed" ? 2 : 0;
 }

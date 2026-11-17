@@ -127,7 +127,7 @@ describe("install codex scope resolution (#768 slice 2a)", () => {
         installArgumentsFor(["codex", "--global"], "install"),
         runtime(),
       );
-      expect(scope).toMatchObject({ kind: "global", home });
+      expect(scope).toMatchObject({ kind: "global", homeDir: home, stateDir: home });
     } finally {
       delete process.env.HOME;
       delete process.env.CODEX_HOME;
@@ -170,5 +170,26 @@ describe("runCodexInstallSurface (#768 slice 2a)", () => {
       executed: "unknown",
       receiptVerified: "unknown",
     });
+  });
+
+  it("refuses a real STDIO install when the running package is not an npm installation (#799)", async () => {
+    const git: GitRunner = async (args, _cwd) => {
+      if (args[0] === "rev-parse" && args[1] === "--show-toplevel") return SYNTHETIC_ROOT + "\n";
+      if (args[0] === "remote") return "origin\thttps://github.com/example/project.git (fetch)\n";
+      if (args[0] === "rev-parse" && args[1] === "--git-common-dir") return ".git\n";
+      throw new Error(`unexpected git ${args.join(" ")}`);
+    };
+    const out: string[] = [];
+    const code = await runCodexInstallSurface(
+      // Not dry-run: a real STDIO write needs the installed pdb-mcp command, which a source
+      // checkout cannot provide, so the installer must refuse rather than write a dead entry.
+      installArgumentsFor(["codex", "--repo", "example/project", "--json"], "install"),
+      runtime(git),
+      async (text) => void out.push(text),
+    );
+    expect(code).toBe(2);
+    const result = JSON.parse(out.join("")) as { items: { code: string | null }[] };
+    expect(result.items[0]).toMatchObject({ code: "UNSUPPORTED_SCOPE", outcome: "refused" });
+    expect(result.items[1]).toMatchObject({ code: "HOOK_NOT_AVAILABLE", outcome: "not-attempted" });
   });
 });
