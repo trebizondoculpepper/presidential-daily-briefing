@@ -1,5 +1,12 @@
 /** CLI projection of the shared identity preparer (#677). No argument scanning or allocation here. */
-import type { EffectiveIdentity, EffectiveIdentityOptions } from "./effectiveidentity.js";
+import {
+  prepareEffectiveIdentity,
+  resolveEffectiveHuman,
+  type EffectiveIdentity,
+  type EffectiveIdentityOptions,
+  type EffectiveIdentityRuntime,
+} from "./effectiveidentity.js";
+import type { AuthContextReader, HumanContextOptions } from "./humancontext.js";
 
 export interface CommandIdentityOptions extends EffectiveIdentityOptions {
   readonly offline?: boolean;
@@ -7,6 +14,25 @@ export interface CommandIdentityOptions extends EffectiveIdentityOptions {
 export type PrepareCommandIdentity = (
   options: CommandIdentityOptions,
 ) => Promise<EffectiveIdentity>;
+/** Production CLI composition, with injectable authentication/cache boundaries for previews. */
+export function prepareCommandIdentity(
+  options: CommandIdentityOptions,
+  runtime: Omit<EffectiveIdentityRuntime, "human"> & {
+    auth?: AuthContextReader;
+    humanOptions?: HumanContextOptions;
+  },
+): Promise<EffectiveIdentity> {
+  const { auth, humanOptions, ...identityRuntime } = runtime;
+  return prepareEffectiveIdentity(options, {
+    ...identityRuntime,
+    human: () =>
+      resolveEffectiveHuman(auth, {
+        ...humanOptions,
+        offline: options.offline || options.intent === "dry-run" || humanOptions?.offline,
+      }),
+  });
+}
+
 type Output = (text: string) => Promise<void>;
 
 /** Expected setup failure, kept out of crash reporting and retaining any persisted outcome. */

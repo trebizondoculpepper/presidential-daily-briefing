@@ -9,7 +9,7 @@ Attribution uses the verified saved name/default role without manual name lookup
 names remain per-call overrides. Shared entry/harness/role options support safe first use;
 a missing bootstrap role produces a concrete setup result instead of inventing implementer.
 The original planner receives a real resolved name, never a placeholder. Dry-runs needing a
-new name preview setup without allocating or making remote requests. Offline, config, Doctor,
+new name preview setup without allocating or starting a remote workflow plan; target resolution may still read GitHub. Offline, config, Doctor,
 rules, help and onboarding remain non-initializing.
 
 The per-invocation output adapter emits setup notices and diagnostics to stderr and adds
@@ -43,3 +43,15 @@ target lookup. Seven command-family tests and an offline cross-repository cache 
 and pass after. Repository-selection diagnostics omit private checkout paths at the shared
 service boundary. Final validation: check, 141 files / 2,620 passed and one skipped, build,
 source smoke and packed-install/package tests, with no timeout or concurrency policy relaxed.
+
+CodeRabbit follow-through: onboarding/README now distinguish a retained verified binding from
+unsupported sessions, which keep passing an entry on every invocation. Production CLI identity
+previews resolve the human offline from cached/unresolved context; they do not make a login API
+read. The preview composition is dependency-injected and exercised through the actual CLI. A
+dry-run still permits the original target/planning reads when those are needed; no remote write
+or identity allocation is performed.
+
+Final review-correction validation: 141 files, 2,621 passed and one skipped; check, build,
+source smoke and packed-install/package tests all passed. The production preview-composition
+acceptance records zero authentication calls, zero allocator calls, zero workflow queries and
+an unchanged empty disposable project.

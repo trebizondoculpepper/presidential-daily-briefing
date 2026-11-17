@@ -71,7 +71,8 @@ Briefings and attributed CLI workflow commands reuse a safely selected local ide
 explicit `--entry KEY` selects a missing identity, PDB generates a name, saves it in the
 checkout's Git-ignored `pdb.toml`, reports what happened on stderr and continues the command.
 Returning commands need no name lookup or `--agent` echo. An existing unbound entry or an
-unsupported/ambiguous session needs an explicit entry selection once; PDB never borrows
+ambiguous session needs explicit entry selection before a verified binding can retain it.
+Unsupported sessions must keep passing `--entry KEY` on every invocation. PDB never borrows
 another agent's generic harness entry. A new name requires your explicit role.
 
 `--agent NAME` remains a per-call override. Explicit `pdb setup identity` remains available

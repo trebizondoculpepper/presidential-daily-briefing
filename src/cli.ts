@@ -3,16 +3,13 @@ import {
   CommandIdentity,
   commandActor,
   commandViewer,
+  prepareCommandIdentity,
   identitySelection,
   identitySelectionOptions,
   IdentityPreparationRequired,
   type PrepareCommandIdentity,
 } from "./config/commandidentity.js";
-import {
-  prepareEffectiveIdentity,
-  resolveEffectiveHuman,
-  type EffectiveIdentity,
-} from "./config/effectiveidentity.js";
+import type { EffectiveIdentity } from "./config/effectiveidentity.js";
 import { runRebrief } from "./rebrief/cli.js";
 import type { CliRuntime as RebriefRuntime } from "./rebrief/cli.js";
 import { resolveEngineSetting } from "./config/engine-setting.js";
@@ -406,7 +403,8 @@ ${crashDisclosure()}
   --agent NAME          Override the effective agent for this call: attention:NAME first,
                         then agent:NAME work; human views use it as their existing routing filter
   --entry KEY           Select a local logical identity entry explicitly; returning sessions
-                        reuse the saved binding without a name lookup or --agent echo
+                        verified sessions reuse the saved binding without an agent-name echo;
+                        unsupported sessions keep passing --entry KEY on every invocation
   --harness NAME        Select a supported local harness; ambiguity still needs --entry KEY
   --role NAME           Shape the compact briefing for implementer (attention, PR follow-up,
                         own work, pickup, unblock candidates, stale claims) or designer
@@ -1231,12 +1229,9 @@ export async function main(
     ...(!process.env.PDB_NO_EFFECTIVE_IDENTITY
       ? {
           prepareIdentity: (options) =>
-            prepareEffectiveIdentity(options, {
+            prepareCommandIdentity(options, {
               env: process.env,
-              human: () =>
-                resolveEffectiveHuman(humanContextEnabled() ? ghAuthContext : undefined, {
-                  offline: options.offline,
-                }),
+              auth: humanContextEnabled() ? ghAuthContext : undefined,
             }),
         }
       : {}),
