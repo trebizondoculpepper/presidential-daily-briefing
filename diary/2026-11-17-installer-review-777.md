@@ -23,3 +23,14 @@ the no-context/no-link control; no footer or installer runtime behavior is relax
 
 Current-main validation passes after the stale assertion correction: check (zero
 errors, 54 existing warnings), all 151 files / 2,754 tests (one skip), and build.
+
+Windows CI exposed a 20-second timeout in the MCP budget size-table aggregate.
+That test repeated every case already checked individually with exact serialized
+byte counts and budgets. Moved its size logging into the existing parameterized
+cases and removed the duplicate aggregate execution. All tool/argument cases, SDK
+transport, exact counts and budget assertions remain; no deadline, skip or retry
+was changed.
+
+After consolidating the duplicate size-table execution, all 151 test files /
+2,753 tests pass (one skip), with check and build also passing. The one fewer test
+is the aggregate duplicate; all individual tool/argument cases remain.
