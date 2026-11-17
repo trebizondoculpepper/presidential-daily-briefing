@@ -3,6 +3,13 @@ import { dailyView, newsView, timingView } from "./views.js";
 import type { MetricTicket } from "./views.js";
 import type { LedgerEvent, TicketLedger } from "./ledger.js";
 
+const noAssessment = {
+  first: { status: "none" as const },
+  revisions: { known: true as const, value: 0 },
+  records: [],
+  ignored: [],
+  unresolved: [],
+};
 // Synthetic fixtures only: no real repository, agent or comment.
 const repo = "example/project";
 const NOW = "2026-11-17T09:00:00.000Z";
@@ -31,6 +38,7 @@ function ledger(n: number, over: Partial<TicketLedger> = {}): TicketLedger {
     },
     omissions: [],
     ignored: [],
+    assessments: { complexity: noAssessment, impact: noAssessment },
     ...over,
   };
 }

@@ -7,6 +7,8 @@ import type { Comment, HistoryEvent } from "../workflow/claims.js";
 import { deliveryMarker } from "../workflow/delivery.js";
 import type { Deliverable, DeliveryRecord } from "../workflow/delivery.js";
 import type { RepositoryPermission } from "../github/github.js";
+import { provenanceComment } from "../estimation/estimate.js";
+import type { MetricProvenance } from "../estimation/estimate.js";
 
 // Synthetic fixtures only: no real repository, agent or comment.
 const repo = "example/project";
@@ -430,5 +432,124 @@ describe("ticket ledger", () => {
     for (const [, typeOnly, from] of imports)
       if (from!.includes("github/github")) expect(typeOnly).toBe("type ");
     expect(source).not.toMatch(/\bghQuery\b|\bghRun\b|\bfetch\(/);
+  });
+});
+
+describe("first assessment endpoints (#833)", () => {
+  const estimate = (
+    kind: "complexity" | "impact",
+    size: "S" | "M" | "L",
+    at: string,
+    login = "writer",
+    previous: ("S" | "M" | "L")[] = [],
+  ) =>
+    comment(
+      provenanceComment({
+        ...(kind === "complexity"
+          ? { schemaVersion: 2, kind: "complexity-estimate" }
+          : { schemaVersion: 1, kind: "impact-estimate" }),
+        storage: "labels",
+        size,
+        previous,
+        rationale: "synthetic",
+        assumptions: [],
+        references: [],
+        estimator: "alice",
+        revision: null,
+        guidanceVersion: 1,
+        // A client-stated time that differs from the server time on purpose.
+        recordedAt: "2020-01-01T00:00:00Z",
+      } as MetricProvenance),
+      at,
+      login,
+    );
+
+  it("finds the first trusted record per metric by server time and counts revisions", async () => {
+    const l = await ticketLedger(
+      withComments([
+        estimate("complexity", "S", t(2)),
+        estimate("impact", "M", t(3)),
+        estimate("complexity", "M", t(5), "writer", ["S"]),
+      ]),
+      trust,
+      now,
+    );
+    expect(l.assessments.complexity.first).toMatchObject({ status: "found", at: t(2), size: "S" });
+    expect(l.assessments.complexity.first).toMatchObject({ recordedAt: "2020-01-01T00:00:00Z" });
+    expect(l.assessments.complexity.revisions).toEqual({ known: true, value: 1 });
+    expect(l.assessments.complexity.records.map((r) => r.size)).toEqual(["S", "M"]);
+    expect(l.assessments.impact.first).toMatchObject({ status: "found", at: t(3), size: "M" });
+  });
+
+  it("skips untrusted records and is unknown behind a record of unknown authority", async () => {
+    const untrusted = await ticketLedger(
+      withComments([
+        estimate("complexity", "L", t(1), "reader"),
+        estimate("complexity", "S", t(2)),
+      ]),
+      trust,
+      now,
+    );
+    expect(untrusted.assessments.complexity.first).toMatchObject({ status: "found", at: t(2) });
+    expect(untrusted.assessments.complexity.ignored).toHaveLength(1);
+    const unknown = await ticketLedger(
+      withComments([estimate("complexity", "L", t(1), "flaky"), estimate("complexity", "S", t(2))]),
+      trust,
+      now,
+    );
+    expect(unknown.assessments.complexity.first).toMatchObject({
+      status: "unknown",
+      observed: { at: t(2) },
+    });
+  });
+
+  it("keeps the revision count unknown when a revision's authority is unresolved", async () => {
+    const l = await ticketLedger(
+      withComments([
+        estimate("complexity", "S", t(2)),
+        estimate("complexity", "M", t(4), "flaky", ["S"]),
+      ]),
+      trust,
+      now,
+    );
+    expect(l.assessments.complexity.first).toMatchObject({ status: "found", at: t(2) });
+    expect(l.assessments.complexity.revisions).toMatchObject({ known: false, observed: 0 });
+    expect(l.assessments.complexity.unresolved).toHaveLength(1);
+  });
+
+  it("is none only with complete history and unknown when comments were cut off", async () => {
+    const none = await ticketLedger(withComments([]), trust, now);
+    expect(none.assessments.impact.first).toEqual({ status: "none" });
+    const cut = await ticketLedger(
+      withComments([estimate("impact", "S", t(2))], false),
+      trust,
+      now,
+    );
+    expect(cut.assessments.impact.first).toMatchObject({
+      status: "unknown",
+      observed: { at: t(2) },
+    });
+    expect(cut.assessments.impact.revisions).toMatchObject({ known: false });
+  });
+
+  it("never treats a current size label as an assessment event", async () => {
+    const l = await ticketLedger(
+      withComments([], true, {
+        history: {
+          events: [
+            {
+              __typename: "LabeledEvent",
+              createdAt: t(2),
+              label: { name: "complexity:S" },
+            } as never,
+          ],
+          complete: true,
+          pages: 1,
+        },
+      }),
+      trust,
+      now,
+    );
+    expect(l.assessments.complexity.first).toEqual({ status: "none" });
   });
 });

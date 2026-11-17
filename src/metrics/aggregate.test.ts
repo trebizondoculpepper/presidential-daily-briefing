@@ -12,6 +12,13 @@ import {
 import type { DurationSample } from "./aggregate.js";
 import type { LedgerEvent, TicketLedger } from "./ledger.js";
 
+const noAssessment = {
+  first: { status: "none" as const },
+  revisions: { known: true as const, value: 0 },
+  records: [],
+  ignored: [],
+  unresolved: [],
+};
 // Synthetic fixtures only: no real repository, agent or comment.
 const repo = "example/project";
 const H = 3_600_000;
@@ -39,6 +46,7 @@ function ledger(over: Partial<TicketLedger> = {}): TicketLedger {
     },
     omissions: [],
     ignored: [],
+    assessments: { complexity: noAssessment, impact: noAssessment },
     ...over,
   };
 }
