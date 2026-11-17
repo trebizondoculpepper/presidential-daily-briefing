@@ -107,7 +107,14 @@ export async function readMetrics(
     requests++;
     return rt.query(q, v);
   };
-  const counted = { query, rest: rt.rest } as Pick<DeliverablesRuntime, "query" | "rest">;
+  // REST evidence (target containment compares) goes through the same counter and
+  // pre-request cancellation check as GraphQL.
+  const rest: DeliverablesRuntime["rest"] = (...args) => {
+    rt.signal?.throwIfAborted();
+    requests++;
+    return rt.rest(...args);
+  };
+  const counted: Pick<DeliverablesRuntime, "query" | "rest"> = { query, rest };
   const warnings: string[] = [];
   const fromMs = Date.parse(from);
   const nowDate = new Date(now);
@@ -167,8 +174,11 @@ export async function readMetrics(
     // First pass learns the required PRs; read their merges, then build the final ledger.
     const first = await ticketLedger(base, rt.trust, nowDate);
     const prs: LedgerPullRequest[] = [];
-    let prsComplete = true;
-    for (const pr of first.requiredPullRequests ?? []) {
+    // Unknown membership means the required set itself is unknown: the PR source stays unread,
+    // never an empty, complete set.
+    const required = first.requiredPullRequests;
+    let prsComplete = required !== null;
+    for (const pr of required ?? []) {
       const [o, nm] = pr.repository.split("/") as [string, string];
       const node = prop(
         prop(await query(prQuery, { owner: o, name: nm, number: pr.number }), "repository"),
@@ -184,7 +194,7 @@ export async function readMetrics(
         });
     }
     const ledger = await ticketLedger(
-      { ...base, pullRequests: { nodes: prs, complete: prsComplete } },
+      { ...base, pullRequests: required === null ? null : { nodes: prs, complete: prsComplete } },
       rt.trust,
       nowDate,
     );
