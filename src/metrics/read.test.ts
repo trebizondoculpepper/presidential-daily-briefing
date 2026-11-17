@@ -407,4 +407,43 @@ describe("bounded metrics read (#573 slice 5b)", () => {
     };
     await expect(readMetrics(repo, FROM, NOW, aborting as never)).rejects.toThrow();
   });
+  it("reads no more required PRs than the delivery member cap", async () => {
+    const many = Array.from({ length: 25 }, (_, i) => 200 + i);
+    const { calls, rt } = fake(
+      [
+        {
+          number: 1,
+          updatedAt: "2026-11-16T00:00:00Z",
+          comments: [submit(1, many, "2026-11-12T00:00:00Z")],
+        },
+      ],
+      50,
+    );
+    const r = await readMetrics(repo, FROM, NOW, rt);
+    expect(calls.filter((c) => c.startsWith("pr:")).length).toBe(20);
+    expect(r.tickets[0]!.ledger.coverage.prs).not.toBe("complete");
+    expect(r.warnings.join(" ")).toMatch(/exceed the cap of 20/);
+  });
+  it("bounds linked-ticket lookups by the ticket bound", async () => {
+    const { calls, rt } = fake(
+      [{ number: 1, updatedAt: "2026-11-16T00:00:00Z" }],
+      50,
+      {},
+      [
+        {
+          number: 92,
+          updatedAt: "2026-11-15T00:00:00Z",
+          mergedAt: "2026-11-15T00:00:00Z",
+          closes: [5, 6],
+        },
+      ],
+      [
+        { number: 5, updatedAt: "2026-11-01T00:00:00Z" },
+        { number: 6, updatedAt: "2026-11-01T00:00:00Z" },
+      ],
+    );
+    const r = await readMetrics(repo, FROM, NOW, rt, { maxPages: 10, maxTickets: 2 });
+    expect(calls.filter((c) => c.startsWith("issue:"))).toEqual(["issue:5"]);
+    expect(r.historyNotRead.members).toContain(`${repo}#6`);
+  });
 });
