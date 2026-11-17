@@ -97,15 +97,46 @@ readback outcome, not permission to overwrite an entry or announce a second allo
 
 ## Read-only operations and service execution
 
-This contract supersedes #319's blanket no-initialization rule for **normal first-use CLI
-operations**. Explicitly read-only operations such as config get/list, Doctor, rules, help and
-onboarding remain non-initializing. Dry-run previews required setup without allocating/persisting
-an identity, changing ignore rules or publishing a remote write. Say that setup is proposed.
+Owner clarification (#866, implementation #865): an observational read does not require
+an agent. A human may request an implementer or designer view without operating an agent;
+`--role` selects the view and is not evidence of an execution identity.
+
+Normal first-use initialization remains available for operations requiring agent attribution.
+Observational CLI reads instead use the shared non-initializing optional-viewer boundary.
+This includes the default role briefing, catch-up/briefing reads, team, who, PR inspection
+and dependency inspection, as well as config get/list, Doctor, rules, help and onboarding.
+Classify operation capabilities centrally through the existing shared intent boundaries;
+do not scatter command-name exceptions or duplicate workflow admission policy in adapters.
+
+An explicit valid agent or verified existing local binding may personalize a read. With
+no safe agent selection, continue as an unattributed viewer, preserving requested role and
+known human context. No entries, several unbound entries, or an uninitialized detected
+session must not trigger agent allocation, import, binding, identity/ignore-file writes,
+claims or first-use setup suggestions. Do not select the first configured entry, borrow
+another agent, or mint an identity merely to satisfy a read. A missing implicit agent is
+not a fatal setup error and must not print an instruction demanding agent initialization.
+
+Explicit malformed agent/entry selectors and corrupt configuration retain useful diagnostics;
+optional identity is not permission to silently reinterpret an explicit request. Technical
+failures in GitHub facts/authentication retain their ordinary exit and completeness semantics.
+Use current/last-known/unresolved human evidence through the existing human resolver; do not
+require an agent to resolve a human, or invent a human when offline evidence is absent.
+
+Text and JSON preserve existing schemas and payload fields. Agent attribution is absent or
+explicitly unresolved when unavailable, never a fabricated name or a false creation notice.
+No agent also means no agent-specific claim/resume action is implied by viewing the list.
+Human ownership and permission decisions remain in shared native rules.
+
+Claim, submit and other agent-attributed mutations still require valid effective identity
+and normal human-ownership admission. A dry-run of an attributed mutation retains its existing
+non-writing identity preview semantics; it is not automatically an unattributed observation.
+CLI/MCP/HTTP adapters share preparation services rather than creating transport-specific policy.
 
 A local MCP/HTTP server may prepare its execution identity during explicitly selected local
 startup, using the same service and binding. Read-only tool calls, GETs, display filters and
 project selection do not themselves initialize identities or switch execution authority. They
-resolve existing matching-project bindings and report a missing identity when no safe one exists.
+resolve existing matching-project bindings where available; an observational read continues
+without execution-agent attribution when none exists.
 A remotely selected repository without a verified local project remains non-initializing.
 A future mutation uses its trusted local execution context and the ordinary operation guards.
 
@@ -148,3 +179,13 @@ check bounded projection and protocol framing, not just the shared resolver. Pre
 zero-initialization tests. Update onboarding and examples to use the normal command directly.
 The implementation PR may close #677 only when the core acceptance is delivered; a contract PR
 uses `References #677` and leaves implementation open.
+
+## Agent-optional read regressions (#865)
+
+Inject identity/authentication/filesystem/GitHub boundaries. Exercise actual CLI text and JSON
+for implementer and designer briefings with no identity entries and with multiple unbound
+entries. Assert the ordinary briefing and preserved human/view context, no identity-store or
+ignore writes, no allocation/import/claim, and no bootstrap notice. Cover reuse of an explicit
+or verified existing agent, a second observational command using the shared boundary, explicit
+invalid selectors, offline unknown-human evidence, and unchanged attributed claim/submit
+refusal. Reuse focused fixtures; no live credentials or private configuration snapshots.
