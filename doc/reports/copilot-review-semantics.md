@@ -73,9 +73,11 @@ GitHub documents a Copilot setting that, when enabled, makes a Copilot review le
   "Allow Copilot approvals to count toward merge requirements" (that review satisfies required
   approvals). An optional repository file-path list (one glob per line, up to 15) makes an
   approval count only when every changed file matches; blank means all files.
-- An approving Copilot review counts toward "required approvals" only when the ruleset explicitly
-  includes the `copilot-pull-request-reviewer` account; a blanket "require approvals" rule may
-  not count it.
+- Whether a Copilot approval counts toward GitHub's merge requirements is decided by those two
+  switches and the optional file globs, not by a ruleset naming the bot account. GitHub merge
+  eligibility is therefore kept separate from PDB's declared provider coverage: PDB accepts an
+  authenticated current-head `APPROVED` review from `copilot-pull-request-reviewer` when the
+  declared policy names Copilot, independent of how GitHub counts it toward required approvals.
 - Reviewers can dismiss the approval; a dismissal is an explicit, observable event and must be
   honored (stale acceptance is not current).
 - The setting does **not** give Copilot a request-changes state or a block; at most it lets
@@ -106,8 +108,10 @@ and a quota/error/skipped/stale provider result never satisfies coverage.
 2. Do not implement a Copilot "request changes" path — the platform does not expose one.
 3. For the optional `APPROVED` setting: surface it as a declared configuration choice, and when
    enabled, treat a current-head `APPROVED` review from the bot account as provider acceptance
-   only if the repository's declared policy names `copilot-pull-request-reviewer` as a counted
-   approver. Never infer acceptance from `COMMENTED`.
+   under the declared codex-or-copilot policy, exactly as `observeProvider` already does for a
+   verified current-head approval. GitHub merge-requirement eligibility (the two switches and
+   file globs) stays separate from PDB's coverage verdict. Never infer acceptance from
+   `COMMENTED`.
 4. Feed these verified semantics into #694/#695 instead of duplicating collection in this
    ticket.
 
