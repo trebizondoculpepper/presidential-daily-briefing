@@ -73,6 +73,7 @@ interface MergedPr {
   updatedAt: string;
   mergedAt: string;
   closes: number[];
+  moreRefs?: boolean;
 }
 function fake(
   issues: Issue[],
@@ -92,6 +93,7 @@ function fake(
         mergedAt: p.mergedAt,
         closingIssuesReferences: {
           nodes: p.closes.map((n) => ({ number: n, repository: { nameWithOwner: repo } })),
+          pageInfo: { hasNextPage: p.moreRefs ?? false },
         },
       }));
       const more = start + pageSize < merged.length;
@@ -344,5 +346,28 @@ describe("bounded metrics read (#573 slice 5b)", () => {
     const { rt } = fake([issue(1, "complexity:S"), issue(2, "complexity:L")], 50);
     const r = await readMetrics(repo, FROM, NOW, rt);
     expect(r.tickets.map((t) => t.complexity)).toEqual(["S", "stale"]);
+  });
+  it("records truncated closing references and unreadable linked tickets as unread", async () => {
+    const { rt } = fake(
+      [{ number: 1, updatedAt: "2026-11-16T00:00:00Z" }],
+      50,
+      {},
+      [
+        {
+          number: 91,
+          updatedAt: "2026-11-15T00:00:00Z",
+          mergedAt: "2026-11-15T00:00:00Z",
+          closes: [8],
+          moreRefs: true,
+        },
+      ],
+      [],
+    );
+    const r = await readMetrics(repo, FROM, NOW, rt);
+    expect(r.historyNotRead.members).toEqual([
+      `${repo} PR #91: closing references beyond 50`,
+      `${repo}#8`,
+    ]);
+    expect(r.historyNotRead.count).toBe(2);
   });
 });
