@@ -446,4 +446,19 @@ describe("bounded metrics read (#573 slice 5b)", () => {
     expect(calls.filter((c) => c.startsWith("issue:"))).toEqual(["issue:5"]);
     expect(r.historyNotRead.members).toContain(`${repo}#6`);
   });
+  it("counts failed linked lookups against the ticket bound", async () => {
+    const { calls, rt } = fake([], 50, {}, [
+      {
+        number: 93,
+        updatedAt: "2026-11-15T00:00:00Z",
+        mergedAt: "2026-11-15T00:00:00Z",
+        closes: [40, 41, 42],
+      },
+    ]);
+    const r = await readMetrics(repo, FROM, NOW, rt, { maxPages: 1, maxTickets: 1 });
+    expect(calls.filter((c) => c.startsWith("issue:"))).toEqual(["issue:40"]);
+    expect(r.historyNotRead.members).toEqual(
+      expect.arrayContaining([`${repo}#40`, `${repo}#41`, `${repo}#42`]),
+    );
+  });
 });
