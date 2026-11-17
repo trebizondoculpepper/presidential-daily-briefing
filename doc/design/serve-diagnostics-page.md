@@ -1,6 +1,6 @@
 # Diagnostics page: interactive read-only Doctor and Ticket Doctor runs
 
-Status: reviewed implementation contract for #585, delivered under #589. Shared service hooks shipped in #785. Sections headed "Shipped today" describe merged behaviour; the run registry/API and page sections define the remaining delivery.
+Status: reviewed implementation contract for #585, delivered under #589. Shared service hooks shipped in #785 and the bounded run registry/API in #786. The final page implements the remaining slice; [validation](../reports/diagnostics-page-validation.md) records native-report, browser and installed-package coverage.
 
 ## Owner decisions (settled)
 
@@ -30,11 +30,11 @@ From #585 and its owner-confirmed split, adopted without reopening:
 
 ### Serve boundaries
 
-`guardRequest` (`src/serve/http.ts`) enforces Host and same-origin Origin; `readJsonBody` requires JSON and caps the body at 64 KiB (`src/serve/options.ts`); served projects come from `selectRepository` (`src/serve/api.ts`). No page today runs Doctor or Ticket Doctor.
+`guardRequest` (`src/serve/http.ts`) enforces Host and same-origin Origin; `readJsonBody` requires JSON and caps the body at 64 KiB (`src/serve/options.ts`); served projects come from `selectRepository` (`src/serve/api.ts`). The Diagnostics page starts Doctor or Ticket Doctor only after an explicit Run.
 
 ## Typed run service
 
-Module `src/serve/runs.ts` defines one generic run registry with two registered run kinds. `src/serve/diagnostic-runs.ts` binds it to registered host/project read services and the explicit HTTP routes. The page is a separate remaining slice. It reuses the existing services; it adds no checks or findings of its own.
+Module `src/serve/runs.ts` defines one generic run registry with two registered run kinds. `src/serve/diagnostic-runs.ts` binds it to registered host/project read services and the explicit HTTP routes. The page in `src/serve/diagnostics-page.ts` reuses the existing services; it adds no checks or findings of its own.
 
 ```ts
 type RunKind = "doctor" | "ticket-doctor";

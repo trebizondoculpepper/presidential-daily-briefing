@@ -69,6 +69,15 @@ export const servedPages: readonly ServedPage[] = [
     shipped: true,
   },
   {
+    id: "diagnostics",
+    path: "/diagnostics",
+    label: "Diagnostics",
+    scope: "global-or-project",
+    parameters: ["repo", "tab"],
+    carries: ["tab"],
+    shipped: true,
+  },
+  {
     id: "quotas",
     path: "/quotas",
     label: "Quotas",

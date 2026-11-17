@@ -76,6 +76,19 @@ li { margin: 0 0 1rem; }
 .why { margin: .2rem 0; }
 code { font-size: .85rem; word-break: break-all; }
 footer { margin-top: 2rem; font-size: .8rem; color: GrayText; }
+ .diagnostic-tabs, .diagnostic-controls { display: flex; flex-wrap: wrap; gap: .5rem; }
+.diagnostic-tabs button, .diagnostic-controls button { min-height: 2.5rem; padding: .35rem .75rem; font: inherit; }
+.diagnostic-tabs [aria-selected="true"] { font-weight: 700; border-bottom: .2rem solid Highlight; }
+#diagnostic-options:not([hidden]) { display: flex; flex-wrap: wrap; gap: 1rem; margin-block: 1rem; }
+#diagnostic-options label { display: grid; gap: .25rem; }
+#diagnostic-options input { width: 10ch; max-width: 100%; min-height: 2.25rem; font: inherit; }
+#diagnostic-panel { overflow-wrap: anywhere; min-width: 0; }
+.diagnostic-results { overflow-wrap: anywhere; }
+.diagnostic-checks { list-style: none; padding: 0; }
+.diagnostic-checks > li, .diagnostic-ticket { border: 1px solid GrayText; border-radius: .3rem; padding: .75rem; margin-block: .75rem; }
+.diagnostic-checks h3 { font-size: 1rem; margin-top: 0; }
+.diagnostic-finding { margin-block: .5rem; }
+.diagnostic-finding > summary { cursor: pointer; }
 pre.rules { white-space: pre-wrap; overflow-wrap: anywhere; font-size: .85rem; }
 .rule-purpose { border: 1px solid GrayText; border-radius: .3rem; padding: .75rem; margin-block: .75rem; }
 .rule-purpose :is(h3, h4) { font-size: 1rem; margin: 0 0 .4rem; }
