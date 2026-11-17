@@ -65,7 +65,11 @@ export interface RunRuntime {
     context: RunContext,
     signal: AbortSignal,
     progress: (step: RunProgress) => void,
-  ): Promise<{ result: NonNullable<RunStatus["result"]>; complete: boolean }>;
+  ): Promise<{
+    result: NonNullable<RunStatus["result"]>;
+    complete: boolean;
+    quotaRefused?: boolean;
+  }>;
   /** Redact every returned string at the trusted host boundary, including progress. */
   redact<T>(value: T): T;
   uuid?: () => string;
@@ -237,7 +241,19 @@ export class DiagnosticRuns {
       );
       if (execution.status.state !== "running") return;
       const result = structuredClone(this.runtime.redact(value.result));
-      this.finish(execution, value.complete ? "completed" : "partial", result);
+      this.finish(
+        execution,
+        value.complete && !value.quotaRefused ? "completed" : "partial",
+        result,
+        value.quotaRefused
+          ? {
+              code: "GITHUB_RATE_LIMITED",
+              message:
+                "GitHub refused further reads for quota; this result contains incomplete evidence.",
+              next: [],
+            }
+          : null,
+      );
     } catch (error) {
       if (execution.status.state !== "running") return;
       if (execution.controller.signal.aborted) this.finish(execution, "cancelled", null);

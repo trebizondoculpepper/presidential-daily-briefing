@@ -3,6 +3,8 @@ import { localDoctor } from "../config/localdoctor.js";
 import { resolveReviewPolicy } from "../config/review-setting.js";
 import { metricStatus } from "../estimation/complexitylabels.js";
 import { impactMetric } from "../estimation/metrics.js";
+import { ReadMeter } from "../github/readplan.js";
+import type { Query, Rest } from "../github/github.js";
 import { permissionLookup } from "../github/github.js";
 import { markerTrust } from "../workflow/delivery.js";
 import { doctorStaleHours } from "../workflow/ticketdoctor.js";
@@ -171,11 +173,48 @@ export function diagnosticRunServices(
                 "The verified login changed while this run waited.",
               );
             onStep({ step: "collect", state: "running", detail: null });
-            const query = queryWith?.(inner);
-            const liveRest =
-              rest &&
-              ((path: string, options?: Parameters<NonNullable<typeof rest>>[1]) =>
-                rest(path, { ...options, signal: inner }));
+            const meter = new ReadMeter(
+              "compatibility-full-v1",
+              "ticket-doctor",
+              read.now,
+              undefined,
+              inner,
+            );
+            let notified = false;
+            const observeQuota = () => {
+              if (notified || !meter.refused || inner.aborted) return;
+              const quota = meter.collection().quota;
+              if (quota) {
+                cache.noteQuotaRefusal(quota);
+                notified = true;
+              }
+            };
+            const rawQuery = queryWith?.(inner);
+            const measuredQuery =
+              rawQuery && meter.query(rawQuery, "ticket-doctor", selected.repository);
+            const query: Query | undefined = measuredQuery
+              ? async (source, variables) => {
+                  try {
+                    return await measuredQuery(source, variables);
+                  } finally {
+                    observeQuota();
+                  }
+                }
+              : undefined;
+            const rawRest: Rest | undefined = rest
+              ? (path, options) => rest(path, { ...options, signal: inner })
+              : undefined;
+            const measuredRest =
+              rawRest && meter.rest(rawRest, "ticket-doctor", selected.repository);
+            const liveRest: Rest | undefined = measuredRest
+              ? async (path, options) => {
+                  try {
+                    return await measuredRest(path, options);
+                  } finally {
+                    observeQuota();
+                  }
+                }
+              : undefined;
             const snapshot = await read.collect(
               selected.repository,
               { signal: inner, ...(liveRest ? { rest: liveRest } : {}) },
@@ -224,24 +263,31 @@ export function diagnosticRunServices(
                   : {}),
               },
             );
-            return { result: result.report, complete: result.complete };
+            return {
+              result: result.report,
+              complete: result.complete,
+              quotaRefused: meter.refused,
+            };
           },
           signal,
         ),
       );
       signal.throwIfAborted();
       const auth = cache.currentVerifiedAuth();
-      if (
-        !auth ||
-        auth.host !== context.host ||
-        auth.login !== context.login ||
-        tracked.freshness.some((f) => f.stale)
-      )
+      if (!auth || auth.host !== context.host || auth.login !== context.login)
         throw new HttpFailure(
           503,
           "CACHE_INVALIDATED",
           "The run's verified read context changed; run it again.",
         );
+      if (tracked.freshness.some((f) => f.refreshError?.code === "GITHUB_RATE_LIMITED"))
+        throw new HttpFailure(
+          429,
+          "GITHUB_RATE_LIMITED",
+          "GitHub quota prevented a fresh diagnostic run.",
+        );
+      if (tracked.freshness.some((f) => f.stale))
+        throw new HttpFailure(503, "CACHE_INVALIDATED", "No fresh diagnostic result is available.");
       return tracked.value;
     },
   });
