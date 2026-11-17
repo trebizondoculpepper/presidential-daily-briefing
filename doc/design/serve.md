@@ -1,5 +1,8 @@
 # `pdb serve`: local HTTP server, memory cache and HTTP MCP
 
+See [API-first frontend](serve-api-first-frontend.md) for the superseding owner
+requirement: backend APIs supply content and frontend components render it.
+
 Architecture contract for #372, the design slice of #42. Implementation is #373 (server and cache) and #390 (HTTP MCP); the dashboard is #374. This document is binding for those tickets once merged; it does not claim any of it is shipped.
 
 **Status (#373).** Implemented in four stacked PRs: #435 (skeleton and lifecycle), #438 (cache and read API), #439 (HTTP MCP) and the docs PR. The defaults this document leaves to the owner are single named constants in `src/serve/options.ts` (`DEFAULT_PORT`, `DEFAULT_TTL_MS`, `STALE_WINDOW_MS`) and `src/serve/cache.ts`/`src/serve/mcp.ts` (entry, byte, concurrency and session bounds). Recorded interpretations: `who` and `team` read the cached snapshot entries shared with the briefing and apply `staleHours` per request; refresh `scope` accepts `all`, `briefing`, `issues`, `who`, `team`, `deps`, `prs` and (#454) `tickets`; the JSON envelope gains a `warnings` array for the stale warning; HTTP MCP adds the freshness block inside the existing envelope `freshness` record as `freshness.cache`, because the version-2 envelope is a strict object that already carries a `freshness` field; on Windows only console Ctrl-C/Ctrl-Break shut down gracefully, a kill from another process terminates at once. The real-client Claude Code verification below is recorded in [serve-http-mcp-acceptance.md](../reports/serve-http-mcp-acceptance.md).
