@@ -40,3 +40,17 @@ Final validation passed: check (zero errors, 54 existing warnings), all 148 test
 files with 2,709 passing tests and one skip, build, smoke and installed-package
 validation. The queued-auth case confirms no fifth collection starts under the
 switched login. Existing passive diagnostic API and import-cycle tests pass.
+
+PR #786 review found that auxiliary quota refusals could be converted to unknown
+permission/delivery evidence before the cache observed them. Reproduced the issue
+through real HTTP requests for answered REST, secondary-limit, thrown REST and
+GraphQL refusals. Wrapped those boundaries with the existing ReadMeter and notify
+the shared cache on the first refusal, before downstream catches. The meter also
+stops later scheduling. Preserve the native report but mark the run partial with
+a safe quota notice; a quota-stopped refresh cannot fall back to stale success.
+An ordinary permission denial is not quota evidence and does not start cooldown.
+
+Review-fix validation passed: check with zero errors/54 existing warnings, all
+148 files with 2,714 passing tests and one skip, build and installed-package
+validation. Four auxiliary refusal regressions now protect the shared cooldown;
+the ordinary-permission-denial control confirms no false cooldown.

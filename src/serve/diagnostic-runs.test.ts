@@ -6,6 +6,7 @@ import { startServe } from "../serve.js";
 import { readServices } from "./services.js";
 import { serveArguments } from "./options.js";
 import { RateLimitError } from "../github/dependencies.js";
+import { classifyGhFailure, parseGhResponse } from "../github/evidence.js";
 import { deliveryMarker } from "../workflow/delivery.js";
 import { collect as collectFacts, AuthenticationError } from "../github/github.js";
 import type { ServeReadRuntime, ServeRuntime } from "./types.js";
@@ -23,6 +24,7 @@ async function setup(
     empty?: boolean;
     untrusted?: boolean;
     nativeCollector?: boolean;
+    auxiliaryQuota?: "rest" | "secondary" | "thrown-rest" | "query" | "forbidden";
   } = {},
 ) {
   let now = Date.parse(time),
@@ -31,7 +33,9 @@ async function setup(
   let authFailure: Error | null = null,
     login = "reader";
   let failure = options.fail;
-  let queries = 0;
+  let queries = 0,
+    auxiliaryRest = 0,
+    auxiliaryQuery = 0;
   type Timer = { at: number; fn: () => void; native: ReturnType<typeof setTimeout> };
   const timers = new Set<Timer>();
   const advance = (ms: number) => {
@@ -69,7 +73,18 @@ async function setup(
           repository: repo,
           issue: 1,
           agent: "sample",
-          deliverables: [],
+          deliverables:
+            options.auxiliaryQuota === "query"
+              ? [
+                  {
+                    kind: "pr",
+                    repository: repo,
+                    number: 2,
+                    nodeId: "PR_2",
+                    target: { repository: repo, branch: null },
+                  },
+                ]
+              : [],
           membership: "open",
           issuedAt: time,
         }),
@@ -133,6 +148,37 @@ async function setup(
     },
   };
   const read: ServeReadRuntime = {
+    ...(options.auxiliaryQuota
+      ? {
+          queryWith: () => async () => {
+            auxiliaryQuery++;
+            throw new RateLimitError("NEVER", { retryAfterSeconds: 60 });
+          },
+          rest: async () => {
+            auxiliaryRest++;
+            if (options.auxiliaryQuota === "forbidden")
+              return {
+                status: 403,
+                body: {
+                  message: "Permission denied; generic rate limit advice is not quota evidence.",
+                },
+              };
+            if (options.auxiliaryQuota === "query")
+              return { status: 200, body: { role_name: "write", user: { login: "unverified" } } };
+            if (options.auxiliaryQuota === "thrown-rest")
+              throw new RateLimitError("NEVER", { retryAfterSeconds: 60 });
+            const secondary = options.auxiliaryQuota === "secondary";
+            const response = parseGhResponse(
+              `HTTP/2.0 ${secondary ? "403 Forbidden" : "429 Too Many Requests"}\r\nRetry-After: 60\r\n\r\n${JSON.stringify({ message: "NEVER", ...(secondary ? { documentation_url: "https://docs.github.com/rest/#secondary-rate-limits" } : {}) })}`,
+            );
+            return {
+              status: secondary ? 403 : 429,
+              body: response.body,
+              evidence: classifyGhFailure({ response }),
+            };
+          },
+        }
+      : {}),
     collect: async (_repository, flags) => {
       collects++;
       const signal = flags?.signal;
@@ -209,7 +255,7 @@ async function setup(
     collectionSignals,
     runtime,
     counts: () => ({ authReads, collects }),
-    costs: () => ({ queries }),
+    costs: () => ({ queries, auxiliaryRest, auxiliaryQuery }),
     read,
     release,
     changeAuth: (next: string, error: Error | null = null) => {
@@ -530,6 +576,46 @@ describe("active diagnostic API (#585)", () => {
     } finally {
       s.release();
       await held;
+      await s.close();
+    }
+  });
+  it.each(["rest", "secondary", "thrown-rest", "query"] as const)(
+    "shares auxiliary %s refusal with the global cache before partial evidence swallows it",
+    async (auxiliaryQuota) => {
+      const s = await setup({ untrusted: true, auxiliaryQuota });
+      try {
+        const first = await s.post({ kind: "ticket-doctor", repo });
+        const partial = await s.terminal(first.body.waiterId);
+        expect(partial).toMatchObject({ state: "partial", error: { code: "GITHUB_RATE_LIMITED" } });
+        expect(partial.result).not.toBeNull();
+        const cost = s.costs();
+        expect(cost.auxiliaryRest).toBeGreaterThan(0);
+        const second = await s.post({ kind: "ticket-doctor", repo });
+        expect(await s.terminal(second.body.waiterId)).toMatchObject({
+          state: "failed",
+          result: null,
+          error: { code: "GITHUB_RATE_LIMITED" },
+        });
+        expect((await s.call(`api/v1/team?repo=${repo}`)).body.error.code).toBe(
+          "GITHUB_RATE_LIMITED",
+        );
+        expect(s.counts().collects).toBe(1);
+        expect(s.costs()).toEqual(cost);
+      } finally {
+        await s.close();
+      }
+    },
+  );
+  it("does not turn an ordinary auxiliary permission denial into a shared quota cooldown", async () => {
+    const s = await setup({ untrusted: true, auxiliaryQuota: "forbidden" });
+    try {
+      for (let n = 0; n < 2; n++) {
+        const started = await s.post({ kind: "ticket-doctor", repo });
+        expect((await s.terminal(started.body.waiterId)).error).toBeNull();
+      }
+      expect(s.counts().collects).toBe(2);
+      expect(s.costs().auxiliaryRest).toBe(2);
+    } finally {
       await s.close();
     }
   });
