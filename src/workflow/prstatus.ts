@@ -28,8 +28,10 @@ import {
   policyNotRead,
   reviewPolicyText,
   reviewProviders,
+  snapshotPolicyReview,
 } from "./reviewpolicy.js";
 import type { DeclaredReviewPolicy, ReviewPolicyDetail } from "./reviewpolicy.js";
+import type { PullRequest } from "../github/types.js";
 export { codexMarker };
 export type { CodexMarker, CodexReviewState } from "./reviewevidence.js";
 import { ghQuery, ghRest, prop, selected, SubjectUnavailable } from "../github/github.js";
@@ -668,4 +670,100 @@ export function prStatusText(r: PrStatusReport): string {
     ...r.completeness.warnings.map((w) => `INCOMPLETE: ${w}`),
   ];
   return lines.join("\n") + "\n";
+}
+
+/**
+ * Shared native PR-readiness evaluation over a collected snapshot PR (#711), reusing the same
+ * `evaluatePrReadiness` Datalog rules as `pdb pr`.
+ */
+export function snapshotPrReadiness(
+  pr: PullRequest,
+  warnings: readonly string[] = [],
+  reviewPolicy?: DeclaredReviewPolicy,
+) {
+  const head = pr.headRefOid;
+  const checkEvidence = requiredCheckEvidence(pr);
+  const checkPolicy = evaluateCheckPolicy(checkEvidence);
+  const contexts = pr.commits?.nodes?.[0]?.commit?.statusCheckRollup?.contexts.nodes ?? [];
+  const pendingCount = checkEvidence.checks.filter((c) =>
+    workflow.unfinished.includes(c.outcome),
+  ).length;
+  const noRunTimeChecks = contexts.map((c) => !("startedAt" in c ? c.startedAt : true));
+  const unresolvedThreadCount = (pr.reviewThreads?.nodes ?? []).filter((t) => !t.isResolved).length;
+  const policy = snapshotPolicyReview(pr, [...warnings], reviewPolicy);
+  const answerer = (login: string | undefined) => (login ?? "").replace(/\[bot\]$/, "");
+  const codexComments = (pr.comments?.nodes ?? []).filter(
+    (c) => answerer(c.author?.login) === reviewerFor.codex,
+  );
+  const codexStates = codexComments
+    .map((c) => codexMarker(c.body)?.code_review)
+    .filter((s): s is NonNullable<typeof s> => !!s);
+  const codex = codexStates.at(-1) ?? null;
+  const knownCommits = [
+    ...(pr.reviews?.nodes ?? []).map((r) => r.commit?.oid),
+    ...codexStates.map((s) => s.commit_sha),
+    ...codexComments.map((c) => codexReviewReceipt(c.body)?.commitSha),
+  ];
+  const hasRunningHeadCodex = codexStates.some(
+    (s) => s.commit_sha === head && typeof s.status === "string" && s.status !== "completed",
+  );
+  const codexCleanReceipt = codexComments.some((c) => {
+    const r = codexReviewReceipt(c.body);
+    return Boolean(
+      r?.clean &&
+      (codexCommitMatches(head, r.commitSha) ||
+        (hasRunningHeadCodex && codexReceiptMatchesPrefix(head, r.commitSha, knownCommits))),
+    );
+  });
+  const state = pr.state ?? "OPEN";
+  const readiness = evaluatePrReadiness({
+    state,
+    closedLabel: state === "MERGED" ? "merged" : state.toLowerCase(),
+    draft: !!pr.isDraft,
+    baseRefName: pr.baseRefName,
+    mergeable: pr.mergeable,
+    mergeStateStatus: pr.mergeStateStatus ?? "UNKNOWN",
+    reviewDecision: pr.reviewDecision ?? null,
+    unresolvedThreadCount,
+    pendingCount,
+    checkEvidence,
+    noRunTimeChecks,
+    policy: {
+      effective: policy.detail.effective,
+      headReviewed: policy.headReviewed,
+      hasFindings: policy.detail.findings.length > 0,
+      summary: policy.detail.providers
+        .map((o) => `${reviewProviders[o.provider].label} ${o.state}`)
+        .join(", "),
+      unknownReason: reviewPolicy?.state === "unknown" ? reviewPolicy.reason : "unresolved",
+      findings: policy.detail.findings.map((f) => ({
+        provider: f.provider,
+        label: reviewProviders[f.provider].label,
+        source: f.source,
+      })),
+    },
+    codex: {
+      findingsOnHead: Boolean(codex?.has_unresolved_findings && codex.commit_sha === head),
+      staleHead: Boolean(
+        codex &&
+        codex.commit_sha !== head &&
+        !codexCleanReceipt &&
+        !(pr.reviews?.nodes ?? []).some(
+          (r) => answerer(r.author?.login) === reviewerFor.codex && r.commit?.oid === head,
+        ),
+      ),
+      runningStatus:
+        !codexCleanReceipt &&
+        codex?.commit_sha === head &&
+        codex.status &&
+        codex.status !== "completed"
+          ? codex.status
+          : null,
+    },
+    reviewRequestStatus: null,
+  });
+  return {
+    ...readiness,
+    requirements: (checkPolicy.ready ? "satisfied" : "unproven") as "satisfied" | "unproven",
+  };
 }

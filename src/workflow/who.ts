@@ -114,7 +114,7 @@ export function ticketOwnership(
   const linked: PullRequest[] = snapshot.pullRequests.filter((pr) =>
     (pr.closingIssuesReferences?.nodes ?? []).some((ref) => ref.url === issue.url),
   );
-  const prs = linked.map(pullRequestState);
+  const prs = linked.map((p) => pullRequestState(p, snapshot.warnings, snapshot.reviewPolicy));
   const prComments = linked.flatMap((pr) => pr.comments.nodes);
   const evidence: CommentEvidence[] = [...issue.comments.nodes, ...prComments]
     .map((c: Comment) => ({ c, kind: classifyComment(c.body) }))
@@ -250,7 +250,7 @@ export function ticketOwnershipText(r: TicketOwnership): string {
   ];
   for (const p of r.pullRequests)
     lines.push(
-      `PR #${p.number}${p.draft ? " (draft)" : ""}: verify ${p.verify}, ${p.unresolvedThreads} unresolved threads, merge ${p.mergeState}${p.reviewDecision ? `, review ${p.reviewDecision}` : ""} ${p.url}`,
+      `PR #${p.number}${p.draft ? " (draft)" : ""}: checks ${p.requirements}, ${p.ready ? "ready" : `blocked (${p.blockers.length})`}, ${p.unresolvedThreads} unresolved threads, merge ${p.mergeState}${p.reviewDecision ? `, review ${p.reviewDecision}` : ""} ${p.url}`,
     );
   if (r.commentEvidence.length) lines.push("", "Ownership comments (historical, not claims):");
   for (const e of r.commentEvidence)

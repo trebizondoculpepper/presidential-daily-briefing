@@ -22,21 +22,21 @@ import type {
   IssueDeliveryDiagnosis,
 } from "./deliverydoctor.js";
 
+import type { DeclaredReviewPolicy } from "./reviewpolicy.js";
+import { snapshotPrReadiness } from "./prstatus.js";
+
 /**
- * Whether a PR's contribution is evidently finished: out of draft, checks passing, no open or
- * unseen review threads, no changes requested. Missing evidence is not finished.
+ * Whether a PR's contribution is evidently finished, using the shared native PR-readiness
+ * decision (#711) plus complete review-thread coverage. Missing evidence is not finished.
  */
-export function contributionFinished(pr: PullRequest): boolean {
-  const rollup = pr.commits?.nodes?.[0]?.commit?.statusCheckRollup;
+export function contributionFinished(
+  pr: PullRequest,
+  warnings: readonly string[] = [],
+  reviewPolicy?: DeclaredReviewPolicy,
+): boolean {
   const threads = pr.reviewThreads;
-  return (
-    !pr.isDraft &&
-    rollup?.state === "SUCCESS" &&
-    !!threads &&
-    !threads.pageInfo?.hasNextPage &&
-    threads.nodes.every((t) => t.isResolved) &&
-    !workflow.changesRequested.includes(pr.reviewDecision ?? "")
-  );
+  if (!threads || threads.pageInfo?.hasNextPage) return false;
+  return snapshotPrReadiness(pr, warnings, reviewPolicy).ready;
 }
 import { planCommands } from "./doctorplans.js";
 import type { CorrectionPlan, CorrectionStep } from "./doctorplans.js";
@@ -620,7 +620,11 @@ export function ticketDoctor(
       for (const ref of pr.closingIssuesReferences?.nodes ?? [])
         openPrsFor.set(ref.url, [
           ...(openPrsFor.get(ref.url) ?? []),
-          { number: pr.number, url: pr.url, finished: contributionFinished(pr) },
+          {
+            number: pr.number,
+            url: pr.url,
+            finished: contributionFinished(pr, snapshot.warnings, snapshot.reviewPolicy),
+          },
         ]);
     }
 

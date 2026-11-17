@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { atomicJson, main } from "../cli.js";
 import { teamText, teamView } from "./team.js";
+import { contributionFinished } from "./ticketdoctor.js";
 import type { Issue } from "../github/types.js";
 import { issue, page, pr, repo, snapshot, time } from "../testing/snapshots.js";
 
@@ -57,7 +58,8 @@ describe("team view (#41, doc/design/diagnostics.md)", () => {
     expect(ana.claims.map((c) => c.number)).toEqual([1, 2, 3]);
     expect(ana.claims[0].pullRequests[0]).toMatchObject({
       number: 40,
-      verify: "SUCCESS",
+      requirements: "satisfied",
+      ready: false,
       unresolvedThreads: 1,
     });
     expect(ana.claims[0].latestActivity!.source).toBe("PR #40 updated");
@@ -173,5 +175,54 @@ describe("team view (#41, doc/design/diagnostics.md)", () => {
     } finally {
       await rm(dir, { recursive: true });
     }
+  });
+
+  it("uses native PR readiness without requiring a verify check in team and Ticket Doctor (#711)", () => {
+    const claimed = issue(10, ["agent:ana", "status:in-progress"]);
+    const prNoVerify = {
+      ...pr(),
+      number: 41,
+      mergeable: "MERGEABLE",
+      mergeStateStatus: "CLEAN",
+      closingIssuesReferences: page([{ number: 10, url: claimed.url }]),
+    };
+    prNoVerify.requiredChecks = {
+      head: prNoVerify.headRefOid,
+      base: "main",
+      expected: [{ context: "lint", appId: null }],
+      checks: [{ name: "lint", databaseId: null, appId: null, required: "required" }],
+      gaps: [],
+    };
+    prNoVerify.commits = {
+      nodes: [
+        {
+          commit: {
+            statusCheckRollup: {
+              state: "SUCCESS",
+              contexts: page([
+                {
+                  name: "lint",
+                  status: "COMPLETED",
+                  conclusion: "SUCCESS",
+                  detailsUrl: "https://github.com/o/r/runs/1",
+                },
+              ]),
+            },
+          },
+        },
+      ],
+    };
+    const view = teamView(snapshot([claimed], [prNoVerify]), { now: new Date(time) });
+    const prRow = view.agents[0]?.claims[0]?.pullRequests[0];
+    expect(prRow).toMatchObject({
+      number: 41,
+      requirements: "satisfied",
+      ready: true,
+      blockers: [],
+    });
+    expect(contributionFinished(prNoVerify)).toBe(true);
+    const rendered = teamText(view);
+    expect(rendered).toContain("checks satisfied, ready");
+    expect(rendered).not.toContain("verify");
   });
 });
