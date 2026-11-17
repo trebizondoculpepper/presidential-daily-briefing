@@ -136,7 +136,18 @@ process.stdout.write(JSON.stringify({ data: { repository: { issues: page(issues)
 `;
 
 /** Feed a native event to the installed artifact without a shell or development loader. */
-async function nativeStopSmoke(entry: string, cwd: string, env = process.env): Promise<void> {
+async function nativeStopSmoke(
+  entry: string,
+  cwd: string,
+  env: NodeJS.ProcessEnv = {
+    ...process.env,
+    PDB_NO_EFFECTIVE_IDENTITY: "1",
+    PDB_NO_HUMAN_CONTEXT: "1",
+    PDB_NO_UPDATE_CHECK: "1",
+    PDB_NO_FIRST_USE_HINT: "1",
+  },
+  withFakeGh = false,
+): Promise<void> {
   const state = await mkdtemp(join(tmpdir(), "pdb native $() & "));
   const selection = [
     "--state-dir",
@@ -174,7 +185,8 @@ async function nativeStopSmoke(entry: string, cwd: string, env = process.env): P
         "",
       ),
     ) as { reason: string };
-    if (initialized.reason !== "initialized") throw new Error("Packaged native init failed");
+    if (initialized.reason !== "initialized")
+      throw new Error(`Packaged native init failed (${initialized.reason})`);
     const args = ["codex-stop", ...selection, "--natural-stop-confirmed"];
     const event = JSON.stringify({
       hook_event_name: "Stop",
@@ -193,7 +205,7 @@ async function nativeStopSmoke(entry: string, cwd: string, env = process.env): P
         throw new Error("Packaged native framing/failure mismatch");
     }
     // Run the successful read only when the caller supplied the credential-free fake gh.
-    if (env !== process.env) {
+    if (withFakeGh) {
       const response = JSON.parse(await invoke(args, event)) as {
         decision?: string;
         reason?: string;
@@ -1077,7 +1089,7 @@ try {
       PDB_NO_HUMAN_CONTEXT: "1",
       PDB_NO_EFFECTIVE_IDENTITY: "1",
     };
-    await nativeStopSmoke(join(packageDir, "dist", "cli.mjs"), work, env);
+    await nativeStopSmoke(join(packageDir, "dist", "cli.mjs"), work, env, true);
     console.log("ok   installed native Codex offer and duplicate guard with fake gh");
     console.log(`ok   installed pdb serve: ${await serveSmoke(bin, env, checkout)}`);
     for (const kind of ["serve", "mcp"] as const)

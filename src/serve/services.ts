@@ -12,6 +12,7 @@ import type { ServeReadRuntime } from "./api.js";
 import { randomUUID } from "node:crypto";
 import { ServeCache } from "./cache.js";
 import { HttpFailure } from "./http.js";
+import { diagnosticRunServices } from "./diagnostic-runs.js";
 import { diagnosticViews, diagnosticsApi } from "./diagnostics.js";
 import type { RulesDiagnostic, SettingDiagnostic } from "./diagnostics.js";
 import { STALE_WINDOW_MS } from "./options.js";
@@ -148,6 +149,7 @@ export function readServices(
       instanceId: randomUUID(),
       now: () => serve.clock.now(),
     });
+    const activeDiagnostics = diagnosticRunServices(facts, serve, read, cache);
     return {
       routes: async (context) => {
         if (context.url.pathname === "/mcp") {
@@ -155,6 +157,7 @@ export function readServices(
           return true;
         }
         if (await diagnostics(context)) return true;
+        if (await activeDiagnostics.routes(context)) return true;
         if (await quotas(context)) return true;
         return api(context);
       },
@@ -169,6 +172,7 @@ export function readServices(
       },
       // Sessions first, then in-flight collections; dropping sessions never drops entries.
       close: async () => {
+        activeDiagnostics.close();
         await mcp.close();
         cache.close();
       },

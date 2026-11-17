@@ -1,3 +1,4 @@
+import type { LocalDoctorRuntime } from "../config/localdoctor.js";
 import type { EffectiveHuman, EffectiveIdentityRuntime } from "../config/effectiveidentity.js";
 import type { LocalIdentitySession } from "../config/serveridentity.js";
 /**
@@ -79,6 +80,8 @@ export interface ServeRuntime {
   read?: ServeReadRuntime;
   /** Local read-only git/file boundaries of the rules page (#392); absent means the real ones. */
   rulesPage?: RulesPageRuntime;
+  /** Read-only Doctor probes; run scope/root and cancellation are fixed by the server. */
+  doctor?: LocalDoctorRuntime;
 }
 
 /** One repository of the served set, with the checkout that configures it, if any. */
