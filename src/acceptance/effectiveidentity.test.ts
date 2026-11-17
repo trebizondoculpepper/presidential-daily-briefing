@@ -1,3 +1,4 @@
+import { prepareCommandIdentity } from "../config/commandidentity.js";
 import { IssueUnavailable } from "../github/github.js";
 import { readdir, mkdir } from "node:fs/promises";
 import { describe, expect, it } from "vite-plus/test";
@@ -498,6 +499,52 @@ describe("effective identity in actual CLI results (#677)", () => {
       });
       expect(JSON.stringify(result.document.effectiveIdentity)).not.toContain(f.root);
       expect(await f.fs.readText(f.file)).toBe(before);
+    }));
+
+  it("uses production preview composition without a live human lookup or identity write", async () =>
+    fixture(async (f) => {
+      let authentications = 0;
+      let allocations = 0;
+      let queries = 0;
+      const runtime = runtimeFor(f, []);
+      const report = await invoke(
+        {
+          ...runtime,
+          query: async () => {
+            queries++;
+            throw new Error("must not plan before a name exists");
+          },
+          prepareIdentity: (options) =>
+            prepareCommandIdentity(
+              { ...options, project: f.root },
+              {
+                env,
+                fs: f.fs,
+                git: f.git,
+                random: () => {
+                  allocations++;
+                  return f.random();
+                },
+                auth: async () => {
+                  authentications++;
+                  return { host: "github.com", login: "owner" };
+                },
+                humanOptions: { cacheDir: f.root },
+              },
+            ),
+        },
+        ["claim", "7", "--repo", f.repository, "--role", "implementer", "--dry-run", "--json"],
+      );
+      expect(report.document.effectiveIdentity).toMatchObject({
+        state: "proposed",
+        agent: null,
+        human: { state: "unresolved", login: null },
+        setup: { state: "proposed" },
+      });
+      expect(authentications).toBe(0);
+      expect(allocations).toBe(0);
+      expect(queries).toBe(0);
+      expect(await readdir(f.root)).toEqual([]);
     }));
 
   it("help and rules do not prepare an identity", async () =>

@@ -93,7 +93,7 @@ export function onboardingDocument(input: OnboardingInput): OnboardingDocument {
     `Before any project work:`,
     `1. Read the onboarding and the current rules: ${onboardingRef} and ${rulesRef}.`,
     `2. Run \`${firstCommand(role)}\`. PDB reuses your identity or safely creates and saves one, reports the result, then continues. Never reuse another agent's name.`,
-    `3. Continue with the CLI (\`pdb${repoFlag}\`) or the MCP server (\`pdb-mcp${repoFlag}\`) for status and priorities; help is \`pdb --help\`. No name lookup or manual echo is needed. If identity selection is ambiguous, select your logical entry once with --entry KEY.`,
+    `3. Continue with the CLI (\`pdb${repoFlag}\`) or the MCP server (\`pdb-mcp${repoFlag}\`) for status and priorities; help is \`pdb --help\`. No name lookup or manual echo is needed. If identity selection is ambiguous, select your logical entry with --entry KEY. A verified binding retains it; unsupported sessions must keep passing --entry KEY on every invocation.`,
     `4. If AGENTS.md has no pdb coordination section, add it: \`pdb onboard${repoFlag} --install\`.`,
     `At the start of every session, read the current rules again before choosing work.`,
   ].join("\n");
@@ -104,7 +104,7 @@ export function onboardingDocument(input: OnboardingInput): OnboardingDocument {
     `${repo ? `This project (${repo})` : "This project"} uses pdb for status, priorities, claims and handoffs.`,
     "",
     `- At the start of every session, read the current rules: ${rulesRef}.`,
-    `- First use: \`${firstCommand("implementer|designer")}\`. PDB reuses or safely creates your identity, saves it and continues. If selection is ambiguous, select your logical entry once with --entry KEY. Never reuse another agent's name.`,
+    `- First use: \`${firstCommand("implementer|designer")}\`. PDB reuses or safely creates your identity, saves it and continues. If selection is ambiguous, select your logical entry with --entry KEY. A verified binding retains it; unsupported sessions must keep passing --entry KEY on every invocation. Never reuse another agent's name.`,
     `- See what to do next: \`pdb${repoFlag}\`. Help: \`pdb --help\`; onboarding: ${onboardingRef}.`,
     `- MCP clients: \`pdb-mcp${repoFlag}\`${server ? `; web: ${server}` : ""}.`,
     "- Prefer pdb over raw gh for status and priorities; use gh only for operations pdb does not support.",
@@ -120,7 +120,7 @@ export function onboardingDocument(input: OnboardingInput): OnboardingDocument {
     onboarding: { command: `pdb onboard${repoFlag}`, url: onboardingUrl },
     identity: [
       `Run \`${firstCommand(role)}\` in this checkout. PDB reuses or safely initializes your identity and continues the requested command.`,
-      "Returning commands reuse the saved binding without --agent. An ambiguous or unsupported session needs --entry KEY; never borrow another agent's entry. A new identity needs your explicit role.",
+      "Returning commands reuse the saved binding without --agent. An ambiguous session needs --entry KEY; unsupported sessions must keep passing --entry KEY on every invocation; never borrow another agent's entry. A new identity needs your explicit role.",
       `Explicit identity management remains available: \`${setupCommand(role)}\`. --agent NAME is a per-call override, not a required lookup step.`,
     ],
     examples,

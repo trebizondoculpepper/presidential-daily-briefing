@@ -61,6 +61,12 @@ describe("onboarding document (#351)", () => {
     expect(doc.prompt).toContain("pdb --repo owner/name --role implementer");
     expect(doc.prompt).not.toContain("--agent NAME");
     expect(doc.prompt).toContain("--entry KEY");
+    expect(doc.prompt).toContain(
+      "unsupported sessions must keep passing --entry KEY on every invocation",
+    );
+    expect(doc.persistentSection).toContain(
+      "unsupported sessions must keep passing --entry KEY on every invocation",
+    );
     expect(doc.persistentSection.startsWith(COORDINATION_START)).toBe(true);
     expect(doc.persistentSection.endsWith(COORDINATION_END)).toBe(true);
     expect(doc.persistentSection).toContain(
