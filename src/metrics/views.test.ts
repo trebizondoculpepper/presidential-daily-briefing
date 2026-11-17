@@ -198,6 +198,20 @@ describe("news view (#573 slice 5a)", () => {
     expect(v.items.map((i) => i.key)).toEqual(["pr:32", "pr:31"]);
     expect(v.omitted).toBe(0);
     expect(newsView(NOW, 6, [t], covered, 1)).toMatchObject({ omitted: 1 });
+    // Walked merges add standalone PRs and never repeat one already in a ledger.
+    const withWalked = newsView(
+      NOW,
+      6,
+      [t],
+      covered,
+      200,
+      [],
+      [
+        { at: "2026-11-17T08:00:00.000Z", key: `${repo}#32` },
+        { at: "2026-11-17T07:00:00.000Z", key: `${repo}#77` },
+      ],
+    );
+    expect(withWalked.items.map((i) => i.key)).toEqual(["pr:32", `pr-merged:${repo}#77`, "pr:31"]);
     expect(v.incomplete).toEqual({ count: 0, members: [] });
     const partial = ticket(8, "none", {
       coverage: {
