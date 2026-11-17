@@ -184,7 +184,7 @@ export function humanRenderers(base: DashboardRenderers): HumanRenderers {
       ...(item.addressed === true ? ['<span class="kind addressed">Addressed to you</span>'] : []),
       ...(item.sourceState === "closed"
         ? [
-            `<span class="kind closed">${item.resolution === "unknown" ? "Ticket closed, resolution unknown" : "Ticket closed, unanswered"}</span>`,
+            `<span class="kind closed">${item.attentionSection === "waiting" ? "Ticket closed, resolution unknown" : "Ticket closed, unanswered"}</span>`,
           ]
         : []),
     ].join(" ");
@@ -232,8 +232,8 @@ export function humanRenderers(base: DashboardRenderers): HumanRenderers {
       return { actionable: "", waiting: "" };
     const repository = str(record(e.selection).repository);
     const items = list(view.items);
-    // The projection's own field decides the split; the order stays the server's.
-    const isWaiting = (i: unknown) => record(i).resolution === "unknown";
+    // The shared native projection's attentionSection field (#643) decides the split; order stays the server's.
+    const isWaiting = (i: unknown) => record(i).attentionSection === "waiting";
     const actionable = items.filter((i) => !isWaiting(i));
     const waiting = items.filter(isWaiting);
     const total = Number(view.total ?? 0);
