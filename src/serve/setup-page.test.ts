@@ -98,8 +98,11 @@ describe("GET /setup (#391)", () => {
       expect(reply.status).toBe(200);
       expect(reply.headers["content-type"]).toBe("text/html; charset=utf-8");
       expect(reply.headers["content-security-policy"]).toContain("script-src 'self'");
-      // No inline script or style; the only script is the same-origin copy helper.
-      expect(reply.body.match(/<script[^>]*>/g)).toEqual(['<script src="/setup.js" defer>']);
+      // Only the shared selector and same-origin copy helper; no inline scripts.
+      expect(reply.body.match(/<script[^>]*>/g)).toEqual([
+        '<script src="/project-selection.js" defer>',
+        '<script src="/setup.js" defer>',
+      ]);
       expect(reply.body).not.toMatch(/\sstyle=|\son[a-z]+=/);
       const doc = onboardingDocument({
         repository: "example/project",
