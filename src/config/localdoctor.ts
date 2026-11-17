@@ -70,16 +70,46 @@ export interface ProbeResult {
   stdout: string;
 }
 /** Process boundary; output is used only for parsing, never echoed. */
-export type Probe = (command: string, args: readonly string[], cwd: string) => Promise<ProbeResult>;
+export type Probe = (
+  command: string,
+  args: readonly string[],
+  cwd: string,
+  signal?: AbortSignal,
+) => Promise<ProbeResult>;
 
-export const nodeProbe: Probe = (command, args, cwd) =>
-  new Promise((resolve) => {
-    execFile(command, [...args], { cwd, windowsHide: true, timeout: 15_000 }, (error, stdout) => {
-      if (!error) return resolve({ code: 0, stdout: String(stdout) });
-      const code = (error as NodeJS.ErrnoException & { code?: unknown }).code;
-      resolve({ code: typeof code === "number" ? code : null, stdout: String(stdout ?? "") });
-    });
+export const nodeProbe: Probe = async (command, args, cwd, signal) => {
+  signal?.throwIfAborted();
+  return new Promise((resolve, reject) => {
+    let result: ProbeResult = { code: null, stdout: "" };
+    const child = execFile(
+      command,
+      [...args],
+      {
+        cwd,
+        windowsHide: true,
+        timeout: 15_000,
+        signal,
+        killSignal: "SIGKILL",
+      },
+      (error, stdout) => {
+        const code = (error as (NodeJS.ErrnoException & { code?: unknown }) | null)?.code;
+        result = {
+          code: error ? (typeof code === "number" ? code : null) : 0,
+          stdout: String(stdout ?? ""),
+        };
+      },
+    );
+    // Abort can invoke execFile's callback before its child closes. Do not report cancellation
+    // complete while the owned probe is still alive; close also drains the output streams.
+    child.once("close", () => (signal?.aborted ? reject(signal.reason) : resolve(result)));
   });
+};
+
+export interface LocalDoctorProgress {
+  step: "runtime" | "dependencies" | "gh" | "project" | "identity";
+  state: "running" | "done" | "skipped";
+  detail: string | null;
+}
 
 export interface LocalDoctorRuntime {
   readonly cwd?: string;
@@ -90,7 +120,12 @@ export interface LocalDoctorRuntime {
   /** Environment for harness detection; defaults to the process. Values are never reported. */
   readonly env?: Environment;
   /** Dependency readiness of the running source checkout (#346); defaults to the real probe. */
-  readonly dependencies?: () => Promise<LocalCheck>;
+  readonly dependencies?: (signal?: AbortSignal) => Promise<LocalCheck>;
+  readonly signal?: AbortSignal;
+  /** Observed check-group transitions, never an estimated percentage. */
+  readonly onStep?: (progress: LocalDoctorProgress) => void;
+  /** Trusted server context only: never infer a project from the server's working directory. */
+  readonly projectUnavailable?: string;
 }
 
 /** The real #346 probe for the running installation. */
@@ -126,11 +161,29 @@ export async function localDoctor(
   options: LocalDoctorOptions,
   runtime: LocalDoctorRuntime = {},
 ): Promise<LocalDoctorReport> {
-  const probe = runtime.probe ?? nodeProbe;
+  const signal = runtime.signal;
+  signal?.throwIfAborted();
+  const probe: Probe = async (command, args, directory) => {
+    signal?.throwIfAborted();
+    const result = await (runtime.probe ?? nodeProbe)(command, args, directory, signal);
+    signal?.throwIfAborted();
+    return result;
+  };
+  const step = (
+    group: LocalDoctorProgress["step"],
+    state: LocalDoctorProgress["state"],
+    detail: string | null = null,
+  ) => {
+    signal?.throwIfAborted();
+    runtime.onStep?.({ step: group, state, detail });
+  };
   const fs = runtime.fs ?? nodeFileSystem;
   const cwd = runtime.cwd ?? process.cwd();
   const checks: LocalCheck[] = [];
-  const add = (check: LocalCheck) => void checks.push(check);
+  const add = (check: LocalCheck) => {
+    signal?.throwIfAborted();
+    checks.push(check);
+  };
   const report: LocalDoctorReport = {
     schemaVersion: LOCAL_DOCTOR_SCHEMA_VERSION,
     scope: "local-configuration",
@@ -142,6 +195,7 @@ export async function localDoctor(
     summary: { ok: 0, missing: 0, invalid: 0, access: 0, unsupported: 0, unknown: 0 },
   };
 
+  step("runtime", "running");
   // runtime.node
   const nodeVersion = runtime.nodeVersion ?? process.versions.node;
   const major = Number(/^v?(\d+)\./.exec(nodeVersion)?.[1]);
@@ -171,9 +225,11 @@ export async function localDoctor(
         },
   );
 
+  step("runtime", "done");
+  step("dependencies", "running");
   // install.dependencies (#346): independent of every other check.
   add(
-    await (runtime.dependencies ?? installationDependencies)().catch((): LocalCheck => ({
+    await (runtime.dependencies ?? installationDependencies)(signal).catch((): LocalCheck => ({
       id: "install.dependencies",
       status: "unknown",
       source: "installation root",
@@ -182,6 +238,8 @@ export async function localDoctor(
     })),
   );
 
+  step("dependencies", "done");
+  step("gh", "running");
   // gh.available and gh.auth: exit codes only; gh output may contain account details.
   const ghVersion = await probe("gh", ["--version"], cwd);
   if (ghVersion.code === null) {
@@ -243,6 +301,14 @@ export async function localDoctor(
     );
   }
 
+  step("gh", "done");
+  if (runtime.projectUnavailable !== undefined) {
+    step("project", "skipped", runtime.projectUnavailable);
+    step("identity", "skipped", runtime.projectUnavailable);
+    for (const check of checks) report.summary[check.status] += 1;
+    return report;
+  }
+  step("project", "running");
   // project.checkout
   let root: string | null = null;
   try {
@@ -276,6 +342,8 @@ export async function localDoctor(
     });
   }
 
+  step("project", "done");
+  step("identity", "running");
   // identity.file, identity.git-ignored, identity.git-tracked
   if (root === null) {
     for (const id of ["identity.file", "identity.git-ignored", "identity.git-tracked"])
@@ -454,6 +522,7 @@ export async function localDoctor(
           },
   );
 
+  step("identity", "done");
   for (const check of checks) report.summary[check.status] += 1;
   return report;
 }
