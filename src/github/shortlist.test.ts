@@ -244,7 +244,7 @@ describe("routine briefing: discover all, rank, hydrate only the shortlist (#368
     expect(hydratedIssues.length + fake.calls.pullRequests.length).toBe(shortlist.hydrated.length);
     expect(shortlist.hydrated.length).toBeLessThanOrEqual(40);
     expect(shortlist.hydrated.length).toBeLessThan(report.subjects.length + 5);
-    expect(fake.calls.issueBatches.every((batch) => batch.length <= 10)).toBe(true);
+    expect(fake.calls.issueBatches.every((batch) => batch.length <= 20)).toBe(true);
     // The owned ticket and its PR are hydrated, so their records were actually read.
     expect(shortlist.hydrated).toEqual(expect.arrayContaining([owned.url, linked.url]));
     // Every shown subject was hydrated; every other open item is disclosed as not hydrated.
@@ -867,7 +867,8 @@ describe("routine briefing: discover all, rank, hydrate only the shortlist (#368
       repo,
       {
         select: async (candidates) => candidates.issues.map((i) => i.url),
-        bounds: { hydrationConcurrency: 1 },
+        // Pin both bounds so this test verifies the quota stop, not the changed batch size.
+        bounds: { hydrationConcurrency: 1, issuesPerRequest: 10 },
       },
       query,
       clock,
