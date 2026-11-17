@@ -123,7 +123,17 @@ const selectionError = (
 ) => new ConfigError("identity-unresolved", message, recovery);
 const problem = (error: unknown): NonNullable<EffectiveIdentity["diagnostic"]> =>
   error instanceof ConfigError
-    ? { code: error.code, message: error.message, recovery: error.recovery }
+    ? error.code === "not-a-repository" || error.code === "repository-mismatch"
+      ? {
+          code: error.code,
+          message:
+            error.code === "not-a-repository"
+              ? "The selected local project is not a Git checkout."
+              : "The selected checkout does not match the requested GitHub repository.",
+          recovery:
+            "Run from the intended local checkout and pass --repo owner/name when it has several GitHub remotes; no identity was selected for another project.",
+        }
+      : { code: error.code, message: error.message, recovery: error.recovery }
     : {
         code: "filesystem",
         message: "Local identity preparation failed.",

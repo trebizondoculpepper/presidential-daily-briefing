@@ -28,6 +28,8 @@ export default defineConfig({
       PDB_NO_CHECKOUT_CHECK: "1",
       PDB_NO_FIRST_USE_HINT: "1",
       PDB_NO_HUMAN_CONTEXT: "1",
+      // #677: identity tests inject disposable stores; never bootstrap the runner's checkout.
+      PDB_NO_EFFECTIVE_IDENTITY: "1",
     },
   },
 });
