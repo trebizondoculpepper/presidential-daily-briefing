@@ -85,6 +85,13 @@ describe("effective identity in actual CLI results (#677)", () => {
       // #681: optional next-step guidance appears only on first creation, with exact commands.
       expect(stderr.join("")).toContain("Optional next steps (nothing runs automatically):");
       expect(stderr.join("")).toContain("pdb doctor");
+      // The Doctor action is also on the shared structured result, so JSON/MCP/HTTP can surface it.
+      const actions = first.document.effectiveIdentity.setup.actions;
+      expect(actions?.length).toBeGreaterThan(0);
+      expect(actions![0]!.command).toMatch(
+        /^pdb doctor( --repo \S+)?( --entry \S+)?( --role \S+)?$/,
+      );
+      expect(actions![0]).toMatchObject({ purpose: expect.any(String) });
       stderr.length = 0;
       const again = await invoke(runtime, ["--json"]);
       expect(again.document.effectiveIdentity).toMatchObject({

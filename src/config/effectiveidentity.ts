@@ -95,6 +95,8 @@ export interface EffectiveIdentity {
     readonly changed: boolean | null;
     readonly persisted: boolean | null;
     readonly notices: readonly string[];
+    /** Optional copyable follow-up actions offered only after a verified first creation (#681). */
+    readonly actions?: readonly { command: string; purpose: string }[];
     readonly persistedAgent?: { readonly name: string; readonly entry: string };
   };
 }
@@ -399,7 +401,26 @@ export async function prepareEffectiveIdentity(
               ]
             : [];
     if (write.lockCleanup) notices.push(write.lockCleanup);
-    return resolved(verified.record, { state, changed: write.changed, persisted: true, notices });
+    // #681: offer the Doctor action only after a verified first creation, built from the
+    // creation context so a non-default --repo/--entry still inspects the identity just made.
+    const actions =
+      state === "created"
+        ? [
+            {
+              command: `pdb doctor${target.repository ? ` --repo ${target.repository}` : ""}${
+                entry ? ` --entry ${entry}` : ""
+              }${role ? ` --role ${role}` : ""}`,
+              purpose: "verify this checkout's local configuration",
+            },
+          ]
+        : [];
+    return resolved(verified.record, {
+      state,
+      changed: write.changed,
+      persisted: true,
+      notices,
+      ...(actions.length ? { actions } : {}),
+    });
   } catch (error) {
     // A failed post-rename chmod/readback may leave a real persisted identity. Report it;
     // never retry initialization blindly or claim the original operation continued.
