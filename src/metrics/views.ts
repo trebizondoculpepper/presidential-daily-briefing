@@ -14,6 +14,7 @@ import {
   groupedDurations,
   pickupToDelivery,
   type CompletionVerdict,
+  type DurationSample,
   type DurationStats,
 } from "./aggregate.js";
 import type { LedgerEvent, TicketLedger } from "./ledger.js";
@@ -233,6 +234,34 @@ function pickupStatus(ledger: TicketLedger): "none" | "other" {
 }
 
 /**
+ * Timing population, as one explicit table (#573 slice 5a):
+ *
+ * | Case                                                    | In the population?             |
+ * | ------------------------------------------------------- | ------------------------------ |
+ * | delivery dated                                          | iff that date is in the window |
+ * | delivered/attested but undated, or verdict unknown      | iff any event in the window    |
+ * | not delivered and proven never picked up                | never (creation-to-pickup)     |
+ * | not delivered and closed                                | iff the closure is in window   |
+ * | not delivered, open or state unknown                    | always (open or unknown)       |
+ */
+function timingMember(
+  t: MetricTicket,
+  status: DurationSample["status"],
+  window: { from: string; through: string },
+  anyEventInWindow: boolean,
+): boolean {
+  const d = deliveryInstant(t.ledger, t.verdict);
+  if (d.status === "dated") return inWindow(d.at, window) === true;
+  if (t.verdict !== "none") return anyEventInWindow;
+  if (pickupStatus(t.ledger) === "none") return false;
+  if (status === "closed-undelivered" || t.ledger.currentState === "closed") {
+    const closure = currentClosure(t.ledger);
+    return closure !== null && inWindow(closure.at, window) === true;
+  }
+  return true;
+}
+
+/**
  * Population: tickets delivered within the window (completed samples), work still open now
  * (lower bounds), tickets closed undelivered within the window, and tickets with unknown
  * endpoints that are still open or had any recorded event in the window. Completed deliveries outside the
@@ -253,24 +282,9 @@ export function timingView(
   for (const t of tickets) {
     const s = pickupToDelivery(t.member, t.ledger, t.verdict, now);
     const anyEventInWindow = t.ledger.events.some((e) => inWindow(e.at, window) === true);
-    // A known delivery date decides membership by itself, whether or not the pickup endpoint
-    // is known, so missing pickup history never changes which period a delivery belongs to.
-    const d = deliveryInstant(t.ledger, t.verdict);
-    let include: boolean;
-    if (d.status === "dated") include = inWindow(d.at, window) === true;
-    else if (s.status === "open") include = true;
-    else if (s.status === "closed-undelivered") {
-      const closure = currentClosure(t.ledger);
-      include = closure !== null && inWindow(closure.at, window) === true;
-    } else if (s.status === "unknown") {
-      // Open (or unknown-state) work stays in the population with an unknown endpoint, so
-      // missing history never makes it disappear; proven never-picked-up tickets belong to
-      // the creation-to-pickup metric instead.
-      include =
-        pickupStatus(t.ledger) !== "none" &&
-        (anyEventInWindow || t.ledger.currentState !== "closed");
-    } else include = false;
-    if (include) samples.push({ ...s, group: t.complexity });
+    if (timingMember(t, s.status, window, anyEventInWindow)) {
+      samples.push({ ...s, group: t.complexity });
+    }
   }
   return {
     schemaVersion: METRICS_SCHEMA_VERSION,
