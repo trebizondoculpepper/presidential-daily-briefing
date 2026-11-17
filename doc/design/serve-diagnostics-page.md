@@ -77,6 +77,43 @@ Rules:
 8. **Ticket Doctor** runs the same code path as the CLI, through the serve read runtime and cache, so counts and findings match `pdb ticket-doctor --json` for the same snapshot. `--offline`, `--cache` and `--since` are not exposed in the first slice.
 9. **Redaction.** Results pass through the existing local-path and diagnostic redaction (`redactLocalText` in `src/mcp/redact.ts`); credentials, environment values and raw process output never appear.
 
+## Resource and lifecycle clarification (#585)
+
+The registry is process-local and bounded independently of the fact cache. Retained
+terminal runs use the existing serve limits: at most 256 runs and 64 MiB of
+serialized status/result data. Thirty minutes is the maximum retention age, not
+a promise against earlier resource eviction. Evict oldest terminal runs first;
+never evict an active run to make room. Expired or evicted results are absent,
+not fresh, healthy or evidence that a previous run succeeded.
+
+Each execution accepts at most 128 waiter handles; the registry holds at most
+1,024 handles in total. Reclaim expired and oldest terminal handles first; never
+drop an active waiter to admit another. If no capacity remains, POST returns
+429 `RUNS_BUSY` without starting, joining or queuing work. Unknown or expired GET
+handles return 404; DELETE remains idempotent and cannot affect another waiter.
+Handles expire with their retained run. Closing the server aborts all executions
+and clears timers, handles and retained data.
+
+A run has a ten-minute execution deadline, matching the existing bounded polling
+collection allowance. Deadline expiry aborts its owned work and reports `failed`
+with `RUN_TIMEOUT`; explicit waiter cancellation remains `cancelled`. A late
+completion after either transition cannot overwrite the terminal state. Enforce
+the existing 4 MiB HTTP response bound on the whole redacted status/result; an
+oversized result becomes a bounded `RESULT_TOO_LARGE` failure with CLI guidance,
+not an unbounded retained payload. Error messages are registered safe text, never
+raw exceptions, subprocess output or environment values.
+
+`latest` uses the cache's last verified auth context without a new auth probe or
+collection. Its timestamps identify historical evidence. An explicit POST uses
+the cache's normal auth verification boundary before keying a run. If that
+verification is unavailable, Ticket Doctor cannot start; Doctor may still inspect
+the host with a null login, since diagnosing broken gh/auth is its purpose. A
+null-login run cannot join a run keyed to a previously verified login. Doctor
+host-only scope reports the project and identity **progress groups** as skipped
+with the registered-checkout reason, while its unchanged LocalDoctorReport
+contains only the four applicable host checks. CLI default scope and JSON remain
+unchanged.
+
 ## HTTP API
 
 Run routes live under `/api/v1/diagnostic-runs`, outside the passive `/api/v1/diagnostics/` prefix, whose handler answers every non-GET with 405 (`src/serve/diagnostics.ts`).
