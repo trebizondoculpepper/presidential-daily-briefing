@@ -161,6 +161,20 @@ describe("daily evidence gaps (#573 slice 5a)", () => {
     expect(newsView(NOW, 6, [], covered, 200, [`${repo}#99`]).incomplete.count).toBe(1);
   });
 
+  it("uses walked merges for the PR series when the read supplies them", () => {
+    const v = dailyView(
+      NOW,
+      7,
+      [],
+      covered,
+      [],
+      [{ at: "2026-11-12T08:00:00Z", key: `${repo}#95` }],
+    );
+    const day = v.figures.prMerges.series.days.find((d) => d.day === "2026-11-12");
+    expect(day).toMatchObject({ status: "known", count: 1, members: [`${repo}#95`] });
+    expect(v.figures.prMerges.lowerBound).toBe(false);
+  });
+
   it("counts an undated delivery once however often it is passed", () => {
     const t = ticket(32, "delivered", { requiredOtherMembers: 1 });
     expect(dailyView(NOW, 7, [t, t], covered).deliveredDateUnknown).toEqual({

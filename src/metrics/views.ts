@@ -182,6 +182,11 @@ export function dailyView(
   coverage: HistoryCoverage,
   /** Tickets in the window the read could not ledger: every figure is then a lower bound. */
   unread: readonly string[] = [],
+  /**
+   * Merges from the pull request walk, when the read supplies them: then the PR-merge series
+   * counts every merged PR, standalone ones included, not only required delivery members.
+   */
+  walkedMerges?: readonly { at: string; key: string }[],
 ): DailyResult {
   const window = trailingWindow(now, days);
   const deliveries: { at: string; key: string }[] = [];
@@ -192,11 +197,11 @@ export function dailyView(
   const undated = new Set<string>();
   // Per-figure evidence gaps, so missing evidence is never shown as known zero activity.
   const outcomeGaps = new Set<string>(unread);
-  const mergeGaps = new Set<string>(unread);
+  const mergeGaps = new Set<string>(walkedMerges ? [] : unread);
 
   for (const t of tickets) {
     if (t.verdict === "unknown" || t.ledger.currentState === "unknown") outcomeGaps.add(t.member);
-    if (t.ledger.coverage.prs !== "complete") mergeGaps.add(t.member);
+    if (!walkedMerges && t.ledger.coverage.prs !== "complete") mergeGaps.add(t.member);
     if (t.verdict === "delivered" || t.verdict === "attested") {
       const d = deliveryInstant(t.ledger, t.verdict);
       if (d.status === "dated") {
@@ -237,7 +242,7 @@ export function dailyView(
       closedCompletedUnverified: figure(unverified, outcomeGaps),
       closedNotPlanned: figure(notPlanned, outcomeGaps),
       prMerges: figure(
-        [...merges].map(([key, at]) => ({ at, key })),
+        walkedMerges ? [...walkedMerges] : [...merges].map(([key, at]) => ({ at, key })),
         mergeGaps,
       ),
     },

@@ -370,4 +370,41 @@ describe("bounded metrics read (#573 slice 5b)", () => {
     ]);
     expect(r.historyNotRead.count).toBe(2);
   });
+  it("returns every in-window merge from the PR walk, standalone PRs included", async () => {
+    const { rt } = fake([], 50, {}, [
+      {
+        number: 95,
+        updatedAt: "2026-11-15T00:00:00Z",
+        mergedAt: "2026-11-15T00:00:00Z",
+        closes: [],
+      },
+      {
+        number: 96,
+        updatedAt: "2026-11-09T00:00:00Z",
+        mergedAt: "2026-11-09T00:00:00Z",
+        closes: [],
+      },
+    ]);
+    const r = await readMetrics(repo, FROM, NOW, rt);
+    expect(r.merges).toEqual([{ at: "2026-11-15T00:00:00Z", key: `${repo}#95` }]);
+  });
+
+  it("rejects when cancelled during collection instead of returning a partial result", async () => {
+    const controller = new AbortController();
+    const { rt } = fake([{ number: 1, updatedAt: "2026-11-16T00:00:00Z" }], 50);
+    const inner = rt as {
+      query: (q: string, v: Record<string, string | number>) => Promise<unknown>;
+    };
+    const aborting = {
+      ...inner,
+      signal: controller.signal,
+      // Abort while the timeline is read; later readers would swallow request failures.
+      query: async (q: string, v: Record<string, string | number>) => {
+        const result = await inner.query(q, v);
+        if (q.includes("timelineItems")) controller.abort();
+        return result;
+      },
+    };
+    await expect(readMetrics(repo, FROM, NOW, aborting as never)).rejects.toThrow();
+  });
 });
