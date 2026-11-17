@@ -44,11 +44,26 @@ describe("locked durable JSON writes (#382)", () => {
         const script = join(dir, "worker.mts");
         await writeFile(
           script,
-          `import { updateJsonFile } from ${JSON.stringify(module)};
+          `import { updateJsonFile, nodeSafeFs, type SafeFs } from ${JSON.stringify(module)};
+let createRefusals = 0;
+const fs: SafeFs = {
+  ...nodeSafeFs,
+  lock: {
+    ...nodeSafeFs.lock,
+    async writeFile(path, data, options) {
+      try { await nodeSafeFs.lock.writeFile(path, data, options); }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "EPERM") createRefusals++;
+        throw error;
+      }
+    },
+  },
+};
 for (let i = 0; i < 5; i++) {
-  const r = await updateJsonFile(${JSON.stringify(target)}, (c) => ({ write: { n: (c.state === "value" ? (c.value as { n: number }).n : 0) + 1 } }), { lockWaitMs: 30000 });
+  const r = await updateJsonFile(${JSON.stringify(target)}, (c) => ({ write: { n: (c.state === "value" ? (c.value as { n: number }).n : 0) + 1 } }), { fs, lockWaitMs: 30000 });
   if (r.status !== "written") { console.error(JSON.stringify(r)); process.exit(1); }
 }
+if (createRefusals) console.log("Recovered JSON lock-create EPERM:", createRefusals);
 `,
         );
         const tsx = import.meta.resolve("tsx");
@@ -79,7 +94,10 @@ for (let i = 0; i < 5; i++) {
           },
         },
       };
-      const outcome = await updateJsonFile(target, () => ({ write: { n: 8 } }), { fs });
+      const outcome = await updateJsonFile(target, () => ({ write: { n: 8 } }), {
+        fs,
+        lockWaitMs: 0,
+      });
       expect(outcome).toMatchObject({
         status: "not-written",
         reason: expect.stringContaining("create: EPERM"),
