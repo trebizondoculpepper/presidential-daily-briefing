@@ -30,3 +30,16 @@ Validation on merged core/current main: check (zero errors, 54 existing warnings
 After the final help-text update, affected CLI/workflow/onboarding suites and checks are rerun;
 the normal Vite+ commit hook is retained. MCP and HTTP startup/projections remain the next
 #677 deliverable; membership stays open. Nothing is released to npm.
+
+Review follow-through: Codex found that following a transferred ticket re-entered normal
+preparation for the destination repository. Transfer reads now inherit the verified original
+invocation context, retain transferredFrom and perform no destination identity setup. The
+actual CLI regression fails on the reviewed head and passes after the fix.
+
+A target-scope audit also found that implicit gh targets and offline cache repositories must
+be resolved before private identity selection. Attributed handlers now pass their actual target
+through to preparation and their planner; offline reads use the cache's repository without live
+target lookup. Seven command-family tests and an offline cross-repository cache test fail before
+and pass after. Repository-selection diagnostics omit private checkout paths at the shared
+service boundary. Final validation: check, 141 files / 2,620 passed and one skipped, build,
+source smoke and packed-install/package tests, with no timeout or concurrency policy relaxed.

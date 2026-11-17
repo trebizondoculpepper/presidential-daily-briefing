@@ -239,6 +239,7 @@ describe("effective identity preparation (#677)", () => {
       expect(result.state).toBe("unresolved");
       expect(result.agent).toBeNull();
       expect(result.diagnostic?.code).toBe("repository-mismatch");
+      expect(JSON.stringify(result)).not.toContain(f.root);
       expect(await f.fs.readText(f.file)).toBe(before);
     }));
 
