@@ -30,6 +30,9 @@ import { workflow } from "../workflow/definition.js";
 import { classifyDeliveryRecords, foldDelivery } from "../workflow/delivery.js";
 import type { DeliveryComment, DeliveryOp } from "../workflow/delivery.js";
 import type { PermissionLookup } from "../github/github.js";
+import { parseMetricProvenance } from "../estimation/estimate.js";
+import { complexityMetric, impactMetric } from "../estimation/metrics.js";
+import type { MetricDescriptor } from "../estimation/metrics.js";
 
 export const LEDGER_SCHEMA_VERSION = 1;
 
@@ -101,6 +104,35 @@ export type PickupCandidate =
       reason: string;
       observed: { at: string; agent: string | null; key: string } | null;
     };
+/** One trusted assessment record: the comment's own id and server time, never a label. */
+export interface AssessmentRecord {
+  /** The comment's createdAt (server time). */
+  at: string;
+  key: string;
+  size: string;
+  /** Sizes the record says it replaced; non-empty marks a revision. */
+  previous: string[];
+  /** The time the record itself states, kept for inspection only. */
+  recordedAt: string | null;
+}
+/**
+ * First trusted assessment and its revisions for one metric (#833). `first` is `found` only when
+ * every comment was read and no record of unknown authority precedes it; a current size label
+ * or `updatedAt` is never an assessment event.
+ */
+export interface AssessmentEndpoints {
+  first:
+    | ({ status: "found" } & AssessmentRecord)
+    | { status: "none" }
+    | { status: "unknown"; reason: string; observed: AssessmentRecord | null };
+  /** Trusted records with a non-empty `previous`, known only from complete history. */
+  revisions: LedgerCount;
+  /** Every trusted record, oldest first, so a figure's members stay inspectable. */
+  records: AssessmentRecord[];
+  /** Records excluded as lacking authority. */
+  ignored: string[];
+}
+
 export interface TicketLedger {
   schemaVersion: typeof LEDGER_SCHEMA_VERSION;
   repository: string;
@@ -132,6 +164,8 @@ export interface TicketLedger {
   omissions: string[];
   /** Records or label changes established as lacking authority: excluded, never unknown. */
   ignored: string[];
+  /** First trusted assessment and revisions per metric (#833). */
+  assessments: { complexity: AssessmentEndpoints; impact: AssessmentEndpoints };
 }
 
 type Candidate = { at: string; agent: string | null; key: string };
@@ -485,6 +519,83 @@ export async function ticketLedger(
     stateReason: issue.state === "CLOSED" ? issue.stateReason : null,
     coverage,
     omissions,
+    ignored,
+    assessments: {
+      complexity: await assessmentEndpoints(
+        complexityMetric,
+        comments,
+        facts.comments?.complete ?? false,
+        trust,
+      ),
+      impact: await assessmentEndpoints(
+        impactMetric,
+        comments,
+        facts.comments?.complete ?? false,
+        trust,
+      ),
+    },
+  };
+}
+
+/** Comment order: server time, then numeric comment id, as the delivery fold orders records. */
+const byCommentTime = (a: Comment, b: Comment): number =>
+  Date.parse(a.createdAt ?? "") - Date.parse(b.createdAt ?? "") ||
+  (a.databaseId ?? Number.MAX_SAFE_INTEGER) - (b.databaseId ?? Number.MAX_SAFE_INTEGER);
+
+/**
+ * First trusted assessment endpoints for one metric (#833), from comments already collected,
+ * using the shared provenance parser and the injected authority. Pure apart from `trust`.
+ */
+async function assessmentEndpoints(
+  d: MetricDescriptor,
+  comments: Comment[],
+  complete: boolean,
+  trust: LedgerTrust,
+): Promise<AssessmentEndpoints> {
+  const records: AssessmentRecord[] = [];
+  const ignored: string[] = [];
+  let unknownBefore: string | null = null;
+  let firstUnknownAt: string | null = null;
+  for (const c of [...comments].sort(byCommentTime)) {
+    const p = parseMetricProvenance(d, c.body);
+    if (!p || !c.createdAt) continue;
+    const record: AssessmentRecord = {
+      at: c.createdAt,
+      key: commentKey(c),
+      size: p.size,
+      previous: [...p.previous],
+      recordedAt: typeof p.recordedAt === "string" ? p.recordedAt : null,
+    };
+    const authority = await trust.comment(c);
+    if (authority.status === "trusted") records.push(record);
+    else if (authority.status === "untrusted")
+      ignored.push(`${d.provenanceKind} record ${record.key} (${authority.why})`);
+    else if (records.length === 0 && unknownBefore === null) {
+      unknownBefore = `${d.provenanceKind} record ${record.key} has unknown authority (${authority.why})`;
+      firstUnknownAt = record.at;
+    }
+  }
+  const earliest = records[0] ?? null;
+  let first: AssessmentEndpoints["first"];
+  if (
+    unknownBefore !== null &&
+    (!earliest || Date.parse(firstUnknownAt!) <= Date.parse(earliest.at))
+  )
+    first = { status: "unknown", reason: unknownBefore, observed: earliest };
+  else if (!complete)
+    first = {
+      status: "unknown",
+      reason: "comment history was cut off, so an earlier record may be unseen",
+      observed: earliest,
+    };
+  else first = earliest ? { status: "found", ...earliest } : { status: "none" };
+  const revisionCount = records.filter((r) => r.previous.length > 0).length;
+  return {
+    first,
+    revisions: complete
+      ? { known: true, value: revisionCount }
+      : { known: false, reason: "comment history incomplete", observed: revisionCount },
+    records,
     ignored,
   };
 }
