@@ -47,6 +47,7 @@ const expected = [
   "package.json",
   "third-party/README.md",
   "third-party/datascript-LICENSE",
+  "third-party/legacy-project-MIT-LICENSE",
 ];
 
 interface PackResult {
@@ -809,9 +810,11 @@ try {
     ? join(prefix, "node_modules", ...packed.name.split("/"))
     : join(prefix, "lib", "node_modules", ...packed.name.split("/"));
   // Only optional fields are read, each through optional chaining, so any JSON shape is safe.
-  const manifest: { scripts?: Record<string, unknown> } | null = JSON.parse(
+  const manifest: { license?: string; scripts?: Record<string, unknown> } | null = JSON.parse(
     await readFile(join(packageDir, "package.json"), "utf8"),
   );
+  if (manifest?.license !== "GPL-3.0-or-later")
+    throw new Error("Installed package must identify the owner-selected GPL-3.0-or-later license.");
   if (manifest?.scripts?.postinstall || manifest?.scripts?.install || manifest?.scripts?.preinstall)
     throw new Error("The package must not run install scripts on installation.");
   console.log("ok   installed globally into an isolated prefix without install scripts");
