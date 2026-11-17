@@ -84,6 +84,28 @@ instance. Preserve existing Host/Origin/CSP controls; new security infrastructur
 remains deferred. The extraction does not change normal `pdb serve` or mandate
 application composition for short-lived CLI config operations.
 
+## Separate Git boundary and research gate
+
+Git is distinct from GitHub. #872 compares mature typed Git libraries with the
+current injected `GitRunner` against actual PDB operations. A library wrapping the
+installed Git executable and a library implementing Git are different choices;
+neither is automatically safer merely because its interface is typed.
+
+The report inventories discovery, remotes, revisions, worktree/status and any
+actual write consumers, then checks typed results, response interpretation,
+worktrees, cancellation/errors, credentials/configuration, supported platforms,
+maintenance/license and packaging. Use bounded credential-free disposable probes;
+no user's checkout/global settings or live remote writes are research fixtures.
+
+Application callers should eventually use typed Git capabilities independent of
+that library choice. Do not adopt a library or migrate callers before the research
+recommendation and a focused follow-up contract are reviewed. The initial report
+must schedule small estimated service/migration follow-ups, carrying limitations
+explicitly; do not invent support for untested operations. Git research is a
+high-priority child of #875, but is not a blocker for independent GH audit or
+serve configuration/state work. Application composition receives both boundaries
+through explicit injection rather than mixing Git and GH into one raw executor.
+
 ## Delivery order and focused acceptance
 
 1. #868 produces a concise inventory of modules, direct/indirect GH touchpoints,
