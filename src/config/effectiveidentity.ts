@@ -13,7 +13,7 @@ import {
   IDENTITY_FILE,
   TRIAGE_ROLES,
   isAgentName,
-  listEntryKeys,
+  readIdentityBindingSelection,
   readBoundIdentity,
   readIdentity,
   readIdentityBindings,
@@ -220,7 +220,7 @@ export async function prepareEffectiveIdentity(
     });
     if (provider && options.harness !== undefined && provider.harness !== options.harness)
       provider = null;
-    const bindings = await readIdentityBindings(target.root, fs);
+    let bindings = await readIdentityBindings(target.root, fs);
     let newSession = false;
     let record: IdentityRecord;
     if (options.entry !== undefined) {
@@ -229,13 +229,15 @@ export async function prepareEffectiveIdentity(
       record = await readIdentity(target.root, entry, fs);
     } else if (provider) {
       source = "binding";
-      const bound = await readBoundIdentity(target.root, provider.key, fs);
+      const selection = await readIdentityBindingSelection(target.root, provider.key, fs);
+      bindings = selection.bindings;
+      const bound = selection.bound;
       if (bound) {
         entry = bound.entry;
         record = bound.record;
       } else {
         const boundEntries = new Set(bindings.values());
-        const keys = await listEntryKeys(target.root, fs);
+        const keys = selection.entries;
         if (
           keys.some(
             (key) =>
