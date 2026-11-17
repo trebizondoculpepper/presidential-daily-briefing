@@ -111,6 +111,22 @@ describe("serve project resolution and registration (#805)", () => {
     expect(memory.writes).toEqual([]);
   });
 
+  it("refuses to serve a saved registration for another GitHub host", async () => {
+    const memory = memoryFs(
+      config(`[serve]\nprojects = [{ host = "ghe.example.com", repository = "owner/a" }]\n`),
+    );
+    const result = await resolveServeProjects(
+      { repos: ["owner/one"], projects: [] },
+      runtime(memory.fs, "/not/a/checkout", {}),
+    );
+    expect(result.served).toEqual([{ repository: "owner/one" }]);
+    expect(result.diagnostics.join("\n")).toMatch(
+      /ghe\.example\.com, which this build cannot serve/,
+    );
+    // The registration is kept, not deleted by a read.
+    expect(result.saved.some((entry) => entry.host === "ghe.example.com")).toBe(true);
+  });
+
   it("refuses to serve a saved root that is now another repository", async () => {
     const memory = memoryFs(
       config(`[serve]\nprojects = [{ repository = "owner/a", localRoot = "/work/reused" }]\n`),
