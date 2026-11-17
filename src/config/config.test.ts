@@ -1031,6 +1031,23 @@ describe("config get/set/list/help commands (#117)", () => {
     expect(t.json()).toMatchObject({ changed: false, changes: [] });
   });
 
+  it("refuses a save whose file changed between the baseline read and the write (#815)", async () => {
+    const t = setup();
+    // The service re-reads before writing; a change landing after our baseline read must be a
+    // conflict, so the reported changes can never describe a stale snapshot.
+    const readText = t.fs.readText;
+    let reads = 0;
+    t.fs.readText = async (path) => {
+      reads++;
+      const text = await readText(path);
+      if (reads === 1) return text;
+      const changed = "schemaVersion = 1\n\n# changed by another writer\n";
+      return path.endsWith(".toml") ? changed : text;
+    };
+    expect(await t.call("set", "processGuide", "true", "--json")).toBe(1);
+    expect(t.json()).toMatchObject({ code: "conflict" });
+  });
+
   it("reports filesystem failures as structured refusals but still propagates programming errors", async () => {
     const t = setup();
     const denied = (op: string) =>
