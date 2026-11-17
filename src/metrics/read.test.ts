@@ -53,6 +53,7 @@ interface Issue {
   state?: string;
   comments?: Comment[];
   totalCount?: number;
+  labels?: string[];
 }
 const node = (i: Issue) => ({
   number: i.number,
@@ -61,13 +62,53 @@ const node = (i: Issue) => ({
   state: i.state ?? "OPEN",
   closedAt: null,
   stateReason: null,
+  lastEditedAt: null,
+  labels: { nodes: (i.labels ?? []).map((name) => ({ name })), pageInfo: { hasNextPage: false } },
   comments: { totalCount: i.totalCount ?? (i.comments ?? []).length, nodes: i.comments ?? [] },
 });
 
 /** A fake GraphQL boundary: issue pages of the given size, empty timelines, and known PRs. */
-function fake(issues: Issue[], pageSize: number, prs: Record<number, string | null> = {}) {
+interface MergedPr {
+  number: number;
+  updatedAt: string;
+  mergedAt: string;
+  closes: number[];
+}
+function fake(
+  issues: Issue[],
+  pageSize: number,
+  prs: Record<number, string | null> = {},
+  merged: MergedPr[] = [],
+  extra: Issue[] = [],
+) {
   const calls: string[] = [];
   const query = async (q: string, v: Record<string, string | number>) => {
+    if (q.includes("pullRequests(first:50")) {
+      calls.push("pr-walk");
+      const start = Number(v.cursor ?? 0);
+      const slice = merged.slice(start, start + pageSize).map((p) => ({
+        number: p.number,
+        updatedAt: p.updatedAt,
+        mergedAt: p.mergedAt,
+        closingIssuesReferences: {
+          nodes: p.closes.map((n) => ({ number: n, repository: { nameWithOwner: repo } })),
+        },
+      }));
+      const more = start + pageSize < merged.length;
+      return {
+        repository: {
+          pullRequests: {
+            nodes: slice,
+            pageInfo: { hasNextPage: more, endCursor: more ? String(start + pageSize) : null },
+          },
+        },
+      };
+    }
+    if (q.includes("issue(number:$number){number createdAt")) {
+      calls.push(`issue:${v.number}`);
+      const found = extra.find((i) => i.number === Number(v.number));
+      return { repository: { issue: found ? node(found) : null } };
+    }
     if (q.includes("issues(first:50")) {
       calls.push("walk");
       const start = Number(v.cursor ?? 0);
@@ -215,5 +256,93 @@ describe("bounded metrics read (#573 slice 5b)", () => {
     await expect(
       readMetrics(repo, FROM, NOW, { ...(rt as object), signal: controller.signal } as never),
     ).rejects.toThrow();
+  });
+  it("adds tickets closed by an in-window merge that the issue walk did not reach", async () => {
+    const { calls, rt } = fake(
+      [{ number: 1, updatedAt: "2026-11-16T00:00:00Z" }],
+      50,
+      {},
+      [
+        {
+          number: 90,
+          updatedAt: "2026-11-15T00:00:00Z",
+          mergedAt: "2026-11-15T00:00:00Z",
+          closes: [9],
+        },
+      ],
+      [{ number: 9, updatedAt: "2026-11-01T00:00:00Z" }],
+    );
+    const r = await readMetrics(repo, FROM, NOW, rt);
+    expect(calls).toContain("issue:9");
+    expect(r.tickets.map((t) => t.member)).toEqual([`${repo}#1`, `${repo}#9`]);
+    expect(r.limitations.join(" ")).toMatch(/another repository/);
+  });
+
+  it("limits complete history to where the pull request walk stopped", async () => {
+    const merged = Array.from({ length: 4 }, (_, i) => ({
+      number: 100 + i,
+      updatedAt: `2026-11-${String(16 - i).padStart(2, "0")}T00:00:00Z`,
+      mergedAt: `2026-11-${String(16 - i).padStart(2, "0")}T00:00:00Z`,
+      closes: [],
+    }));
+    const { rt } = fake([{ number: 1, updatedAt: "2026-11-16T00:00:00Z" }], 2, {}, merged);
+    const r = await readMetrics(repo, FROM, NOW, rt, { maxPages: 1, maxTickets: 100 });
+    expect(r.coverage.completeFrom).toBe("2026-11-15T00:00:00Z");
+    expect(r.warnings.join(" ")).toMatch(/pull request walk stopped/);
+  });
+
+  it("catches a failed PR read as missing evidence for that ticket only", async () => {
+    const { rt } = fake(
+      [
+        {
+          number: 1,
+          updatedAt: "2026-11-16T00:00:00Z",
+          comments: [submit(1, [10], "2026-11-12T00:00:00Z")],
+        },
+      ],
+      50,
+    );
+    const failing = {
+      ...(rt as { query: (q: string, v: Record<string, string | number>) => Promise<unknown> }),
+      query: async (q: string, v: Record<string, string | number>) => {
+        if (q.includes("pullRequest(number:$number){number state mergedAt}"))
+          throw new Error("FORBIDDEN");
+        return (
+          rt as { query: (q: string, v: Record<string, string | number>) => Promise<unknown> }
+        ).query(q, v);
+      },
+    };
+    const r = await readMetrics(repo, FROM, NOW, failing as never);
+    expect(r.tickets[0]!.ledger.coverage.prs).not.toBe("complete");
+  });
+
+  it("classifies a stale assessment as stale, through the shared classifier", async () => {
+    const record = (size: string) =>
+      comment(
+        `<!-- github-triage:complexity-estimate v2 ${JSON.stringify({
+          schemaVersion: 2,
+          kind: "complexity-estimate",
+          storage: "labels",
+          size,
+          previous: [],
+          rationale: "r",
+          assumptions: [],
+          references: [],
+          estimator: "alice",
+          revision: "x",
+          guidanceVersion: 1,
+          recordedAt: "2026-11-11T00:00:00Z",
+        })} -->`,
+        "2026-11-11T00:00:00Z",
+      );
+    const issue = (n: number, label: string) => ({
+      number: n,
+      updatedAt: "2026-11-16T00:00:00Z",
+      comments: [record("S")],
+      labels: [label],
+    });
+    const { rt } = fake([issue(1, "complexity:S"), issue(2, "complexity:L")], 50);
+    const r = await readMetrics(repo, FROM, NOW, rt);
+    expect(r.tickets.map((t) => t.complexity)).toEqual(["S", "stale"]);
   });
 });
