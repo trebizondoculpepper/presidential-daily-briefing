@@ -130,9 +130,9 @@ export interface ActivityRenderers {
   /** Whether the envelope belongs to the page's project (a late or foreign answer is dropped). */
   matches(envelope: unknown, repo: string): boolean;
   renderNotices(envelope: unknown): string;
-  /** Agents with evidenced activity in the window, in server order; empty string when none fit. */
-  renderAgents(envelope: unknown, window: number, nowMs?: number): string;
-  renderCoverage(envelope: unknown, window: number, nowMs?: number): string;
+  /** Agents holding recorded work, in server order; empty string when none hold work. */
+  renderAgents(envelope: unknown): string;
+  renderCoverage(envelope: unknown): string;
 }
 
 /**
@@ -141,37 +141,22 @@ export interface ActivityRenderers {
  */
 export function activityRenderers(base: DashboardRenderers): ActivityRenderers {
   const escapeHtml = (text: unknown): string => base.escapeHtml(text);
-  const ms = (days: number) => days * 24 * 3_600_000;
   const record = (value: unknown): Record<string, unknown> =>
     typeof value === "object" && value !== null ? (value as Record<string, unknown>) : {};
   const str = (value: unknown): string => (typeof value === "string" ? value : "");
   const list = (value: unknown): unknown[] => (Array.isArray(value) ? value : []);
-  /** An attributed participation timestamp for a claim/responsibility; empty when unattributed. */
-  const attributedAt = (c: unknown): string => {
-    const src = record(c);
-    // responsibilityInventory pushes each item to its responsible agent, so `since` is that
-    // agent's attributed start of responsibility. `latestActivity` is NOT actor-attributed (a
-    // ticket edit, another comment or a PR update can set it), so it is never participation.
-    return str(src.since);
-  };
-  /** Agents with an attributed event timestamp in the window. Activity state alone describes
-   * claim disposition, not recency: it is never counted as recent participation. */
-  const agentsActive = (agents: unknown[], window: number, nowMs: number): unknown[] =>
-    agents.filter((a) =>
-      [...list(record(a).claims), ...list(record(a).responsibilities)].some((c) => {
-        const at = attributedAt(c);
-        return at !== "" && Number.isFinite(Date.parse(at)) && nowMs - Date.parse(at) <= ms(window);
-      }),
-    );
-  /** Agents whose participation cannot be determined: work held but no attributed evidence. */
-  const agentsUndetermined = (agents: unknown[], window: number, nowMs: number): unknown[] =>
+  /**
+   * The shared projection exposes no actor-attributed participation event. `latestActivity`
+   * mixes ticket/comment/PR updates without the actor, and a responsibility's `since` can
+   * timestamp an incoming transfer, not the recipient's participation. Neither is ever counted
+   * as recent participation: agents holding work are shown as participation-undetermined with a
+   * note, and the Evidence section states that participation cannot be determined from the
+   * served model. The window still bounds what is displayed.
+   */
+  const agentsActive = (): unknown[] => [];
+  const agentsUndetermined = (agents: unknown[]): unknown[] =>
     agents.filter(
-      (a) =>
-        !agentsActive([a], window, nowMs).length &&
-        [...list(record(a).claims), ...list(record(a).responsibilities)].some((c) => {
-          const at = attributedAt(c);
-          return at === "";
-        }),
+      (a) => list(record(a).claims).length > 0 || list(record(a).responsibilities).length > 0,
     );
   const safeLink = (url: unknown): string | null =>
     typeof url === "string" && /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\//.test(url) ? url : null;
@@ -278,7 +263,7 @@ export function activityRenderers(base: DashboardRenderers): ActivityRenderers {
     return `<h4>Continuing responsibility</h4><ol>${rows.join("")}</ol>`;
   };
 
-  const renderAgents = (envelope: unknown, window: number, nowMs: number = Date.now()) => {
+  const renderAgents = (envelope: unknown) => {
     const e = record(envelope);
     if (e.status === "error") return "";
     const agents = list(team(envelope));
@@ -297,14 +282,13 @@ export function activityRenderers(base: DashboardRenderers): ActivityRenderers {
       }
     }
     const repository = str(record(e.selection).repository);
-    const active = agentsActive(agents, window, nowMs);
-    const undetermined = agentsUndetermined(agents, window, nowMs);
+    const active = agentsActive();
+    const undetermined = agentsUndetermined(agents);
     const shown = [...active, ...undetermined];
-    // Agents with no evidenced activity and no responsibility are not listed (owner
-    // clarification); deliverable-only agents whose participation cannot be determined are
-    // listed with a note, never silently dropped as a fake all-clear.
+    // Agents with no claim and no responsibility are not listed; agents holding work are listed
+    // with a participation-undetermined note, never silently dropped as a fake all-clear.
     if (!shown.length)
-      return '<p class="warn">No agent has evidenced activity in this window within the available evidence.</p>';
+      return '<p class="warn">No agent holds recorded claims or responsibilities in the available evidence.</p>';
     const rows = shown.map((a) => {
       const agent = record(a);
       const name = escapeHtml(str(agent.agent));
@@ -328,20 +312,15 @@ export function activityRenderers(base: DashboardRenderers): ActivityRenderers {
     return `<ol class="agents">${rows.join("")}</ol>`;
   };
 
-  const renderCoverage = (envelope: unknown, window: number, nowMs: number = Date.now()) => {
+  const renderCoverage = (envelope: unknown) => {
     const e = record(envelope);
     const complete = e.status === "complete";
     const all = list(team(envelope));
     const total = all.length;
-    const active = agentsActive(all, window, nowMs).length;
-    const undetermined = agentsUndetermined(all, window, nowMs).length;
-    const gap =
-      undetermined > 0
-        ? `<p class="warn">${undetermined} agent(s) hold work but participation could not be determined (no activity attributed to them in the evidence).</p>`
-        : "";
+    const undetermined = agentsUndetermined(all).length;
     return `<h2>Evidence</h2><p>${complete ? "Coverage complete." : '<span class="warn">Coverage incomplete: missing evidence is unknown, never absent.</span>'}</p><p>${
-      active
-    } of ${total} agent(s) have evidenced activity in the last ${escapeHtml(String(window))} day(s).</p>${gap}`;
+      undetermined
+    } of ${total} agent(s) hold recorded work. Participation cannot be determined from the served model (no activity event attributed to an agent).</p>`;
   };
 
   return { activityUrl, matches, renderNotices, renderAgents, renderCoverage };
@@ -374,11 +353,11 @@ export function activityClient(base: DashboardRenderers, view: ActivityRenderers
     return days;
   };
 
-  const render = (envelope: unknown, days: number) => {
+  const render = (envelope: unknown) => {
     state.innerHTML = base.renderState(envelope, false);
     notices.innerHTML = view.renderNotices(envelope);
-    agents.innerHTML = view.renderAgents(envelope, days);
-    coverage.innerHTML = view.renderCoverage(envelope, days);
+    agents.innerHTML = view.renderAgents(envelope);
+    coverage.innerHTML = view.renderCoverage(envelope);
     agents.classList.remove("provisional");
     coverage.classList.remove("provisional");
   };
@@ -414,7 +393,7 @@ export function activityClient(base: DashboardRenderers, view: ActivityRenderers
         status: "error",
         error: { code: "SELECTION_MISMATCH", message: "The answer was for another project." },
       };
-    render(envelope, days);
+    render(envelope);
   };
 
   byId("selection")!.addEventListener("submit", (event) => {

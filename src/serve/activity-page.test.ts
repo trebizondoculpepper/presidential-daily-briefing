@@ -296,8 +296,6 @@ describe("activity renderers (#456)", () => {
         agent("beta", [claim(2, hours(200), { title: "Beta stale work" })]),
         agent("unlisted", []),
       ]),
-      1,
-      start,
     );
     expect(html).toContain("alpha");
     expect(html).toContain("beta");
@@ -326,8 +324,6 @@ describe("activity renderers (#456)", () => {
           }),
         ]),
       ]),
-      1,
-      start,
     );
     expect(html).toContain("PR #9");
     expect(html).toContain("APPROVED");
@@ -391,8 +387,6 @@ describe("activity renderers (#456)", () => {
           },
         },
       ),
-      1,
-      start,
     );
     // The responsibilities render even with no remaining claim.
     expect(html).toContain("Continuing responsibility");
@@ -426,8 +420,6 @@ describe("activity renderers (#456)", () => {
           ],
         }),
       ]),
-      1,
-      start,
     );
     expect(html).toContain("gamma");
     expect(html).toContain("Continuing responsibility");
@@ -448,11 +440,9 @@ describe("activity renderers (#456)", () => {
           ],
         }),
       ]),
-      1,
-      start,
     );
-    expect(coverage).toContain("0 of 1 agent(s) have evidenced activity");
-    expect(coverage).toContain("participation could not be determined");
+    expect(coverage).toContain("1 of 1 agent(s) hold recorded work");
+    expect(coverage).toContain("Participation cannot be determined");
   });
 
   it("escapes agent, title and warning text and links only GitHub URLs", () => {
@@ -462,16 +452,12 @@ describe("activity renderers (#456)", () => {
           claim(8, hours(2), { title: "<script>x</script>" }),
         ]),
       ]),
-      1,
-      start,
     );
     expect(html).not.toMatch(/<img|<script/);
     expect(html).toContain("&lt;img src=x");
     expect(html).toContain("&lt;script&gt;x&lt;/script&gt;");
     const hostile = view.renderAgents(
       teamEnvelope([agent("a", [claim(8, hours(2), { url: "javascript:alert(1)" })])]),
-      1,
-      start,
     );
     expect(hostile).not.toContain('href="javascript');
   });
@@ -479,15 +465,11 @@ describe("activity renderers (#456)", () => {
   it("says no agent fits only when none has activity; an error renders no list", () => {
     // A claim with neither attributed state nor an attributed since is undetermined, so it is
     // listed with the note; an agent with nothing at all is not listed.
-    const undetermined = view.renderAgents(
-      teamEnvelope([agent("beta", [claim(2, hours(200))])]),
-      1,
-      start,
-    );
+    const undetermined = view.renderAgents(teamEnvelope([agent("beta", [claim(2, hours(200))])]));
     expect(undetermined).toContain("Participation cannot be determined");
-    const none = view.renderAgents(teamEnvelope([agent("gamma", [])]), 1, start);
-    expect(none).toContain("No agent has evidenced activity");
-    expect(view.renderAgents({ status: "error" }, 1, start)).toBe("");
+    const none = view.renderAgents(teamEnvelope([agent("gamma", [])]));
+    expect(none).toContain("No agent holds recorded claims or responsibilities");
+    expect(view.renderAgents({ status: "error" })).toBe("");
   });
 
   it("rejects an answer for another project and reports coverage", () => {
@@ -495,7 +477,7 @@ describe("activity renderers (#456)", () => {
     expect(
       view.matches(teamEnvelope([], { selection: { repository: "example/other" } }), repo),
     ).toBe(false);
-    expect(view.renderCoverage(teamEnvelope([]), 1, start)).toContain("0 of 0 agent(s)");
+    expect(view.renderCoverage(teamEnvelope([]))).toContain("0 of 0 agent(s)");
     const coverage = view.renderCoverage(
       teamEnvelope([
         agent("alpha", [claim(1, hours(2))], {
@@ -513,10 +495,9 @@ describe("activity renderers (#456)", () => {
         }),
         agent("beta", [claim(2, hours(200))]),
       ]),
-      1,
-      start,
     );
-    expect(coverage).toContain("1 of 2 agent(s)");
+    expect(coverage).toContain("2 of 2 agent(s) hold recorded work");
+    expect(coverage).toContain("Participation cannot be determined");
     expect(coverage).toContain("Coverage complete.");
   });
 });
@@ -597,7 +578,7 @@ describe("activity browser script (#456)", () => {
     // beta is undetermined (no attributed evidence), so it is listed with the note.
     expect(b.elements.get("agents")!.innerHTML).toContain("beta");
     expect(b.elements.get("agents")!.innerHTML).toContain("Participation cannot be determined");
-    expect(b.elements.get("coverage")!.innerHTML).toContain("1 of 2 agent(s)");
+    expect(b.elements.get("coverage")!.innerHTML).toContain("2 of 2 agent(s) hold recorded work");
   });
 
   it("drops an answer for another project and aborts a superseded read", async () => {
