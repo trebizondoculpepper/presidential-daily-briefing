@@ -167,12 +167,15 @@ describe("pdb serve arguments (#373)", () => {
     const git = async (args: readonly string[], cwd: string) => {
       if (args[0] === "rev-parse" && (cwd === subDir || cwd === repoRoot)) return `${repoRoot}\n`;
       if (args[0] === "remote" && cwd === repoRoot)
-        return "origin\thttps://github.com/example/rel.git (fetch)\n";
+        return [
+          "origin\thttps://github.com/fork/rel.git (fetch)",
+          "upstream\thttps://github.com/example/rel.git (fetch)",
+        ].join("\n");
       throw new Error("not a git repository");
     };
     const running = await startServe(
       serveArguments(["--port", "0", "--project", "./packages/app", "--project", "."], repoRoot),
-      { ...h.runtime, cwd: repoRoot, git },
+      { ...h.runtime, cwd: repoRoot, git, currentRepository: async () => "example/rel" },
     );
     try {
       expect(running.facts.served).toEqual([{ repository: "example/rel", project: repoRoot }]);
@@ -186,6 +189,9 @@ describe("pdb serve arguments (#373)", () => {
         ...bad.runtime,
         cwd: repoRoot,
         git,
+        currentRepository: async () => {
+          throw new Error("not a git repository");
+        },
       }),
     ).rejects.toThrow(/not inside a Git checkout/);
   });

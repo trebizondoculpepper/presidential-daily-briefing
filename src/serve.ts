@@ -129,11 +129,30 @@ async function servedSet(
   for (const project of options.projects) {
     let resolvedProject = project;
     let repository: string;
+    try {
+      repository = (await runtime.currentRepository(project)).trim();
+    } catch {
+      if (runtime.git) {
+        try {
+          await resolveRepositoryTarget(project, undefined, runtime.git);
+        } catch (error) {
+          if (error instanceof ConfigError) throw new ServeStartupError(EXIT_USAGE, error.message);
+        }
+      }
+      throw new ServeStartupError(
+        EXIT_USAGE,
+        `--project ${project} does not resolve to a GitHub repository; check the path and gh authentication.`,
+      );
+    }
+    if (!/^[\w.-]+\/[\w.-]+$/.test(repository))
+      throw new ServeStartupError(
+        EXIT_USAGE,
+        `--project ${project} does not resolve to a GitHub repository.`,
+      );
     if (runtime.git) {
       try {
-        const target = await resolveRepositoryTarget(project, undefined, runtime.git);
+        const target = await resolveRepositoryTarget(project, repository, runtime.git);
         resolvedProject = target.root;
-        repository = target.repository;
       } catch (error) {
         if (error instanceof ConfigError) throw new ServeStartupError(EXIT_USAGE, error.message);
         throw new ServeStartupError(
@@ -141,20 +160,6 @@ async function servedSet(
           `--project ${project} does not resolve to a GitHub repository.`,
         );
       }
-    } else {
-      try {
-        repository = (await runtime.currentRepository(project)).trim();
-      } catch {
-        throw new ServeStartupError(
-          EXIT_USAGE,
-          `--project ${project} does not resolve to a GitHub repository; check the path and gh authentication.`,
-        );
-      }
-      if (!/^[\w.-]+\/[\w.-]+$/.test(repository))
-        throw new ServeStartupError(
-          EXIT_USAGE,
-          `--project ${project} does not resolve to a GitHub repository.`,
-        );
     }
     const existing = served.get(repository.toLowerCase());
     if (existing?.project && existing.project !== resolvedProject)
