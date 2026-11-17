@@ -1,3 +1,4 @@
+import { serverHumanContext, humanContextEnabled } from "../config/humancontext.js";
 /**
  * The services `pdb serve` builds once listening (doc/design/serve.md): one memory cache shared
  * by the JSON read API and HTTP MCP, and the status counters.
@@ -47,6 +48,42 @@ export function readServices(
       initialAuth: facts.auth,
       // A different gh login (gh auth switch) cleared the cache; status shows the new one.
       onAuthChange: (auth) => (facts.auth = auth),
+      onAuthObservation: (observation) => {
+        if (!humanContextEnabled()) return;
+        if (observation.state === "verified") {
+          facts.effectiveHuman = {
+            context: serverHumanContext(observation.auth, observation.observedAt),
+            authenticationFailed: false,
+          };
+        } else if (observation.state === "refused" || facts.effectiveHuman?.authenticationFailed) {
+          facts.effectiveHuman = {
+            context: {
+              state: "unresolved",
+              host: facts.auth.host,
+              login: null,
+              source: "none",
+              reason:
+                "The gh login was refused and has not been verified again; run gh auth status.",
+            },
+            authenticationFailed: true,
+          };
+        } else {
+          const previous =
+            facts.effectiveHuman?.context ?? serverHumanContext(facts.auth, facts.startedAt);
+          facts.effectiveHuman = {
+            context:
+              previous.state === "unresolved"
+                ? previous
+                : {
+                    ...previous,
+                    state: "last-known",
+                    reason:
+                      "The current gh account is unavailable; reporting previously verified server context.",
+                  },
+            authenticationFailed: false,
+          };
+        }
+      },
     });
     const api = readApi(options, read, cache)(facts);
     // #548: one quota service per server for its verified gh login; nothing runs until asked.
