@@ -168,8 +168,8 @@ describe("pdb serve arguments (#373)", () => {
       if (args[0] === "rev-parse" && (cwd === subDir || cwd === repoRoot)) return `${repoRoot}\n`;
       if (args[0] === "remote" && cwd === repoRoot)
         return [
-          "origin\thttps://github.com/fork/rel.git (fetch)",
-          "upstream\thttps://github.com/example/rel.git (fetch)",
+          "origin\thttps://ghe.example.com/fork/rel.git (fetch)",
+          "upstream\thttps://ghe.example.com/example/rel.git (fetch)",
         ].join("\n");
       throw new Error("not a git repository");
     };

@@ -12,7 +12,7 @@ import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { isIP } from "node:net";
 import { AuthenticationError, currentRepository } from "./github/github.js";
-import { ConfigError, nodeGit, resolveRepositoryTarget } from "./config/config.js";
+import { nodeGit } from "./config/config.js";
 import { systemClock } from "./mcp/polling.js";
 import { installedVersion } from "./updates/updates.js";
 import { defaultReadRuntime, readServices } from "./serve/services.js";
@@ -128,39 +128,34 @@ async function servedSet(
     if (!served.has(repository.toLowerCase())) served.set(repository.toLowerCase(), { repository });
   for (const project of options.projects) {
     let resolvedProject = project;
+    if (runtime.git) {
+      let root = "";
+      try {
+        root = (await runtime.git(["rev-parse", "--show-toplevel"], project)).trim();
+      } catch {
+        root = "";
+      }
+      if (!root)
+        throw new ServeStartupError(
+          EXIT_USAGE,
+          `${project} is not inside a Git checkout. Run from or pass --project pointing to a local Git checkout.`,
+        );
+      resolvedProject = root;
+    }
     let repository: string;
     try {
-      repository = (await runtime.currentRepository(project)).trim();
+      repository = (await runtime.currentRepository(resolvedProject)).trim();
     } catch {
-      if (runtime.git) {
-        try {
-          await resolveRepositoryTarget(project, undefined, runtime.git);
-        } catch (error) {
-          if (error instanceof ConfigError) throw new ServeStartupError(EXIT_USAGE, error.message);
-        }
-      }
       throw new ServeStartupError(
         EXIT_USAGE,
-        `--project ${project} does not resolve to a GitHub repository; check the path and gh authentication.`,
+        `--project ${resolvedProject} does not resolve to a GitHub repository; check the path and gh authentication.`,
       );
     }
     if (!/^[\w.-]+\/[\w.-]+$/.test(repository))
       throw new ServeStartupError(
         EXIT_USAGE,
-        `--project ${project} does not resolve to a GitHub repository.`,
+        `--project ${resolvedProject} does not resolve to a GitHub repository.`,
       );
-    if (runtime.git) {
-      try {
-        const target = await resolveRepositoryTarget(project, repository, runtime.git);
-        resolvedProject = target.root;
-      } catch (error) {
-        if (error instanceof ConfigError) throw new ServeStartupError(EXIT_USAGE, error.message);
-        throw new ServeStartupError(
-          EXIT_USAGE,
-          `--project ${project} does not resolve to a GitHub repository.`,
-        );
-      }
-    }
     const existing = served.get(repository.toLowerCase());
     if (existing?.project && existing.project !== resolvedProject)
       throw new ServeStartupError(
