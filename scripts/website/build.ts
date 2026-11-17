@@ -1,9 +1,10 @@
 import { CaptureFailure } from "./failure.js";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { build } from "vite-plus";
 import { renderSite, type SiteInput } from "../../website/site.js";
+import { conversations } from "../../website/conversations.js";
 
 /** Caller verifies that this helper and all templates belong to the pinned release. */
 export async function buildWebsite(input: SiteInput, output: string): Promise<void> {
@@ -13,6 +14,12 @@ export async function buildWebsite(input: SiteInput, output: string): Promise<vo
   }
   await mkdir(resolve(output, "assets"), { recursive: true });
   await writeFile(resolve(output, "assets/site.css"), await readFile("website/site.css"));
+  await mkdir(resolve(output, "assets/conversations"), { recursive: true });
+  for (const { file } of conversations)
+    await copyFile(
+      resolve("website/assets/conversations", file),
+      resolve(output, "assets/conversations", file),
+    );
   await build({
     configFile: false,
     logLevel: "silent",

@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
+import { copyFile, mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it } from "vite-plus/test";
@@ -8,6 +8,7 @@ import { verifyPublication } from "./publication.js";
 import { packageName, publicRepository } from "./provenance.js";
 import { hash, siteFiles, treeHash, verifySiteArtifact } from "./site-artifact.js";
 import { renderSite } from "../../website/site.js";
+import { conversations } from "../../website/conversations.js";
 
 const time = "2026-11-15T12:00:00.000Z";
 const publication: PublicationManifest = {
@@ -198,6 +199,12 @@ describe("site artifact handoff", () => {
       await mkdir(join(root, "assets"));
       await writeFile(join(root, "assets/site.css"), "/* fixture */");
       await writeFile(join(root, "assets/copy.js"), "// fixture");
+      await mkdir(join(root, "assets/conversations"));
+      for (const { file } of conversations)
+        await copyFile(
+          new URL(`../../website/assets/conversations/${file}`, import.meta.url),
+          join(root, "assets/conversations", file),
+        );
       const capture = await captureExamples(publication, boundary());
       const files = await siteFiles(root);
       const manifest: SiteManifest = {
@@ -217,6 +224,20 @@ describe("site artifact handoff", () => {
         artifactSha256: treeHash(files),
       };
       await verifySiteArtifact(root, JSON.stringify(manifest));
+      const image = conversations[0].file;
+      const imagePath = join(root, "assets/conversations", image);
+      await writeFile(imagePath, "substituted image");
+      await expect(siteFiles(root)).rejects.toThrow("reviewed source");
+      await rm(imagePath);
+      await expect(siteFiles(root)).rejects.toThrow("illustration missing");
+      await copyFile(
+        new URL(`../../website/assets/conversations/${image}`, import.meta.url),
+        imagePath,
+      );
+      const unknownImage = join(root, "assets/conversations/unreviewed.png");
+      await writeFile(unknownImage, "unexpected");
+      await expect(siteFiles(root)).rejects.toThrow("Unexpected");
+      await rm(unknownImage);
       const mismatch = structuredClone(manifest);
       mismatch.templateRevision = "c".repeat(40);
       await expect(verifySiteArtifact(root, JSON.stringify(mismatch))).rejects.toThrow(
