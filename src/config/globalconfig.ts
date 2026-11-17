@@ -47,6 +47,28 @@ export interface GlobalProject {
   readonly localRoot?: string;
 }
 
+/**
+ * Verifies an absolute local checkout root for a registered project (#849 finding 3). Returns
+ * null when the root is valid; a message when it must be rejected. The default requires the
+ * path to be absolute; a full repository-association check is injected by the CLI at write
+ * time (the service stays transport-neutral and testable).
+ */
+export type ProjectRootVerifier = (
+  localRoot: unknown,
+  repository: string,
+  host: string,
+) => Promise<string | null> | string | null;
+
+/** The default verifier: absolute paths only; deeper association is the caller's boundary. */
+export const defaultProjectRootVerifier: ProjectRootVerifier = (localRoot) =>
+  typeof localRoot === "string" &&
+  localRoot !== "" &&
+  (localRoot.startsWith("/") ||
+    /^[A-Za-z]:[\\/]/.test(localRoot) ||
+    /^\\\\[^\\]+\\[^\\]+/.test(localRoot))
+    ? null
+    : "localRoot must be an absolute path to a verified checkout.";
+
 /** The typed values the global service knows. */
 export type GlobalValue = number | string | GlobalProject[];
 
@@ -160,7 +182,11 @@ function defaultValue(key: string): GlobalValue {
 }
 
 /** Validate a value for a registered global key, returning the normalised stored value. */
-export function validateGlobalValue(key: string, value: unknown): GlobalValue {
+export async function validateGlobalValue(
+  key: string,
+  value: unknown,
+  verifyProjectRoot: ProjectRootVerifier = defaultProjectRootVerifier,
+): Promise<GlobalValue> {
   const entry = findKey(key);
   switch (entry.kind) {
     case "port": {
@@ -191,12 +217,19 @@ export function validateGlobalValue(key: string, value: unknown): GlobalValue {
     case "projects": {
       if (!Array.isArray(value))
         throw globalInvalid(key, `expected an array of tables, got ${describe(value)}`);
-      return value.map((record) => validateProject(record, key));
+      const projects: GlobalProject[] = [];
+      for (const record of value)
+        projects.push(await validateProject(record, key, verifyProjectRoot));
+      return projects;
     }
   }
 }
 
-function validateProject(value: unknown, key: string): GlobalProject {
+async function validateProject(
+  value: unknown,
+  key: string,
+  verifyProjectRoot: ProjectRootVerifier,
+): Promise<GlobalProject> {
   if (!isRecord(value))
     throw globalInvalid(key, `each project must be a table, got ${describe(value)}`);
   const extra = Object.keys(value).filter((k) => !["host", "repository", "localRoot"].includes(k));
@@ -209,15 +242,32 @@ function validateProject(value: unknown, key: string): GlobalProject {
       key,
       `project "repository" must be owner/name, got ${describe(repository)}`,
     );
-  if (localRoot !== undefined && (typeof localRoot !== "string" || localRoot === ""))
-    throw globalInvalid(
-      key,
-      `project "localRoot" must be an absolute verified path, got ${describe(localRoot)}`,
-    );
+  let verifiedRoot: string | undefined;
+  if (localRoot !== undefined) {
+    const problem =
+      typeof verifyProjectRoot === "function"
+        ? await verifyProjectRoot(localRoot, repository, host === undefined ? "github.com" : host)
+        : defaultProjectRootVerifier(
+            localRoot,
+            repository,
+            host === undefined ? "github.com" : host,
+          );
+    if (problem !== null)
+      throw globalInvalid(
+        key,
+        `<project repository="${repository}">: ${problem} (got ${describe(localRoot)})`,
+      );
+    if (typeof localRoot !== "string")
+      throw globalInvalid(
+        key,
+        `<project repository="${repository}">: localRoot must be text, got ${describe(localRoot)}`,
+      );
+    verifiedRoot = localRoot;
+  }
   return {
     host: host === undefined ? "github.com" : host,
     repository,
-    ...(localRoot === undefined ? {} : { localRoot }),
+    ...(verifiedRoot === undefined ? {} : { localRoot: verifiedRoot }),
   };
 }
 
@@ -286,6 +336,7 @@ function valueOf(document: Record<string, unknown>, key: string): unknown {
 export async function loadGlobalConfig(
   dir: string,
   fs: GlobalConfigFileSystem = nodeFileSystem,
+  options: GlobalParseOptions = {},
 ): Promise<LoadedGlobalConfig> {
   const path = join(dir, GLOBAL_CONFIG_FILE);
   const raw = await fs.readText(path).catch((error: unknown) => {
@@ -293,11 +344,20 @@ export async function loadGlobalConfig(
     if (refusal) throw refusal;
     throw error;
   });
-  return parseGlobalConfig(raw, path);
+  return parseGlobalConfig(raw, path, options);
+}
+
+export interface GlobalParseOptions {
+  readonly verifyProjectRoot?: ProjectRootVerifier;
 }
 
 /** Parse and validate global config text. Never writes. */
-export function parseGlobalConfig(raw: string | null, path: string): LoadedGlobalConfig {
+export async function parseGlobalConfig(
+  raw: string | null,
+  path: string,
+  options: GlobalParseOptions = {},
+): Promise<LoadedGlobalConfig> {
+  const verifyProjectRoot = options.verifyProjectRoot ?? defaultProjectRootVerifier;
   const explicit = new Map<string, GlobalValue>();
   if (raw === null)
     return { path, storedVersion: null, explicit, settings: effective(explicit), raw };
@@ -337,13 +397,32 @@ export function parseGlobalConfig(raw: string | null, path: string): LoadedGloba
     );
   const body = { ...document };
   delete body.schemaVersion;
+  // A structurally invalid parent (e.g. `serve = "broken"`) or an unknown top-level key is
+  // malformed configuration, never silently treated as absent defaults (#849 finding 2).
+  for (const [top, value] of Object.entries(body)) {
+    if (!GLOBAL_KEYS.some((k) => k.key === top || k.key.startsWith(`${top}.`))) {
+      throw new GlobalConfigError(
+        "malformed",
+        `${path} contains unsupported configuration key "${top}".`,
+        `Remove or fix ${path} (supported global keys: ${GLOBAL_KEYS.map((k) => k.key).join(", ")}), then retry.`,
+      );
+    }
+    for (const key of GLOBAL_KEYS.map((k) => k.key)) {
+      if (key.startsWith(`${top}.`)) {
+        if (!isRecord(value) || value instanceof Date) {
+          throw new GlobalConfigError(
+            "malformed",
+            `${path} has "${top}" as ${Array.isArray(value) ? "an array" : typeof value}, expected a table.`,
+            `Remove or fix ${path}, then retry.`,
+          );
+        }
+      }
+    }
+  }
   for (const key of GLOBAL_KEYS.map((k) => k.key)) {
     const value = valueOf(body, key);
-    if (value === undefined) {
-      // Absent keys take the default; present keys are validated (including null-refused paths).
-    } else {
-      explicit.set(key, validateGlobalValue(key, value));
-    }
+    if (value !== undefined)
+      explicit.set(key, await validateGlobalValue(key, value, verifyProjectRoot));
   }
   return { path, storedVersion, explicit, settings: effective(explicit), raw };
 }
@@ -371,6 +450,7 @@ export interface GlobalWriteOptions {
   readonly now?: () => number;
   readonly sleep?: (ms: number) => Promise<void>;
   readonly expectedRaw?: string | null;
+  readonly verifyProjectRoot?: ProjectRootVerifier;
 }
 
 export interface GlobalWriteResult {
@@ -429,6 +509,7 @@ export async function writeGlobalConfig(
   const fs = options.fs ?? nodeFileSystem;
   const now = options.now ?? Date.now;
   const sleep = options.sleep ?? defaultSleep;
+  const verifyProjectRoot = options.verifyProjectRoot;
   const path = join(dir, GLOBAL_CONFIG_FILE);
   if (typeof fs.makeDirectory !== "function")
     throw new GlobalConfigError(
@@ -458,7 +539,7 @@ export async function writeGlobalConfig(
     throw error;
   }
   try {
-    const current = await loadGlobalConfig(dir, fs);
+    const current = await loadGlobalConfig(dir, fs, verifyProjectRoot ? { verifyProjectRoot } : {});
     if (options.expectedRaw !== undefined && current.raw !== options.expectedRaw)
       throw conflict(path);
     const next = new Map(current.explicit);
@@ -467,7 +548,7 @@ export async function writeGlobalConfig(
         findKey(key);
         next.delete(key);
       } else {
-        next.set(key, validateGlobalValue(key, value));
+        next.set(key, await validateGlobalValue(key, value, verifyProjectRoot));
       }
     }
     const text = serializeGlobal(next);
@@ -489,7 +570,7 @@ export async function writeGlobalConfig(
       await fs.remove(temporary).catch(() => undefined);
       throw error;
     }
-    const written = await loadGlobalConfig(dir, fs);
+    const written = await loadGlobalConfig(dir, fs, verifyProjectRoot ? { verifyProjectRoot } : {});
     return { changed: true, config: written };
   } finally {
     const release = await held();
