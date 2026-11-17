@@ -15,6 +15,18 @@ export interface CommandIdentityOptions extends EffectiveIdentityOptions {
 export type PrepareCommandIdentity = (
   options: CommandIdentityOptions,
 ) => Promise<EffectiveIdentity>;
+
+/**
+ * Optional next-step suggestions shown once after a verified new identity is created (#681).
+ * Only commands this installed version actually routes are offered; nothing is executed and the
+ * original operation is never blocked on these. Doctor exists in every shipped build; installer
+ * (hook/MCP) snippets are omitted until `pdb install <client>` ships in this version.
+ */
+export function createdIdentityGuidance(): string[] {
+  const lines = ["Optional next steps (nothing runs automatically):"];
+  lines.push("  pdb doctor  — verify this checkout's local configuration");
+  return lines;
+}
 /** Production CLI composition, with injectable authentication/cache boundaries for previews. */
 export function prepareCommandIdentity(
   options: CommandIdentityOptions,
@@ -68,6 +80,12 @@ export class CommandIdentity {
         `pdb: Effective agent ${result.agent} (entry ${result.entry ?? "none"}; source ${result.source}; role ${result.role ?? "unknown"}, ${result.roleSource}).\n`,
       );
     for (const notice of result.setup.notices) this.stderr(`pdb: ${notice}\n`);
+    // #681: only after a verified first creation, offer the optional next steps as copyable
+    // commands. Doctor exists in every build; installer commands are offered only when this
+    // installed version actually routes them, so nothing invented or absent is suggested.
+    if (result.setup.state === "created") {
+      for (const line of createdIdentityGuidance()) this.stderr(`pdb: ${line}\n`);
+    }
     if (result.diagnostic)
       this.stderr(`pdb: ${result.diagnostic.message} ${result.diagnostic.recovery}\n`);
     if (!presentation.allowUnresolved && (result.state === "failed" || !result.agent))
