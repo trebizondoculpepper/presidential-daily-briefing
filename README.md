@@ -181,6 +181,12 @@ The first stdout line is `pdb serve VERSION listening on http://127.0.0.1:4372/`
 | `GET /`                                                                      | Read-only dashboard: choose a project and role to see the ranked next steps                          |
 | `GET /api/v1/diagnostics/{projects,config,cache,inflight,errors,rules}`      | The server's own state: settings, cache, running collections, recent failures, rules; never collects |
 
+Every served page has a running-process footer: PDB version, known build revision/dirty
+state and UTC start time. Missing build provenance stays unknown. The optional public IP
+is shown only when already known; PDB makes no external address-discovery request.
+The Doctor link appears only when that page is available. Updating files does not change
+an already-running process's captured identity; restart it to load a new build.
+
 Every data route wraps the CLI JSON in an envelope with `selection`, `effectiveIdentity` and `freshness` (`source` is `live`, `cached` or `stale`, with `observedAt` and `ageSeconds`). `refresh=true` on any read bypasses a fresh entry. If GitHub fails, a result observed within the last 30 minutes is served as `stale` and `incomplete`, never as complete; otherwise the route answers 502 with the CLI command that inspects the same read. MCP results of `triage_briefing`, `triage_issue` and `triage_dependencies` carry the same block as `freshness.cache`; `triage_events` keeps its version-1 envelope, with no cache block.
 
 Effective identity follows the same startup/read boundaries as stdio MCP. Status reports the historical `identityStartup` outcome. Account observations update human metadata without changing the local agent binding; unavailable authentication remains explicit.
