@@ -253,30 +253,23 @@ export function timingView(
   for (const t of tickets) {
     const s = pickupToDelivery(t.member, t.ledger, t.verdict, now);
     const anyEventInWindow = t.ledger.events.some((e) => inWindow(e.at, window) === true);
+    // A known delivery date decides membership by itself, whether or not the pickup endpoint
+    // is known, so missing pickup history never changes which period a delivery belongs to.
+    const d = deliveryInstant(t.ledger, t.verdict);
     let include: boolean;
-    switch (s.status) {
-      case "completed": {
-        const d = deliveryInstant(t.ledger, t.verdict);
-        include = d.status === "dated" && inWindow(d.at, window) === true;
-        break;
-      }
-      case "open":
-        include = true;
-        break;
-      case "closed-undelivered": {
-        const closure = currentClosure(t.ledger);
-        include = closure !== null && inWindow(closure.at, window) === true;
-        break;
-      }
-      case "unknown":
-        // Open (or unknown-state) work stays in the population with an unknown endpoint, so
-        // missing history never makes it disappear; proven never-picked-up tickets belong to
-        // the creation-to-pickup metric instead.
-        include =
-          anyEventInWindow ||
-          (t.ledger.currentState !== "closed" && pickupStatus(t.ledger) !== "none");
-        break;
-    }
+    if (d.status === "dated") include = inWindow(d.at, window) === true;
+    else if (s.status === "open") include = true;
+    else if (s.status === "closed-undelivered") {
+      const closure = currentClosure(t.ledger);
+      include = closure !== null && inWindow(closure.at, window) === true;
+    } else if (s.status === "unknown") {
+      // Open (or unknown-state) work stays in the population with an unknown endpoint, so
+      // missing history never makes it disappear; proven never-picked-up tickets belong to
+      // the creation-to-pickup metric instead.
+      include =
+        anyEventInWindow ||
+        (t.ledger.currentState !== "closed" && pickupStatus(t.ledger) !== "none");
+    } else include = false;
     if (include) samples.push({ ...s, group: t.complexity });
   }
   return {

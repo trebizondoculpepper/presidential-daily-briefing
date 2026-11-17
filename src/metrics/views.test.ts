@@ -199,4 +199,26 @@ describe("timing view (#573 slice 5a)", () => {
     expect(v.groups["S"]).toMatchObject({ unknown: 1 });
     expect(v.groups["S"]!.members.unknown).toEqual([`${repo}#13`]);
   });
+  it("excludes a delivery dated before the window even when its pickup is unread", () => {
+    const before = ticket(15, "delivered", {
+      firstPickup: {
+        "claim-marker": { status: "unknown", reason: "comments cut off", observed: null },
+        label: { status: "none" },
+      },
+      requiredPullRequests: [{ repository: repo, number: 60 }],
+      currentState: "closed",
+      stateReason: "COMPLETED",
+      events: [merged(60, "2026-11-01T00:00:00Z"), closed(15, "2026-11-12T00:00:00Z", "COMPLETED")],
+    });
+    const inside = ticket(16, "delivered", {
+      firstPickup: {
+        "claim-marker": { status: "unknown", reason: "comments cut off", observed: null },
+        label: { status: "none" },
+      },
+      requiredPullRequests: [{ repository: repo, number: 61 }],
+      events: [merged(61, "2026-11-12T00:00:00Z")],
+    });
+    const v = timingView(NOW, 7, [before, inside], covered);
+    expect(v.groups["S"]!.members.unknown).toEqual([`${repo}#16`]);
+  });
 });
