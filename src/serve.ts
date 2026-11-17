@@ -12,6 +12,7 @@ import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { isIP } from "node:net";
 import { AuthenticationError, currentRepository } from "./github/github.js";
+import { nodeGit } from "./config/config.js";
 import { systemClock } from "./mcp/polling.js";
 import { installedVersion } from "./updates/updates.js";
 import { defaultReadRuntime, readServices } from "./serve/services.js";
@@ -81,6 +82,8 @@ import { ghAuthContext } from "./github/ghauth.js";
 export { ghAuthContext };
 
 export const defaultServeRuntime = (): ServeRuntime => ({
+  cwd: process.cwd(),
+  git: nodeGit,
   currentRepository,
   authContext: ghAuthContext,
   clock: systemClock,
@@ -124,29 +127,44 @@ async function servedSet(
   for (const repository of options.repos)
     if (!served.has(repository.toLowerCase())) served.set(repository.toLowerCase(), { repository });
   for (const project of options.projects) {
+    let resolvedProject = project;
+    if (runtime.git) {
+      let root = "";
+      try {
+        root = (await runtime.git(["rev-parse", "--show-toplevel"], project)).trim();
+      } catch {
+        root = "";
+      }
+      if (!root)
+        throw new ServeStartupError(
+          EXIT_USAGE,
+          `${project} is not inside a Git checkout. Run from or pass --project pointing to a local Git checkout.`,
+        );
+      resolvedProject = root;
+    }
     let repository: string;
     try {
-      repository = (await runtime.currentRepository(project)).trim();
+      repository = (await runtime.currentRepository(resolvedProject)).trim();
     } catch {
       throw new ServeStartupError(
         EXIT_USAGE,
-        `--project ${project} does not resolve to a GitHub repository; check the path and gh authentication.`,
+        `--project ${resolvedProject} does not resolve to a GitHub repository; check the path and gh authentication.`,
       );
     }
     if (!/^[\w.-]+\/[\w.-]+$/.test(repository))
       throw new ServeStartupError(
         EXIT_USAGE,
-        `--project ${project} does not resolve to a GitHub repository.`,
+        `--project ${resolvedProject} does not resolve to a GitHub repository.`,
       );
     const existing = served.get(repository.toLowerCase());
-    if (existing?.project && existing.project !== project)
+    if (existing?.project && existing.project !== resolvedProject)
       throw new ServeStartupError(
         EXIT_USAGE,
-        `--project ${project} and --project ${existing.project} are both ${repository}; pass one.`,
+        `--project ${resolvedProject} and --project ${existing.project} are both ${repository}; pass one.`,
       );
     served.set(repository.toLowerCase(), {
       repository: existing?.repository ?? repository,
-      project,
+      project: resolvedProject,
     });
   }
   return [...served.values()];
@@ -569,7 +587,7 @@ export async function runServe(
 ): Promise<number> {
   let options: ServeOptions & { help?: boolean };
   try {
-    options = serveArguments(args);
+    options = serveArguments(args, runtime.cwd);
   } catch (error) {
     if (!(error instanceof ServeUsageError)) throw error;
     runtime.stderr(`pdb serve: ${error.message}\n`);

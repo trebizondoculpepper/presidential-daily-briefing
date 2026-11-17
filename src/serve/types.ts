@@ -55,6 +55,10 @@ export interface ServeReadRuntime {
 
 /** Injected boundaries of `pdb serve`. */
 export interface ServeRuntime {
+  /** Invoking working directory for resolving relative `--project` paths (#569). */
+  cwd?: string;
+  /** Git runner for resolving nested `--project` paths and worktrees to their root (#569). */
+  git?: GitRunner;
   /** Resolve a local checkout to its owner/name (startup only). */
   currentRepository: (cwd?: string, signal?: AbortSignal) => Promise<string>;
   /** The gh host and login (startup, and before live collections at most once per TTL). */
