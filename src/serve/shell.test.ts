@@ -98,7 +98,9 @@ describe("shared served-page shell (#605)", () => {
     expect(html).toContain('href="/?repo=other%2Frepo&amp;role=designer&amp;agent=me"');
     expect(html).toContain("Ticket &lt;&amp;");
     expect(html.match(/<header/g)).toHaveLength(1);
-    expect(html).not.toMatch(/<script|<style|\sstyle=|https?:\/\//);
+    expect(html).not.toMatch(/<script(?! src=)|<style|\sstyle=|https?:\/\//);
+    expect(html).not.toContain("Project: Owner/Project");
+    expect(html).toContain('<script src="/project-selection.js" defer></script>');
     // #733: the project selector is always visible, including account-wide Quotas, which keeps
     // its account-wide labelling.
     expect(renderToolbar(context("quotas"))).toContain("Change project");

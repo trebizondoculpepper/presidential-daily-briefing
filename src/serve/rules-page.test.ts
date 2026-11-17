@@ -100,7 +100,9 @@ describe("rules page rendering (#392)", () => {
     const doc = rulesDocument({ ...declaredRulesContext(), effective: unknown }, {}, model);
     const html = rulesPageHtml(doc, rulesText(doc), page);
     expect(html).toContain("&lt;img src=x onerror=alert(1)&gt;");
-    expect(html).not.toMatch(/<img|<script/i);
+    expect(html.replace('<script src="/project-selection.js" defer></script>', "")).not.toMatch(
+      /<img|<script/i,
+    );
   });
 
   it("shows read settings as effective, and otherwise says unknown rather than the defaults", () => {
@@ -199,7 +201,9 @@ describe("GET /rules (#392)", () => {
       expect(reply.status).toBe(200);
       expect(reply.headers["content-type"]).toBe("text/html; charset=utf-8");
       expect(reply.headers["content-security-policy"]).toContain("default-src 'none'");
-      expect(reply.body).not.toMatch(/<script|\sstyle=|https?:\/\/(?!127\.0\.0\.1)/);
+      expect(
+        reply.body.replace('<script src="/project-selection.js" defer></script>', ""),
+      ).not.toMatch(/<script|\sstyle=|https?:\/\/(?!127\.0\.0\.1)/);
       const text = unescape(reply.body);
       expect(text).toContain("processGuide = true  (stored in the settings file)");
       expect(text).toContain(
@@ -346,7 +350,9 @@ describe("purpose-first rule presentation (#578)", () => {
     expect(html).toContain(`<code>${revised.rulesHash}</code>`);
     expect(html).toContain(`<code>${revised.narrationHash}</code>`);
     expect(html).toContain(escapeHtml(literal));
-    expect(html).not.toMatch(/<img|<script/i);
+    expect(html.replace('<script src="/project-selection.js" defer></script>', "")).not.toMatch(
+      /<img|<script/i,
+    );
     expect(html).not.toContain('href="https://example.test/');
     expect(html).not.toContain(escapeHtml(shippedModel().decisions[0].purpose!));
     expect(html).toContain("{head} ${secret}");

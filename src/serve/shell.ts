@@ -236,7 +236,7 @@ export function renderToolbar(context: ShellContext): string {
     page.scope === "account"
       ? "Account-wide: your GitHub login's quotas, not a project's"
       : selection.repository
-        ? `Project: ${selection.repository}`
+        ? ""
         : selection.state === "global"
           ? "Scope: Global"
           : !context.served.length
@@ -248,10 +248,10 @@ export function renderToolbar(context: ShellContext): string {
   const projectMenu = `<details class="project-menu"><summary>${htmlEscape(
     selection.repository ? selection.repository : "Change project",
   )}</summary><ul>${projects || "<li>No projects are served. Start pdb serve with --repo or --project.</li>"}</ul></details>`;
-  return `<header class="shell-toolbar"><a class="skip-link" href="#content">Skip to content</a><div class="shell-context"><a class="product" href="${htmlEscape(pageHref(pageById("work"), selection, page))}"${carryAttribute(pageById("work"))}>Presidential Daily Briefing</a>${projectMenu}<span>${htmlEscape(indicator)}</span></div><div class="shell-menus"><nav class="wide-pages" aria-label="Pages">${links}</nav><details class="narrow-pages"><summary>Pages: ${htmlEscape(pageById(active).label)}</summary><nav aria-label="Pages">${links}</nav></details></div></header>`;
+  return `<header class="shell-toolbar"><a class="skip-link" href="#content">Skip to content</a><div class="shell-context"><a class="product" href="${htmlEscape(pageHref(pageById("work"), selection, page))}"${carryAttribute(pageById("work"))}>Presidential Daily Briefing</a>${projectMenu}${indicator ? `<span>${htmlEscape(indicator)}</span>` : ""}</div><div class="shell-menus"><nav class="wide-pages" aria-label="Pages">${links}</nav><details class="narrow-pages"><summary>Pages: ${htmlEscape(pageById(active).label)}</summary><nav aria-label="Pages">${links}</nav></details></div></header>`;
 }
 export function shellStart(context: ShellContext, title: string, script?: string): string {
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${htmlEscape(title)}</title><link rel="stylesheet" href="/dashboard.css">${script ? `<script src="${htmlEscape(script)}" defer></script>` : ""}</head><body>${renderToolbar(context)}`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${htmlEscape(title)}</title><link rel="stylesheet" href="/dashboard.css"><script src="/project-selection.js" defer></script>${script ? `<script src="${htmlEscape(script)}" defer></script>` : ""}</head><body>${renderToolbar(context)}`;
 }
 export function shellPage(
   context: ShellContext,

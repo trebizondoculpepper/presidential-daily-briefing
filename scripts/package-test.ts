@@ -271,7 +271,7 @@ async function serveSmoke(bin: string, env: NodeJS.ProcessEnv, cwd: string): Pro
         throw new Error(`Installed diagnostics ${view} is not empty before any read.`);
     }
     // The project rules page (#392) from the packaged artifact, with no source tree: the same
-    // compiled policy as pdb rules, settings unknown for a --repo-only project, no script.
+    // compiled policy as pdb rules, settings unknown for a --repo-only project, only shared navigation script.
     const rulesPage = await fetch(`${url}rules?repo=example%2Fparity`);
     const rulesHtml = await rulesPage.text();
     if (
@@ -279,9 +279,17 @@ async function serveSmoke(bin: string, env: NodeJS.ProcessEnv, cwd: string): Pro
       !rulesHtml.includes("<h1>Project rules</h1>") ||
       !/Coverage of the full policy: \d+ decision rules/.test(rulesHtml) ||
       !rulesHtml.includes("effective settings: unknown") ||
-      rulesHtml.includes("<script")
+      rulesHtml
+        .replace('<script src="/project-selection.js" defer></script>', "")
+        .includes("<script")
     )
       throw new Error(`Installed pdb serve /rules is wrong: ${rulesHtml.slice(0, 400)}`);
+    const navigationScript = await fetch(`${url}project-selection.js`);
+    if (
+      navigationScript.status !== 200 ||
+      !(await navigationScript.text()).includes("pdb.selected-project")
+    )
+      throw new Error("Installed shared project-selection script is unavailable.");
     // Every shipped HTML page uses the shared toolbar; browser scripts are never executed here.
     for (const path of [
       "?repo=example%2Fparity",
