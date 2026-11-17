@@ -350,6 +350,82 @@ export async function readIdentity(
   };
 }
 
+const BINDING_KEY_PATTERN = /^[a-z][a-z0-9-]{1,40}_[a-f0-9]{64}$/;
+
+/** Binding keys contain a registered provider name and an opaque project-scoped digest. */
+export function validateIdentityBindingKey(key: string): void {
+  if (!BINDING_KEY_PATTERN.test(key))
+    throw new ConfigError(
+      "invalid-value",
+      "Invalid local identity binding key.",
+      "Select the logical entry explicitly with --entry KEY.",
+    );
+}
+
+function bindingsFor(document: Table | null): Map<string, string> {
+  const value = document?.agentBindings;
+  if (value === undefined) return new Map();
+  if (!isTable(value)) throw malformed("agentBindings is not a table.");
+  const bindings = new Map<string, string>();
+  for (const [key, entry] of Object.entries(value)) {
+    // Unknown future metadata is preserved, but is not interpreted as a known binding.
+    if (!BINDING_KEY_PATTERN.test(key)) continue;
+    if (typeof entry !== "string") throw malformed("an agent binding has an invalid target entry.");
+    try {
+      validateEntryKey(entry);
+    } catch {
+      throw malformed("an agent binding has an invalid target entry.");
+    }
+    bindings.set(key, entry);
+  }
+  return bindings;
+}
+
+async function bindingDocument(root: string, fs: ConfigFileSystem): Promise<Table | null> {
+  try {
+    const path = join(root, IDENTITY_FILE);
+    if (await fs.isSymbolicLink?.(path))
+      throw new ConfigError(
+        "unsafe-path",
+        `${IDENTITY_FILE} is a symbolic link; no identity binding was selected.`,
+        "Use a regular private identity file at the repository root.",
+      );
+    const raw = await fs.readText(path);
+    return raw === null ? null : parseIdentityDocument(raw);
+  } catch (error) {
+    if (error instanceof ConfigError) throw error;
+    throw unreadable(IDENTITY_FILE, error);
+  }
+}
+
+/** Internal selection evidence: entry keys only, never other agents' configuration values. */
+export async function readIdentityBindings(
+  root: string,
+  fs: ConfigFileSystem = nodeFileSystem,
+): Promise<ReadonlyMap<string, string>> {
+  return bindingsFor(await bindingDocument(root, fs));
+}
+
+/** Read one binding and its canonical identity from the same atomic document snapshot. */
+export async function readBoundIdentity(
+  root: string,
+  key: string,
+  fs: ConfigFileSystem = nodeFileSystem,
+): Promise<{ entry: string; record: IdentityRecord } | null> {
+  validateIdentityBindingKey(key);
+  const document = await bindingDocument(root, fs);
+  const entry = bindingsFor(document).get(key);
+  if (entry === undefined) return null;
+  const record = recordFor(document, entry);
+  if (!record.entryExists || !record.name || !isAgentName(record.name) || record.problems.length)
+    throw new ConfigError(
+      "identity-unresolved",
+      "The active identity binding has no valid canonical agent entry.",
+      "Repair the selected identity entry or choose it explicitly with --entry KEY; no replacement name was allocated.",
+    );
+  return { entry, record };
+}
+
 const agentKeys = (document: Table | null): string[] =>
   document !== null && isTable(document.agents) ? Object.keys(document.agents) : [];
 
@@ -667,6 +743,16 @@ export interface IdentityWriteOptions {
    * valid name; this writer generates names only for absent entries, so setup could not finish.
    */
   readonly requireName?: boolean;
+  /** Automatic setup reuses a valid name/default role won by an earlier writer. */
+  readonly reuseExistingIdentity?: boolean;
+  /** #677: persist a verified local binding in the same replacement as its identity. */
+  readonly binding?: {
+    readonly key: string;
+    readonly expectedEntry: string | null;
+    readonly allowRebind?: boolean;
+    /** Implicit new-session setup must not borrow an unbound entry of this harness. */
+    readonly newSessionHarness?: string;
+  };
 }
 
 export interface IdentityWriteResult {
@@ -880,6 +966,28 @@ export async function setIdentity(
   options: IdentityWriteOptions = {},
 ): Promise<IdentityWriteResult> {
   validateEntryKey(entry);
+  if (options.binding) {
+    validateIdentityBindingKey(options.binding.key);
+    if (options.binding.expectedEntry !== null) validateEntryKey(options.binding.expectedEntry);
+    if (
+      options.binding.newSessionHarness &&
+      !/^[a-z][a-z0-9-]*$/.test(options.binding.newSessionHarness)
+    )
+      throw new ConfigError(
+        "invalid-value",
+        "Invalid identity binding harness.",
+        "Select the logical entry explicitly.",
+      );
+  }
+  if (
+    options.binding?.newSessionHarness &&
+    !entry.startsWith(`${options.binding.newSessionHarness}.`)
+  )
+    throw new ConfigError(
+      "invalid-value",
+      "The generated entry does not match its binding harness.",
+      "Select the intended logical entry explicitly.",
+    );
   const field = identityKey(key).field;
   validateIdentityValue(key, value);
   const fs = options.fs ?? nodeFileSystem;
@@ -935,20 +1043,45 @@ export async function setIdentity(
       throw malformed(`agents.${entry} is not a table.`);
     }
     // Checked under the lock, against the document about to be rewritten: nothing is written.
-    if (options.requireName && before.entryExists && !before.name)
+    if (options.requireName && before.entryExists && (!before.name || !isAgentName(before.name)))
       throw new ConfigError(
         "invalid-value",
         `Entry [agents.${entry}] in ${IDENTITY_FILE} has no valid name, so no identity was set up and nothing was changed.`,
         `Set one explicitly: pdb config set identity.name NAME --entry ${entry}`,
       );
-    if (field === "name" && namesInUse(document, entry).has(value.toLowerCase())) {
+    if (
+      field === "name" &&
+      !options.reuseExistingIdentity &&
+      namesInUse(document, entry).has(value.toLowerCase())
+    ) {
       throw new ConfigError(
         "conflict",
         `Another local agent entry already uses the name ${JSON.stringify(value)}.`,
         "Choose a different name; names identify one logical agent each.",
       );
     }
-    if (before.entryExists && identityValue(before, key) === value) {
+    let nextValue =
+      options.reuseExistingIdentity && field === "name" && before.name
+        ? before.name
+        : options.reuseExistingIdentity && field === "triage_role" && before.triageRole
+          ? before.triageRole
+          : value;
+    const bindings = options.binding ? bindingsFor(document) : new Map<string, string>();
+    const currentBinding = options.binding ? (bindings.get(options.binding.key) ?? null) : null;
+    if (options.binding) {
+      if (currentBinding !== options.binding.expectedEntry && currentBinding !== entry)
+        throw conflict();
+      if (currentBinding !== null && currentBinding !== entry && !options.binding.allowRebind)
+        throw conflict();
+      if (currentBinding === entry && !before.entryExists)
+        throw new ConfigError(
+          "identity-unresolved",
+          "The active binding points to a missing canonical entry.",
+          "Repair the existing identity before retrying; no replacement name was allocated.",
+        );
+    }
+    const bindingChanged = options.binding !== undefined && currentBinding !== entry;
+    if (before.entryExists && identityValue(before, key) === nextValue && !bindingChanged) {
       // An unchanged value needs no collision check against the legacy file.
       // An unchanged value still refused a tracked file and established missing exclusion
       // above; the identity contents are left untouched.
@@ -969,11 +1102,34 @@ export async function setIdentity(
     let legacyIgnored: string | null = null;
     // Names of agents that exist only in the legacy file must not be duplicated (#528 review).
     const legacyNames = await readLegacyNames(target.root, fs);
+    if (options.binding?.newSessionHarness) {
+      if (before.entryExists && currentBinding !== entry) throw conflict();
+      if (legacyNames.unknown !== null)
+        throw new ConfigError(
+          "identity-unresolved",
+          "Legacy entries could not be checked for safe session selection.",
+          "Repair the legacy identity file or select the logical entry explicitly.",
+        );
+      const harness = options.binding.newSessionHarness;
+      const bound = new Set(bindings.values());
+      const unbound = [
+        ...new Set([...agentKeys(document), ...agentKeys(legacyNames.document)]),
+      ].filter(
+        (candidate) =>
+          (candidate === harness || candidate.startsWith(`${harness}.`)) && !bound.has(candidate),
+      );
+      if (unbound.length)
+        throw new ConfigError(
+          "identity-unresolved",
+          "Unbound entries make automatic session selection ambiguous.",
+          "Select the intended logical entry explicitly with --entry KEY.",
+        );
+    }
     const legacyTaken = (name: string) =>
       legacyOnlyNames(legacyNames.document, document, entry).has(name.toLowerCase());
     let legacyNamesUnchecked: string | null = null;
     if (field === "name") {
-      if (legacyTaken(value)) throw legacyNameTaken(value, "");
+      if (!options.reuseExistingIdentity && legacyTaken(value)) throw legacyNameTaken(value, "");
       legacyNamesUnchecked = legacyNames.unknown;
     }
     let generatedName: string | null = null;
@@ -991,6 +1147,7 @@ export async function setIdentity(
         legacy = { found: null, document: null };
       }
       imported = legacy.found;
+      if (options.reuseExistingIdentity && field === "name" && imported) nextValue = imported.name;
       const table: Table = Object.create(null);
       if (imported !== null) {
         if (field !== "name") {
@@ -1021,7 +1178,23 @@ export async function setIdentity(
       }
       agents[entry] = table;
     }
-    (agents[entry] as Table)[field] = value;
+    if (options.reuseExistingIdentity && field === "name") {
+      if (namesInUse(document, entry).has(nextValue.toLowerCase()))
+        throw new ConfigError(
+          "conflict",
+          "The selected identity name is already used by another entry.",
+          "Repair the duplicate identity before retrying.",
+        );
+      if (legacyTaken(nextValue)) throw legacyNameTaken(nextValue, "");
+    }
+    (agents[entry] as Table)[field] = nextValue;
+    if (options.binding && bindingChanged) {
+      const table = isTable(document.agentBindings)
+        ? document.agentBindings
+        : (Object.create(null) as Table);
+      table[options.binding.key] = entry;
+      document.agentBindings = table;
+    }
     const text = serializeIdentityDocument(document);
     assertLosslessRewrite(raw, text);
 
