@@ -486,6 +486,15 @@ describe("activity renderers (#456)", () => {
                 responsibility: { ticket: "alpha", since: hours(1), members: [] },
                 deliverables: [],
               },
+              // A present responsibility object with ticket:null is a known unassigned ticket
+              // (delivery reset), not an evidence gap: it must not appear as unknown.
+              {
+                number: 33,
+                url: url(33),
+                closure: "open",
+                responsibility: { ticket: null, since: hours(2), members: [] },
+                deliverables: [],
+              },
             ],
           },
         },

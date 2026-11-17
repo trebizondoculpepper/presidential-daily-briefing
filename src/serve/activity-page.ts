@@ -321,7 +321,10 @@ export function activityRenderers(base: DashboardRenderers): ActivityRenderers {
     if (e.status === "error") return "";
     const tickets = list(record(record(e.result).delivery).tickets).filter((t) => {
       const ticket = record(t);
-      return ticket.closure === "open" && !record(ticket.responsibility)?.ticket;
+      // The responsibility object being absent means records are unread/unverifiable; a present
+      // object with ticket:null is a known unassigned ticket (e.g. after a delivery reset) and
+      // is not an evidence gap, matching teamResponsibilityLines.
+      return ticket.closure === "open" && !ticket.responsibility;
     });
     if (!tickets.length) return "";
     const rows = tickets
