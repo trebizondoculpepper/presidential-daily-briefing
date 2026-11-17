@@ -31,11 +31,14 @@ All in memory and never persisted. There is no dirty flag on disk.
 
 - **startup:** the effective global settings the process started with, from the `LoadedGlobalConfig` read at startup. CLI overrides such as `--port` are recorded as the effective startup value, with their source.
 - **applied:** the values the process is actually running with. It starts equal to startup, and advances only for `live` keys, and only when #808 reports a successful application of a specific saved revision.
-- **saved:** the most recent configuration read, as a `LoadedGlobalConfig` whose revision is a digest of `raw`, or absent when there is no file.
+- **saved:** the most recent configuration read, as a `LoadedGlobalConfig`. Every snapshot has a `Revision`: the digest of `raw` when the file exists, or the fixed value `"absent"` when it doesn't. An absent file is a valid snapshot of defaults, so it can be applied and reported like any other revision.
 
 ## State and result
 
 ```ts
+/** A file-content digest, or "absent" when there is no config.toml (valid defaults). */
+type Revision = string;
+
 type KeyState =
   | { status: "in-sync" } // saved equals applied
   | { status: "pending-live"; reason: string } // live key differs, not yet applied
@@ -55,8 +58,8 @@ interface KeyView {
 interface ApplicationStateView {
   schemaVersion: 1;
   startedAt: string;
-  savedRevision: string | null; // digest of the last read file text, null when absent
-  appliedRevision: string | null; // the saved revision whose live keys were last applied
+  savedRevision: Revision | null; // null only when the saved config is unreadable or invalid
+  appliedRevision: Revision; // the saved revision whose live keys were last applied
   keys: KeyView[];
   restartRequired: string[]; // keys whose state is restart-required, for one-line notices
   pendingLive: string[];
@@ -74,6 +77,7 @@ Rules, each covered by a test:
 6. **Invalid or unreadable saved config:** `readError` is set, `saved` is `null` for every key, and `applied` keeps the last valid values, as serve-configuration-layers.md already requires.
 7. **After a restart:** a new process starts with fresh snapshots, so earlier restart notices disappear by construction.
 8. **Overridden keys:** an `overridden` key shows its saved value for information and never produces `pending-live` or `restart-required`, whatever is saved later. Its saved value takes effect only on a restart without the override. An acceptance case starts with `--port 9000` over a saved 4372, observes the unchanged file and expects `overridden` with no restart notice. It then saves 5000 and still expects no restart notice.
+9. **Deleted file:** deleting `config.toml` and reloading gives a saved revision of `\"absent\"` with default values. For example, `serve.projects` becomes `[]`, a `pending-live` change that #808 can apply and report against `\"absent\"`, exactly as for any other revision. An acceptance case covers deletion followed by reload, both for success and for failure.
 
 ## Interface
 
@@ -85,7 +89,7 @@ interface ApplicationState {
   observe(saved: LoadedGlobalConfig | { error: GlobalConfigError }): ApplicationStateView;
   /** #808 reports the outcome of applying a saved revision's live keys. */
   recordApplication(result: {
-    revision: string;
+    revision: Revision;
     applied: string[];
     failed: { key: string; error: string }[];
   }): ApplicationStateView;
@@ -105,4 +109,4 @@ The service makes no reads or writes itself: callers pass in the snapshots, so t
 
 ## Delivery and validation
 
-One implementation PR after this contract merges: `src/serve/appstate.ts` with injected-input tests covering rules 1–8, plus the consequence registry next to `GLOBAL_KEYS`. Wiring into reload (#813), live application (#808) and the Settings page (#584) belongs to those tickets.
+One implementation PR after this contract merges: `src/serve/appstate.ts` with injected-input tests covering rules 1–9, plus the consequence registry next to `GLOBAL_KEYS`. Wiring into reload (#813), live application (#808) and the Settings page (#584) belongs to those tickets.
