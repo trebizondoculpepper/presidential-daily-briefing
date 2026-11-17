@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 import { join } from "node:path";
+import { CONFIG_KEYS } from "./config.js";
 import {
   GLOBAL_CONFIG_FILE,
   GLOBAL_DEFAULT_PORT,
@@ -244,5 +245,40 @@ repository = "c/d"
 
   it("keeps every registered key in the global registry", () => {
     expect(GLOBAL_KEYS.map((k) => k.key)).toEqual(["serve.port", "serve.ttl", "serve.projects"]);
+  });
+
+  // Scope separation (#804): the two registries never overlap, and each scope refuses the other's
+  // keys instead of silently accepting them into a file that means something else.
+  it("shares no key with the repository registry", () => {
+    const repository = CONFIG_KEYS.map((key) => key.key);
+    expect(repository.filter((key) => GLOBAL_KEYS.some((k) => k.key === key))).toEqual([]);
+  });
+
+  it("refuses repository workflow keys rather than storing them globally", async () => {
+    for (const entry of CONFIG_KEYS) {
+      await expect(validateGlobalValue(entry.key, entry.defaultValue)).rejects.toThrow(
+        GlobalConfigError,
+      );
+      await expect(validateGlobalValue(entry.key, entry.defaultValue)).rejects.toMatchObject({
+        code: "unknown-key",
+      });
+    }
+  });
+
+  it("refuses to parse a document holding a repository key", async () => {
+    const raw = `schemaVersion = ${GLOBAL_SCHEMA_VERSION}\n\n[serve]\nport = 4800\n\n[briefing]\nengine = "datalog"\n`;
+    await expect(parseGlobalConfig(raw, join(dir, GLOBAL_CONFIG_FILE))).rejects.toMatchObject({
+      code: "malformed",
+    });
+  });
+
+  it("refuses a mistyped key inside a registered table instead of ignoring it", async () => {
+    const raw = `schemaVersion = ${GLOBAL_SCHEMA_VERSION}\n\n[serve]\nport = 4800\nprot = 4801\n`;
+    await expect(parseGlobalConfig(raw, join(dir, GLOBAL_CONFIG_FILE))).rejects.toMatchObject({
+      code: "malformed",
+    });
+    await expect(parseGlobalConfig(raw, join(dir, GLOBAL_CONFIG_FILE))).rejects.toThrow(
+      /serve\.prot/,
+    );
   });
 });
