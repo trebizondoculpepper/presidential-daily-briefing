@@ -1,7 +1,7 @@
 {
   "modelVersion": 2,
   "policyVersion": 1,
-  "rulesHash": "1e48e2b5cef5874602d76bfab8f328eb0038227b0e77a91aa578eb8e2dc71b5b",
+  "rulesHash": "774e9aaac1b0ebcd328d21cb700c99beaf65f97ecaa48c898eb457b9c6b83ef8",
   "sources": [
     "policy/schema.edn",
     "policy/rules.edn",
@@ -87,7 +87,24 @@
       "unlock-count": "number of dependents it unlocks",
       "unlock-unknown": "reason the unlock count is unknown",
       "unlocks-dependent": "dependent it would unlock",
-      "urgency-key": "urgency sort key"
+      "urgency-key": "urgency sort key",
+      "closed-label": "closed or merged pull request state",
+      "no-run-time": "whether a cancelled check had no recorded run time",
+      "pending-count": "number of pending checks",
+      "base-ref": "pull request base branch",
+      "unresolved-threads": "number of unresolved review threads",
+      "policy-effective": "effective declared review policy",
+      "policy-unknown-reason": "reason the declared review policy is unknown",
+      "policy-head-reviewed": "whether the declared review policy accepted the current head",
+      "policy-has-findings": "whether the declared review policy has unresolved head findings",
+      "policy-summary": "configured review providers' current-head states",
+      "provider-finding": "unresolved finding from a configured review provider",
+      "provider-label": "review provider display label",
+      "finding-source": "review finding source URL",
+      "codex-findings": "whether legacy Codex receipt reports findings on the current head",
+      "codex-stale": "whether legacy Codex coverage is stale against the current head",
+      "codex-running": "in-progress status of Codex's current-head review",
+      "review-request-status": "status of an explicit review request"
     },
     "viewer": {
       "agent": "agent name",
@@ -9060,6 +9077,1914 @@
       "set": "rules"
     },
     {
+      "name": "declared-review-coverage",
+      "params": ["?t"],
+      "alternatives": [
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "policy-effective",
+              "value": {
+                "lit": "codex-or-coderabbit"
+              },
+              "phrase": "effective declared review policy",
+              "many": false
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 116
+          }
+        },
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "policy-effective",
+              "value": {
+                "lit": "codex-or-copilot"
+              },
+              "phrase": "effective declared review policy",
+              "many": false
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 117
+          }
+        }
+      ],
+      "calls": [],
+      "set": "rules"
+    },
+    {
+      "name": "optional-review-detail",
+      "params": ["?t"],
+      "alternatives": [
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
+              "type": "call",
+              "predicate": "declared-review-coverage",
+              "args": [
+                {
+                  "var": "?t"
+                }
+              ]
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "policy-head-reviewed",
+              "value": {
+                "lit": true
+              },
+              "phrase": "whether the declared review policy accepted the current head",
+              "many": false
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 118
+          }
+        }
+      ],
+      "calls": ["declared-review-coverage"],
+      "set": "rules"
+    },
+    {
+      "name": "pr-specific-blocker",
+      "params": ["?t", "?code", "?reason"],
+      "alternatives": [
+        {
+          "params": ["?t", "?code", "?reason"],
+          "clauses": [
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "PR-DRAFT"
+                }
+              ],
+              "result": "?code"
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "draft",
+              "value": {
+                "lit": true
+              },
+              "phrase": "draft flag",
+              "many": false
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "draft"
+                }
+              ],
+              "result": "?reason"
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 119
+          }
+        },
+        {
+          "params": ["?t", "?code", "?reason"],
+          "clauses": [
+            {
+              "type": "call",
+              "predicate": "check-blocker",
+              "args": [
+                {
+                  "var": "?t"
+                },
+                {
+                  "var": "?code"
+                },
+                {
+                  "var": "?reason"
+                }
+              ]
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 120
+          }
+        },
+        {
+          "params": ["?t", "?code", "?reason"],
+          "clauses": [
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "PR-CHECK-FAILED"
+                }
+              ],
+              "result": "?code"
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "check",
+              "value": {
+                "var": "?c"
+              },
+              "phrase": "check run",
+              "many": true
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?c"
+              },
+              "attribute": "name",
+              "value": {
+                "var": "?name"
+              },
+              "phrase": "name",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?c"
+              },
+              "attribute": "outcome",
+              "value": {
+                "var": "?o"
+              },
+              "phrase": "outcome",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "constant",
+              "entity": {
+                "lit": 1
+              },
+              "attribute": "failure",
+              "value": {
+                "var": "?o"
+              },
+              "phrase": null,
+              "many": true
+            },
+            {
+              "type": "compare",
+              "op": "not=",
+              "args": [
+                {
+                  "var": "?o"
+                },
+                {
+                  "lit": "CANCELLED"
+                }
+              ]
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "check "
+                },
+                {
+                  "var": "?name"
+                },
+                {
+                  "lit": " failed"
+                }
+              ],
+              "result": "?reason"
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 121
+          }
+        },
+        {
+          "params": ["?t", "?code", "?reason"],
+          "clauses": [
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "PR-CHECK-CANCELLED"
+                }
+              ],
+              "result": "?code"
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "check",
+              "value": {
+                "var": "?c"
+              },
+              "phrase": "check run",
+              "many": true
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?c"
+              },
+              "attribute": "name",
+              "value": {
+                "var": "?name"
+              },
+              "phrase": "name",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?c"
+              },
+              "attribute": "outcome",
+              "value": {
+                "lit": "CANCELLED"
+              },
+              "phrase": "outcome",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?c"
+              },
+              "attribute": "no-run-time",
+              "value": {
+                "lit": true
+              },
+              "phrase": "whether a cancelled check had no recorded run time",
+              "many": false
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "check "
+                },
+                {
+                  "var": "?name"
+                },
+                {
+                  "lit": " cancelled without running (likely infrastructure, not a code defect): verification incomplete"
+                }
+              ],
+              "result": "?reason"
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 122
+          }
+        },
+        {
+          "params": ["?t", "?code", "?reason"],
+          "clauses": [
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "PR-CHECK-CANCELLED"
+                }
+              ],
+              "result": "?code"
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "check",
+              "value": {
+                "var": "?c"
+              },
+              "phrase": "check run",
+              "many": true
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?c"
+              },
+              "attribute": "name",
+              "value": {
+                "var": "?name"
+              },
+              "phrase": "name",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?c"
+              },
+              "attribute": "outcome",
+              "value": {
+                "lit": "CANCELLED"
+              },
+              "phrase": "outcome",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?c"
+              },
+              "attribute": "no-run-time",
+              "value": {
+                "lit": false
+              },
+              "phrase": "whether a cancelled check had no recorded run time",
+              "many": false
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "check "
+                },
+                {
+                  "var": "?name"
+                },
+                {
+                  "lit": " cancelled: verification incomplete"
+                }
+              ],
+              "result": "?reason"
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 123
+          }
+        },
+        {
+          "params": ["?t", "?code", "?reason"],
+          "clauses": [
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "PR-CHECK-PENDING"
+                }
+              ],
+              "result": "?code"
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "pending-count",
+              "value": {
+                "var": "?n"
+              },
+              "phrase": "number of pending checks",
+              "many": false
+            },
+            {
+              "type": "compare",
+              "op": ">",
+              "args": [
+                {
+                  "var": "?n"
+                },
+                {
+                  "lit": 0
+                }
+              ]
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "var": "?n"
+                },
+                {
+                  "lit": " check(s) still pending: waiting"
+                }
+              ],
+              "result": "?reason"
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 124
+          }
+        },
+        {
+          "params": ["?t", "?code", "?reason"],
+          "clauses": [
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "PR-CONFLICTS"
+                }
+              ],
+              "result": "?code"
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "mergeable",
+              "value": {
+                "lit": "CONFLICTING"
+              },
+              "phrase": "mergeability",
+              "many": false
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "merge conflicts with the base branch"
+                }
+              ],
+              "result": "?reason"
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 125
+          }
+        },
+        {
+          "params": ["?t", "?code", "?reason"],
+          "clauses": [
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "PR-MERGEABLE-UNKNOWN"
+                }
+              ],
+              "result": "?code"
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "mergeable",
+              "value": {
+                "lit": "UNKNOWN"
+              },
+              "phrase": "mergeability",
+              "many": false
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "mergeability unknown (GitHub still computing)"
+                }
+              ],
+              "result": "?reason"
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 126
+          }
+        },
+        {
+          "params": ["?t", "?code", "?reason"],
+          "clauses": [
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "PR-BEHIND"
+                }
+              ],
+              "result": "?code"
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "merge-state",
+              "value": {
+                "lit": "BEHIND"
+              },
+              "phrase": "merge state",
+              "many": true
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "base-ref",
+              "value": {
+                "var": "?base"
+              },
+              "phrase": "pull request base branch",
+              "many": false
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "branch is behind "
+                },
+                {
+                  "var": "?base"
+                },
+                {
+                  "lit": ": update it before merging"
+                }
+              ],
+              "result": "?reason"
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 127
+          }
+        },
+        {
+          "params": ["?t", "?code", "?reason"],
+          "clauses": [
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "PR-MERGE-STATE"
+                }
+              ],
+              "result": "?code"
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "merge-state",
+              "value": {
+                "var": "?m"
+              },
+              "phrase": "merge state",
+              "many": true
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "fact",
+                  "scope": "constant",
+                  "entity": {
+                    "lit": 1
+                  },
+                  "attribute": "merge-state",
+                  "value": {
+                    "var": "?m"
+                  },
+                  "phrase": null,
+                  "many": true
+                }
+              ]
+            },
+            {
+              "type": "compare",
+              "op": "not=",
+              "args": [
+                {
+                  "var": "?m"
+                },
+                {
+                  "lit": "BLOCKED"
+                }
+              ]
+            },
+            {
+              "type": "compare",
+              "op": "not=",
+              "args": [
+                {
+                  "var": "?m"
+                },
+                {
+                  "lit": "BEHIND"
+                }
+              ]
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "call",
+                  "predicate": "pr-merge-state-exempt",
+                  "args": [
+                    {
+                      "var": "?t"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "merge state "
+                },
+                {
+                  "var": "?m"
+                },
+                {
+                  "lit": " is not current: merging is not possible yet"
+                }
+              ],
+              "result": "?reason"
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 131
+          }
+        },
+        {
+          "params": ["?t", "?code", "?reason"],
+          "clauses": [
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "PR-CHANGES-REQUESTED"
+                }
+              ],
+              "result": "?code"
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "review-decision",
+              "value": {
+                "lit": "CHANGES_REQUESTED"
+              },
+              "phrase": "review decision",
+              "many": false
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "changes requested"
+                }
+              ],
+              "result": "?reason"
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 132
+          }
+        },
+        {
+          "params": ["?t", "?code", "?reason"],
+          "clauses": [
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "PR-REVIEW-REQUIRED"
+                }
+              ],
+              "result": "?code"
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "review-decision",
+              "value": {
+                "lit": "REVIEW_REQUIRED"
+              },
+              "phrase": "review decision",
+              "many": false
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "a required approving review is missing"
+                }
+              ],
+              "result": "?reason"
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 133
+          }
+        },
+        {
+          "params": ["?t", "?code", "?reason"],
+          "clauses": [
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "PR-UNRESOLVED-THREADS"
+                }
+              ],
+              "result": "?code"
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "unresolved-threads",
+              "value": {
+                "var": "?n"
+              },
+              "phrase": "number of unresolved review threads",
+              "many": false
+            },
+            {
+              "type": "compare",
+              "op": ">",
+              "args": [
+                {
+                  "var": "?n"
+                },
+                {
+                  "lit": 0
+                }
+              ]
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "var": "?n"
+                },
+                {
+                  "lit": " unresolved review thread(s)"
+                }
+              ],
+              "result": "?reason"
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 134
+          }
+        },
+        {
+          "params": ["?t", "?code", "?reason"],
+          "clauses": [
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "PR-CODEX-FINDINGS"
+                }
+              ],
+              "result": "?code"
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "call",
+                  "predicate": "declared-review-coverage",
+                  "args": [
+                    {
+                      "var": "?t"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "fact",
+                  "scope": "entity",
+                  "entity": {
+                    "var": "?t"
+                  },
+                  "attribute": "policy-effective",
+                  "value": {
+                    "lit": "unknown"
+                  },
+                  "phrase": "effective declared review policy",
+                  "many": false
+                }
+              ]
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "codex-findings",
+              "value": {
+                "lit": true
+              },
+              "phrase": "whether legacy Codex receipt reports findings on the current head",
+              "many": false
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "Codex reports unresolved findings on the current head"
+                }
+              ],
+              "result": "?reason"
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 135
+          }
+        },
+        {
+          "params": ["?t", "?code", "?reason"],
+          "clauses": [
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "PR-CODEX-STALE"
+                }
+              ],
+              "result": "?code"
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "call",
+                  "predicate": "optional-review-detail",
+                  "args": [
+                    {
+                      "var": "?t"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "codex-stale",
+              "value": {
+                "lit": true
+              },
+              "phrase": "whether legacy Codex coverage is stale against the current head",
+              "many": false
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "Codex's latest review is for an older commit; current head not yet covered"
+                }
+              ],
+              "result": "?reason"
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 136
+          }
+        },
+        {
+          "params": ["?t", "?code", "?reason"],
+          "clauses": [
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "PR-PROVIDER-FINDINGS"
+                }
+              ],
+              "result": "?code"
+            },
+            {
+              "type": "call",
+              "predicate": "declared-review-coverage",
+              "args": [
+                {
+                  "var": "?t"
+                }
+              ]
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "provider-finding",
+              "value": {
+                "var": "?f"
+              },
+              "phrase": "unresolved finding from a configured review provider",
+              "many": true
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?f"
+              },
+              "attribute": "provider-label",
+              "value": {
+                "var": "?label"
+              },
+              "phrase": "review provider display label",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?f"
+              },
+              "attribute": "finding-source",
+              "value": {
+                "var": "?src"
+              },
+              "phrase": "review finding source URL",
+              "many": false
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "var": "?label"
+                },
+                {
+                  "lit": " reports unresolved findings on the current head "
+                },
+                {
+                  "var": "?src"
+                }
+              ],
+              "result": "?reason"
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 137
+          }
+        },
+        {
+          "params": ["?t", "?code", "?reason"],
+          "clauses": [
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "PR-PROVIDER-FINDINGS"
+                }
+              ],
+              "result": "?code"
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "policy-effective",
+              "value": {
+                "lit": "unknown"
+              },
+              "phrase": "effective declared review policy",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "provider-finding",
+              "value": {
+                "var": "?f"
+              },
+              "phrase": "unresolved finding from a configured review provider",
+              "many": true
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?f"
+              },
+              "attribute": "provider-label",
+              "value": {
+                "var": "?label"
+              },
+              "phrase": "review provider display label",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?f"
+              },
+              "attribute": "finding-source",
+              "value": {
+                "var": "?src"
+              },
+              "phrase": "review finding source URL",
+              "many": false
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "var": "?label"
+                },
+                {
+                  "lit": " reports unresolved findings on the current head "
+                },
+                {
+                  "var": "?src"
+                }
+              ],
+              "result": "?reason"
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 138
+          }
+        },
+        {
+          "params": ["?t", "?code", "?reason"],
+          "clauses": [
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "PR-POLICY-UNSATISFIED"
+                }
+              ],
+              "result": "?code"
+            },
+            {
+              "type": "call",
+              "predicate": "declared-review-coverage",
+              "args": [
+                {
+                  "var": "?t"
+                }
+              ]
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "policy-head-reviewed",
+              "value": {
+                "lit": false
+              },
+              "phrase": "whether the declared review policy accepted the current head",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "policy-has-findings",
+              "value": {
+                "lit": false
+              },
+              "phrase": "whether the declared review policy has unresolved head findings",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "policy-effective",
+              "value": {
+                "var": "?eff"
+              },
+              "phrase": "effective declared review policy",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "policy-summary",
+              "value": {
+                "var": "?sum"
+              },
+              "phrase": "configured review providers' current-head states",
+              "many": false
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "review policy "
+                },
+                {
+                  "var": "?eff"
+                },
+                {
+                  "lit": ": no configured provider has accepted the current head yet ("
+                },
+                {
+                  "var": "?sum"
+                },
+                {
+                  "lit": ")"
+                }
+              ],
+              "result": "?reason"
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 139
+          }
+        },
+        {
+          "params": ["?t", "?code", "?reason"],
+          "clauses": [
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "PR-POLICY-UNKNOWN"
+                }
+              ],
+              "result": "?code"
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "policy-effective",
+              "value": {
+                "lit": "unknown"
+              },
+              "phrase": "effective declared review policy",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "policy-unknown-reason",
+              "value": {
+                "var": "?why"
+              },
+              "phrase": "reason the declared review policy is unknown",
+              "many": false
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "review policy unknown ("
+                },
+                {
+                  "var": "?why"
+                },
+                {
+                  "lit": "): review coverage cannot be established"
+                }
+              ],
+              "result": "?reason"
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 140
+          }
+        },
+        {
+          "params": ["?t", "?code", "?reason"],
+          "clauses": [
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "PR-REVIEW-REQUEST-NONE"
+                }
+              ],
+              "result": "?code"
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "call",
+                  "predicate": "optional-review-detail",
+                  "args": [
+                    {
+                      "var": "?t"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "review-request-status",
+              "value": {
+                "lit": "no reaction yet"
+              },
+              "phrase": "status of an explicit review request",
+              "many": false
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "a review was requested and has had no reaction"
+                }
+              ],
+              "result": "?reason"
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 141
+          }
+        },
+        {
+          "params": ["?t", "?code", "?reason"],
+          "clauses": [
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "PR-REVIEW-REQUEST-PENDING"
+                }
+              ],
+              "result": "?code"
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "call",
+                  "predicate": "optional-review-detail",
+                  "args": [
+                    {
+                      "var": "?t"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "review-request-status",
+              "value": {
+                "var": "?st"
+              },
+              "phrase": "status of an explicit review request",
+              "many": false
+            },
+            {
+              "type": "compare",
+              "op": "not=",
+              "args": [
+                {
+                  "var": "?st"
+                },
+                {
+                  "lit": "no reaction yet"
+                }
+              ]
+            },
+            {
+              "type": "compare",
+              "op": "not=",
+              "args": [
+                {
+                  "var": "?st"
+                },
+                {
+                  "lit": "covered"
+                }
+              ]
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "waiting for the requested review to finish ("
+                },
+                {
+                  "var": "?st"
+                },
+                {
+                  "lit": ")"
+                }
+              ],
+              "result": "?reason"
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 142
+          }
+        },
+        {
+          "params": ["?t", "?code", "?reason"],
+          "clauses": [
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "PR-CODEX-RUNNING"
+                }
+              ],
+              "result": "?code"
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "call",
+                  "predicate": "optional-review-detail",
+                  "args": [
+                    {
+                      "var": "?t"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "fact",
+                  "scope": "entity",
+                  "entity": {
+                    "var": "?t"
+                  },
+                  "attribute": "review-request-status",
+                  "value": {
+                    "wild": true
+                  },
+                  "phrase": "status of an explicit review request",
+                  "many": false
+                }
+              ]
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "codex-running",
+              "value": {
+                "var": "?st"
+              },
+              "phrase": "in-progress status of Codex's current-head review",
+              "many": false
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "waiting for Codex's review of the current head to finish ("
+                },
+                {
+                  "var": "?st"
+                },
+                {
+                  "lit": ")"
+                }
+              ],
+              "result": "?reason"
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 143
+          }
+        }
+      ],
+      "calls": [
+        "check-blocker",
+        "pr-merge-state-exempt",
+        "declared-review-coverage",
+        "optional-review-detail"
+      ],
+      "set": "rules"
+    },
+    {
+      "name": "pr-merge-state-exempt",
+      "params": ["?t"],
+      "alternatives": [
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "merge-state",
+              "value": {
+                "lit": "DIRTY"
+              },
+              "phrase": "merge state",
+              "many": true
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "mergeable",
+              "value": {
+                "lit": "CONFLICTING"
+              },
+              "phrase": "mergeability",
+              "many": false
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 128
+          }
+        },
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "merge-state",
+              "value": {
+                "lit": "DRAFT"
+              },
+              "phrase": "merge state",
+              "many": true
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "draft",
+              "value": {
+                "lit": true
+              },
+              "phrase": "draft flag",
+              "many": false
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 129
+          }
+        },
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "merge-state",
+              "value": {
+                "lit": "UNKNOWN"
+              },
+              "phrase": "merge state",
+              "many": true
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "mergeable",
+              "value": {
+                "lit": "UNKNOWN"
+              },
+              "phrase": "mergeability",
+              "many": false
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 130
+          }
+        }
+      ],
+      "calls": [],
+      "set": "rules"
+    },
+    {
+      "name": "has-pr-specific-blocker",
+      "params": ["?t"],
+      "alternatives": [
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
+              "type": "call",
+              "predicate": "pr-specific-blocker",
+              "args": [
+                {
+                  "var": "?t"
+                },
+                {
+                  "var": "?c"
+                },
+                {
+                  "var": "?r"
+                }
+              ]
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 144
+          }
+        }
+      ],
+      "calls": ["pr-specific-blocker"],
+      "set": "rules"
+    },
+    {
+      "name": "pr-blocker",
+      "params": ["?t", "?code", "?reason"],
+      "alternatives": [
+        {
+          "params": ["?t", "?code", "?reason"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "closed-label",
+              "value": {
+                "var": "?l"
+              },
+              "phrase": "closed or merged pull request state",
+              "many": false
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "fact",
+                  "scope": "entity",
+                  "entity": {
+                    "var": "?t"
+                  },
+                  "attribute": "state",
+                  "value": {
+                    "lit": "OPEN"
+                  },
+                  "phrase": "state",
+                  "many": false
+                }
+              ]
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "PR-CLOSED"
+                }
+              ],
+              "result": "?code"
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "pull request is "
+                },
+                {
+                  "var": "?l"
+                }
+              ],
+              "result": "?reason"
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 145
+          }
+        },
+        {
+          "params": ["?t", "?code", "?reason"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "state",
+              "value": {
+                "lit": "OPEN"
+              },
+              "phrase": "state",
+              "many": false
+            },
+            {
+              "type": "call",
+              "predicate": "pr-specific-blocker",
+              "args": [
+                {
+                  "var": "?t"
+                },
+                {
+                  "var": "?code"
+                },
+                {
+                  "var": "?reason"
+                }
+              ]
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 146
+          }
+        },
+        {
+          "params": ["?t", "?code", "?reason"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "state",
+              "value": {
+                "lit": "OPEN"
+              },
+              "phrase": "state",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "merge-state",
+              "value": {
+                "lit": "BLOCKED"
+              },
+              "phrase": "merge state",
+              "many": true
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "call",
+                  "predicate": "has-pr-specific-blocker",
+                  "args": [
+                    {
+                      "var": "?t"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "PR-BLOCKED"
+                }
+              ],
+              "result": "?code"
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "GitHub reports merging is blocked (branch protection); inspect the rules"
+                }
+              ],
+              "result": "?reason"
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 147
+          }
+        }
+      ],
+      "calls": ["pr-specific-blocker", "has-pr-specific-blocker"],
+      "set": "rules"
+    },
+    {
       "name": "selected",
       "params": ["?t", "?r"],
       "alternatives": [
@@ -11250,6 +13175,30 @@
       "ruleSet": "rules"
     },
     {
+      "name": "pr-blockers",
+      "find": ["?t", "?code", "?reason"],
+      "inputs": ["$", "%"],
+      "clauses": [
+        {
+          "type": "call",
+          "predicate": "pr-blocker",
+          "args": [
+            {
+              "var": "?t"
+            },
+            {
+              "var": "?code"
+            },
+            {
+              "var": "?reason"
+            }
+          ]
+        }
+      ],
+      "calls": ["pr-blocker"],
+      "ruleSet": "rules"
+    },
+    {
       "name": "q1",
       "find": ["?t", "?d"],
       "inputs": ["$", "%"],
@@ -11895,15 +13844,15 @@
   ],
   "coverage": {
     "decisions": 38,
-    "predicates": 75,
-    "alternatives": 126,
+    "predicates": 81,
+    "alternatives": 158,
     "denials": 9,
-    "queries": 17,
+    "queries": 18,
     "keyQueries": 4,
     "evidence": 39,
     "overrides": 4,
     "constants": 14,
-    "attributes": 77,
-    "clauses": 697
+    "attributes": 94,
+    "clauses": 832
   }
 }
