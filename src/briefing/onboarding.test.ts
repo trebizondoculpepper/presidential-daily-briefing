@@ -58,7 +58,9 @@ describe("onboarding document (#351)", () => {
     expect(lines[2]).toContain("pdb onboard --repo owner/name");
     expect(lines[2]).toContain("`pdb rules`");
     expect(doc.prompt).toContain("At the start of every session, read the current rules");
-    expect(doc.prompt).toContain("pdb setup identity --role implementer");
+    expect(doc.prompt).toContain("pdb --repo owner/name --role implementer");
+    expect(doc.prompt).not.toContain("--agent NAME");
+    expect(doc.prompt).toContain("--entry KEY");
     expect(doc.persistentSection.startsWith(COORDINATION_START)).toBe(true);
     expect(doc.persistentSection.endsWith(COORDINATION_END)).toBe(true);
     expect(doc.persistentSection).toContain(
@@ -79,7 +81,10 @@ describe("onboarding document (#351)", () => {
       ...doc.examples.map((e) => e.command),
     ];
     const setups = all.flatMap((t) => t.match(/pdb setup identity[^`\n]*/g) ?? []);
-    expect(setups.length).toBeGreaterThanOrEqual(4);
+    expect(setups.length).toBeGreaterThanOrEqual(1);
+    expect(doc.examples.find((e) => e.purpose.startsWith("First use"))?.command).toBe(
+      "pdb --repo owner/B --role implementer",
+    );
     for (const command of setups) expect(command).toContain("--repo owner/B");
   });
 

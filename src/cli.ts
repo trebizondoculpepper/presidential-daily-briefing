@@ -1,4 +1,14 @@
 #!/usr/bin/env node
+import {
+  CommandIdentity,
+  commandActor,
+  commandViewer,
+  identitySelection,
+  identitySelectionOptions,
+  IdentityPreparationRequired,
+  type PrepareCommandIdentity,
+} from "./config/commandidentity.js";
+import { prepareEffectiveIdentity, resolveEffectiveHuman } from "./config/effectiveidentity.js";
 import { runRebrief } from "./rebrief/cli.js";
 import type { CliRuntime as RebriefRuntime } from "./rebrief/cli.js";
 import { resolveEngineSetting } from "./config/engine-setting.js";
@@ -189,7 +199,7 @@ import type { IssueCreateRuntime } from "./workflow/issuecreate.js";
 import type { ServeRuntime } from "./serve.js";
 
 /** Parsed `deps` arguments: help, a migration plan, a native change, or a read. */
-export type DepsArguments =
+export type DepsArguments = (
   | { help: true; repo?: undefined }
   | { help?: undefined; migrate: "plan"; file: string; repo?: string; json?: boolean }
   | {
@@ -225,10 +235,13 @@ export type DepsArguments =
       agent?: string;
       /** The viewer's platform for platform-restricted pickup, as the briefing's --platform. */
       platform?: string;
-    };
+    }
+) & { entry?: string; harness?: string; role?: string };
 
 /** Injected services for `main`; tests replace the GitHub-facing ones. */
 export interface Runtime {
+  /** Normal CLI identity preparation; tests inject every local/session/human boundary. */
+  prepareIdentity?: PrepareCommandIdentity;
   collect: typeof collect;
   /** Routine shortlist collection (#368); absent: the routine briefing reads the full snapshot. */
   collectShortlist?: typeof collectShortlist;
@@ -283,6 +296,9 @@ export const help = `Usage: pdb [options]
        (from a source checkout: npm run pdb -- [options])
 Presidential Daily Briefing: evidence-linked actions for coding agents. Requires authenticated gh and Node 26+.
 Next-action default: Datalog, implementer view; --role designer selects design work.
+Normal CLI first use: pass --role implementer|designer to safely initialize a missing local
+identity and continue. Configured sessions reuse it. --entry/--harness select local identity;
+explicit reads and dry-runs do not initialize. JSON adds effectiveIdentity; diagnostics use stderr.
 Rollback: pdb config set briefing.engine typescript.
 ${crashDisclosure()}
   briefing [--last 24h | --since ISO | --checkpoint PATH]  Read-only repository catch-up:
@@ -302,11 +318,11 @@ ${crashDisclosure()}
                         codex-or-coderabbit / codex-or-copilot either provider's current-head acceptance
                         covers review; a finding from either still blocks
   pr N --history        Why does PR N keep failing review? Rounds, findings, recurring files
-  claim N --agent NAME [--branch B] [--platform P] [--rework] [--dry-run]  Claim an eligible ticket;
+  claim N [--agent NAME] [--branch B] [--platform P] [--rework] [--dry-run]  Claim an eligible ticket;
                         --rework reclaims your own awaiting-review issue to fix review feedback;
                         with delivery records only the ticket-responsible agent may, and the
                         claim is followed by a membership-open record (finish with submit)
-  release N --agent NAME --as ready|incomplete|parked|done [--note TEXT] [--pr URL|--change URL]
+  release N [--agent NAME] --as ready|incomplete|parked|done [--note TEXT] [--pr URL|--change URL]
                         [--dry-run]  Hand over your claim in one operation: record the outcome,
                         release agent:NAME and set readiness (ready; incomplete=parked, still
                         pickable; done+open PR -> status:awaiting-review; done without one ->
@@ -314,21 +330,21 @@ ${crashDisclosure()}
   deliverables N attach|detach|retarget|handoff|membership|attest|reassign|reset|void
                         --agent NAME ... [--dry-run]  Record required deliverables and
                         responsibility on the issue (deliverables --help)
-  submit N --agent NAME [--pr URL...] [--target owner/name:branch] [--membership open] [--dry-run]
+  submit N [--agent NAME] [--pr URL...] [--target owner/name:branch] [--membership open] [--dry-run]
                         Hand over your PRs: record them, release your claim and set
                         status:awaiting-review; you stay responsible for follow-up (submit --help)
-  complete N --agent NAME [--dry-run]  Verify delivery from fresh evidence (every required PR
+  complete N [--agent NAME] [--dry-run]  Verify delivery from fresh evidence (every required PR
                         merged into its live target) and only then record completion and close
                         the issue as completed; never reopens or merges (complete --help)
-  claim wait N --agent NAME (--question URL | --blocked-by owner/name#M) --why TEXT [--dry-run]
+  claim wait N [--agent NAME] (--question URL | --blocked-by owner/name#M) --why TEXT [--dry-run]
                         Keep your claim while it waits on a question or an open native blocker;
                         while every other claim of yours verifiably waits, you may claim one more
-  claim resume N --agent NAME [--dry-run]  Make a waiting claim active again once its blocker
+  claim resume N [--agent NAME] [--dry-run]  Make a waiting claim active again once its blocker
                         cleared (never automatic; refused while another claim is active)
-  needs-human N --agent NAME --designer NAME --why TEXT --question TEXT... [--release] [--dry-run]
+  needs-human N [--agent NAME] --designer NAME --why TEXT --question TEXT... [--release] [--dry-run]
                         Record questions for a designer and mark the ticket decision-needed;
                         keeps your claim waiting on the question (--release relinquishes it)
-  question resolve|withdraw N --agent NAME --question URL --why TEXT [--dry-run]
+  question resolve|withdraw N [--agent NAME] --question URL --why TEXT [--dry-run]
                         Record that a needs-human question was answered or withdrawn (explicit,
                         with a reason; never inferred from replies, labels or closure)
   quotas [--json] [--refresh | --offline]  Read-only GitHub API allowance per resource for
@@ -383,7 +399,11 @@ ${crashDisclosure()}
                         of this repository and at most 30 minutes old (exit 2; nothing written)
   --offline             Read explicit cache; no GitHub queries/checkpoint advancement
   --full                Expanded version-1 report
-  --agent NAME          Your identity: attention:NAME first, then agent:NAME work
+  --agent NAME          Override the effective agent for this call: attention:NAME first,
+                        then agent:NAME work; human views use it as their existing routing filter
+  --entry KEY           Select a local logical identity entry explicitly; returning sessions
+                        reuse the saved binding without a name lookup or --agent echo
+  --harness NAME        Select a supported local harness; ambiguity still needs --entry KEY
   --role NAME           Shape the compact briefing for implementer (attention, PR follow-up,
                         own work, pickup, unblock candidates, stale claims) or designer
                         (attention, decisions, documentation, design review, new design).
@@ -505,6 +525,7 @@ export function ticketArgumentsFor(args: string[]) {
       repo: { type: "string" },
       json: { type: "boolean" },
       agent: { type: "string" },
+      ...identitySelectionOptions,
       platform: { type: "string" },
       "limit-prs": { type: "string" },
       "max-chars": { type: "string" },
@@ -547,6 +568,7 @@ export function depsArgumentsFor(args: string[]): DepsArguments {
       tree: { type: "boolean" },
       "max-nodes": { type: "string" },
       agent: { type: "string" },
+      ...identitySelectionOptions,
       platform: { type: "string" },
       top: { type: "boolean" },
       limit: { type: "string" },
@@ -588,7 +610,13 @@ export function depsArgumentsFor(args: string[]): DepsArguments {
     if (positionals.length !== 1 || !values.plan || values.on || values.note || values.tree)
       throw new Error(usage);
     if (values["dry-run"]) throw new Error(`--plan never changes GitHub. ${usage}`);
-    return { migrate: "plan", file: values.plan, repo: values.repo, json: values.json };
+    return {
+      ...identitySelection(values),
+      migrate: "plan",
+      file: values.plan,
+      repo: values.repo,
+      json: values.json,
+    };
   }
   if (values.plan) throw new Error("--plan applies only to deps migrate.");
   if (positionals[0] === "add" || positionals[0] === "remove") {
@@ -611,6 +639,7 @@ export function depsArgumentsFor(args: string[]): DepsArguments {
       on,
       note: values.note.trim(),
       dryRun: !!values["dry-run"],
+      ...identitySelection(values),
       repo: values.repo,
       json: values.json,
     };
@@ -625,6 +654,7 @@ export function depsArgumentsFor(args: string[]): DepsArguments {
     return {
       top: true,
       limit,
+      ...identitySelection(values),
       repo: values.repo,
       json: values.json,
       ...(values.agent ? { agent: values.agent } : {}),
@@ -646,6 +676,7 @@ export function depsArgumentsFor(args: string[]): DepsArguments {
       throw new Error(`--max-nodes must be 1–${treeNodeMaximum}.`);
   }
   return {
+    ...identitySelection(values),
     repo: values.repo,
     json: values.json,
     tree: values.tree,
@@ -662,7 +693,7 @@ const plannedExit = (changes: { status: string }[]): number => {
   return !applying ? (refused ? 1 : 0) : refused ? 2 : 0;
 };
 const releaseUsage =
-  "Usage: pdb release N --agent NAME --as ready|incomplete|parked|done [--note TEXT] [--pr URL|--change URL] [--dry-run] [--json]";
+  "Usage: pdb release N [--agent NAME] --as ready|incomplete|parked|done [--note TEXT] [--pr URL|--change URL] [--dry-run] [--json]";
 export const releaseHelp = `${releaseUsage}
 Hand over your active claim on issue N in one operation (doc/design/workflow.md, #62).
 Re-reads live state, then: removes agent:NAME (only yours; other owners are kept), sets one
@@ -687,7 +718,7 @@ Exit: 0 done and verified; 2 partly done, conflict, or unverified (see Retry); 1
  * Arguments for `claim`, `release` and `needs-human` (doc/design/workflow.md).
  */
 export const questionUsage =
-  "Usage: pdb question resolve|withdraw N --agent NAME --question URL --why TEXT [--dry-run] [--json] [--repo owner/name]";
+  "Usage: pdb question resolve|withdraw N [--agent NAME] --question URL --why TEXT [--dry-run] [--json] [--repo owner/name]";
 
 /** Arguments of `question resolve|withdraw` (#412). */
 export function questionArgumentsFor(args: string[]) {
@@ -699,6 +730,7 @@ export function questionArgumentsFor(args: string[]) {
       json: { type: "boolean" },
       "dry-run": { type: "boolean" },
       agent: { type: "string" },
+      ...identitySelectionOptions,
       question: { type: "string" },
       why: { type: "string" },
     },
@@ -708,8 +740,7 @@ export function questionArgumentsFor(args: string[]) {
     positionals.length !== 2 ||
     (op !== "resolve" && op !== "withdraw") ||
     !/^[1-9]\d*$/.test(issue ?? "") ||
-    !values.agent ||
-    !/^[A-Za-z0-9][\w.-]*$/.test(values.agent) ||
+    (values.agent !== undefined && !/^[A-Za-z0-9][\w.-]*$/.test(values.agent)) ||
     !values.question ||
     !values.why?.trim()
   )
@@ -720,6 +751,7 @@ export function questionArgumentsFor(args: string[]) {
     op: op as "resolve" | "withdraw",
     number: Number(issue),
     agent: values.agent,
+    ...identitySelection(values),
     question: values.question,
     why: values.why.trim(),
     repo: values.repo,
@@ -737,6 +769,7 @@ export function workflowArgumentsFor(command: "claim" | "needs-human" | "release
       json: { type: "boolean" },
       "dry-run": { type: "boolean" },
       agent: { type: "string" },
+      ...identitySelectionOptions,
       branch: { type: "string" },
       platform: { type: "string" },
       rework: { type: "boolean" },
@@ -752,19 +785,20 @@ export function workflowArgumentsFor(command: "claim" | "needs-human" | "release
   });
   const usage =
     command === "claim"
-      ? "Usage: pdb claim N --agent NAME [--branch BRANCH] [--platform P] [--rework] [--dry-run] [--json]"
+      ? "Usage: pdb claim N [--agent NAME] [--branch BRANCH] [--platform P] [--rework] [--dry-run] [--json]"
       : command === "release"
         ? releaseUsage
-        : "Usage: pdb needs-human N --agent NAME --designer NAME --why TEXT --question TEXT [--question TEXT...] [--release] [--dry-run] [--json]";
+        : "Usage: pdb needs-human N [--agent NAME] --designer NAME --why TEXT --question TEXT [--question TEXT...] [--release] [--dry-run] [--json]";
   const number =
     positionals.length === 1 && /^[1-9]\d*$/.test(positionals[0]) ? Number(positionals[0]) : null;
   const name = /^[A-Za-z0-9][\w.-]*$/;
-  if (!number || !values.agent || !name.test(values.agent)) throw new Error(usage);
+  if (!number || (values.agent !== undefined && !name.test(values.agent))) throw new Error(usage);
   if (values.repo && !/^[\w.-]+\/[\w.-]+$/.test(values.repo))
     throw new Error("--repo must be owner/name.");
   const common = {
     number,
     agent: values.agent,
+    ...identitySelection(values),
     repo: values.repo,
     json: values.json,
     dryRun: !!values["dry-run"],
@@ -819,7 +853,7 @@ export function workflowArgumentsFor(command: "claim" | "needs-human" | "release
 }
 
 export const claimWaitUsage =
-  "Usage: pdb claim wait N --agent NAME (--question URL | --blocked-by owner/name#M) --why TEXT [--dry-run] [--json] [--repo owner/name]\n       pdb claim resume N --agent NAME [--dry-run] [--json] [--repo owner/name]";
+  "Usage: pdb claim wait N [--agent NAME] (--question URL | --blocked-by owner/name#M) --why TEXT [--dry-run] [--json] [--repo owner/name]\n       pdb claim resume N [--agent NAME] [--dry-run] [--json] [--repo owner/name]";
 
 /** Arguments of `claim wait` and `claim resume` (#412). */
 export function claimActivityArgumentsFor(op: "wait" | "resume", args: string[]) {
@@ -831,6 +865,7 @@ export function claimActivityArgumentsFor(op: "wait" | "resume", args: string[])
       json: { type: "boolean" },
       "dry-run": { type: "boolean" },
       agent: { type: "string" },
+      ...identitySelectionOptions,
       question: { type: "string" },
       "blocked-by": { type: "string" },
       why: { type: "string" },
@@ -839,8 +874,7 @@ export function claimActivityArgumentsFor(op: "wait" | "resume", args: string[])
   if (
     positionals.length !== 1 ||
     !/^[1-9]\d*$/.test(positionals[0]!) ||
-    !values.agent ||
-    !/^[A-Za-z0-9][\w.-]*$/.test(values.agent)
+    (values.agent !== undefined && !/^[A-Za-z0-9][\w.-]*$/.test(values.agent))
   )
     throw new Error(claimWaitUsage);
   if (values.repo && !/^[\w.-]+\/[\w.-]+$/.test(values.repo))
@@ -849,6 +883,7 @@ export function claimActivityArgumentsFor(op: "wait" | "resume", args: string[])
     op,
     number: Number(positionals[0]),
     agent: values.agent,
+    ...identitySelection(values),
     repo: values.repo,
     json: values.json,
     dryRun: !!values["dry-run"],
@@ -874,6 +909,8 @@ export function argumentsFor(args: string[]) {
       json: { type: "boolean" },
       full: { type: "boolean" },
       agent: { type: "string" },
+      entry: { type: "string" },
+      harness: { type: "string" },
       "max-chars": { type: "string" },
       issue: { type: "string" },
       since: { type: "string" },
@@ -1187,6 +1224,18 @@ export async function main(
   runtime: Runtime = {
     collect,
     collectShortlist,
+    ...(!process.env.PDB_NO_EFFECTIVE_IDENTITY
+      ? {
+          prepareIdentity: (options) =>
+            prepareEffectiveIdentity(options, {
+              env: process.env,
+              human: () =>
+                resolveEffectiveHuman(humanContextEnabled() ? ghAuthContext : undefined, {
+                  offline: options.offline,
+                }),
+            }),
+        }
+      : {}),
     ...(humanContextEnabled()
       ? { briefingHuman: (offline: boolean) => resolveHumanContext(ghAuthContext, { offline }) }
       : {}),
@@ -1262,7 +1311,27 @@ export async function main(
     ? showFirstUseHint(rest, runtime).catch(() => false)
     : Promise.resolve(false);
   try {
-    return await run(rest, output, runtime);
+    const identity = runtime.prepareIdentity
+      ? new CommandIdentity(
+          runtime.prepareIdentity,
+          output,
+          runtime.stderr ??
+            ((text) => {
+              process.stderr.write(text);
+            }),
+        )
+      : undefined;
+    try {
+      return await run(
+        rest,
+        identity ? (text) => identity.output(text) : output,
+        runtime,
+        identity,
+      );
+    } catch (error) {
+      if (error instanceof IdentityPreparationRequired && identity) return identity.refusal();
+      throw error;
+    }
   } finally {
     if (await hintPending)
       (runtime.stderr ?? ((t) => process.stderr.write(t)))(`${firstUseHintText}\n`);
@@ -1428,7 +1497,12 @@ async function runRulesInit(
 }
 
 /** `pdb issue create` (#199, doc/design/issue-creation.md). */
-async function runIssue(args: string[], output: Output, runtime: Runtime): Promise<number> {
+async function runIssue(
+  args: string[],
+  output: Output,
+  runtime: Runtime,
+  identity?: CommandIdentity,
+): Promise<number> {
   if (args[0] !== "create") throw new Error(issueCreateUsage);
   const rest = args.slice(1);
   if (rest.length === 0 || rest.includes("--help") || rest.includes("-h")) {
@@ -1449,6 +1523,7 @@ async function runIssue(args: string[], output: Output, runtime: Runtime): Promi
         assignee: { type: "string", multiple: true },
         repo: { type: "string" },
         agent: { type: "string" },
+        ...identitySelectionOptions,
         "dry-run": { type: "boolean" },
         json: { type: "boolean" },
       },
@@ -1457,6 +1532,12 @@ async function runIssue(args: string[], output: Output, runtime: Runtime): Promi
     throw new Error(issueCreateUsage);
   }
   if (values.title === undefined) throw new Error(`--title is required. ${issueCreateUsage}`);
+  if (identity)
+    values.agent = await commandActor(
+      { ...values, dryRun: !!values["dry-run"] },
+      identity,
+      issueCreateUsage,
+    );
   const stderr = runtime.stderr ?? ((text: string) => process.stderr.write(text));
   const rt: IssueCreateRuntime = {
     rest: runtime.rest ?? ghRest,
@@ -1503,7 +1584,11 @@ async function runIssue(args: string[], output: Output, runtime: Runtime): Promi
       }
       return { verified: true, repository: target.repository };
     },
-    ...(runtime.briefingHuman ? { employingHuman: () => runtime.briefingHuman!(false) } : {}),
+    ...(identity?.result
+      ? { employingHuman: async () => identity.result!.human }
+      : runtime.briefingHuman
+        ? { employingHuman: () => runtime.briefingHuman!(false) }
+        : {}),
     ...runtime.issueCreate,
   };
   let result;
@@ -1531,7 +1616,12 @@ async function runIssue(args: string[], output: Output, runtime: Runtime): Promi
 }
 
 /** The command itself; `main` adds the version check around it. */
-async function run(args: string[], output: Output, runtime: Runtime): Promise<number> {
+async function run(
+  args: string[],
+  output: Output,
+  runtime: Runtime,
+  identity?: CommandIdentity,
+): Promise<number> {
   if (args[0] === "rules") return runRules(args.slice(1), output, runtime);
   if (args[0] === "process") {
     const { values } = parseArgs({ args: args.slice(1), options: { json: { type: "boolean" } } });
@@ -1541,6 +1631,12 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
   if (args[0] === "briefing")
     return runBriefing(args.slice(1), output, {
       ...runtime,
+      ...(identity
+        ? {
+            prepareViewer: (values: import("./briefing/catchupcli.js").BriefingArguments) =>
+              commandViewer(values, identity),
+          }
+        : {}),
       files: runtime.briefingFiles ?? {
         atomicJson,
         cachedSnapshot,
@@ -1562,7 +1658,7 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
       },
       ...runtime.rebrief,
     });
-  if (args[0] === "issue") return runIssue(args.slice(1), output, runtime);
+  if (args[0] === "issue") return runIssue(args.slice(1), output, runtime, identity);
   if (args[0] === "quotas")
     return runQuotas(args.slice(1), output, {
       rest: runtime.rest ?? ghRest,
@@ -1609,6 +1705,8 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
       args: args.slice(1),
       options: {
         repo: { type: "string" },
+        agent: { type: "string" },
+        ...identitySelectionOptions,
         json: { type: "boolean" },
         "stale-hours": { type: "string" },
         limit: { type: "string" },
@@ -1634,6 +1732,7 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
           ? "--since reads closed issues live and cannot be used with --offline."
           : "--since must be an ISO 8601 timestamp.",
       );
+    await commandViewer(values, identity);
     const snapshot = values.offline
       ? await cachedSnapshot(values.cache ?? "", values.repo)
       : await runtime.collect(values.repo ?? (await runtime.currentRepository()), {});
@@ -1695,9 +1794,16 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
       await output(submit ? submitHelp : deliverablesHelp);
       return 0;
     }
-    const { request, repo, json, dryRun } = submit
-      ? submitArguments(args.slice(1))
-      : deliverablesArguments(args.slice(1));
+    const parsed = submit ? submitArguments(args.slice(1)) : deliverablesArguments(args.slice(1));
+    const { repo, json, dryRun } = parsed;
+    const request = {
+      ...parsed.request,
+      agent: await commandActor(
+        { ...parsed, agent: parsed.request.agent },
+        identity,
+        submit ? submitHelp : deliverablesHelp,
+      ),
+    };
     const repository = repo ?? (await runtime.currentRepository());
     // Per run: a permission learned now is never reused by a later invocation.
     const permission = permissionLookup(repository, runtime.rest ?? ghRest);
@@ -1725,7 +1831,12 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
       await output(completeHelp);
       return 0;
     }
-    const { request, repo, json, dryRun } = completeArguments(args.slice(1));
+    const parsed = completeArguments(args.slice(1));
+    const { repo, json, dryRun } = parsed;
+    const request = {
+      ...parsed.request,
+      agent: await commandActor({ ...parsed, agent: parsed.request.agent }, identity, completeHelp),
+    };
     const repository = repo ?? (await runtime.currentRepository());
     // Per run: a permission learned now is never reused by a later invocation.
     const permission = permissionLookup(repository, runtime.rest ?? ghRest);
@@ -1753,7 +1864,8 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
     return 0;
   }
   if (args[0] === "question") {
-    const values = questionArgumentsFor(args.slice(1));
+    const parsed = questionArgumentsFor(args.slice(1));
+    const values = { ...parsed, agent: await commandActor(parsed, identity, questionUsage) };
     const repository = values.repo ?? (await runtime.currentRepository());
     const query = runtime.query ?? ghQuery;
     const permission = permissionLookup(repository, runtime.rest ?? ghRest);
@@ -1771,7 +1883,8 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
     return result.exitCode;
   }
   if (args[0] === "claim" && (args[1] === "wait" || args[1] === "resume")) {
-    const values = claimActivityArgumentsFor(args[1], args.slice(2));
+    const parsed = claimActivityArgumentsFor(args[1], args.slice(2));
+    const values = { ...parsed, agent: await commandActor(parsed, identity, claimWaitUsage) };
     const repository = values.repo ?? (await runtime.currentRepository());
     const query = runtime.query ?? ghQuery;
     const permission = permissionLookup(repository, runtime.rest ?? ghRest);
@@ -1810,7 +1923,15 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
     return result.exitCode;
   }
   if (args[0] === "claim" || args[0] === "needs-human" || args[0] === "release") {
-    const values = workflowArgumentsFor(args[0], args.slice(1));
+    const parsed = workflowArgumentsFor(args[0], args.slice(1));
+    const values = {
+      ...parsed,
+      agent: await commandActor(
+        parsed,
+        identity,
+        "Use an effective identity or pass --agent NAME for this workflow command.",
+      ),
+    };
     const repository = values.repo ?? (await runtime.currentRepository());
     const query = runtime.query ?? ghQuery;
     // Per run: a permission learned now is never reused by a later invocation.
@@ -1956,6 +2077,8 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
       args: args.slice(1),
       options: {
         repo: { type: "string" },
+        agent: { type: "string" },
+        ...identitySelectionOptions,
         json: { type: "boolean" },
         "stale-hours": { type: "string" },
         cache: { type: "string" },
@@ -1969,6 +2092,7 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
     if (!Number.isFinite(staleHours) || staleHours <= 0)
       throw new Error("--stale-hours must be a positive number.");
     if (values.offline && !values.cache) throw new Error("--offline requires --cache PATH.");
+    await commandViewer(values, identity);
     const snapshot = values.offline
       ? await cachedSnapshot(values.cache ?? "", values.repo)
       : await runtime.collect(values.repo ?? (await runtime.currentRepository()), {});
@@ -1990,6 +2114,7 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
       return 0;
     }
     const { values, positionals, limitPrs, maxChars } = parsed;
+    values.agent = await commandViewer(values, identity);
     const number = Number(positionals[0]);
     const repository = values.repo ?? (await runtime.currentRepository());
     let read;
@@ -2030,6 +2155,8 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
       allowPositionals: true,
       options: {
         repo: { type: "string" },
+        agent: { type: "string" },
+        ...identitySelectionOptions,
         json: { type: "boolean" },
         "stale-hours": { type: "string" },
         cache: { type: "string" },
@@ -2045,6 +2172,7 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
     if (!Number.isFinite(staleHours) || staleHours <= 0)
       throw new Error("--stale-hours must be a positive number.");
     if (values.offline && !values.cache) throw new Error("--offline requires --cache PATH.");
+    await commandViewer(values, identity);
     const number = Number(positionals[0]);
     if (!values.offline && !values.cache) {
       // issue-detail-v1 (#367): the ticket and its linked open PRs only, never the repository.
@@ -2110,6 +2238,12 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
       // #245/#269: provenance authority for both metrics, the #212 rule over a per-run permission cache.
       trust: (repository) => markerTrust(permissionLookup(repository, runtime.rest ?? ghRest)),
       ...runtime.estimate,
+      ...(identity
+        ? {
+            prepareActor: (values: import("./config/commandidentity.js").CommandActorOptions) =>
+              commandActor(values, identity, estimateUsage),
+          }
+        : {}),
     });
   }
   if (args[0] === "pr") {
@@ -2118,6 +2252,8 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
       allowPositionals: true,
       options: {
         repo: { type: "string" },
+        agent: { type: "string" },
+        ...identitySelectionOptions,
         json: { type: "boolean" },
         history: { type: "boolean" },
       },
@@ -2126,6 +2262,7 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
       throw new Error("Usage: pdb pr N [--history] [--json] [--repo owner/name]");
     if (values.repo && !/^[\w.-]+\/[\w.-]+$/.test(values.repo))
       throw new Error("--repo must be owner/name.");
+    await commandViewer(values, identity);
     const repository = values.repo ?? (await runtime.currentRepository());
     const query = runtime.query ?? ghQuery;
     const { report, text } = values.history
@@ -2146,6 +2283,11 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
       await output(depsHelp);
       return 0;
     }
+    if ("action" in values) {
+      if (identity) await commandActor(values, identity, depsHelp);
+    } else if ("migrate" in values) {
+      await commandViewer(values, identity, true);
+    } else values.agent = await commandViewer(values, identity);
     const repository = values.repo ?? (await runtime.currentRepository());
     if (!/^[\w.-]+\/[\w.-]+$/.test(repository)) throw new Error("--repo must be owner/name.");
     if ("migrate" in values) {
@@ -2216,8 +2358,30 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
     await output(help);
     return 0;
   }
-  // #664: the employing human, once per run; offline reads use only the last-known record.
-  const human = runtime.briefingHuman ? await runtime.briefingHuman(!!options.offline) : undefined;
+  const effective = identity
+    ? await identity.select(
+        {
+          repository: options.repo,
+          agent: options.role === "human" ? undefined : options.agent,
+          entry: options.entry,
+          harness: options.harness,
+          role: options.role === "human" ? undefined : options.role,
+          intent: options.role === "human" || options.offline ? "readonly" : "normal",
+          offline: !!options.offline,
+          authenticationRequired: false,
+        },
+        { json: !!options.json, allowUnresolved: options.role === "human" || !!options.offline },
+      )
+    : undefined;
+  // A human view's agent flag is its existing routing filter, never an execution-agent override.
+  if (effective && options.role !== "human") {
+    options.agent = effective.agent ?? undefined;
+    options.role = effective.role ?? options.role;
+  }
+  // Resolve the employing human once; it stays distinct from the human-attention payload.
+  const human =
+    effective?.human ??
+    (runtime.briefingHuman ? await runtime.briefingHuman(!!options.offline) : undefined);
   /**
    * The briefing presentation for `repository`, resolved once: configuration, label filter and
    * one per-run permission cache shared by the shortlist's ranking passes and the final report.
@@ -2394,6 +2558,7 @@ async function run(args: string[], output: Output, runtime: Runtime): Promise<nu
           [...rest, "--repo", d.destination.repository, "--issue", String(d.destination.number)],
           followed,
           runtime,
+          identity,
         );
       }
       const report = { schemaVersion: 1, kind: "issue-unavailable", ...d };

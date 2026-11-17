@@ -69,6 +69,7 @@ export function onboardingDocument(input: OnboardingInput): OnboardingDocument {
   const role = input.role ?? "implementer|designer";
   // The selected repository is always passed, so setup refuses a checkout of another project.
   const setupCommand = (r: string) => `pdb setup identity --role ${r}${repoFlag}`;
+  const firstCommand = (r: string) => `pdb${repoFlag} --role ${r}`;
   const server = input.server ?? null;
   const url = server && repo ? rulesUrl(server, repo) : null;
   const rulesRef = `\`pdb rules\`${url ? ` (or ${url})` : ""}`;
@@ -78,10 +79,10 @@ export function onboardingDocument(input: OnboardingInput): OnboardingDocument {
   const examples = [
     { purpose: "Read the current rules", command: "pdb rules" },
     {
-      purpose: "Get your own persistent identity once",
-      command: setupCommand(role),
+      purpose: "First use: prepare your identity and see next actions",
+      command: firstCommand(role),
     },
-    { purpose: "See what to do next", command: `pdb${repoFlag} --role ${role} --agent NAME` },
+    { purpose: "See what to do next", command: `pdb${repoFlag}` },
     { purpose: "Use the MCP server instead of the CLI", command: `pdb-mcp${repoFlag}` },
     { purpose: "Help", command: "pdb --help" },
     { purpose: "Show this onboarding again", command: `pdb onboard${repoFlag}` },
@@ -91,8 +92,8 @@ export function onboardingDocument(input: OnboardingInput): OnboardingDocument {
     `You are working on ${where}, which coordinates work with Presidential Daily Briefing (pdb).`,
     `Before any project work:`,
     `1. Read the onboarding and the current rules: ${onboardingRef} and ${rulesRef}.`,
-    `2. Get your own persistent name once: \`${setupCommand(role)}\`. Never reuse another agent's name.`,
-    `3. Use the CLI (\`pdb${repoFlag} --agent NAME\`) or the MCP server (\`pdb-mcp${repoFlag}\`) for status and priorities; help is \`pdb --help\`.`,
+    `2. Run \`${firstCommand(role)}\`. PDB reuses your identity or safely creates and saves one, reports the result, then continues. Never reuse another agent's name.`,
+    `3. Continue with the CLI (\`pdb${repoFlag}\`) or the MCP server (\`pdb-mcp${repoFlag}\`) for status and priorities; help is \`pdb --help\`. No name lookup or manual echo is needed. If identity selection is ambiguous, select your logical entry once with --entry KEY.`,
     `4. If AGENTS.md has no pdb coordination section, add it: \`pdb onboard${repoFlag} --install\`.`,
     `At the start of every session, read the current rules again before choosing work.`,
   ].join("\n");
@@ -103,8 +104,8 @@ export function onboardingDocument(input: OnboardingInput): OnboardingDocument {
     `${repo ? `This project (${repo})` : "This project"} uses pdb for status, priorities, claims and handoffs.`,
     "",
     `- At the start of every session, read the current rules: ${rulesRef}.`,
-    `- Get your own persistent identity once: \`${setupCommand("implementer|designer")}\`. Never reuse another agent's name.`,
-    `- See what to do next: \`pdb${repoFlag} --agent NAME\`. Help: \`pdb --help\`; onboarding: ${onboardingRef}.`,
+    `- First use: \`${firstCommand("implementer|designer")}\`. PDB reuses or safely creates your identity, saves it and continues. If selection is ambiguous, select your logical entry once with --entry KEY. Never reuse another agent's name.`,
+    `- See what to do next: \`pdb${repoFlag}\`. Help: \`pdb --help\`; onboarding: ${onboardingRef}.`,
     `- MCP clients: \`pdb-mcp${repoFlag}\`${server ? `; web: ${server}` : ""}.`,
     "- Prefer pdb over raw gh for status and priorities; use gh only for operations pdb does not support.",
     COORDINATION_END,
@@ -118,8 +119,9 @@ export function onboardingDocument(input: OnboardingInput): OnboardingDocument {
     rules: { command: "pdb rules", url },
     onboarding: { command: `pdb onboard${repoFlag}`, url: onboardingUrl },
     identity: [
-      `Run \`${setupCommand(role)}\` once in this checkout; it generates your own name and keeps it.`,
-      "Use that name with --agent. Never reuse another agent's or another harness's entry.",
+      `Run \`${firstCommand(role)}\` in this checkout. PDB reuses or safely initializes your identity and continues the requested command.`,
+      "Returning commands reuse the saved binding without --agent. An ambiguous or unsupported session needs --entry KEY; never borrow another agent's entry. A new identity needs your explicit role.",
+      `Explicit identity management remains available: \`${setupCommand(role)}\`. --agent NAME is a per-call override, not a required lookup step.`,
     ],
     examples,
     prompt,
