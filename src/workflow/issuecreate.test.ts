@@ -37,12 +37,16 @@ const issueBody = (number: number, labels: string[], over: Record<string, unknow
   html_url: `https://github.com/${target}/issues/${number}`,
   repository_url: `https://api.github.com/repos/${target}`,
   labels: labels.map((name) => ({ name })),
+  assignees: [{ login: "reporter" }],
   ...over,
 });
 
 interface Fake {
   rt: IssueCreateRuntime;
-  posts: { path: string; payload: { title: string; body: string; labels?: string[] } }[];
+  posts: {
+    path: string;
+    payload: { title: string; body: string; labels?: string[]; assignees?: string[] };
+  }[];
   gets: string[];
   stderr: string[];
 }
@@ -55,6 +59,8 @@ function fake(
     current?: () => Promise<string>;
     stdin?: string;
     files?: Record<string, string>;
+    targetContext?: IssueCreateRuntime["targetContext"];
+    employingHuman?: IssueCreateRuntime["employingHuman"];
   } = {},
 ): Fake {
   const posts: Fake["posts"] = [];
@@ -77,13 +83,15 @@ function fake(
     rest,
     post: async (path, payload) => {
       posts.push({ path, payload: payload as Fake["posts"][number]["payload"] });
-      return options.post
-        ? options.post(posts.length)
-        : {
-            dispatched: true,
-            status: 201,
-            body: issueBody(100 + posts.length, (payload as { labels?: string[] }).labels ?? []),
-          };
+      if (options.post) return options.post(posts.length);
+      const typed = payload as { labels?: string[]; assignees?: string[] };
+      return {
+        dispatched: true,
+        status: 201,
+        body: issueBody(100 + posts.length, typed.labels ?? [], {
+          assignees: (typed.assignees ?? []).map((login) => ({ login })),
+        }),
+      };
     },
     currentRepository: options.current ?? (async () => target),
     now: () => new Date("2026-11-15T12:00:00Z"),
@@ -98,6 +106,9 @@ function fake(
     },
     readStdin: async () => Buffer.from(options.stdin ?? ""),
     stderr: (t) => stderr.push(t),
+    targetContext:
+      options.targetContext ?? (async (repository) => ({ verified: true, repository })),
+    ...(options.employingHuman ? { employingHuman: options.employingHuman } : {}),
   };
   return { rt, posts, gets, stderr };
 }
@@ -272,7 +283,7 @@ describe("issue create: retries and honest outcomes", () => {
         operationId: "op00000000000001",
         repository: target,
         repositoryId: "R_kgDO42",
-        digest: intentDigest("A bug", "secret details", []),
+        digest: intentDigest("A bug", "secret details", [], ["reporter"]),
       }),
     );
     expect(marker).not.toContain("secret");
@@ -499,5 +510,112 @@ describe("issue create: generated commands and the create boundary", () => {
     const result = await createIssue(request(), f.rt);
     expect(result.status).toBe("unknown");
     expect(result.issue).toBeNull();
+  });
+});
+
+describe("issue create: human ownership and verified context (#666, #674)", () => {
+  it("assigns the resolved employing human by default in the one POST without creating an agent claim", async () => {
+    const f = fake({
+      employingHuman: async () => ({
+        state: "current",
+        host: "github.com",
+        login: "alice",
+        source: "gh-login",
+        observedAt: "2026-11-15T12:00:00Z",
+      }),
+      targetContext: async (repository) => ({
+        verified: true,
+        repository,
+        defaultLabels: ["triage:managed"],
+      }),
+    });
+    const result = await createIssue(request({ agent: "agent_one", labels: ["bug"] }), f.rt);
+    expect(result.status).toBe("created");
+    expect(result.assignees).toEqual({ requested: ["alice"], applied: ["alice"] });
+    expect(result.labels).toEqual({
+      requested: ["triage:managed", "bug"],
+      applied: ["triage:managed", "bug"],
+    });
+    expect(f.posts).toHaveLength(1);
+    expect(f.posts[0]!.payload.assignees).toEqual(["alice"]);
+    expect(f.posts[0]!.payload.labels).toEqual(["triage:managed", "bug"]);
+    expect(f.posts[0]!.payload.labels).not.toContain("status:claimed");
+  });
+
+  it("supports separate-human creation intent via explicit assignees and distinct digest", async () => {
+    const f = fake();
+    const dry = await createIssue(request({ dryRun: true, assignees: ["bob"] }), f.rt);
+    expect(dry.status).toBe("planned");
+    expect(dry.assignees).toEqual({ requested: ["bob"], applied: null });
+    expect(dry.preview?.body).toContain(intentDigest("A bug", "", [], ["bob"]));
+    expect(dry.preview?.body).not.toContain(intentDigest("A bug", "", [], ["reporter"]));
+    expect(f.posts).toHaveLength(0);
+
+    const created = await createIssue(request({ assignees: ["bob"] }), f.rt);
+    expect(created.status).toBe("created");
+    expect(created.assignees).toEqual({ requested: ["bob"], applied: ["bob"] });
+    expect(f.posts).toHaveLength(1);
+    expect(f.posts[0]!.payload.assignees).toEqual(["bob"]);
+  });
+
+  it("reports partial with recovery and real issue link when GitHub omits assignment, never retrying POST", async () => {
+    const f = fake({
+      post: () => ({
+        dispatched: true,
+        status: 201,
+        body: issueBody(101, [], { assignees: [] }),
+      }),
+      readBack: { status: 200, body: issueBody(101, [], { assignees: [] }) },
+    });
+    const result = await createIssue(request(), f.rt);
+    expect(result.status).toBe("partial");
+    expect(result.error?.id).toBe("ASSIGNMENT_MISSING");
+    expect(result.issue?.url).toBe(`https://github.com/${target}/issues/101`);
+    expect(result.assignees).toEqual({ requested: ["reporter"], applied: [] });
+    expect(result.recovery.join("\n")).toContain(`repos/${target}/issues/101/assignees`);
+    expect(f.posts).toHaveLength(1);
+    expect(issueCreateExitCode(result)).toBe(2);
+  });
+
+  it("reports partial when assignee outcome is unreadable after failed read-back, never retrying POST", async () => {
+    const f = fake({
+      post: () => ({
+        dispatched: true,
+        status: 201,
+        body: {
+          number: 101,
+          node_id: "I_101",
+          html_url: `https://github.com/${target}/issues/101`,
+        },
+      }),
+      readBack: { status: 500, body: null },
+    });
+    const result = await createIssue(request(), f.rt);
+    expect(result.status).toBe("partial");
+    expect(result.error?.id).toBe("ASSIGNMENT_UNVERIFIED");
+    expect(result.issue?.url).toBe(`https://github.com/${target}/issues/101`);
+    expect(result.assignees).toEqual({ requested: ["reporter"], applied: null });
+    expect(f.posts).toHaveLength(1);
+    expect(issueCreateExitCode(result)).toBe(2);
+  });
+
+  it("refuses unverified or unmanaged target context with ordinary gh guidance and zero POSTs", async () => {
+    const f = fake({
+      targetContext: async () => ({
+        verified: false,
+        reason: "No PDB policy configuration (.github/triage.toml) found.",
+      }),
+    });
+    const result = await createIssue(
+      request({ title: "Outside bug", body: "secret body text", labels: ["bug"] }),
+      f.rt,
+    );
+    expect(result.status).toBe("refused");
+    expect(result.error?.id).toBe("UNVERIFIED_TARGET_CONTEXT");
+    expect(result.recovery[0]).toContain("gh issue create");
+    expect(result.recovery[0]).toContain(target);
+    expect(result.recovery[0]).not.toContain("secret body text");
+    expect(f.posts).toHaveLength(0);
+    expect(issueCreateExitCode(result)).toBe(1);
   });
 });

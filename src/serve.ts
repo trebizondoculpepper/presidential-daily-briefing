@@ -3,6 +3,10 @@ import {
   readPackageBuildIdentity,
   withProcessIdentity,
 } from "./serve/process-footer.js";
+import { disabledEffectiveHuman } from "./config/effectiveidentity.js";
+import { humanContextEnabled } from "./config/humancontext.js";
+import { startLocalIdentity } from "./config/serveridentity.js";
+import { serverHumanContext } from "./config/humancontext.js";
 import { servedPages, shellContext, selectionErrorPage } from "./serve/shell.js";
 /**
  * `pdb serve`: a foreground local HTTP server (doc/design/serve.md, #373).
@@ -17,6 +21,7 @@ import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { isIP } from "node:net";
 import { AuthenticationError, currentRepository } from "./github/github.js";
+import { nodeGit } from "./config/config.js";
 import { systemClock } from "./mcp/polling.js";
 import { installedVersion } from "./updates/updates.js";
 import { defaultReadRuntime, readServices } from "./serve/services.js";
@@ -86,6 +91,11 @@ import { ghAuthContext } from "./github/ghauth.js";
 export { ghAuthContext };
 
 export const defaultServeRuntime = (): ServeRuntime => ({
+  ...(!process.env.PDB_NO_EFFECTIVE_IDENTITY
+    ? { identityRuntime: { env: process.env, git: nodeGit } }
+    : {}),
+  cwd: process.cwd(),
+  git: nodeGit,
   currentRepository,
   authContext: ghAuthContext,
   clock: systemClock,
@@ -130,29 +140,44 @@ async function servedSet(
   for (const repository of options.repos)
     if (!served.has(repository.toLowerCase())) served.set(repository.toLowerCase(), { repository });
   for (const project of options.projects) {
+    let resolvedProject = project;
+    if (runtime.git) {
+      let root = "";
+      try {
+        root = (await runtime.git(["rev-parse", "--show-toplevel"], project)).trim();
+      } catch {
+        root = "";
+      }
+      if (!root)
+        throw new ServeStartupError(
+          EXIT_USAGE,
+          `${project} is not inside a Git checkout. Run from or pass --project pointing to a local Git checkout.`,
+        );
+      resolvedProject = root;
+    }
     let repository: string;
     try {
-      repository = (await runtime.currentRepository(project)).trim();
+      repository = (await runtime.currentRepository(resolvedProject)).trim();
     } catch {
       throw new ServeStartupError(
         EXIT_USAGE,
-        `--project ${project} does not resolve to a GitHub repository; check the path and gh authentication.`,
+        `--project ${resolvedProject} does not resolve to a GitHub repository; check the path and gh authentication.`,
       );
     }
     if (!/^[\w.-]+\/[\w.-]+$/.test(repository))
       throw new ServeStartupError(
         EXIT_USAGE,
-        `--project ${project} does not resolve to a GitHub repository.`,
+        `--project ${resolvedProject} does not resolve to a GitHub repository.`,
       );
     const existing = served.get(repository.toLowerCase());
-    if (existing?.project && existing.project !== project)
+    if (existing?.project && existing.project !== resolvedProject)
       throw new ServeStartupError(
         EXIT_USAGE,
-        `--project ${project} and --project ${existing.project} are both ${repository}; pass one.`,
+        `--project ${resolvedProject} and --project ${existing.project} are both ${repository}; pass one.`,
       );
     served.set(repository.toLowerCase(), {
       repository: existing?.repository ?? repository,
-      project,
+      project: resolvedProject,
     });
   }
   return [...served.values()];
@@ -224,6 +249,32 @@ export async function startServe(
     // Optional provenance is unavailable; the running server still starts with honest unknowns.
   }
   const processIdentity = captureProcessIdentity(facts, buildIdentity);
+  facts.effectiveHuman = humanContextEnabled()
+    ? { context: serverHumanContext(auth, facts.startedAt), authenticationFailed: false }
+    : disabledEffectiveHuman(auth.host);
+  if (runtime.identityRuntime) {
+    const localProjects = served.filter((entry) => entry.project !== undefined);
+    const selected =
+      localProjects.length === 1 ? localProjects[0] : served.length === 1 ? served[0] : undefined;
+    facts.identitySession = await startLocalIdentity(
+      {
+        project: selected?.project,
+        repository: selected?.repository,
+        agent: options.agent,
+        entry: options.entry,
+        harness: options.harness,
+        role: options.role,
+      },
+      { ...runtime.identityRuntime, human: async () => facts.effectiveHuman! },
+    );
+    const startup = facts.identitySession.startup;
+    for (const notice of startup.setup.notices) runtime.stderr(`pdb serve startup: ${notice}\n`);
+    if (startup.diagnostic)
+      runtime.stderr(
+        `pdb serve startup: ${startup.diagnostic.message} ${startup.diagnostic.recovery}\n`,
+      );
+  }
+
   const dashboard = dashboardFiles();
   const statusDocument = () => ({
     schemaVersion: 1,
@@ -250,6 +301,11 @@ export async function startServe(
     }),
     ttlSeconds: options.ttlMs / 1000,
     auth: { host: facts.auth.host, login: facts.auth.login },
+    ...(facts.identitySession
+      ? {
+          identityStartup: { phase: "local-server-startup", result: facts.identitySession.startup },
+        }
+      : {}),
     cache: status.cache(),
     ...(status.diagnostics ? { diagnostics: status.diagnostics() } : {}),
   });
@@ -620,7 +676,7 @@ export async function runServe(
 ): Promise<number> {
   let options: ServeOptions & { help?: boolean };
   try {
-    options = serveArguments(args);
+    options = serveArguments(args, runtime.cwd);
   } catch (error) {
     if (!(error instanceof ServeUsageError)) throw error;
     runtime.stderr(`pdb serve: ${error.message}\n`);

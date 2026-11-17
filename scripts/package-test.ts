@@ -713,7 +713,7 @@ try {
   const runtimeChunks = new Set<string>();
   const visit = async (file: string): Promise<void> => {
     for (const match of (await readFile(join(root, file), "utf8")).matchAll(
-      /(?:\bfrom\s*|\bimport\s*(?:\(\s*)?)["']\.\/((?:datalog|engine|requiredchecks)-[A-Za-z0-9_-]+\.mjs)["']/g,
+      /(?:\bfrom\s*|\bimport\s*(?:\(\s*)?)["']\.\/((?:datalog|engine|requiredchecks|english-render)-[A-Za-z0-9_-]+\.mjs)["']/g,
     )) {
       const child = `dist/${match[1]}`;
       if (runtimeChunks.has(child)) continue;
@@ -971,6 +971,7 @@ try {
       PDB_NO_UPDATE_CHECK: "1",
       PDB_NO_FIRST_USE_HINT: "1",
       PDB_NO_HUMAN_CONTEXT: "1",
+      PDB_NO_EFFECTIVE_IDENTITY: "1",
       ...(windows ? { SystemRoot: process.env.SystemRoot, ComSpec: process.env.ComSpec } : {}),
     };
     const rules = (rulesArgs: string[]) =>
@@ -1074,6 +1075,7 @@ try {
       PDB_NO_UPDATE_CHECK: "1",
       PDB_NO_FIRST_USE_HINT: "1",
       PDB_NO_HUMAN_CONTEXT: "1",
+      PDB_NO_EFFECTIVE_IDENTITY: "1",
     };
     await nativeStopSmoke(join(packageDir, "dist", "cli.mjs"), work, env);
     console.log("ok   installed native Codex offer and duplicate guard with fake gh");
@@ -1241,6 +1243,7 @@ try {
       PDB_NO_UPDATE_CHECK: "1",
       PDB_NO_FIRST_USE_HINT: "1",
       PDB_NO_HUMAN_CONTEXT: "1",
+      PDB_NO_EFFECTIVE_IDENTITY: "1",
     };
     const selected = await resolveEngineSetting(live, { cwd: root });
     for (const role of ["implementer", "designer"]) {

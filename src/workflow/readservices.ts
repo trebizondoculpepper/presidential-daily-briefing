@@ -3,6 +3,7 @@
  * summary", #373). The CLI and `pdb serve` call these directly; neither runs the other or parses
  * terminal text, so both emit the same versioned JSON for the same facts.
  */
+import { ticketDoctor, ticketDoctorText } from "./ticketdoctor.js";
 import type { DeclaredReviewPolicy } from "./reviewpolicy.js";
 import { collectIssueFocus, ghQueryWith, hydratePullRequests } from "../github/github.js";
 import type { FocusOptions, Query, Rest } from "../github/github.js";
@@ -11,8 +12,13 @@ import type { GraphQuery } from "./claims.js";
 import { readClaimActivity, readTeamActivity, teamActivityCap } from "./retainedfacts.js";
 import { ReadMeter } from "../github/readplan.js";
 import type { Snapshot } from "../github/types.js";
-import { diagnoseDelivery } from "./deliverydoctor.js";
+import {
+  diagnoseDelivery,
+  diagnoseClosedDrift,
+  deliveryDoctorTicketCap,
+} from "./deliverydoctor.js";
 import type { DeliveryDiagnosis } from "./deliverydoctor.js";
+import { markerTrust } from "./delivery.js";
 import type { TrustDecision } from "./delivery.js";
 import {
   deliveryFields,
@@ -306,6 +312,7 @@ export async function readWhoWith(
       meter,
       signal,
       ...(locate ? { locate } : {}),
+      ...(boundaries.live?.rest ? { rest: boundaries.live.rest } : {}),
       ...(options.nativeEdges ? { nativeEdges: true } : {}),
       ...(options.hydrationLimit !== undefined ? { hydrationLimit: options.hydrationLimit } : {}),
     },
@@ -525,4 +532,97 @@ export async function readPullRequest(
   };
   const text = appendLines(prStatusText(status), delivery ? prDeliveryLines(delivery) : []);
   return { report, text, complete: report.completeness.complete };
+}
+
+/** Observed service phases for an explicit interactive diagnostic run (#585). */
+export interface DiagnosticProgress {
+  step: "delivery" | "closed-scan" | "findings";
+  state: "running" | "done" | "skipped";
+  detail: string | null;
+}
+
+/** The same read-only Ticket Doctor composition for CLI and server; no transport or mutations. */
+export async function readTicketDoctor(
+  snapshot: Snapshot,
+  options: {
+    staleHours: number;
+    limit: number;
+    now: Date;
+    offline: boolean;
+    impactEnabled: boolean;
+    since?: string;
+  },
+  boundaries: DeliveryBoundaries & { onStep?: (step: DiagnosticProgress) => void },
+) {
+  snapshot = withPolicy(snapshot, boundaries);
+  const step = (
+    name: DiagnosticProgress["step"],
+    state: DiagnosticProgress["state"],
+    detail: string | null = null,
+  ) => {
+    boundaries.signal?.throwIfAborted();
+    boundaries.onStep?.({ step: name, state, detail });
+  };
+  const live = options.offline ? undefined : boundaries.live;
+  step("delivery", "running");
+  const delivery = await diagnoseDelivery(snapshot, {
+    ...boundaries,
+    live,
+    onProgress: (count) =>
+      step(
+        "delivery",
+        "running",
+        `${count} of at most ${deliveryDoctorTicketCap} tickets evaluated`,
+      ),
+  });
+  step("delivery", "done");
+  let closedDrift;
+  if (options.since !== undefined && live) {
+    step("closed-scan", "running");
+    closedDrift = await diagnoseClosedDrift(
+      snapshot.repository,
+      new Date(options.since).toISOString(),
+      {
+        live,
+        signal: boundaries.signal,
+        trust:
+          boundaries.trust ??
+          markerTrust(permissionLookup(snapshot.repository, live.rest, boundaries.signal)),
+      },
+    );
+    step("closed-scan", "done");
+  } else step("closed-scan", "skipped", "No live closed-issue window requested.");
+  step("findings", "running");
+  const claimAgents = teamView(snapshot, {}).agents.map((a) => a.agent);
+  const teamActivity =
+    live && claimAgents.length
+      ? await readTeamActivity(snapshot, claimAgents, {
+          query: live.query as GraphQuery,
+          permission: permissionLookup(snapshot.repository, live.rest, boundaries.signal),
+        })
+      : undefined;
+  boundaries.signal?.throwIfAborted();
+  const report = ticketDoctor(snapshot, {
+    delivery,
+    closedDrift,
+    ...(teamActivity?.activity.size ? { claimActivity: teamActivity.activity } : {}),
+    ...(teamActivity?.omitted.length ? { omittedAgents: teamActivity.omitted } : {}),
+    staleHours: options.staleHours,
+    limit: options.limit,
+    now: options.now,
+    offline: options.offline,
+    impactEnabled: options.impactEnabled,
+  });
+  const read = deliveryRead(snapshot, delivery);
+  const coverage = read.omissions.filter((o) => !delivery.warnings.includes(o));
+  const doctor = withDeliveryCompleteness(report, {
+    complete: !coverage.length,
+    omissions: coverage,
+  });
+  step("findings", "done");
+  return {
+    report: read.tickets.length ? { ...doctor, delivery: read } : doctor,
+    text: ticketDoctorText(doctor),
+    complete: doctor.completeness.complete,
+  };
 }

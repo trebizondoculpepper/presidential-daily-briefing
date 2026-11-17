@@ -50,17 +50,17 @@ pdb serve [--port N] [--host ADDR] [--allow-remote] [--ttl DURATION]
           [--agent NAME] [--entry KEY | --harness NAME]
 ```
 
-| Option                            | Default     | Validation                                                                                                                                  |
-| --------------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--port N`                        | `4372`      | Integer 0–65535. `0` asks the OS for an ephemeral port (tests).                                                                             |
-| `--host ADDR`                     | `127.0.0.1` | Literal IP address or `localhost`. Loopback (`127.0.0.0/8`, `::1`, `localhost`) is always allowed. Anything else requires `--allow-remote`. |
-| `--allow-remote`                  | off         | Only meaningful with a non-loopback `--host`; see [Security](#security).                                                                    |
-| `--ttl DURATION`                  | `5m`        | Parsed with the existing `parseDuration`. Accepted range 1m–10m inclusive; outside the range is a usage error, never silently clamped.      |
-| `--repo owner/name`               | none        | Repeatable. Existing owner/name validator.                                                                                                  |
-| `--project PATH`                  | none        | Repeatable. Absolute path to a local checkout; resolved to its repository at startup with the existing resolver.                            |
-| `--agent`, `--entry`, `--harness` | none        | Same meaning and validators as `pdb-mcp`; startup identity defaults.                                                                        |
+| Option                            | Default     | Validation                                                                                                                                                                                                                  |
+| --------------------------------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--port N`                        | `4372`      | Integer 0–65535. `0` asks the OS for an ephemeral port (tests).                                                                                                                                                             |
+| `--host ADDR`                     | `127.0.0.1` | Literal IP address or `localhost`. Loopback (`127.0.0.0/8`, `::1`, `localhost`) is always allowed. Anything else requires `--allow-remote`.                                                                                 |
+| `--allow-remote`                  | off         | Only meaningful with a non-loopback `--host`; see [Security](#security).                                                                                                                                                    |
+| `--ttl DURATION`                  | `5m`        | Parsed with the existing `parseDuration`. Accepted range 1m–10m inclusive; outside the range is a usage error, never silently clamped.                                                                                      |
+| `--repo owner/name`               | none        | Repeatable. Existing owner/name validator.                                                                                                                                                                                  |
+| `--project PATH`                  | none        | Repeatable. Absolute or relative path to a local checkout; relative paths resolve against the invoking CLI's working directory and nested checkouts/worktrees resolve to their verified Git root and repository at startup. |
+| `--agent`, `--entry`, `--harness` | none        | Same meaning and validators as `pdb-mcp`; startup identity defaults.                                                                                                                                                        |
 
-At least one `--repo` or `--project` is required. Without one the command exits with status 2 and the guidance `pdb serve needs --repo owner/name or --project /absolute/project/path`; it never serves the cwd repository (#271). The union of startup repositories is the **served set**; see [Identity and project selection](#identity-and-project-selection).
+At least one `--repo` or `--project` is required. Without one the command exits with status 2 and the guidance `pdb serve needs --repo owner/name or --project PATH`; it never serves the cwd repository (#271). The union of startup repositories is the **served set**; see [Identity and project selection](#identity-and-project-selection).
 
 Startup sequence, in order: parse and validate arguments; resolve every `--project` to a repository (failure exits 2 naming the path); resolve the authentication context once (`gh auth status`/`gh api user` through the existing argument-array runner; failure exits 1 with "run gh auth login"); bind the listener; print the banner. No GitHub data is collected at startup.
 

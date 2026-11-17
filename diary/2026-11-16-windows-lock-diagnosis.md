@@ -47,3 +47,20 @@ Validation of the expanded diagnostic slice: check and build passed; the complet
 suite passed 134 files / 2,491 tests (one skipped), using one worker with existing
 per-test limits. This is diagnostic evidence, not a claim that the original Windows
 cause or its reliability acceptance has been established.
+
+The diagnostic slice merged in #738 as 401a2c3 after a clean exact-head Codex review
+and required CI. Windows passed all twenty batches (500 total updates), without
+observing the intermittent cause. #729 remains open with delivery membership open.
+
+A separate draft reproduction branch temporarily raises only the Windows batch
+counts from ten to one hundred for one bounded CI pass (5,000 total updates).
+Measured batches took roughly 0.5–0.7 seconds, so the estimated added Windows test
+cost is about two minutes. Existing counts, cleanup checks and per-case deadlines
+are unchanged. Restore the normal ten-batch level before any final repair merge;
+this temporary repetition increase is investigation, not the proposed production fix.
+No paid model calls, new infrastructure or private filesystem data are involved.
+
+Before publishing the bounded reproduction branch, check/build and all 134 test
+files passed locally (2,504 tests, one skipped), with one worker and unchanged limits.
+The larger repetition count applies only to Windows; this local run is validation
+of the branch, not Windows reproduction evidence.

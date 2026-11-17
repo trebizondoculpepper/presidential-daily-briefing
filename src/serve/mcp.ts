@@ -53,9 +53,19 @@ export function cachedMcpRuntime(
   const { guardedQueryWith, guardedRest: _r, ...cached } = cachedBoundaries(read, cache, isServed);
   return {
     ...cached,
+    ...(facts.identitySession
+      ? {
+          identitySession: facts.identitySession,
+          identityHuman: () =>
+            facts.effectiveHuman?.context ?? serverHumanContext(facts.auth, facts.startedAt),
+        }
+      : {}),
     // #664: the process's execution human, the same as the JSON API's.
     ...(humanContextEnabled()
-      ? { humanContext: async () => serverHumanContext(facts.auth, facts.startedAt) }
+      ? {
+          humanContext: async () =>
+            facts.effectiveHuman?.context ?? serverHumanContext(facts.auth, facts.startedAt),
+        }
       : {}),
     now: read.now,
     env: read.env,

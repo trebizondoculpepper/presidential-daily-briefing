@@ -8,6 +8,7 @@ import { spawn } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { open } from "node:fs/promises";
 import { isAgentName } from "../config/identity.js";
+import type { HumanContext } from "../config/humancontext.js";
 import { shellQuote } from "./claims.js";
 import { classifyGhFailure, parseGhResponse } from "../github/evidence.js";
 import type { FailureClassification } from "../github/evidence.js";
@@ -21,26 +22,30 @@ export const MAX_LABELS = 20;
 export const MAX_LABEL_CODE_POINTS = 50;
 
 export const issueCreateUsage =
-  "Usage: pdb issue create --title TEXT [--body TEXT | --body-file PATH|-] [--label LABEL]... [--repo owner/name] [--agent NAME] [--dry-run] [--json]";
+  "Usage: pdb issue create --title TEXT [--body TEXT | --body-file PATH|-] [--label LABEL]... [--assignee LOGIN]... [--repo owner/name] [--agent NAME] [--dry-run] [--json]";
 
 export const issueCreateHelp = `${issueCreateUsage}
 
-Create one issue in a resolved repository. Without --repo the current gh checkout's repository
-is used; the resolved target (canonical name and immutable ID) is shown before writing.
-  --title TEXT      Required; one line, at most ${MAX_TITLE_CODE_POINTS} characters
-  --body TEXT       Issue body text, or
-  --body-file PATH  Read the body from a file; - reads standard input (not both with --body)
-  --label LABEL     Repeatable, at most ${MAX_LABELS}; each must already exist (never created).
-                    GitHub may drop labels you lack permission to set: reported as partial
-  --repo owner/name Target repository (default: the current checkout)
-  --agent NAME      Reported agent, recorded as provenance only (never authority)
-  --dry-run         Resolve and validate; show target, title, body and labels; no write
-  --json            One versioned JSON document on stdout
+Create one issue in a verified PDB-managed repository checkout. Without --repo the current gh
+checkout's repository is used; the resolved target (canonical name and immutable ID) and verified
+policy context are checked before writing. New issues default to the creating/employing human as
+assignee (human ownership, not an automatic agent claim).
+  --title TEXT       Required; one line, at most ${MAX_TITLE_CODE_POINTS} characters
+  --body TEXT        Issue body text, or
+  --body-file PATH   Read the body from a file; - reads standard input (not both with --body)
+  --label LABEL      Repeatable, at most ${MAX_LABELS}; each must already exist (never created).
+                     GitHub may drop labels you lack permission to set: reported as partial
+  --assignee LOGIN   Repeatable; override the default creating-human assignee
+  --repo owner/name  Target repository (default: the current checkout)
+  --agent NAME       Reported agent, recorded as provenance only (never authority or a claim)
+  --dry-run          Resolve and validate; show target, title, body, labels and assignees; no write
+  --json             One versioned JSON document on stdout
 
 Arguments are passed to gh as data, never through a shell. The body gets a hidden marker
 (${ISSUE_CREATE_MARKER}) with an operation ID, the target ID and a digest of title, body and
 labels; it is a correlation receipt, not a claim, approval or signature. No status, claim or
-agent label is added. The local checkout configuration and identity are never changed.
+agent label is added. The issue writer never changes local checkout settings or identity. Normal CLI preparation
+may first reuse or safely initialize the selected local agent (see pdb --help).
 
 Retries: exactly one create request is sent per invocation and none is ever retried
 automatically. After a timeout, 5xx or lost reply the outcome is "unknown": inspect the target's
@@ -62,6 +67,10 @@ export interface PostAnswer {
 }
 export type RestPost = (path: string, payload: unknown) => Promise<PostAnswer>;
 
+export type TargetCreationContext =
+  | { verified: true; repository: string; defaultLabels?: readonly string[] }
+  | { verified: false; reason: string };
+
 export interface IssueCreateRuntime {
   rest: Rest;
   post: RestPost;
@@ -72,6 +81,10 @@ export interface IssueCreateRuntime {
   readStdin: () => Promise<Uint8Array>;
   /** Preflight diagnostics (text mode only); never stdout. */
   stderr: (text: string) => void;
+  /** Verify local checkout and PDB policy context for the target repository (#666). */
+  targetContext?: (repository: string) => Promise<TargetCreationContext>;
+  /** Resolved employing human (#664); falls back to the authenticated viewer login. */
+  employingHuman?: () => Promise<HumanContext>;
 }
 
 export interface IssueCreateRequest {
@@ -79,6 +92,7 @@ export interface IssueCreateRequest {
   body?: string;
   bodyFile?: string;
   labels: string[];
+  assignees?: string[];
   repo?: string;
   agent?: string;
   dryRun: boolean;
@@ -101,6 +115,7 @@ export interface IssueCreateResult {
   title: string;
   issue: { number: number; nodeId: string; url: string } | null;
   labels: { requested: string[]; applied: string[] | null };
+  assignees: { requested: string[]; applied: string[] | null };
   error: { id: string; message: string; evidence?: FailureClassification } | null;
   warnings: string[];
   recovery: string[];
@@ -111,9 +126,47 @@ export interface IssueCreateResult {
 export class IssueCreateUsageError extends Error {}
 
 const REPO = /^[\w.-]+\/[\w.-]+$/;
+const GITHUB_LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
+const MAX_ASSIGNEES = 10;
 // eslint-disable-next-line no-control-regex
 const CONTROL = /[\u0000-\u001f\u007f]/;
 const codePoints = (text: string) => Array.from(text).length;
+
+function normalizeLabels(rawLabels: readonly string[]): string[] {
+  const labels: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of rawLabels) {
+    const label = raw.trim();
+    if (!label || CONTROL.test(label) || codePoints(label) > MAX_LABEL_CODE_POINTS)
+      throw new IssueCreateUsageError(
+        `Invalid --label: labels are 1-${MAX_LABEL_CODE_POINTS} characters without control characters.`,
+      );
+    const key = label.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    labels.push(label);
+  }
+  if (labels.length > MAX_LABELS)
+    throw new IssueCreateUsageError(`At most ${MAX_LABELS} distinct labels.`);
+  return labels;
+}
+
+function normalizeAssignees(rawAssignees: readonly string[]): string[] {
+  const assignees: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of rawAssignees) {
+    const login = raw.trim();
+    if (!GITHUB_LOGIN.test(login))
+      throw new IssueCreateUsageError("Invalid --assignee: must be a valid GitHub login.");
+    const key = login.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    assignees.push(login);
+  }
+  if (assignees.length > MAX_ASSIGNEES)
+    throw new IssueCreateUsageError(`At most ${MAX_ASSIGNEES} distinct assignees.`);
+  return assignees;
+}
 
 /** Validate parsed flags; every refusal here happens before any GitHub request. */
 export function validateRequest(request: IssueCreateRequest): IssueCreateRequest {
@@ -129,22 +182,10 @@ export function validateRequest(request: IssueCreateRequest): IssueCreateRequest
     throw new IssueCreateUsageError("--repo must be owner/name.");
   if (request.agent !== undefined && !isAgentName(request.agent))
     throw new IssueCreateUsageError("--agent must be a valid agent name.");
-  const labels: string[] = [];
-  const seen = new Set<string>();
-  for (const raw of request.labels) {
-    const label = raw.trim();
-    if (!label || CONTROL.test(label) || codePoints(label) > MAX_LABEL_CODE_POINTS)
-      throw new IssueCreateUsageError(
-        `Invalid --label: labels are 1-${MAX_LABEL_CODE_POINTS} characters without control characters.`,
-      );
-    const key = label.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    labels.push(label);
-  }
-  if (labels.length > MAX_LABELS)
-    throw new IssueCreateUsageError(`At most ${MAX_LABELS} distinct labels.`);
-  return { ...request, labels };
+  const labels = normalizeLabels(request.labels);
+  const assignees =
+    request.assignees !== undefined ? normalizeAssignees(request.assignees) : undefined;
+  return { ...request, labels, ...(assignees !== undefined ? { assignees } : {}) };
 }
 
 /** Read the body: text, a file or stdin, decoded as strict UTF-8 and bounded. */
@@ -167,11 +208,18 @@ async function readBody(request: IssueCreateRequest, rt: IssueCreateRuntime): Pr
   }
 }
 
-/** Digest of the user's intent: exact title, exact user body and requested labels. */
-export function intentDigest(title: string, body: string, labels: string[]): string {
-  return createHash("sha256")
-    .update(JSON.stringify([title, body, [...labels].sort()]))
-    .digest("hex");
+/** Digest of the user's intent: exact title, exact user body, requested labels and assignees. */
+export function intentDigest(
+  title: string,
+  body: string,
+  labels: readonly string[],
+  assignees: readonly string[] = [],
+): string {
+  const parts =
+    assignees.length > 0
+      ? [title, body, [...labels].sort(), [...assignees].sort()]
+      : [title, body, [...labels].sort()];
+  return createHash("sha256").update(JSON.stringify(parts)).digest("hex");
 }
 
 /** The appended correlation marker. Every value is validated, so it cannot close the comment. */
@@ -220,6 +268,7 @@ export async function createIssue(
     title: request.title,
     issue: null,
     labels: { requested: request.labels, applied: null },
+    assignees: { requested: request.assignees ?? [], applied: null },
     error: null,
     warnings: [],
     recovery: [],
@@ -303,13 +352,66 @@ export async function createIssue(
 
   const user = await read("user");
   const login = user?.status === 200 ? prop(user.body, "login") : null;
-  if (typeof login !== "string" || !/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/.test(login))
+  if (typeof login !== "string" || !GITHUB_LOGIN.test(login))
     return readRefusal(user, "authenticated user");
   result.viewer = login;
 
+  // Require verified target checkout/policy context (#666); unfamiliar/unmanaged/no-checkout
+  // reporting receives ordinary gh guidance instead of importing another project's defaults.
+  const context = rt.targetContext
+    ? await rt.targetContext(fullName)
+    : {
+        verified: false as const,
+        reason: `No verified local checkout or PDB policy context for ${fullName}.`,
+      };
+  if (!context.verified || context.repository.toLowerCase() !== fullName.toLowerCase()) {
+    const reason = !context.verified
+      ? context.reason
+      : `Verified checkout (${context.repository}) does not match ${fullName}.`;
+    const ghArgs = [
+      "gh",
+      "issue",
+      "create",
+      "--repo",
+      fullName,
+      "--title",
+      request.title,
+      ...(request.bodyFile !== undefined && request.bodyFile !== "-"
+        ? ["--body-file", request.bodyFile]
+        : userBody
+          ? ["--body-file", "<path-to-body-file>"]
+          : []),
+      ...request.labels.flatMap((l) => ["--label", l]),
+      ...(request.assignees ?? []).flatMap((a) => ["--assignee", a]),
+    ];
+    result.recovery = [ghArgs.map(shellQuote).join(" ")];
+    return refuse(
+      "UNVERIFIED_TARGET_CONTEXT",
+      `${reason} For unfamiliar, unmanaged, or no-checkout issue reporting, use ordinary gh instead of borrowing another checkout's PDB policy.`,
+    );
+  }
+
+  const effectiveLabels = normalizeLabels([...(context.defaultLabels ?? []), ...request.labels]);
+  result.labels.requested = effectiveLabels;
+
+  // Default assignee is the resolved creating/employing human; explicit --assignee overrides it.
+  // Human ownership is never an automatic agent claim.
+  let effectiveAssignees: string[];
+  if (request.assignees !== undefined) {
+    effectiveAssignees = request.assignees;
+  } else {
+    const human = rt.employingHuman ? await rt.employingHuman().catch(() => null) : null;
+    const creatingHuman =
+      human?.state === "current" && human.login && GITHUB_LOGIN.test(human.login)
+        ? human.login
+        : login;
+    effectiveAssignees = [creatingHuman];
+  }
+  result.assignees.requested = effectiveAssignees;
+
   // Labels: each must exist (this command never creates one). Setting labels needs push access;
   // GitHub otherwise drops them, which is disclosed now and verified after creation.
-  for (const label of request.labels) {
+  for (const label of effectiveLabels) {
     const answer = await read(`repos/${fullName}/labels/${encodeURIComponent(label)}`);
     if (answer?.status === 404)
       return refuse(
@@ -319,18 +421,18 @@ export async function createIssue(
     if (answer?.status !== 200) return readRefusal(answer, "label");
   }
   const push = prop(repository.body, "permissions", "push");
-  if (request.labels.length && push !== true)
+  if ((effectiveLabels.length || effectiveAssignees.length) && push !== true)
     result.warnings.push(
       push === false
-        ? `${login} lacks push access to ${fullName}; GitHub may create the issue without the requested labels.`
-        : `Could not confirm label permission on ${fullName}; labels are verified after creation.`,
+        ? `${login} lacks push access to ${fullName}; GitHub may create the issue without the requested labels or assignees.`
+        : `Could not confirm label/assignee permission on ${fullName}; labels and assignees are verified after creation.`,
     );
 
   const marker = creationMarker({
     operationId,
     repository: fullName,
     repositoryId: nodeId,
-    digest: intentDigest(request.title, userBody, request.labels),
+    digest: intentDigest(request.title, userBody, effectiveLabels, effectiveAssignees),
     ...(request.agent ? { agent: request.agent } : {}),
   });
   const body = userBody ? `${userBody}\n\n${marker}` : marker;
@@ -363,7 +465,8 @@ export async function createIssue(
   const payload = {
     title: request.title,
     body,
-    ...(request.labels.length ? { labels: request.labels } : {}),
+    ...(effectiveLabels.length ? { labels: effectiveLabels } : {}),
+    ...(effectiveAssignees.length ? { assignees: effectiveAssignees } : {}),
   };
   let answer: PostAnswer;
   try {
@@ -452,48 +555,92 @@ export async function createIssue(
     );
   }
   result.issue = { number, nodeId: issueNode, url: issueUrl };
-  const names = (value: unknown): string[] | null =>
+  const fieldStrings = (value: unknown, key: string): string[] | null =>
     Array.isArray(value)
-      ? value.flatMap((l) => {
-          const name = prop(l, "name");
-          return typeof name === "string" ? [name] : [];
+      ? value.flatMap((entry) => {
+          const item = prop(entry, key);
+          return typeof item === "string" ? [item] : [];
         })
       : null;
-  let applied = names(prop(created, "labels"));
-  const missing = (have: string[]) =>
-    request.labels.filter((l) => !have.some((h) => h.toLowerCase() === l.toLowerCase()));
-  if (request.labels.length && (applied === null || missing(applied).length)) {
-    // One bounded read-back before reporting labels missing.
+  let appliedLabels = fieldStrings(prop(created, "labels"), "name");
+  let appliedAssignees = fieldStrings(prop(created, "assignees"), "login");
+  const missingFrom = (wanted: readonly string[], have: readonly string[]) =>
+    wanted.filter((w) => !have.some((h) => h.toLowerCase() === w.toLowerCase()));
+  const needsLabelRead =
+    effectiveLabels.length > 0 &&
+    (appliedLabels === null || missingFrom(effectiveLabels, appliedLabels).length > 0);
+  const needsAssigneeRead =
+    effectiveAssignees.length > 0 &&
+    (appliedAssignees === null || missingFrom(effectiveAssignees, appliedAssignees).length > 0);
+  if (needsLabelRead || needsAssigneeRead) {
+    // One bounded read-back before reporting labels or assignees missing.
     const back = await read(`repos/${fullName}/issues/${number}`);
-    const backLabels =
-      back?.status === 200 && prop(back.body, "node_id") === issueNode
-        ? names(prop(back.body, "labels"))
-        : null;
-    if (backLabels) applied = backLabels;
-    else result.warnings.push("Read-back of the created issue failed; label state is unverified.");
+    const backValid = back?.status === 200 && prop(back.body, "node_id") === issueNode;
+    const backLabels = backValid ? fieldStrings(prop(back.body, "labels"), "name") : null;
+    const backAssignees = backValid ? fieldStrings(prop(back.body, "assignees"), "login") : null;
+    if (backLabels) appliedLabels = backLabels;
+    else if (needsLabelRead)
+      result.warnings.push("Read-back of the created issue failed; label state is unverified.");
+    if (backAssignees) appliedAssignees = backAssignees;
+    else if (needsAssigneeRead)
+      result.warnings.push("Read-back of the created issue failed; assignee state is unverified.");
   }
-  // Unknown stays null: an unread label list is never reported as empty.
-  result.labels.applied = applied;
-  if (request.labels.length && applied === null) {
+  // Unknown stays null: an unread label or assignee list is never reported as empty.
+  result.labels.applied = appliedLabels;
+  result.assignees.applied = appliedAssignees;
+
+  const labelsUnverified = effectiveLabels.length > 0 && appliedLabels === null;
+  const assigneesUnverified = effectiveAssignees.length > 0 && appliedAssignees === null;
+  const absentLabels = appliedLabels ? missingFrom(effectiveLabels, appliedLabels) : [];
+  const absentAssignees = appliedAssignees ? missingFrom(effectiveAssignees, appliedAssignees) : [];
+
+  if (labelsUnverified || assigneesUnverified || absentLabels.length || absentAssignees.length) {
     result.status = "partial";
-    result.error = {
-      id: "LABELS_UNVERIFIED",
-      message: `Issue created, but whether GitHub applied the requested labels is unknown. Inspect ${issueUrl}; do not create it again.`,
-    };
-    return result;
-  }
-  const absent = missing(applied ?? []);
-  if (absent.length) {
-    result.status = "partial";
-    result.error = {
-      id: "LABELS_MISSING",
-      message: `Issue created, but GitHub did not apply: ${absent.join(", ")}. Do not create it again.`,
-    };
-    // gh issue edit --add-label splits on commas; the REST call takes the exact names as JSON on
-    // stdin through a quoted here-doc, so nothing in a label is split or expanded by a shell.
-    result.recovery = [
-      `${["gh", "api", "--method", "POST", `repos/${fullName}/issues/${number}/labels`, "--input", "-"].map(shellQuote).join(" ")} <<'PDB_LABELS'\n${JSON.stringify({ labels: absent })}\nPDB_LABELS`,
-    ];
+    const missingParts: string[] = [];
+    if (absentLabels.length) missingParts.push(`labels: ${absentLabels.join(", ")}`);
+    if (absentAssignees.length) missingParts.push(`assignees: ${absentAssignees.join(", ")}`);
+    const unverifiedParts: string[] = [];
+    if (labelsUnverified) unverifiedParts.push("labels");
+    if (assigneesUnverified) unverifiedParts.push("assignees");
+    if (absentLabels.length && !absentAssignees.length && !assigneesUnverified) {
+      result.error = {
+        id: "LABELS_MISSING",
+        message: `Issue created, but GitHub did not apply: ${absentLabels.join(", ")}. Do not create it again.`,
+      };
+    } else if (absentAssignees.length && !absentLabels.length && !labelsUnverified) {
+      result.error = {
+        id: "ASSIGNMENT_MISSING",
+        message: `Issue created, but GitHub omitted assignee(s): ${absentAssignees.join(", ")}. Inspect ${issueUrl}; do not create it again.`,
+      };
+    } else if (labelsUnverified && !assigneesUnverified && !absentAssignees.length) {
+      result.error = {
+        id: "LABELS_UNVERIFIED",
+        message: `Issue created, but whether GitHub applied the requested labels is unknown. Inspect ${issueUrl}; do not create it again.`,
+      };
+    } else if (assigneesUnverified && !labelsUnverified && !absentLabels.length) {
+      result.error = {
+        id: "ASSIGNMENT_UNVERIFIED",
+        message: `Issue created, but whether GitHub applied the requested assignees is unknown. Inspect ${issueUrl}; do not create it again.`,
+      };
+    } else {
+      const details = [
+        ...(missingParts.length ? [`missing ${missingParts.join("; ")}`] : []),
+        ...(unverifiedParts.length ? [`unverified ${unverifiedParts.join(" and ")}`] : []),
+      ].join("; ");
+      result.error = {
+        id: absentLabels.length || absentAssignees.length ? "PARTIAL_APPLY" : "PARTIAL_UNVERIFIED",
+        message: `Issue created, but ${details}. Inspect ${issueUrl}; do not create it again.`,
+      };
+    }
+    // gh issue edit splits on commas; REST calls take exact names as JSON on stdin.
+    if (absentLabels.length)
+      result.recovery.push(
+        `${["gh", "api", "--method", "POST", `repos/${fullName}/issues/${number}/labels`, "--input", "-"].map(shellQuote).join(" ")} <<'PDB_LABELS'\n${JSON.stringify({ labels: absentLabels })}\nPDB_LABELS`,
+      );
+    if (absentAssignees.length)
+      result.recovery.push(
+        `${["gh", "api", "--method", "POST", `repos/${fullName}/issues/${number}/assignees`, "--input", "-"].map(shellQuote).join(" ")} <<'PDB_ASSIGNEES'\n${JSON.stringify({ assignees: absentAssignees })}\nPDB_ASSIGNEES`,
+      );
     return result;
   }
   result.status = "created";
@@ -524,6 +671,10 @@ export function issueCreateText(result: IssueCreateResult): string {
   if (result.labels.requested.length)
     lines.push(
       `Labels: ${result.labels.requested.join(", ")}${result.labels.applied ? ` (applied: ${result.labels.applied.join(", ") || "none"})` : ""}`,
+    );
+  if (result.assignees.requested.length)
+    lines.push(
+      `Assignees: ${result.assignees.requested.join(", ")}${result.assignees.applied ? ` (applied: ${result.assignees.applied.join(", ") || "none"})` : ""}`,
     );
   if (result.issue) lines.push(`Issue: #${result.issue.number} ${result.issue.url}`);
   if (result.preview) lines.push(`Body (${result.preview.bodyBytes} bytes):`, result.preview.body);

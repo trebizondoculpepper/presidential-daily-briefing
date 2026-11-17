@@ -1,4 +1,4 @@
-# Native project-rule extension v1
+# Native project-rule extension
 
 Contract for #513–#516, completing the remaining #75 priority/reason customization
 boundary after research #499/#512. The executable language is native DataScript EDN,
@@ -10,14 +10,14 @@ enabled by this documentation. Broader new-action/workflow replacement is not v1
 A committed project-root `pdb.rules.edn` contains exactly one EDN map with these
 required keys, no unknown/duplicate keys:
 
-- `:format-version` integer 1.
+- `:format-version` integer 1, or narration-only format 2 as specified below.
 - `:projection-version` integer 1.
 - `:base-policy-version` the exact shipped policy version.
-- `:base-rules-hash` the exact lower-case 64-hex shipped semantic hash.
+- `:base-rules-hash` the exact lower-case 64-hex shipped compatibility `rulesHash`.
 - `:rules` a native rules vector. Helpers are named `project-` followed by lower-case
   letters/digits/hyphens; no shipped predicate is imported or redefined.
 - `:preferences` a vector of at most 50 records, with unique source-order-preserved
-  IDs. Each record has exactly `:id`, `:when`, `:priority`, `:why`, `:witnesses`.
+  IDs. In v1 each record has exactly `:id`, `:when`, `:priority`, `:why`, `:witnesses`.
 
 A preference ID matches `project-[a-z0-9][a-z0-9-]{0,62}`. `:when` and `:priority`
 are vectors of native clauses. The reserved action variable is `?a`; the priority
@@ -44,6 +44,22 @@ its `:when` and `:priority` clauses. Evaluate witnesses with that action bound; 
 allow a free action ID or use a project-provided root query/`:find`/`:in` template.
 Project clauses cannot change input schema, lexicon, constants, query templates,
 comparison engine or shipped decision definitions.
+
+## Narration-only format 2 (#578)
+
+The [rule-attached narration contract](rule-attached-narration.md) defines optional
+literal `:purpose` metadata only for explicit format 2. Version 1 retains its exact
+closed preference schema; the starter command continues to generate version 1.
+Both formats retain projection version 1, identical required fields, the native
+subset and every restriction below. No unknown executable key is admitted.
+
+Bundled purposes use a separate narration revision, preserving the existing base
+`rulesHash` for purpose-only changes. Keep all previously hashed fields in that
+compatibility identity. Project source hashes still include the whole canonical
+form. The composite array below uses the actual format version as its first item:
+`[1, defaultRulesHash, 1, canonicalProjectForm]` for v1 and
+`[2, defaultRulesHash, 1, canonicalProjectForm]` for v2. This does not auto-upgrade
+existing project files or change their execution.
 
 ## Validation and native subset
 
@@ -158,7 +174,7 @@ Keep the default `rulesHash` unchanged when disabled. When enabled and valid,
 `rulesHash` reports the composite effective hash, with additive `effectivePolicy`
 metadata: state, applied-order mode, format/projection/base-policy versions,
 defaultRulesHash, projectRulesHash, effectiveRulesHash, matched project IDs and safe
-source identity. Composite hash is SHA-256 over a versioned canonical JSON array
+source identity. For v1, composite hash is SHA-256 over the versioned canonical JSON array
 `[1, defaultRulesHash, 1, canonicalProjectForm]`; projectRulesHash hashes the canonical
 project form's UTF-8. The manifest versions and base hash are inside that form.
 Canonicalize maps by sorted printed key after rejecting duplicates, then use the

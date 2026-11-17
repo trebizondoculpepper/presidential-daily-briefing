@@ -7,13 +7,27 @@
  * GitHub or repository configuration, so it works from the installed package anywhere.
  */
 import englishJson from "./english.generated.json" with { type: "json" };
-import { rulesHash as engineRulesHash, policyVersion } from "./engine.js";
-import { clauseLines, conjunctionText, predicateHead } from "./english-render.js";
+import {
+  rulesHash as engineRulesHash,
+  narrationHash as engineNarrationHash,
+  policyVersion,
+} from "./engine.js";
+import {
+  clauseLines,
+  conjunctionText,
+  predicateHead,
+  queryHeader,
+  evidenceLines,
+  decisionFormalLines,
+  denialFormalLines,
+  denialQueryLines,
+  preferenceFormalLines,
+  decisionGroups,
+} from "./english-render.js";
 import type {
   Clause,
   CompiledDecision,
   CompiledDenial,
-  CompiledEvidence,
   CompiledPredicate,
   CompiledQuery,
   EnglishPolicy,
@@ -64,6 +78,7 @@ export interface ProjectPolicyEnglish {
   effectiveRulesHash: string;
   preferences: {
     id: string;
+    purpose?: string;
     why: string;
     english: { when: Clause[]; priority: Clause[]; witnesses: Record<string, Clause[]> };
   }[];
@@ -117,12 +132,37 @@ interface UsedBy {
  * The shipped model, after checking it was compiled from the very policy the engine runs. A
  * mismatch means a stale or mixed install, and printing it would misstate the rules.
  */
-export function shippedModel(model: EnglishPolicy = shipped): EnglishPolicy {
-  if (model.rulesHash !== engineRulesHash || model.policyVersion !== policyVersion)
+export interface RulesArtifactIdentity {
+  rulesHash: string;
+  policyVersion: number;
+  narrationHash?: string | null;
+}
+
+/** Both identities are checked; absence is compatible only with matching absent narration. */
+export function validateRulesArtifact(
+  model: EnglishPolicy,
+  native: RulesArtifactIdentity,
+): EnglishPolicy {
+  if (model.rulesHash !== native.rulesHash || model.policyVersion !== native.policyVersion)
     throw new RulesArtifactError(
-      `the English rules artifact (rulesHash ${model.rulesHash.slice(0, 12)}) does not match the engine policy (rulesHash ${engineRulesHash.slice(0, 12)}); reinstall pdb or run npm run rules:build`,
+      `the English rules artifact (rulesHash ${model.rulesHash.slice(0, 12)}) does not match the engine policy (rulesHash ${native.rulesHash.slice(0, 12)}); reinstall pdb or run npm run rules:build`,
+    );
+  const revision = model.narrationHash ?? null;
+  const unboundPurpose =
+    revision === null &&
+    [...model.decisions, ...model.denials].some((r) => r.purpose !== undefined);
+  if (revision !== (native.narrationHash ?? null) || unboundPurpose)
+    throw new RulesArtifactError(
+      "the English narration revision does not match the native policy; reinstall pdb or run npm run rules:build",
     );
   return model;
+}
+export function shippedModel(model: EnglishPolicy = shipped): EnglishPolicy {
+  return validateRulesArtifact(model, {
+    rulesHash: engineRulesHash,
+    policyVersion,
+    narrationHash: engineNarrationHash,
+  });
 }
 
 /** Every rule ID and predicate name `--rule` accepts. */
@@ -353,6 +393,7 @@ export function rulesDocument(
           source: "pdb.rules.edn",
           preferences: preferences.map((p) => ({
             id: p.id,
+            ...(p.purpose !== undefined ? { purpose: p.purpose } : {}),
             why: p.why,
             when: conjunctionText(p.english.when),
             priority: conjunctionText(p.english.priority),
@@ -405,6 +446,7 @@ export function rulesDocument(
     policy: {
       policyVersion: model.policyVersion,
       rulesHash: model.rulesHash,
+      narrationHash: model.narrationHash ?? null,
       englishModelVersion: model.modelVersion,
       sources: model.sources,
     },
@@ -437,6 +479,18 @@ export function rulesDocument(
           reason:
             "pdb rules reads no project configuration, so this repository's effective settings are not known here and are not assumed to equal the defaults. Use pdb config list inside the project.",
         } as EffectiveSettings),
+    },
+    narration: {
+      scope:
+        "Decision rules, denial rules and project preferences in this view; predicates and queries retain formal definitions.",
+      total: decisionOut.length + denials.length + (project?.preferences.length ?? 0),
+      supplied: [...decisionOut, ...denials, ...(project?.preferences ?? [])].filter(
+        (r) => r.purpose !== undefined,
+      ).length,
+      missing: [...decisionOut, ...denials, ...(project?.preferences ?? [])]
+        .filter((r) => r.purpose === undefined)
+        .map((r) => r.id),
+      note: "Authored purposes explain intent; generated conditions define the represented policy. A purpose is not evidence that a rule matched a ticket. Mutation guards remain outside this listing.",
     },
     decisions: decisionOut,
     eligibility: {
@@ -480,14 +534,7 @@ export function rulesDocument(
 }
 export type RulesDocument = ReturnType<typeof rulesDocument>;
 
-const queryHeader = (q: CompiledQuery) =>
-  `${q.name}: find ${q.find.join(", ")}${q.inputs.length ? ` given ${q.inputs.join(" ")}` : ""}${q.ruleSet ? ` (predicates from ${q.ruleSet === "ordering" ? "ordering.edn" : "rules.edn"})` : ""}`;
-
-function evidenceLines(e: CompiledEvidence[], indent: string): string[] {
-  return e.map((x) => `${indent}${x.name} (${x.scope}): ${conjunctionText(x.clauses as Clause[])}`);
-}
-
-/** The text listing: the same document as --json, never truncated. */
+/** The complete formal CLI listing; purposes never replace or append conditions here. */
 export function rulesText(doc: RulesDocument): string {
   const out: string[] = [];
   const push = (...lines: string[]) => out.push(...lines);
@@ -541,37 +588,17 @@ export function rulesText(doc: RulesDocument): string {
   if (show(doc.decisions.length)) push("", `== Decision rules (${doc.decisions.length}) ==`);
   if (show(doc.decisions.length))
     push("Each rule proposes its action for every ?t its conditions match.");
-  const bands = [...new Set(doc.decisions.map((d) => d.band))].sort((a, b) => a - b);
-  for (const band of bands) {
+  for (const { band, decisions } of decisionGroups(doc.decisions)) {
     push("", `Band ${band}`);
-    for (const d of doc.decisions
-      .filter((x) => x.band === band)
-      .sort((a, b) => a.preference - b.preference || a.source.index - b.source.index)) {
-      push(
-        `  ${d.id}: action ${d.kind}; preference ${d.preference}; codes ${d.codes.join(", ")}`,
-        "    When all of:",
-        ...clauseLines(d.clauses, "      "),
-      );
-      if (d.overriddenBy.length)
-        push(
-          `    Declared override: ${d.overriddenBy.join(", ")} win(s) over ${d.id} when both match.`,
-        );
-      if (d.overrides.length)
-        push(`    Declared override: ${d.id} wins over ${d.overrides.join(", ")} when both match.`);
-      if (d.evidence.length) push("    Evidence shown:", ...evidenceLines(d.evidence, "      "));
+    for (const d of decisions) {
+      push(...decisionFormalLines(d));
     }
   }
 
   if (show(doc.eligibility.denials.length))
     push("", `== Eligibility and denials (${doc.eligibility.denials.length}) ==`);
-  if (doc.eligibility.denialQuery)
-    push(
-      "Denials query:",
-      `  ${queryHeader(doc.eligibility.denialQuery)}`,
-      ...clauseLines(doc.eligibility.denialQuery.clauses, "    "),
-    );
-  for (const d of doc.eligibility.denials)
-    push(`  ${d.id} (from ${d.predicate}) when all of:`, ...clauseLines(d.clauses, "      "));
+  if (doc.eligibility.denialQuery) push(...denialQueryLines(doc.eligibility.denialQuery));
+  for (const d of doc.eligibility.denials) push(...denialFormalLines(d));
 
   push("", "== Ordering ==");
   push(
@@ -596,15 +623,7 @@ export function rulesText(doc: RulesDocument): string {
     push("", `== Project preferences (${p.preferences.length}) ==`);
     push(`From ${p.source}. ${p.statements.join(" ")}`);
     for (const pref of p.preferences) {
-      push(
-        `  ${pref.id}: reason "${pref.why}"`,
-        "    Matches an admitted action ?a when all of:",
-        ...clauseLines(pref.clauses.when, "      "),
-        "    Priority (?value, higher sorts first) when all of:",
-        ...clauseLines(pref.clauses.priority, "      "),
-      );
-      for (const [name, cs] of Object.entries(pref.clauses.witnesses))
-        push(`    Witness ${name} (?value) when all of:`, ...clauseLines(cs, "      "));
+      push(...preferenceFormalLines(pref));
     }
     if (p.helpers.length) {
       push("Project helpers:");
