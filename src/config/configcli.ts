@@ -42,6 +42,17 @@ import {
 import { resolveEntry, SUPPORTED_HARNESSES, validateHarness } from "./harness.js";
 import type { EntryResolution, Environment } from "./harness.js";
 import type { IdentityKey, IdentityRecord } from "./identity.js";
+import {
+  GLOBAL_KEYS,
+  GLOBAL_CONFIG_FILE,
+  GlobalConfigError,
+  globalConfigDirectory,
+  loadGlobalConfig,
+  validateGlobalValue,
+  writeGlobalConfig,
+  type EffectiveGlobalSetting,
+  type GlobalValue,
+} from "./globalconfig.js";
 import type {
   ConfigFormat,
   LoadedConfig,
@@ -64,20 +75,32 @@ export interface ConfigRuntime {
   readonly env?: Environment;
 }
 
-export const configUsage = `Usage: pdb config get KEY [--entry KEY | --harness NAME] [--json] [--repo owner/name]
-       pdb config set KEY VALUE [--entry KEY | --harness NAME] [--json] [--repo owner/name]
-       pdb config list [--entry KEY | --harness NAME] [--json] [--repo owner/name]
+export const configUsage = `Usage: pdb config get KEY [--scope repository|global] [--entry KEY | --harness NAME] [--json] [--repo owner/name]
+       pdb config set KEY VALUE [--scope repository|global] [--entry KEY | --harness NAME] [--json] [--repo owner/name]
+       pdb config list [--scope repository|global] [--entry KEY | --harness NAME] [--json] [--repo owner/name]
        pdb config convert [--prefer toml|json] [--json] [--repo owner/name]
        pdb config help [KEY] [--json]
 identity.* keys use the [agents.KEY] entry of the root pdb.toml selected by --entry KEY,
-else by --harness ${SUPPORTED_HARNESSES.join("|")}, else by the detected harness.`;
+else by --harness ${SUPPORTED_HARNESSES.join("|")}, else by the detected harness.
+The global scope (--scope global) reads/writes the per-OS-user ${GLOBAL_CONFIG_FILE} and
+rejects identity keys and convert.`;
 
 type Parsed =
   | { command: "help"; key?: string; json: boolean }
-  | ({ command: "get"; key: string; json: boolean; repo?: string } & Selection)
-  | ({ command: "set"; key: string; value: string; json: boolean; repo?: string } & Selection)
-  | ({ command: "list"; json: boolean; repo?: string } & Selection)
+  | ({ command: "get"; key: string; json: boolean; repo?: string; scope: ConfigScope } & Selection)
+  | ({
+      command: "set";
+      key: string;
+      value: string;
+      json: boolean;
+      repo?: string;
+      scope: ConfigScope;
+    } & Selection)
+  | ({ command: "list"; json: boolean; repo?: string; scope: ConfigScope } & Selection)
   | { command: "convert"; json: boolean; repo?: string; prefer?: ConfigFormat };
+
+/** The supported configuration scopes (#804): repository (implicit) and global (per-user). */
+export type ConfigScope = "repository" | "global";
 
 /** Explicit entry selection; both absent means harness detection decides. */
 interface Selection {
@@ -98,7 +121,7 @@ class ConfigUsageError extends Error {
   }
 }
 
-const scopeRecovery = `Repository scope is the only supported scope and is implicit; run the command from the repository's checkout without a scope option.\n${configUsage}`;
+const scopeRecovery = `Repository scope is the implicit default; global settings use --scope global (per-OS-user config, see doc/design/configuration-service.md).\n${configUsage}`;
 
 /** Parse `config ...` arguments (after the word `config`). Throws ConfigUsageError. */
 export function configArgumentsFor(args: string[]): Parsed {
@@ -127,13 +150,20 @@ export function configArgumentsFor(args: string[]): Parsed {
   const { values, positionals } = parsed;
   const json = !!values.json;
   const other = (["global", "system", "machine", "user"] as const).find((flag) => values[flag]);
-  if (other || (values.scope !== undefined && values.scope !== "repository")) {
+  if (other) {
     throw new ConfigUsageError(
       "unsupported-scope",
-      `Unsupported configuration scope "${other ?? values.scope}"; global/machine settings are not available.`,
+      `Unsupported configuration scope "${other}"; use --scope global or --scope repository.`,
       scopeRecovery,
     );
   }
+  const scope: ConfigScope = values.scope === "global" ? "global" : "repository";
+  if (values.scope !== undefined && values.scope !== "repository" && values.scope !== "global")
+    throw new ConfigUsageError(
+      "unsupported-scope",
+      `Unsupported configuration scope "${values.scope}"; use --scope global or --scope repository.`,
+      scopeRecovery,
+    );
   if (values.repo !== undefined && !/^[\w.-]+\/[\w.-]+$/.test(values.repo)) {
     throw new ConfigUsageError("usage", "--repo must be owner/name.");
   }
@@ -144,11 +174,12 @@ export function configArgumentsFor(args: string[]): Parsed {
       operands.length > (command === "help" ? 1 : 0) ||
       values.repo !== undefined ||
       values.entry !== undefined ||
-      values.harness !== undefined
+      values.harness !== undefined ||
+      scope === "global"
     )
       throw new ConfigUsageError(
         "usage",
-        "config help takes at most one KEY and no --repo/--entry/--harness.",
+        "config help takes at most one KEY and no --repo/--entry/--harness/--scope.",
       );
     return { command: "help", key, json };
   }
@@ -156,8 +187,13 @@ export function configArgumentsFor(args: string[]): Parsed {
   if (prefer !== undefined && command !== "convert")
     throw new ConfigUsageError("usage", "--prefer applies only to config convert.");
   if (command === "convert") {
-    if (operands.length !== 0 || entry !== undefined || harness !== undefined)
-      throw new ConfigUsageError("usage", "config convert takes no KEY and no --entry/--harness.");
+    if (operands.length !== 0 || entry !== undefined || harness !== undefined || scope === "global")
+      throw new ConfigUsageError(
+        "usage",
+        scope === "global"
+          ? "config convert is a repository operation; there is no global file to convert."
+          : "config convert takes no KEY and no --entry/--harness.",
+      );
     if (prefer !== undefined && prefer !== "toml" && prefer !== "json")
       throw new ConfigUsageError("usage", "--prefer must be toml or json.");
     return { command, json, repo, prefer };
@@ -170,11 +206,18 @@ export function configArgumentsFor(args: string[]): Parsed {
     !isIdentityKey(operands[0] ?? "")
   )
     throw new ConfigUsageError("usage", "--entry and --harness apply only to identity.* keys.");
+  if (scope === "global" && (entry !== undefined || harness !== undefined))
+    throw new ConfigUsageError(
+      "usage",
+      "--entry and --harness do not apply to the global scope.",
+      `${configUsage}`,
+    );
   if (command === "get" && operands.length === 1)
-    return { command, key: operands[0]!, json, repo, entry, harness };
+    return { command, key: operands[0]!, json, repo, scope, entry, harness };
   if (command === "set" && operands.length === 2)
-    return { command, key: operands[0]!, value: operands[1]!, json, repo, entry, harness };
-  if (command === "list" && operands.length === 0) return { command, json, repo, entry, harness };
+    return { command, key: operands[0]!, value: operands[1]!, json, repo, scope, entry, harness };
+  if (command === "list" && operands.length === 0)
+    return { command, json, repo, scope, entry, harness };
   throw new ConfigUsageError(
     "usage",
     ["get", "set", "list"].includes(command)
@@ -309,6 +352,16 @@ export async function runConfig(
       return 0;
     }
     const fs = runtime.fs ?? nodeFileSystem;
+    if (parsed.command !== "convert" && parsed.scope === "global") {
+      if ((parsed.command === "get" || parsed.command === "set") && isIdentityKey(parsed.key))
+        throw new ConfigUsageError(
+          "invalid-value",
+          "Global configuration does not hold identity keys.",
+          `Identity keys use the [agents.KEY] entry selected by --entry KEY: pdb config ${parsed.command} ${parsed.key} --entry KEY.`,
+        );
+      await output(await runGlobal(parsed, runtime));
+      return 0;
+    }
     if ((parsed.command === "get" || parsed.command === "set") && isIdentityKey(parsed.key)) {
       await output(await runIdentity(parsed, runtime));
       return 0;
@@ -609,6 +662,116 @@ async function runIdentity(
     write.lockCleanup ?? "",
   ].filter(Boolean);
   return `${parsed.key} = ${setting.value} (entry ${entry}, ${selectionText(where)}) — ${write.changed ? `written to ${IDENTITY_FILE} (local, not committed)` : "unchanged"}${extra.map((line) => `\n  ${line}`).join("")}\n`;
+}
+
+/**
+ * Parse command-line text for a global key into its typed value, before the service validates
+ * it. Port parses as a decimal integer; ttl and projects are validated text (projects are not
+ * settable from one CLI string; use `pdb config set serve.projects ...` with a JSON array).
+ */
+function parsedGlobalValue(kind: string, key: string, text: string): GlobalValue {
+  if (kind === "port") {
+    if (!/^\d{1,5}$/.test(text.trim()))
+      throw new GlobalConfigError(
+        "invalid-value",
+        `Invalid value for "${key}": expected an integer 1-65535, got ${JSON.stringify(text)}.`,
+        `pdb config set ${key} 1-65535 --scope global`,
+      );
+    return validateGlobalValue(key, Number(text.trim()));
+  }
+  if (kind === "projects") {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      throw new GlobalConfigError(
+        "invalid-value",
+        `Invalid value for "${key}": expected a JSON array of projects, got ${JSON.stringify(text)}.`,
+        `pdb config set ${key} '[{"repository":"owner/name"}]' --scope global`,
+      );
+    }
+    return validateGlobalValue(key, parsed);
+  }
+  return validateGlobalValue(key, text);
+}
+
+/**
+ * `config get|set|list --scope global` (#804): the per-OS-user global configuration service.
+ * Reads are read-only (no file created); set validates first and writes atomically under a
+ * lock. Identity keys, --entry/--harness and convert do not apply to the global scope.
+ */
+async function runGlobal(
+  parsed: Extract<Parsed, { command: "get" | "set" | "list" }>,
+  runtime: ConfigRuntime,
+): Promise<string> {
+  const fs = runtime.fs ?? nodeFileSystem;
+  const dir = globalConfigDirectory(runtime.env ?? process.env);
+  const on = (config: Awaited<ReturnType<typeof loadGlobalConfig>>) => ({
+    scope: "global",
+    path: config.path,
+    storedVersion: config.storedVersion,
+  });
+  const display = (value: GlobalValue): string =>
+    Array.isArray(value) ? JSON.stringify(value) : String(value);
+  const settingJson = (setting: EffectiveGlobalSetting) => {
+    const entry = GLOBAL_KEYS.find((k) => k.key === setting.key)!;
+    return { ...setting, valueKind: entry.kind, defaultValue: display(entry.defaultValue) };
+  };
+  const text = (settings: readonly EffectiveGlobalSetting[]): string =>
+    settings.map((s) => `${s.key} = ${display(s.value)} (${s.source})`).join("\n");
+  if (parsed.command === "get") {
+    const config = await loadGlobalConfig(dir, fs);
+    const setting = config.settings.find((s) => s.key === parsed.key);
+    if (!setting)
+      throw new GlobalConfigError(
+        "unknown-key",
+        `Unknown global configuration key "${parsed.key}".`,
+        `Supported keys: ${GLOBAL_KEYS.map((k) => k.key).join(", ")}.`,
+      );
+    const result = {
+      schemaVersion: 1,
+      kind: "config-get",
+      ...on(config),
+      ...settingJson(setting),
+    };
+    return parsed.json
+      ? JSON.stringify(result, null, 2) + "\n"
+      : `${setting.key} = ${display(setting.value)} (${setting.source}; global)\n`;
+  }
+  if (parsed.command === "list") {
+    // A long-lived consumer's baseline is the snapshot at listing time; changes are reported
+    // against that in-memory snapshot on demand (doc/design/configuration-service.md).
+    const config = await loadGlobalConfig(dir, fs);
+    const result = {
+      schemaVersion: 1,
+      kind: "config-list",
+      ...on(config),
+      settings: config.settings.map(settingJson),
+    };
+    return parsed.json
+      ? JSON.stringify(result, null, 2) + "\n"
+      : `Global configuration (${config.path}${config.storedVersion === null ? ", not present: all defaults" : ""}):\n${text(config.settings)}\n`;
+  }
+  const entry = GLOBAL_KEYS.find((k) => k.key === parsed.key);
+  if (!entry)
+    throw new GlobalConfigError(
+      "unknown-key",
+      `Unknown global configuration key "${parsed.key}".`,
+      `Supported keys: ${GLOBAL_KEYS.map((k) => k.key).join(", ")}.`,
+    );
+  const value = parsedGlobalValue(entry.kind, parsed.key, parsed.value);
+  const write = await writeGlobalConfig(dir, new Map([[parsed.key, value]]), { fs });
+  const setting = write.config.settings.find((s) => s.key === parsed.key)!;
+  const result = {
+    schemaVersion: 1,
+    kind: "config-set",
+    ...on(write.config),
+    changed: write.changed,
+    ...settingJson(setting),
+  };
+  return parsed.json
+    ? JSON.stringify(result, null, 2) + "\n"
+    : `${setting.key} = ${display(setting.value)} — ${write.changed ? `written to ${write.config.path} (global, not committed)` : "unchanged"}\n`;
 }
 
 /** Identity section of `config list`: only registered values of the selected entry. */

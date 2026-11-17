@@ -21,6 +21,7 @@ import {
   type ConfigSchema,
   type GitRunner,
 } from "./config.js";
+import { GLOBAL_CONFIG_FILE } from "./globalconfig.js";
 
 describe("repository configuration service (#116, doc/design/repository-configuration.md)", () => {
   const root = "/repo";
@@ -827,6 +828,7 @@ describe("config get/set/list/help commands (#117)", () => {
   function setup(
     initial?: string,
     remotes = "origin\thttps://github.com/owner/name.git (fetch)\n",
+    env: Record<string, string> = {},
   ) {
     const files = new Map<string, string>(initial === undefined ? [] : [[path, initial]]);
     const fs: ConfigFileSystem = {
@@ -850,7 +852,7 @@ describe("config get/set/list/help commands (#117)", () => {
         currentRepository: async () => {
           throw new Error("no GitHub");
         },
-        config: { fs, git, cwd: root, env: {} },
+        config: { fs, git, cwd: root, env },
       });
     return { files, fs, out, call, json: () => JSON.parse(out.at(-1)!) };
   }
@@ -936,6 +938,37 @@ describe("config get/set/list/help commands (#117)", () => {
     await expect(t.call("set", "complexity.enabled")).rejects.toThrow(/Usage: pdb config/);
     await expect(t.call("frobnicate")).rejects.toThrow(/Unknown config command/);
     expect(t.files.size).toBe(0);
+  });
+
+  it("reads and writes the global scope through the service (#804)", async () => {
+    const t = setup(undefined, undefined, { PDB_CONFIG_DIR: "/global" });
+    // Global scope reads default; a set writes into the global directory; identity keys refuse.
+    expect(await t.call("get", "serve.port", "--scope", "global", "--json")).toBe(0);
+    expect(t.json()).toMatchObject({
+      scope: "global",
+      key: "serve.port",
+      value: 4372,
+      source: "default",
+    });
+    expect(await t.call("set", "serve.port", "4800", "--scope", "global", "--json")).toBe(0);
+    expect(t.json()).toMatchObject({
+      scope: "global",
+      value: 4800,
+      source: "explicit",
+      changed: true,
+    });
+    expect(await t.call("get", "serve.port", "--scope", "global", "--json")).toBe(0);
+    expect(t.json()).toMatchObject({ scope: "global", value: 4800, source: "explicit" });
+    expect(await t.call("set", "identity.name", "x", "--scope", "global", "--json")).toBe(1);
+    expect(t.json()).toMatchObject({ code: "invalid-value" });
+    expect(await t.call("convert", "--scope", "global", "--json")).toBe(1);
+    expect(t.json()).toMatchObject({ code: "usage" });
+    // The global file lives under the injected directory, not the repository.
+    const globalPath = join("/global", GLOBAL_CONFIG_FILE);
+    expect(t.files.has(globalPath)).toBe(true);
+    const globalText = t.files.get(globalPath)!;
+    expect(globalText).toContain("[serve]");
+    expect(globalText).toContain("port = 4800");
   });
 
   it("reports filesystem failures as structured refusals but still propagates programming errors", async () => {
