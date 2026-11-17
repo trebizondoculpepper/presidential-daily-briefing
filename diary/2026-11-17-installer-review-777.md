@@ -14,3 +14,12 @@ or trust setting was changed. Full validation is recorded with the PR reply.
 
 Full validation passed: check (zero errors, 54 existing warnings), 138 test files /
 2,568 passing tests (one skip), and build. The normal pre-commit hook is retained.
+
+The original PR merged concurrently before the fixes were pushed. Follow-up #797
+carries them onto current main. Full current-main validation exposed a stale
+process-footer assertion from #730: the Doctor link is now valid because #788
+shipped Diagnostics. Updated that assertion to require the scoped link and retain
+the no-context/no-link control; no footer or installer runtime behavior is relaxed.
+
+Current-main validation passes after the stale assertion correction: check (zero
+errors, 54 existing warnings), all 151 files / 2,754 tests (one skip), and build.

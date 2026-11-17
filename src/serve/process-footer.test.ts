@@ -57,7 +57,7 @@ describe("running process identity footer (#730)", () => {
     expect(html.match(/<footer>/g)).toHaveLength(1);
   });
 
-  it("shows honest unknowns and no dead Doctor link, including the no-footer fallback", () => {
+  it("shows honest unknowns and links the shipped Doctor page, including the no-footer fallback", () => {
     const identity = captureProcessIdentity({ version: null, startedAt });
     const html = withProcessIdentity(
       "<body><main>Choose a project</main></body>",
@@ -72,7 +72,8 @@ describe("running process identity footer (#730)", () => {
     expect(html).toContain("Source: unknown");
     expect(html).toContain("Dirty build: unknown");
     expect(html).toContain("Public IP: unavailable");
-    expect(html).not.toContain(">Doctor</a>");
+    expect(html).toContain('href="/diagnostics?repo=owner%2Frepo">Doctor</a>');
+    expect(renderProcessIdentity(identity)).not.toContain(">Doctor</a>");
     expect(
       renderProcessIdentity(captureProcessIdentity({ version: "1", startedAt }, { dirty: false })),
     ).toContain("Dirty build: unknown");
