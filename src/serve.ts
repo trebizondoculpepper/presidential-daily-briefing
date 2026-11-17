@@ -56,6 +56,7 @@ import {
 } from "./serve/dashboard.js";
 import { ticketPage, ticketScript } from "./serve/ticket-page.js";
 import { humanPage, humanScript } from "./serve/human-page.js";
+import { activityPage, activityScript } from "./serve/activity-page.js";
 import { quotasPage, quotasScript } from "./serve/quotas-page.js";
 
 export { serveHelp } from "./serve/options.js";
@@ -164,6 +165,8 @@ const dashboardFiles = (): Map<string, { type: string; body: string }> =>
     ["/setup.js", { type: "text/javascript; charset=utf-8", body: setupScript() }],
     // The human attention view (#458): its page is rendered per request, its script is static.
     ["/human.js", { type: "text/javascript; charset=utf-8", body: humanScript() }],
+    // The read-only Activity view (#456): its page is rendered per request, its script is static.
+    ["/activity.js", { type: "text/javascript; charset=utf-8", body: activityScript() }],
     // The account-scoped quota meters (#548): the page reads nothing until Refresh.
     ["/quotas.js", { type: "text/javascript; charset=utf-8", body: quotasScript() }],
   ]);
@@ -414,6 +417,23 @@ export async function startServe(
             allow: "GET, HEAD",
           });
         const page = humanPage(context.url.searchParams, served, selectRepository);
+        response.writeHead(page.status, {
+          "content-type": "text/html; charset=utf-8",
+          "cache-control": "no-store",
+          "x-content-type-options": "nosniff",
+          "referrer-policy": "no-referrer",
+          "content-security-policy": dashboardSecurityPolicy,
+        });
+        response.end(request.method === "HEAD" ? undefined : page.html);
+        return;
+      }
+      if (path === "/activity") {
+        // The read-only Activity/Agents view (#456): validated server-side, read by its script.
+        if (request.method !== "GET" && request.method !== "HEAD")
+          throw new HttpFailure(405, "METHOD_NOT_ALLOWED", "Use GET.", [], {
+            allow: "GET, HEAD",
+          });
+        const page = activityPage(context.url.searchParams, served, selectRepository);
         response.writeHead(page.status, {
           "content-type": "text/html; charset=utf-8",
           "cache-control": "no-store",

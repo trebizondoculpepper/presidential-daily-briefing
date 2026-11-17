@@ -31,7 +31,7 @@ export const dashboardPage = (context: ShellContext = shellContext("work")): str
 <label>Agent <input id="agent" type="text" placeholder="optional" autocomplete="off" spellcheck="false"></label>
 <button id="show" type="submit">Show</button><button id="refresh" type="button">Refresh</button>
 </form>
-<p><a id="human-link" href="/human">Human attention</a></p>
+<p><a id="human-link" href="/human">Human attention</a> · <a id="activity-link" href="/activity">Activity</a></p>
 <section id="state" aria-live="polite"></section><section id="actions"></section>
 `,
     "/dashboard.js",
@@ -279,6 +279,10 @@ export function dashboardClient(render: DashboardRenderers): void {
   const humanLink = byId("human-link") as HTMLAnchorElement | null;
   const humanHref = () => `/human${repo ? `?${new URLSearchParams({ repo })}` : ""}`;
   if (humanLink) humanLink.href = humanHref();
+  const activityLink = byId("activity-link") as HTMLAnchorElement | null;
+  const activityHref = () =>
+    `/activity${repo ? `?${new URLSearchParams({ repo, window: "1" })}` : ""}`;
+  if (activityLink) activityLink.href = activityHref();
   let controller: AbortController | null = null;
   let request = 0;
 
