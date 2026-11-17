@@ -151,7 +151,12 @@ async function cwdRepository(
   }
 }
 
+/** A host as it is compared: an absent host means github.com. */
+const canonicalHost = (host: string | undefined): string => (host ?? "github.com").toLowerCase();
+
+/** Registrations are the same only when host, repository and local root all match. */
 const sameRegistration = (left: GlobalProject, right: GlobalProject): boolean =>
+  canonicalHost(left.host) === canonicalHost(right.host) &&
   canonical(left.repository) === canonical(right.repository) &&
   (left.localRoot ?? null) === (right.localRoot ?? null);
 
@@ -285,8 +290,12 @@ export async function resolveServeProjects(
   // Two different roots for one repository were already refused by ServedSet.add above.
   const next: GlobalProject[] = saved.map((entry) => ({ ...entry }));
   for (const entry of verified) {
+    // Match the host too: a github.com target must not refine an enterprise registration that
+    // happens to name the same owner/name, and must not be lost behind it.
     const index = next.findIndex(
-      (existing) => canonical(existing.repository) === canonical(entry.repository),
+      (existing) =>
+        canonicalHost(existing.host) === canonicalHost(entry.host) &&
+        canonical(existing.repository) === canonical(entry.repository),
     );
     if (index === -1) next.push(entry);
     else if (!next[index]!.localRoot) next[index] = { ...next[index]!, localRoot: entry.localRoot };

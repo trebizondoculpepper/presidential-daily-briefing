@@ -111,6 +111,23 @@ describe("serve project resolution and registration (#805)", () => {
     expect(memory.writes).toEqual([]);
   });
 
+  it("keeps an enterprise registration independent from the same github.com repository", async () => {
+    const memory = memoryFs(
+      config(`[serve]\nprojects = [{ host = "ghe.example.com", repository = "owner/one" }]\n`),
+    );
+    const result = await resolveServeProjects(
+      { repos: ["owner/one"], projects: [] },
+      runtime(memory.fs, "/not/a/checkout", {}),
+    );
+    // The github.com target is served and appended, never merged into the enterprise entry.
+    expect(result.served).toEqual([{ repository: "owner/one" }]);
+    expect(result.saved).toEqual([
+      { host: "ghe.example.com", repository: "owner/one" },
+      { host: "github.com", repository: "owner/one" },
+    ]);
+    expect(result.registered).toEqual([{ host: "github.com", repository: "owner/one" }]);
+  });
+
   it("refuses to serve a saved registration for another GitHub host", async () => {
     const memory = memoryFs(
       config(`[serve]\nprojects = [{ host = "ghe.example.com", repository = "owner/a" }]\n`),
