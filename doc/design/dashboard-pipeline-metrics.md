@@ -1,5 +1,8 @@
 # Dashboard navigation and evidence-based pipeline metrics
 
+See [small dashboard and delivery slices](small-dashboard-delivery.md) for the
+current owner-approved child-ticket map and shipped-versus-remaining boundaries.
+
 Status: proposed contract for #573. Nothing in this document is implemented by it. Sections headed "Shipped today" describe current behaviour and cite the file that implements it; every other section is a proposal for the named page tickets. Merging this document does not close #574, #575, #576, #456, #458, #548 or #605.
 
 ## Contents
