@@ -11,6 +11,7 @@
 import type { Comment, Issue, PullRequest, Snapshot } from "../github/types.js";
 import type { TrustDecision } from "../workflow/delivery.js";
 import { cacheWord } from "./briefing.js";
+import { fitBriefingText } from "./compact.js";
 import { parseQuestionMarker } from "../workflow/claims.js";
 import { parseQuestionRecord, recordMarker } from "./questionrecord.js";
 import { emptyQuestionCounts, foldSourceQuestions, legacyQuestionLabels } from "./questionfold.js";
@@ -460,7 +461,7 @@ export function humanBriefing(
   };
 }
 
-/** Compact text rendering of a human briefing within `maxChars`. */
+/** Compact text rendering of a human briefing within `maxChars` (#379). */
 export function humanText(
   report: {
     repository: string;
@@ -474,50 +475,59 @@ export function humanText(
   const source = f.offline
     ? `; ${cacheWord(f)}${f.ageSeconds === undefined ? "" : ` (${f.ageSeconds}s old)`}, live verification unavailable${f.source === "stale" ? "; refresh before acting" : ""}`
     : "";
-  const lines = [
+  const headerLines = [
     `HUMAN BRIEFING ${report.repository} for ${human.human ?? "(no human named)"} — fetched ${f.fetchedAt}${source}`,
     "What input of yours is blocking progress? Read-only: no claims, answers or sign-offs are made here.",
-    ...human.notices,
   ];
-  if (!human.coverage.complete)
-    lines.push(
-      `INCOMPLETE evidence: ${human.coverage.warnings.length} warning(s); missing evidence is not "nothing needed". Use --json for all warnings.`,
-      ...human.coverage.warnings.slice(0, 3).map((w) => `  - ${w}`),
-    );
+  const warningLines = !human.coverage.complete
+    ? [
+        `INCOMPLETE evidence: ${human.coverage.warnings.length} warning(s); missing evidence is not "nothing needed". Use --json for all warnings.`,
+        ...human.coverage.warnings.slice(0, 3).map((w) => `  - ${w}`),
+      ]
+    : [];
+  const rows: string[] = [];
+  const itemRowIndices = new Set<number>();
   if (!human.total)
-    lines.push(
+    rows.push(
       human.coverage.complete
         ? "No human input is waiting."
         : "No human input found in the evidence read; coverage is incomplete.",
     );
   human.items.forEach((item, i) => {
-    lines.push(
-      `${i + 1}. [${[
-        item.explicit ? (item.addressed ? "explicit, to you" : "explicit") : "inferred",
-        ...(item.resolution
-          ? [
-              item.resolution === "unknown"
-                ? "ticket closed, resolution unknown"
-                : "ticket closed, unanswered",
-            ]
-          : []),
-      ].join(", ")}] ${item.kind} ${item.target} — ${item.title}`,
-      `   Why: ${item.reason}`,
-      ...item.requested.map((r) => `   Requested: ${r}`),
-      `   Blocks: ${item.blocks.subjects.join(", ") || "nothing known"}${item.blocks.unknown.length ? ` (${item.blocks.unknown.join("; ")})` : ""}`,
-      `   Source: ${item.source}`,
-      ...item.warnings.map((w) => `   Warning: ${w}`),
+    rows.push(
+      [
+        `${i + 1}. [${[
+          item.explicit ? (item.addressed ? "explicit, to you" : "explicit") : "inferred",
+          ...(item.resolution
+            ? [
+                item.resolution === "unknown"
+                  ? "ticket closed, resolution unknown"
+                  : "ticket closed, unanswered",
+              ]
+            : []),
+        ].join(", ")}] ${item.kind} ${item.target} — ${item.title}`,
+        `   Why: ${item.reason}`,
+        ...item.requested.map((r) => `   Requested: ${r}`),
+        `   Blocks: ${item.blocks.subjects.join(", ") || "nothing known"}${item.blocks.unknown.length ? ` (${item.blocks.unknown.join("; ")})` : ""}`,
+        `   Source: ${item.source}`,
+        ...item.warnings.map((w) => `   Warning: ${w}`),
+      ].join("\n"),
     );
+    itemRowIndices.add(rows.length - 1);
   });
-  if (human.omitted) lines.push(`${human.omitted} more item(s) omitted; raise --limit.`);
-  lines.push(`Excluded: ${human.coverage.excluded.join("; ")}.`);
-  let text = "";
-  for (const line of lines) {
-    if (text.length + line.length + 1 > maxChars) {
-      text += "… output truncated; use --json.\n";
-      break;
-    }
-    text += `${line}\n`;
-  }
-  return text;
+  if (human.omitted) rows.push(`${human.omitted} more item(s) omitted; raise --limit.`);
+  const excludedLine = `Excluded: ${human.coverage.excluded.join("; ")}.`;
+  return fitBriefingText({
+    headerLines,
+    contextNotices: human.notices,
+    warningLines,
+    incomplete: !human.coverage.complete,
+    rows: [...rows, excludedLine],
+    itemRowIndices,
+    totalItems: human.total,
+    diagLines: [],
+    omittedGuideLine: [],
+    baseNotice: "Truncated due to maximum size; raise --max-chars or use --json.",
+    maxChars,
+  });
 }

@@ -74,7 +74,12 @@ Use one shared CLI/MCP text projection for both roles and both engines. HTTP and
 the dashboard should consume the same ranked model, but their native HTML layout
 is not a reason to add another ranker or prose explainer. Text budget truncation
 states "Truncated due to maximum size" per #379, preferably retaining whole useful
-rows and a supported detail/limit command when it fits. No false minimum-size error
+rows, shown/total counts (`(K of N shown)`) when known, and a supported detail/limit
+command when it fits. When `--max-chars` is smaller than the fixed header, warnings
+and footer, whole lines degrade in priority order (repository/role header, `INCOMPLETE:`
+evidence status, workflow-guide footer, secondary notices) ending with the longest
+notice that fits (`Truncated due to maximum size...`, `Truncated due to maximum size.`,
+`[truncated]` or `…`), never exceeding `--max-chars`. No false minimum-size error
 or undocumented command. User-supplied titles/comments never become instructions.
 
 Do not change top-ten selection, action kinds, eligibility, commands, provenance,
