@@ -27,7 +27,9 @@
     "dist/engine-*.mjs",
     "dist/engine-*.mjs.map",
     "dist/requiredchecks-*.mjs",
-    "dist/requiredchecks-*.mjs.map"
+    "dist/requiredchecks-*.mjs.map",
+    "dist/english-render-*.mjs",
+    "dist/english-render-*.mjs.map"
   ],
   "type": "module",
   "publishConfig": {

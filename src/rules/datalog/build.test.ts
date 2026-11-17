@@ -115,6 +115,7 @@ describe("rules build (#348)", () => {
     const { "D-DENY-BLOCKER": _, ...denials } = bundle.denials;
     expect(problemsOf(() => validateBundle({ ...bundle, denials }))).toEqual([
       "decisions.edn :denials: D-DENY-BLOCKER is derived but undocumented",
+      "decisions.edn :denial-purposes: unknown denial ID D-DENY-BLOCKER",
     ]);
   });
 

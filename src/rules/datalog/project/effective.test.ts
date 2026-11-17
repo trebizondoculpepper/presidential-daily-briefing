@@ -162,6 +162,26 @@ describe("effective project policy (#516)", () => {
     ]);
   });
 
+  it("evaluates narrated format 2 with the same order and reasons while reporting its revision", async () => {
+    const text = current
+      .replace(":format-version 1", ":format-version 2")
+      .replace(":why", ':purpose "Prefer the registered project label." :why');
+    const policy = compileProjectPolicy(text, base);
+    const plain = await run(enabled);
+    const narrated = await run(enabled, "impact", { loadPolicy: async () => policy });
+    expect(narrated.warnings).toEqual([]);
+    expect(narrated.manifest).toMatchObject({
+      state: "active",
+      formatVersion: 2,
+      projectionVersion: 1,
+      projectRulesHash: policy.projectRulesHash,
+      effectiveRulesHash: policy.effectiveRulesHash,
+      matchedIds: plain.manifest.matchedIds,
+    });
+    expect(targets(narrated.items)).toEqual(targets(plain.items));
+    expect(narrated.items.map((a) => a.why)).toEqual(plain.items.map((a) => a.why));
+  });
+
   it("keeps the default order under an explicit age order and says so", async () => {
     const items = defaults("oldest");
     const result = await run(enabled, "oldest");

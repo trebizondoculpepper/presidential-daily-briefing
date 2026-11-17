@@ -9,6 +9,7 @@
  *   npm run rules:build            write policy.generated.json
  *   npm run rules:build -- --check fail if the committed artifact differs from a fresh build
  */
+import { purposeText } from "./narration.js";
 import ds from "datascript";
 import type { Db, Schema } from "datascript";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -245,6 +246,7 @@ export function readSources(
     const decisionsFile = keyed(file("decisions.edn"), "policy/decisions.edn", [
       "decisions",
       "denials",
+      "denial-purposes",
     ]);
     const definitions: DecisionRule[] = vector(
       need(decisionsFile, "decisions", "policy/decisions.edn"),
@@ -253,6 +255,7 @@ export function readSources(
       const where = `policy/decisions.edn :decisions[${i}]`;
       const m = keyed(form, where, [
         "id",
+        "purpose",
         "kind",
         "band",
         "preference",
@@ -264,6 +267,9 @@ export function readSources(
       const when = vector(need(m, "when", where), `${where} :when`);
       return {
         id: text(need(m, "id", where), `${where} :id`),
+        ...(m.has("purpose")
+          ? { purpose: purposeText(m.get("purpose"), `${where} :purpose`) }
+          : {}),
         kind: text(need(m, "kind", where), `${where} :kind`),
         band: integer(need(m, "band", where), `${where} :band`),
         preference: integer(need(m, "preference", where), `${where} :preference`),
@@ -341,6 +347,19 @@ export function readSources(
           "policy/decisions.edn :denials",
         ).map(([k, v]) => [k, text(v, `policy/decisions.edn :denials "${k}"`)]),
       ),
+      ...(decisionsFile.has("denial-purposes")
+        ? {
+            denialPurposes: Object.fromEntries(
+              named(
+                decisionsFile.get("denial-purposes"),
+                "policy/decisions.edn :denial-purposes",
+              ).map(([id, value]) => [
+                id,
+                purposeText(value, `policy/decisions.edn :denial-purposes "${id}"`),
+              ]),
+            ),
+          }
+        : {}),
       queries: Object.fromEntries(
         queryMap
           .filter(([k]) => !["match", "witness", "key-queries"].includes(k))
@@ -468,6 +487,10 @@ export function validateBundle(bundle: PolicyBundle): PolicyBundle {
     if (!idPattern.test(d.id)) problems.push(`${where}: rule ID must match ${idPattern}`);
     if (ids.has(d.id)) problems.push(`${where}: duplicate rule ID`);
     ids.add(d.id);
+    if (d.purpose !== undefined)
+      attempt(`${where} :purpose`, () => {
+        purposeText(d.purpose, where);
+      });
     if (!(d.kind in commandKinds) && d.kind !== "implement")
       problems.push(`${where}: kind "${d.kind}" has no command mapping`);
     check(`${where} :when`, d.query, bundle.clauses);
@@ -489,6 +512,13 @@ export function validateBundle(bundle: PolicyBundle): PolicyBundle {
   for (const id of Object.keys(bundle.denials))
     if (!derived.has(id))
       problems.push(`decisions.edn :denials: ${id} is never derived by rules.edn`);
+  for (const [id, value] of Object.entries(bundle.denialPurposes ?? {})) {
+    if (!Object.hasOwn(bundle.denials, id))
+      problems.push(`decisions.edn :denial-purposes: unknown denial ID ${id}`);
+    attempt(`decisions.edn :denial-purposes "${id}"`, () => {
+      purposeText(value, id);
+    });
+  }
   problems.push(...overrideProblems(bundle));
   // The English listing must account for every construct: an unsupported form or a missing
   // lexicon phrase fails the build, never an omitted line in `pdb rules`.
