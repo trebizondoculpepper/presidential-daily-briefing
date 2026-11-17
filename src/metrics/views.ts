@@ -104,20 +104,37 @@ export function newsView(
   tickets: readonly MetricTicket[],
   coverage: HistoryCoverage,
   limit = 200,
+  /** Tickets in the window the read could not ledger: their events are missing. */
+  unread: readonly string[] = [],
+  /** Merges from the pull request walk, standalone PRs included; deduplicated by PR. */
+  walkedMerges: readonly { at: string; key: string }[] = [],
 ): NewsResult {
   const through = new Date(Date.parse(now)).toISOString();
   const from = new Date(Date.parse(now) - hours * 3_600_000).toISOString();
   const window = { from, through };
   const seen = new Set<string>();
+  const mergedPrs = new Set<string>();
   const all: NewsItem[] = [];
-  const gaps = new Set<string>();
+  const gaps = new Set<string>(unread);
   for (const t of tickets) {
     if (Object.values(t.ledger.coverage).some((c) => c !== "complete")) gaps.add(t.member);
     for (const e of t.ledger.events) {
       if (inWindow(e.at, window) !== true || seen.has(e.key)) continue;
       seen.add(e.key);
+      if (e.kind === "pr-merged") mergedPrs.add(`${e.pr.repository}#${e.pr.number}`.toLowerCase());
       all.push({ at: e.at, kind: e.kind, member: t.member, key: e.key, detail: detailOf(e) });
     }
+  }
+  for (const m of walkedMerges) {
+    if (inWindow(m.at, window) !== true || mergedPrs.has(m.key.toLowerCase())) continue;
+    mergedPrs.add(m.key.toLowerCase());
+    all.push({
+      at: m.at,
+      kind: "pr-merged",
+      member: m.key,
+      key: `pr-merged:${m.key}`,
+      detail: m.key,
+    });
   }
   all.sort((a, b) => Date.parse(b.at) - Date.parse(a.at) || (a.key < b.key ? -1 : 1));
   return {
@@ -178,6 +195,13 @@ export function dailyView(
   days: number,
   tickets: readonly MetricTicket[],
   coverage: HistoryCoverage,
+  /** Tickets in the window the read could not ledger: every figure is then a lower bound. */
+  unread: readonly string[] = [],
+  /**
+   * Merges from the pull request walk, when the read supplies them: then the PR-merge series
+   * counts every merged PR, standalone ones included, not only required delivery members.
+   */
+  walkedMerges?: readonly { at: string; key: string }[],
 ): DailyResult {
   const window = trailingWindow(now, days);
   const deliveries: { at: string; key: string }[] = [];
@@ -187,12 +211,12 @@ export function dailyView(
   const merges = new Map<string, string>();
   const undated = new Set<string>();
   // Per-figure evidence gaps, so missing evidence is never shown as known zero activity.
-  const outcomeGaps = new Set<string>();
-  const mergeGaps = new Set<string>();
+  const outcomeGaps = new Set<string>(unread);
+  const mergeGaps = new Set<string>(walkedMerges ? [] : unread);
 
   for (const t of tickets) {
     if (t.verdict === "unknown" || t.ledger.currentState === "unknown") outcomeGaps.add(t.member);
-    if (t.ledger.coverage.prs !== "complete") mergeGaps.add(t.member);
+    if (!walkedMerges && t.ledger.coverage.prs !== "complete") mergeGaps.add(t.member);
     if (t.verdict === "delivered" || t.verdict === "attested") {
       const d = deliveryInstant(t.ledger, t.verdict);
       if (d.status === "dated") {
@@ -233,7 +257,7 @@ export function dailyView(
       closedCompletedUnverified: figure(unverified, outcomeGaps),
       closedNotPlanned: figure(notPlanned, outcomeGaps),
       prMerges: figure(
-        [...merges].map(([key, at]) => ({ at, key })),
+        walkedMerges ? [...walkedMerges] : [...merges].map(([key, at]) => ({ at, key })),
         mergeGaps,
       ),
     },
