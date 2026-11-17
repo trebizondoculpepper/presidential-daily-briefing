@@ -2,7 +2,13 @@ import { describe, expect, it } from "vite-plus/test";
 import { runInNewContext } from "node:vm";
 import { projectSelectionScript } from "./project-selection.js";
 
-async function navigate(href: string, projects: string[], saved: string | null, broken = false) {
+async function navigate(
+  href: string,
+  projects: string[],
+  saved: string | null,
+  broken = false,
+  normalized?: string,
+) {
   const redirects: string[] = [];
   const writes: string[] = [];
   const sandbox = {
@@ -20,10 +26,14 @@ async function navigate(href: string, projects: string[], saved: string | null, 
         },
       },
     },
-    fetch: async () => ({
-      ok: true,
-      json: async () => ({ repositories: projects.map((repository) => ({ repository })) }),
-    }),
+    fetch: async () => {
+      // Work startup uses history.replaceState while the status request is pending.
+      if (normalized) sandbox.window.location.href = normalized;
+      return {
+        ok: true,
+        json: async () => ({ repositories: projects.map((repository) => ({ repository })) }),
+      };
+    },
   };
   await runInNewContext(projectSelectionScript(), sandbox);
   return { redirects, writes };
@@ -45,6 +55,17 @@ describe("shared project selection", () => {
       redirects: [],
       writes: ["C/D"],
     });
+  });
+  it("remembers a selection after Work normalizes role during the status request", async () => {
+    expect(
+      await navigate(
+        "http://localhost/?repo=c/d",
+        ["a/b", "C/D"],
+        "a/b",
+        false,
+        "http://localhost/?repo=c/d&role=implementer",
+      ),
+    ).toEqual({ redirects: [], writes: ["C/D"] });
   });
   it("does not replace invalid or repeated explicit selections", async () => {
     for (const query of ["repo=gone/repo", "repo=", "repo=a/b&repo=c/d"]) {
