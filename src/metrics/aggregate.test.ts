@@ -29,6 +29,8 @@ function ledger(over: Partial<TicketLedger> = {}): TicketLedger {
     membership: "complete",
     requiredPullRequests: [],
     requiredOtherMembers: 0,
+    currentState: "open",
+    stateReason: null,
     coverage: {
       comments: "complete",
       timeline: "complete",
@@ -103,7 +105,12 @@ describe("duration statistics (#573 slice 4)", () => {
       { member: "B", status: "unknown", reason: "never picked up" },
     ]);
     expect(s).toMatchObject({ completed: 1, mean: H, unknown: 1 });
-    expect(s.members).toEqual({ completed: ["A"], open: [], unknown: ["B"] });
+    expect(s.members).toEqual({
+      completed: ["A"],
+      open: [],
+      unknown: ["B"],
+      closedUndelivered: [],
+    });
   });
 
   it("applies the sample threshold within each group, not across groups", () => {
@@ -278,6 +285,40 @@ describe("pickup to delivery (#573 slice 4)", () => {
     expect(pickupToDelivery("#3", ledger(), "delivered", "2026-11-17T00:00:00Z")).toMatchObject({
       status: "unknown",
       reason: "never picked up",
+    });
+  });
+  it("never counts a closed, undelivered ticket as open work", () => {
+    const abandoned = ledger({
+      firstPickup: picked("2026-11-10T00:00:00Z"),
+      currentState: "closed",
+      stateReason: "NOT_PLANNED",
+    });
+    const sample = pickupToDelivery("#4", abandoned, "none", "2026-11-17T00:00:00Z");
+    expect(sample).toEqual({ member: "#4", status: "closed-undelivered", reason: "NOT_PLANNED" });
+    const unverified = ledger({
+      firstPickup: picked("2026-11-10T00:00:00Z"),
+      currentState: "closed",
+      stateReason: "COMPLETED",
+    });
+    const stats = durationStats([
+      sample,
+      pickupToDelivery("#5", unverified, "none", "2026-11-17T00:00:00Z"),
+      pickupToDelivery(
+        "#6",
+        ledger({ firstPickup: picked("2026-11-16T00:00:00Z") }),
+        "none",
+        "2026-11-17T00:00:00Z",
+      ),
+    ]);
+    expect(stats).toMatchObject({ completed: 0, open: { count: 1 }, closedUndelivered: 2 });
+    expect(stats.members.closedUndelivered).toEqual(["#4", "#5"]);
+  });
+
+  it("is unknown when the current issue state is unknown", () => {
+    const l = ledger({ firstPickup: picked("2026-11-10T00:00:00Z"), currentState: "unknown" });
+    expect(pickupToDelivery("#7", l, "none", "2026-11-17T00:00:00Z")).toMatchObject({
+      status: "unknown",
+      reason: "current issue state unknown",
     });
   });
 });

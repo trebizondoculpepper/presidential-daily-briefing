@@ -123,6 +123,10 @@ export interface TicketLedger {
    * delivery instant cannot be dated from merges alone (#573 slice 4).
    */
   requiredOtherMembers: number | null;
+  /** The issue's state as read now, so closed undelivered work is never treated as open. */
+  currentState: "open" | "closed" | "unknown";
+  /** GitHub's close reason (for example NOT_PLANNED or COMPLETED) when closed; else null. */
+  stateReason: string | null;
   coverage: LedgerCoverage;
   /** Why evidence is missing or unknown. */
   omissions: string[];
@@ -477,6 +481,8 @@ export async function ticketLedger(
     membership,
     requiredPullRequests,
     requiredOtherMembers,
+    currentState: issue.state === "OPEN" ? "open" : issue.state === "CLOSED" ? "closed" : "unknown",
+    stateReason: issue.state === "CLOSED" ? issue.stateReason : null,
     coverage,
     omissions,
     ignored,

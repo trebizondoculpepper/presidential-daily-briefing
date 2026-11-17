@@ -35,7 +35,12 @@ export type DurationSample =
   | { member: string; status: "completed"; ms: number }
   /** Still running: its elapsed time so far is only a lower bound. */
   | { member: string; status: "open"; elapsedMs: number }
-  | { member: string; status: "unknown"; reason: string };
+  | { member: string; status: "unknown"; reason: string }
+  /**
+   * Closed without delivery (abandoned, or closed as completed without verified delivery):
+   * excluded from the timing sample and from open work, but counted so it is never dropped.
+   */
+  | { member: string; status: "closed-undelivered"; reason: string | null };
 
 export interface DurationStats {
   median: number | null;
@@ -46,8 +51,10 @@ export interface DurationStats {
   p90: number | null;
   open: { count: number; longestElapsedMs: number | null };
   unknown: number;
+  /** Closed without delivery: reported separately, never as open work or a sample. */
+  closedUndelivered: number;
   /** Every ticket counted in any figure above, so drill-down membership matches the counts. */
-  members: { completed: string[]; open: string[]; unknown: string[] };
+  members: { completed: string[]; open: string[]; unknown: string[]; closedUndelivered: string[] };
 }
 
 /** Median first, mean and completed count; open and unknown reported, never dropped. */
@@ -57,6 +64,7 @@ export function durationStats(samples: readonly DurationSample[]): DurationStats
   const completed = unique.filter((s) => s.status === "completed");
   const open = unique.filter((s) => s.status === "open");
   const unknown = unique.filter((s) => s.status === "unknown");
+  const closed = unique.filter((s) => s.status === "closed-undelivered");
   const sorted = completed.map((s) => s.ms).sort((a, b) => a - b);
   const enough = sorted.length >= PERCENTILE_MIN_SAMPLE;
   return {
@@ -70,10 +78,12 @@ export function durationStats(samples: readonly DurationSample[]): DurationStats
       longestElapsedMs: open.length === 0 ? null : Math.max(...open.map((s) => s.elapsedMs)),
     },
     unknown: unknown.length,
+    closedUndelivered: closed.length,
     members: {
       completed: completed.map((s) => s.member),
       open: open.map((s) => s.member),
       unknown: unknown.map((s) => s.member),
+      closedUndelivered: closed.map((s) => s.member),
     },
   };
 }
@@ -174,7 +184,8 @@ export function deliveryInstant(ledger: TicketLedger, verdict: CompletionVerdict
 
 /**
  * Pickup-to-delivery for one ticket: first proven pickup to the delivery instant. Handoffs and
- * requeues never restart it. Open work reports its elapsed time so far as a lower bound.
+ * requeues never restart it. Open work reports its elapsed time so far as a lower bound;
+ * a closed ticket that was never delivered is reported as closed-undelivered, never as open.
  */
 export function pickupToDelivery(
   member: string,
@@ -188,6 +199,12 @@ export function pickupToDelivery(
   const delivery = deliveryInstant(ledger, verdict);
   if (delivery.status === "undated") return { member, status: "unknown", reason: delivery.reason };
   if (delivery.status === "not-delivered") {
+    if (ledger.currentState === "closed") {
+      return { member, status: "closed-undelivered", reason: ledger.stateReason };
+    }
+    if (ledger.currentState === "unknown") {
+      return { member, status: "unknown", reason: "current issue state unknown" };
+    }
     return {
       member,
       status: "open",
