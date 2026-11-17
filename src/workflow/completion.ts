@@ -1,3 +1,4 @@
+import { identitySelection, identitySelectionOptions } from "../config/commandidentity.js";
 /**
  * Evidence-based ticket completion (#191, doc/design/delivery-lifecycle.md "Default completion
  * policy", "Rule and fact interface" and "Complete and concurrent claims").
@@ -1390,7 +1391,7 @@ export function completeText(result: CompletePlan | CompleteResult, dryRun = fal
 }
 
 export const completeUsage =
-  "Usage: pdb complete N --agent NAME [--dry-run] [--json] [--repo owner/name]";
+  "Usage: pdb complete N [--agent NAME] [--dry-run] [--json] [--repo owner/name]";
 export const completeHelp = `${completeUsage}
 Verify delivery of issue N from fresh evidence and, only when it holds, record completion and
 close the issue as completed (#191, doc/design/delivery-lifecycle.md). Delivery is "delivered"
@@ -1419,16 +1420,22 @@ export function completeArguments(args: string[]) {
       json: { type: "boolean" },
       "dry-run": { type: "boolean" },
       agent: { type: "string" },
+      ...identitySelectionOptions,
     },
   });
   const [n, ...extra] = positionals;
   const number = /^[1-9]\d*$/.test(n ?? "") ? Number(n) : null;
-  if (!number || extra.length || !values.agent || !/^[A-Za-z0-9][\w.-]*$/.test(values.agent))
+  if (
+    !number ||
+    extra.length ||
+    (values.agent !== undefined && !/^[A-Za-z0-9][\w.-]*$/.test(values.agent))
+  )
     throw new Error(completeUsage);
   if (values.repo && !/^[\w.-]+\/[\w.-]+$/.test(values.repo))
     throw new Error("--repo must be owner/name.");
   return {
-    request: { number, agent: values.agent } satisfies CompleteRequest,
+    request: { number, agent: values.agent },
+    ...identitySelection(values),
     repo: values.repo,
     json: !!values.json,
     dryRun: !!values["dry-run"],

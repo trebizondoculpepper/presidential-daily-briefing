@@ -44,7 +44,8 @@ assignee (human ownership, not an automatic agent claim).
 Arguments are passed to gh as data, never through a shell. The body gets a hidden marker
 (${ISSUE_CREATE_MARKER}) with an operation ID, the target ID and a digest of title, body and
 labels; it is a correlation receipt, not a claim, approval or signature. No status, claim or
-agent label is added. The local checkout configuration and identity are never changed.
+agent label is added. The issue writer never changes local checkout settings or identity. Normal CLI preparation
+may first reuse or safely initialize the selected local agent (see pdb --help).
 
 Retries: exactly one create request is sent per invocation and none is ever retried
 automatically. After a timeout, 5xx or lost reply the outcome is "unknown": inspect the target's

@@ -449,7 +449,7 @@ describe("claim and needs-human (doc/design/workflow.md)", () => {
   });
   it("validates arguments, and a dry run writes nothing", async () => {
     for (const bad of [
-      ["claim", "7"],
+      ["claim"],
       ["claim", "x", "--agent", "a"],
       ["claim", "7", "--agent", "a", "--why", "w"],
       ["needs-human", "7", "--agent", "a", "--designer", "d", "--why", "w"],
