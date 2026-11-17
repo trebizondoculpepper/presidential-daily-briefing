@@ -1,6 +1,7 @@
 /** CLI projection of the shared identity preparer (#677). No argument scanning or allocation here. */
 import {
   prepareEffectiveIdentity,
+  disabledEffectiveHuman,
   resolveEffectiveHuman,
   type EffectiveIdentity,
   type EffectiveIdentityOptions,
@@ -26,10 +27,12 @@ export function prepareCommandIdentity(
   return prepareEffectiveIdentity(options, {
     ...identityRuntime,
     human: () =>
-      resolveEffectiveHuman(auth, {
-        ...humanOptions,
-        offline: options.offline || options.intent === "dry-run" || humanOptions?.offline,
-      }),
+      auth
+        ? resolveEffectiveHuman(auth, {
+            ...humanOptions,
+            offline: options.offline || options.intent === "dry-run" || humanOptions?.offline,
+          })
+        : Promise.resolve(disabledEffectiveHuman(humanOptions?.host)),
   });
 }
 

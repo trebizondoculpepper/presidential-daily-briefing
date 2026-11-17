@@ -1,3 +1,6 @@
+import type { PrepareCommandIdentity } from "../config/commandidentity.js";
+import type { EffectiveIdentity } from "../config/effectiveidentity.js";
+import { effectiveReadIdentity } from "../config/serveridentity.js";
 import type { Readable } from "node:stream";
 import { codexResponse } from "./codex.js";
 /** Opt-in process-per-hook wrapper. No native hooks or repository configuration are written. */
@@ -39,6 +42,7 @@ response: Codex/Claude/Ori adapters translate it and must establish model-visibl
 Remove YOUR disposable state directory after stopping its adapter; no other uninstall needed.
 Exit: 0 structured decision (including stop/defer); 1 invalid arguments/setup.\n`;
 export interface CliRuntime {
+  prepareIdentity?: PrepareCommandIdentity;
   input?: Readable;
   currentRepository?: typeof currentRepository;
   git?: GitRunner;
@@ -68,9 +72,10 @@ export async function runRebrief(
   let identityMetadata:
     | Pick<ReadIdentity, "source" | "store" | "diagnostic" | "storeDiagnostic">
     | undefined;
+  let effectiveIdentity: EffectiveIdentity | undefined;
   const emit = async (result: Result) =>
     output(
-      `${JSON.stringify({ ...result, ...(identityMetadata ? { identity: identityMetadata } : {}) })}\n`,
+      `${JSON.stringify({ ...result, ...(effectiveIdentity ? { effectiveIdentity } : {}), ...(identityMetadata ? { identity: identityMetadata } : {}) })}\n`,
     );
   const controller = new AbortController();
   const abort = () => controller.abort();
@@ -196,16 +201,30 @@ export async function runRebrief(
         (await (runtime.currentRepository ?? currentRepository)(values.project, controller.signal));
       if (values.project)
         input.project = (await resolveIdentityTarget(values.project, input.repository, git)).root;
-      const identity = await resolveReadIdentity({
-        toolAgent: values.agent,
-        project: input.project,
-        repository: input.repository,
-        entry: values.entry,
-        harness: values.harness,
-        env: runtime.env ?? process.env,
-        fs: runtime.fs,
-        git,
-      });
+      effectiveIdentity = runtime.prepareIdentity
+        ? await runtime.prepareIdentity({
+            project: input.project,
+            repository: input.repository,
+            agent: values.agent,
+            entry: values.entry,
+            harness: values.harness,
+            role: values.role,
+            requireProject: true,
+            intent: "readonly",
+          })
+        : undefined;
+      const identity = effectiveIdentity
+        ? effectiveReadIdentity(effectiveIdentity, "tool")
+        : await resolveReadIdentity({
+            toolAgent: values.agent,
+            project: input.project,
+            repository: input.repository,
+            entry: values.entry,
+            harness: values.harness,
+            env: runtime.env ?? process.env,
+            fs: runtime.fs,
+            git,
+          });
       const bounded = (value: string | null) =>
         value === null || value.length <= 512 ? value : `${value.slice(0, 498)}… [truncated]`;
       identityMetadata = {

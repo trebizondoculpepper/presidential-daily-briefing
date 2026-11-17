@@ -1,3 +1,11 @@
+import {
+  startLocalIdentity,
+  withDisplayRole,
+  effectiveReadIdentity,
+  type LocalIdentitySession,
+  type ServerEffectiveIdentity,
+} from "../config/serveridentity.js";
+import type { EffectiveIdentityRuntime } from "../config/effectiveidentity.js";
 import { crashDisclosure } from "../telemetry/crash-setting.js";
 import {
   BriefingEngineError,
@@ -31,7 +39,11 @@ import { readBriefing, readDependencies } from "../briefing/service.js";
 import { resolveReviewPolicy } from "../config/review-setting.js";
 import { markerTrust } from "../workflow/delivery.js";
 import { readSnapshotResponsibility } from "../workflow/responsibility.js";
-import { humanContextEnabled, resolveHumanContext } from "../config/humancontext.js";
+import {
+  humanContextEnabled,
+  resolveHumanContext,
+  type HumanContext,
+} from "../config/humancontext.js";
 import { ghAuthContext } from "../github/ghauth.js";
 import { onboardingDocument, onboardingInstructions } from "../briefing/onboarding.js";
 import { catchUp, catchUpLimits } from "../briefing/catchup.js";
@@ -49,9 +61,9 @@ import {
 import type { Clock } from "./polling.js";
 import type { ReadRuntime } from "../briefing/service.js";
 import type { ConfigFileSystem, GitRunner } from "../config/config.js";
-import { validateHarness } from "../config/harness.js";
+import { detectClientEntry, validateHarness } from "../config/harness.js";
 import type { Environment } from "../config/harness.js";
-import { validateEntryKey } from "../config/identity.js";
+import { TRIAGE_ROLES, validateEntryKey, type TriageRole } from "../config/identity.js";
 import { resolveReadIdentity } from "../config/readidentity.js";
 import type { ReadIdentity } from "../config/readidentity.js";
 import {
@@ -88,6 +100,8 @@ export interface McpOptions {
   entry?: string;
   /** Explicit supported harness selecting its entry (read only). */
   harness?: string;
+  /** Explicit local bootstrap role; tool role arguments remain display options. */
+  role?: string;
   /** Opt-in proactive polling of the one resolved repository (doc/design/polling-events.md). */
   poll?: boolean;
   /** Minutes between completed polls; default 30, minimum 1. */
@@ -96,6 +110,12 @@ export interface McpOptions {
 
 /** Injected boundaries; tests replace every GitHub-facing one. */
 export interface McpRuntime extends ReadRuntime {
+  /** Prepared by the local entry point only; never by a tool request. */
+  identitySession?: LocalIdentitySession;
+  /** HTTP cache's latest actual human observation, without another authentication request. */
+  identityHuman?: () => HumanContext;
+  /** Per-call view default resolved from trusted local identity; no persisted-role rewrite. */
+  identityRole?: TriageRole;
   currentRepository: (cwd?: string, signal?: AbortSignal) => Promise<string>;
   /** Environment for harness detection; absent means no environment signals. */
   env?: Environment;
@@ -134,18 +154,21 @@ export class SelectionRefusal extends Error {
 }
 
 export const mcpHelp = `Usage: pdb-mcp [--project PATH] [--repo owner/name] [--agent NAME]
-                         [--entry KEY | --harness NAME] [--poll [--poll-interval-minutes N]]
+                         [--entry KEY | --harness NAME] [--role implementer|designer]
+                         [--poll [--poll-interval-minutes N]]
 Read-only stdio MCP server for Presidential Daily Briefing. Requires authenticated gh and Node 26+.
 Tools: triage_briefing, triage_issue, triage_dependencies, triage_events. Never changes GitHub.
   --project PATH        Local project checkout used to resolve the default repository
   --repo owner/name     Default repository (a tool's repo argument wins)
   --agent NAME          Default agent for focused reads (a tool's agent argument wins)
-  --entry KEY           Without an agent, read the name of [agents.KEY] in the project's
-                        root pdb.toml, else a legacy agent-inbox.toml entry reported as
-                        legacy-not-imported (read only; never created, imported or changed)
-  --harness NAME        Without an agent or --entry, select that harness's entry
-                        (claude, codex, ori); else the MCP client (ori-SERVER selects
-                        ori.SERVER), else the detected harness; otherwise unfocused
+  --entry KEY           Select a local logical entry for startup preparation; verified
+                        bindings retain selection. Unsupported sessions keep passing the entry
+  --harness NAME        Supported local harness; missing/ambiguous binding needs --entry KEY
+  --role ROLE           Explicit startup bootstrap role (implementer or designer); a new name
+                        requires it. Tool role/agent arguments only change read/display focus
+Local startup may safely initialize the selected project's identity, then start the server.
+Tool calls remain non-initializing, and startup setup outcomes are identified as historical
+in effectiveIdentity. No local project means the launch directory is never borrowed.
   --poll                Opt in: poll the resolved repository while this server runs
                         and record deduplicated events for triage_events (off by default)
   --poll-interval-minutes N
@@ -170,6 +193,7 @@ export function mcpArguments(args: string[]): McpOptions & { help?: boolean } {
       agent: { type: "string" },
       entry: { type: "string" },
       harness: { type: "string" },
+      role: { type: "string" },
       poll: { type: "boolean" },
       "poll-interval-minutes": { type: "string" },
       help: { type: "boolean" },
@@ -191,6 +215,8 @@ export function mcpArguments(args: string[]): McpOptions & { help?: boolean } {
     throw new Error("--agent must be an agent name such as kavya_sabbagh.");
   if (values.entry !== undefined && values.harness !== undefined)
     throw new Error("Pass either --entry or --harness, not both.");
+  if (values.role !== undefined && !(TRIAGE_ROLES as readonly string[]).includes(values.role))
+    throw new Error("--role must be implementer or designer for local identity preparation.");
   if (values.entry !== undefined) validateEntryKey(values.entry);
   if (values.harness !== undefined) validateHarness(values.harness);
   return {
@@ -200,6 +226,7 @@ export function mcpArguments(args: string[]): McpOptions & { help?: boolean } {
     agent: values.agent,
     entry: values.entry,
     harness: values.harness,
+    ...(values.role !== undefined ? { role: values.role } : {}),
     ...(values.poll
       ? {
           poll: true,
@@ -359,6 +386,7 @@ export const dependenciesInput = z.strictObject({
 export const envelope = z.object({
   schemaVersion: z.literal(1),
   kind: z.enum(["events"]),
+  effectiveIdentity: z.record(z.string(), z.unknown()).optional(),
   status: z.enum(["complete", "incomplete", "error"]),
   selection: selectionSchema,
   result: z.record(z.string(), z.unknown()).nullable(),
@@ -442,6 +470,28 @@ const explicitSelection = (tool?: string, startup?: string): IdentitySelection =
   identityDiagnostic: null,
 });
 
+/** Prepare only the selected local startup target; calls below are non-initializing. */
+export async function prepareMcpIdentity(
+  options: McpOptions,
+  runtime: McpRuntime,
+  identityRuntime: EffectiveIdentityRuntime,
+  stderr: (text: string) => void,
+): Promise<void> {
+  let repository = options.repo;
+  if (!repository && options.project) {
+    try {
+      repository = await runtime.currentRepository(options.project);
+    } catch {
+      /* shared preparation reports its verified local outcome */
+    }
+  }
+  runtime.identitySession = await startLocalIdentity({ ...options, repository }, identityRuntime);
+  const startup = runtime.identitySession.startup;
+  for (const notice of startup.setup.notices) stderr(`pdb-mcp startup: ${notice}\n`);
+  if (startup.diagnostic)
+    stderr(`pdb-mcp startup: ${startup.diagnostic.message} ${startup.diagnostic.recovery}\n`);
+}
+
 /** Build one server for one connection; no state is shared between calls or connections. */
 export function createServer(
   options: McpOptions,
@@ -463,7 +513,12 @@ export function createServer(
   const select = async (
     args: { repo?: string; agent?: string },
     signal: AbortSignal,
-  ): Promise<{ selection: Selection & { repository: string }; reader: McpRuntime }> => {
+  ): Promise<{
+    selection: Selection & { repository: string };
+    reader: McpRuntime;
+    effectiveIdentity?: ServerEffectiveIdentity;
+    project?: string;
+  }> => {
     let repository = args.repo ?? options.repo;
     let project = options.project;
     let callReader = reader;
@@ -492,20 +547,45 @@ export function createServer(
       if (!repoPattern.test(repository)) throw new Failure("repository-unresolved");
     }
     if (signal.aborted) throw new Failure("cancelled");
-    const identity = await resolveReadIdentity({
-      toolAgent: args.agent,
-      startupAgent: options.agent,
-      project,
-      repository,
-      entry: options.entry,
-      harness: options.harness,
-      clientName: server.server.getClientVersion()?.name,
-      env: runtime.env ?? {},
-      git: runtime.git,
-      fs: runtime.fs,
-    });
+    const effectiveIdentity = await runtime.identitySession?.read(project, repository);
+    // Verified Ori client names can select read-only display focus; they never bind execution.
+    const clientEntry = detectClientEntry(server.server.getClientVersion()?.name ?? "");
+    const useClientFocus =
+      clientEntry?.harness === "ori" &&
+      options.agent === undefined &&
+      options.entry === undefined &&
+      options.harness === undefined;
+    const identity =
+      effectiveIdentity &&
+      args.agent === undefined &&
+      !useClientFocus &&
+      options.entry === undefined
+        ? effectiveReadIdentity(effectiveIdentity)
+        : await resolveReadIdentity({
+            toolAgent: args.agent,
+            startupAgent: options.agent,
+            project,
+            repository,
+            entry: options.entry,
+            harness: options.harness,
+            clientName: server.server.getClientVersion()?.name,
+            env: runtime.env ?? {},
+            git: runtime.git,
+            fs: runtime.fs,
+          });
     if (signal.aborted) throw new Failure("cancelled");
-    return { selection: { repository, ...identitySelection(identity) }, reader: callReader };
+    if (effectiveIdentity)
+      callReader = {
+        ...callReader,
+        humanContext: async () => effectiveIdentity.human,
+        identityRole: effectiveIdentity.role ?? undefined,
+      };
+    return {
+      selection: { repository, ...identitySelection(identity) },
+      reader: callReader,
+      effectiveIdentity,
+      project,
+    };
   };
 
   const identityNotice = (selection: Selection): string =>
@@ -522,7 +602,7 @@ export function createServer(
   const call = async (
     tool: string,
     view: ReadView,
-    args: { repo?: string; agent?: string; number?: number },
+    args: { repo?: string; agent?: string; number?: number; role?: string },
     signal: AbortSignal,
     maxChars: number,
     read: (
@@ -534,12 +614,19 @@ export function createServer(
       build: (base: ViewBase, redact: <T>(value: T) => T) => BoundedView;
     }>,
   ): Promise<ToolResult> => {
+    let effectiveIdentity: ServerEffectiveIdentity | undefined;
+    let selectedProject: string | undefined;
     let selection: Selection = {
       repository: args.repo ?? options.repo ?? null,
       ...explicitSelection(args.agent, options.agent),
     };
     try {
-      const { selection: selected, reader: callReader } = await select(args, signal);
+      const selectedContext = await select(args, signal);
+      const { selection: selected, reader: callReader } = selectedContext;
+      effectiveIdentity = selectedContext.effectiveIdentity
+        ? withDisplayRole(selectedContext.effectiveIdentity, args.role)
+        : undefined;
+      selectedProject = selectedContext.project;
       selection = selected;
       const work = () => read(selected, callReader);
       const { value: outcome, freshness } = runtime.track
@@ -568,10 +655,54 @@ export function createServer(
         },
         redact,
       );
+      if (runtime.identitySession) {
+        // In pdb serve the cache may have verified an account switch during the read.
+        if (!effectiveIdentity)
+          effectiveIdentity = await runtime.identitySession.read(
+            selectedProject,
+            selected.repository,
+          );
+        if (runtime.identityHuman)
+          effectiveIdentity = { ...effectiveIdentity, human: runtime.identityHuman() };
+        if (signal.aborted) throw new Failure("cancelled");
+        effectiveIdentity = withDisplayRole(effectiveIdentity, args.role);
+        built.data.effectiveIdentity = redact(effectiveIdentity);
+        built.protectedPaths = [...(built.protectedPaths ?? []), "effectiveIdentity"];
+        if (built.data.employingHuman) built.data.employingHuman = redact(effectiveIdentity.human);
+      }
       // Additive: the server cache's freshness block, inside the existing freshness record.
       if (freshness) built.freshness = { ...built.freshness, cache: freshness };
       return boundedResult(built);
     } catch (error) {
+      if (effectiveIdentity && runtime.identityHuman)
+        effectiveIdentity = { ...effectiveIdentity, human: runtime.identityHuman() };
+      if (effectiveIdentity) effectiveIdentity = withDisplayRole(effectiveIdentity, args.role);
+      const errorWithIdentity = (
+        errorTool: string,
+        errorView: ReadView,
+        errorSelection: Selection,
+        errorNumber: number | undefined,
+        code: string,
+        message: string,
+        cause: SafeEngineCause | null = null,
+      ) =>
+        errorResult(
+          errorTool,
+          errorView,
+          errorSelection,
+          errorNumber,
+          code,
+          message,
+          cause,
+          effectiveIdentity
+            ? plain(
+                redactPaths(
+                  effectiveIdentity,
+                  localPaths(options.project, ...(runtime.localProjects ?? [])),
+                ),
+              )
+            : undefined,
+        );
       // pdb serve: the cache's sanitized GitHub failure codes pass through unchanged.
       if (
         error instanceof Error &&
@@ -580,14 +711,21 @@ export function createServer(
         /^GITHUB_[A-Z_]+$/.test(error.code) &&
         !signal.aborted
       )
-        return errorResult(tool, view, selection, args.number, error.code, error.message);
+        return errorWithIdentity(tool, view, selection, args.number, error.code, error.message);
       // #311: an argument the resolved role rejects (for example a section ID under the
       // default role) is the caller's to fix, with the supported choices; not a GitHub failure.
       if (error instanceof BriefingArgumentError && !signal.aborted)
-        return errorResult(tool, view, selection, args.number, "invalid-argument", error.message);
+        return errorWithIdentity(
+          tool,
+          view,
+          selection,
+          args.number,
+          "invalid-argument",
+          error.message,
+        );
       // #312: a label lookup that failed is not "no such label" and not a collection failure.
       if (error instanceof LabelFilterUnresolved && !signal.aborted)
-        return errorResult(tool, view, selection, args.number, error.code, error.message);
+        return errorWithIdentity(tool, view, selection, args.number, error.code, error.message);
       const code: FailureCode =
         error instanceof Failure || error instanceof BriefingEngineError
           ? error.code
@@ -595,7 +733,7 @@ export function createServer(
             ? "cancelled"
             : "collection-failed";
       const cause = safeEngineCause(error);
-      return errorResult(
+      return errorWithIdentity(
         tool,
         view,
         selection,
@@ -612,7 +750,7 @@ export function createServer(
     {
       title: "Triage briefing",
       description:
-        'Datalog next actions by default (implementer view unless role is supplied). Explicit TypeScript rollback: pdb config set briefing.engine typescript. Evidence-linked action briefing for a GitHub repository: what needs attention and what to pick up next. Call at the start of work or with since to catch up. New to pdb here? `pdb onboard` shows the rules, identity setup and a prompt for agents. mode "briefing" returns the repository-wide what-changed report for a window (since, or last such as 24h; default last 24h); it never reads or advances a checkpoint. Actions default to ten next steps; catch-up defaults to five rows per section. In actions mode, role (implementer or designer) returns the blended queue for that role (rankedActions, role.next, estimation, impactEstimation) exactly as the CLI --role, and order (impact, oldest, newest) matches CLI --order. role human returns the human briefing (human): questions, attention and sign-offs owed by the human named in agent, explicit before inferred; read-only. The text lists only the next steps; context true adds the background lines (structured data is the same either way). PR acceptance follows the declared review.policy of the repository: undeclared keeps the legacy rule; codex-or-coderabbit or codex-or-copilot accepts an authenticated current-head review from either named provider, while a finding from either blocks and CI, protections and authority stay independent.',
+        'Datalog next actions by default (the effective local role, otherwise implementer; an explicit tool role overrides the view). Explicit TypeScript rollback: pdb config set briefing.engine typescript. Evidence-linked action briefing for a GitHub repository: what needs attention and what to pick up next. Call at the start of work or with since to catch up. New to pdb here? `pdb onboard` shows the rules, identity setup and a prompt for agents. mode "briefing" returns the repository-wide what-changed report for a window (since, or last such as 24h; default last 24h); it never reads or advances a checkpoint. Actions default to ten next steps; catch-up defaults to five rows per section. In actions mode, role (implementer or designer) returns the blended queue for that role (rankedActions, role.next, estimation, impactEstimation) exactly as the CLI --role, and order (impact, oldest, newest) matches CLI --order. role human returns the human briefing (human): questions, attention and sign-offs owed by the human named in agent, explicit before inferred; read-only. The text lists only the next steps; context true adds the background lines (structured data is the same either way). PR acceptance follows the declared review.policy of the repository: undeclared keeps the legacy rule; codex-or-coderabbit or codex-or-copilot accepts an authenticated current-head review from either named provider, while a finding from either blocks and CI, protections and authority stay independent.',
       inputSchema: briefingInput,
       outputSchema: boundedEnvelope,
       annotations,
@@ -671,7 +809,7 @@ export function createServer(
                 since: args.since ? new Date(args.since).toISOString() : undefined,
                 limit: args.limit ?? (args.mode === "briefing" ? catchUpLimits.limit.default : 10),
                 maxChars: args.maxChars,
-                role: args.role,
+                role: args.role ?? rt.identityRole,
                 ...(args.section ? { section: args.section } : {}),
                 ...(args.label ? { labels: args.label } : {}),
                 order: args.order ?? "impact",
@@ -802,7 +940,44 @@ export function createServer(
       const watcher = runtime.watcher ?? null;
       const repository = watcher?.repository ?? null;
       // The startup agent is echoed; an over-long one is shortened, and the text says so.
-      const echoed = explicitSelection(undefined, options.agent);
+      const effectiveIdentity = !ctx.mcpReq.signal.aborted
+        ? await runtime.identitySession?.startupRead()
+        : undefined;
+      const echoed = effectiveIdentity
+        ? identitySelection(effectiveReadIdentity(effectiveIdentity))
+        : explicitSelection(undefined, options.agent);
+      const eventResult = (shape: Envelope, text: string) => {
+        const result = toolResult(
+          {
+            ...shape,
+            ...(effectiveIdentity
+              ? {
+                  effectiveIdentity: plain(
+                    redactPaths(
+                      effectiveIdentity,
+                      localPaths(options.project, ...(runtime.localProjects ?? [])),
+                    ),
+                  ),
+                }
+              : {}),
+          },
+          text,
+        );
+        if (shape.result === null && resultBytes(result) > budgetBytes) {
+          const message =
+            "Effective identity details were omitted for size; inspect the local startup diagnostic.";
+          return toolResult(
+            {
+              ...shape,
+              effectiveIdentity: undefined,
+              status: "error",
+              error: { code: shape.error?.code ?? budgetErrorCode, message },
+            },
+            `Error: ${message}\n`,
+          );
+        }
+        return result;
+      };
       const shortenedAgent = echoed.agent !== null && echoed.agent.length > fieldLimit;
       const selection = {
         repository,
@@ -815,7 +990,7 @@ export function createServer(
         ? `Startup agent longer than ${fieldLimit} characters shortened (${truncationMarker}).\n`
         : "";
       if (ctx.mcpReq.signal.aborted)
-        return toolResult(
+        return eventResult(
           {
             schemaVersion: 1,
             kind: "events",
@@ -834,7 +1009,7 @@ export function createServer(
           limit < args.limit
             ? `Page reduced from ${args.limit} to ${limit} event(s) to fit the ${budgetBytes}-byte response budget; continue from nextCursor.\n`
             : "";
-        const result = toolResult(
+        const result = eventResult(
           {
             schemaVersion: 1,
             kind: "events",
@@ -848,7 +1023,7 @@ export function createServer(
         if (resultBytes(result) <= budgetBytes) return result;
         if (limit <= 1) {
           const message = `One event exceeds the ${budgetBytes}-byte response budget. Recovery: call triage_briefing for current evidence.`;
-          return toolResult(
+          return eventResult(
             {
               schemaVersion: 1,
               kind: "events",
@@ -876,9 +1051,11 @@ function errorResult(
   code: string,
   message: string,
   cause: SafeEngineCause | null = null,
+  effectiveIdentity?: Record<string, unknown>,
 ): ToolResult {
   return boundedError({
     cause,
+    effectiveIdentity,
     tool,
     view,
     repository: selection.repository,
