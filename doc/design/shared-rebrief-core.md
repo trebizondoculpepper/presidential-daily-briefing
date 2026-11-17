@@ -1,5 +1,7 @@
 # Shared bounded rebrief core and native continuation adapters
 
+The follow-up [approved continuation limits contract](approved-continuation-limits.md) (#657) supersedes arbitrary default total-work caps as requirements. Existing v1 cap/state descriptions below remain implementation facts until that focused migration ships; this is not permission to reset state or invent native stop provenance.
+
 Documentation-first contract for #506 and platform prototypes #396/#398/#400.
 Extends local-service-and-rule-testing.md. HTTP MCP briefing delivery remains the
 priority and is already supplied by #390. This does not promise a portable MCP
