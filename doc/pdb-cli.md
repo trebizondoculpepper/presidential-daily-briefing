@@ -4,6 +4,11 @@
 
 ## Current design handoff
 
+For current executable examples, use [practical usage](usage.md) and [the README](../README.md).
+The inherited proposal below preserves its original scope and issue references. Current
+normal commands use the [shared effective identity service](design/effective-identity.md);
+explicit `--agent` examples remain supported overrides.
+
 [Consolidated owner decisions](design/README.md) define proposed briefings, ranking, identity, handoff, diagnostics and update checks. Those focused contracts supersede conflicting historical proposals below for their stated scope; they do not claim implementation or adopt all proposed process policies.
 
 ## Purpose and ownership
