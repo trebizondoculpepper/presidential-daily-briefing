@@ -1,3 +1,4 @@
+import { identitySelection, identitySelectionOptions } from "../config/commandidentity.js";
 /**
  * `deliverables N attach | detach | retarget | handoff | membership | attest | reassign | reset |
  * void` (#189, doc/design/delivery-lifecycle.md "Transitions and commands", "Legacy attachment",
@@ -1742,16 +1743,16 @@ export function deliverablesText(
   return lines.join("\n") + "\n";
 }
 
-export const deliverablesUsage = `Usage: pdb deliverables N attach --agent NAME --pr URL [--pr URL...] [--target owner/name:branch] [--membership complete|open] [--reason TEXT]
+export const deliverablesUsage = `Usage: pdb deliverables N attach [--agent NAME] --pr URL [--pr URL...] [--target owner/name:branch] [--membership complete|open] [--reason TEXT]
        pdb deliverables N attach --legacy --agent NAME (--pr URL | --commit owner/name@SHA)... [--target owner/name:branch] [--membership open] --reason TEXT
-       pdb deliverables N detach --agent NAME --pr URL --reason TEXT
-       pdb deliverables N retarget --agent NAME --pr URL --target owner/name:branch --reason TEXT
-       pdb deliverables N handoff --agent NAME --to NAME [--pr URL] --reason TEXT
-       pdb deliverables N membership complete|open --agent NAME --reason TEXT
+       pdb deliverables N detach [--agent NAME] --pr URL --reason TEXT
+       pdb deliverables N retarget [--agent NAME] --pr URL --target owner/name:branch --reason TEXT
+       pdb deliverables N handoff [--agent NAME] --to NAME [--pr URL] --reason TEXT
+       pdb deliverables N membership complete|open [--agent NAME] --reason TEXT
        pdb deliverables N attest [--legacy] --agent NAME --reason TEXT [--evidence URL]
-       pdb deliverables N reassign --agent NAME --to NAME --reason TEXT
-       pdb deliverables N reset --agent NAME --as ready|incomplete --reason TEXT
-       pdb deliverables N void --agent NAME --comment ID --reason TEXT
+       pdb deliverables N reassign [--agent NAME] --to NAME --reason TEXT
+       pdb deliverables N reset [--agent NAME] --as ready|incomplete --reason TEXT
+       pdb deliverables N void [--agent NAME] --comment ID --reason TEXT
   Every form also takes [--dry-run] [--json] [--repo owner/name].`;
 
 export const deliverablesHelp = `${deliverablesUsage}
@@ -1798,6 +1799,7 @@ export function deliverablesArguments(args: string[]) {
       json: { type: "boolean" },
       "dry-run": { type: "boolean" },
       agent: { type: "string" },
+      ...identitySelectionOptions,
       pr: { type: "string", multiple: true },
       commit: { type: "string", multiple: true },
       target: { type: "string" },
@@ -1815,7 +1817,8 @@ export function deliverablesArguments(args: string[]) {
   const number = /^[1-9]\d*$/.test(n ?? "") ? Number(n) : null;
   const act = deliverablesActions.find((a) => a === action);
   const name = /^[A-Za-z0-9][\w.-]*$/;
-  if (!number || !act || !values.agent || !name.test(values.agent)) throw new Error(usage);
+  if (!number || !act || (values.agent !== undefined && !name.test(values.agent)))
+    throw new Error(usage);
   if (extra.length || (state !== undefined && act !== "membership")) throw new Error(usage);
   if (values.repo && !/^[\w.-]+\/[\w.-]+$/.test(values.repo))
     throw new Error("--repo must be owner/name.");
@@ -1879,7 +1882,7 @@ export function deliverablesArguments(args: string[]) {
     fail("--as applies to reset only, and reset needs it.");
   if (values.as !== undefined && values.as !== "ready" && values.as !== "incomplete")
     fail("reset --as must be ready or incomplete.");
-  const request: DeliverablesRequest = {
+  const request: Omit<DeliverablesRequest, "agent"> & { agent?: string } = {
     number,
     action: act,
     agent: values.agent,
@@ -1894,11 +1897,17 @@ export function deliverablesArguments(args: string[]) {
     comment: values.comment ?? null,
     as: (values.as as "ready" | "incomplete" | undefined) ?? null,
   };
-  return { request, repo: values.repo, json: !!values.json, dryRun: !!values["dry-run"] };
+  return {
+    request,
+    ...identitySelection(values),
+    repo: values.repo,
+    json: !!values.json,
+    dryRun: !!values["dry-run"],
+  };
 }
 
 export const submitUsage =
-  "Usage: pdb submit N --agent NAME [--pr URL...] [--target owner/name:branch] [--membership open] [--dry-run] [--json] [--repo owner/name]";
+  "Usage: pdb submit N [--agent NAME] [--pr URL...] [--target owner/name:branch] [--membership open] [--dry-run] [--json] [--repo owner/name]";
 
 export const submitHelp = `${submitUsage}
 Hand over finished implementation work (#190, doc/design/delivery-lifecycle.md D3): record the
@@ -1936,6 +1945,7 @@ export function submitArguments(args: string[]) {
       json: { type: "boolean" },
       "dry-run": { type: "boolean" },
       agent: { type: "string" },
+      ...identitySelectionOptions,
       pr: { type: "string", multiple: true },
       target: { type: "string" },
       membership: { type: "string" },
@@ -1947,7 +1957,11 @@ export function submitArguments(args: string[]) {
   };
   const [n, ...extra] = positionals;
   const number = /^[1-9]\d*$/.test(n ?? "") ? Number(n) : null;
-  if (!number || extra.length || !values.agent || !/^[A-Za-z0-9][\w.-]*$/.test(values.agent))
+  if (
+    !number ||
+    extra.length ||
+    (values.agent !== undefined && !/^[A-Za-z0-9][\w.-]*$/.test(values.agent))
+  )
     throw new Error(usage);
   if (values.repo && !/^[\w.-]+\/[\w.-]+$/.test(values.repo))
     throw new Error("--repo must be owner/name.");
@@ -1962,7 +1976,7 @@ export function submitArguments(args: string[]) {
   }
   if (values.membership !== undefined && values.membership !== "open")
     fail("--membership takes only open (complete is the default).");
-  const request: DeliverablesRequest = {
+  const request: Omit<DeliverablesRequest, "agent"> & { agent?: string } = {
     number,
     action: "submit",
     agent: values.agent,
@@ -1977,5 +1991,11 @@ export function submitArguments(args: string[]) {
     comment: null,
     as: null,
   };
-  return { request, repo: values.repo, json: !!values.json, dryRun: !!values["dry-run"] };
+  return {
+    request,
+    ...identitySelection(values),
+    repo: values.repo,
+    json: !!values.json,
+    dryRun: !!values["dry-run"],
+  };
 }

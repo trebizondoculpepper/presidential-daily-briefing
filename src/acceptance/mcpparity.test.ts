@@ -15,6 +15,7 @@ import { collect } from "../github/github.js";
 import type { Query } from "../github/github.js";
 import { boundedEnvelope, createServer } from "../mcp.js";
 import { parityDifference } from "../mcp/parity.js";
+import { budgetBytes, resultBytes } from "../mcp/bounded.js";
 import type { McpRuntime } from "../mcp.js";
 import type { Issue, Page } from "../github/types.js";
 
@@ -71,7 +72,7 @@ const files = (config: string | null): ConfigFileSystem => ({
 const git: GitRunner = async (args) =>
   args[0] === "rev-parse" ? `${root}\n` : `origin\thttps://github.com/${repo}.git (fetch)\n`;
 
-const runtimeFor = (config: string | null): McpRuntime => {
+const runtimeFor = (config: string | null, engineClock = () => 0): McpRuntime => {
   const fs = files(config);
   return {
     collect: (repository, options) => collect(repository, options, query, clock),
@@ -82,7 +83,7 @@ const runtimeFor = (config: string | null): McpRuntime => {
     estimation: { fs, git, cwd: root },
     guide: { fs, git, cwd: root },
     now: clock,
-    engineClock: () => 0,
+    engineClock,
     git,
     fs,
     env: {},
@@ -96,7 +97,7 @@ interface Case {
   config: string | null;
 }
 
-async function cliResult(c: Case): Promise<Record<string, unknown>> {
+async function cliResult(c: Case, engineClock = () => 0): Promise<Record<string, unknown>> {
   let out = "";
   const code = await main(
     [
@@ -114,7 +115,10 @@ async function cliResult(c: Case): Promise<Record<string, unknown>> {
       "--no-update-check",
     ],
     async (text) => void (out += text),
-    { ...runtimeFor(c.config), updateCheck: async () => ({ status: "disabled" }) as never },
+    {
+      ...runtimeFor(c.config, engineClock),
+      updateCheck: async () => ({ status: "disabled" }) as never,
+    },
   );
   expect(code).toBe(0);
   return JSON.parse(out) as Record<string, unknown>;
@@ -168,6 +172,33 @@ const kinds = (result: Record<string, unknown>): string[] =>
   );
 
 describe("CLI and MCP report identical blended queues (#260)", () => {
+  it("reproduces the load-dependent diagnostic mismatch with an injected timer, while fixed timers preserve parity (#724)", async () => {
+    const c: Case = { role: "implementer", order: "impact", limit: 20, config: null };
+    let tick = 0;
+    const slow = await cliResult(c, () => tick++ * 2001);
+    const mcp = await mcpResult(c);
+    const slowRanking = slow.rankedActions as {
+      items: unknown[];
+      decisionEngine: { diagnostics: string[] };
+    };
+    const mcpRanking = mcp.result.rankedActions as {
+      items: unknown[];
+      decisionEngine: { diagnostics: string[] };
+    };
+    expect(slowRanking.decisionEngine.diagnostics).toEqual([
+      "evaluation exceeded soft 2000ms budget (2001ms)",
+    ]);
+    expect(mcpRanking.decisionEngine.diagnostics).toEqual([]);
+    expect(slowRanking.items.slice(0, mcpRanking.items.length)).toEqual(mcpRanking.items);
+    expect(mcp.omitted["rankedActions.items"]).toBe(
+      slowRanking.items.length - mcpRanking.items.length,
+    );
+    expect(
+      parityDifference("rankedActions", mcp.result.rankedActions, slow.rankedActions, mcp.omitted),
+    ).toBe("rankedActions: differs from the CLI");
+    expectParity(mcp, await cliResult(c));
+  });
+
   for (const role of ["implementer", "designer"] as const)
     for (const order of ["impact", "oldest"] as const)
       for (const limit of [20, 3])
@@ -360,7 +391,8 @@ describe("--section and the MCP section input report the same section (#311)", (
   });
 
   it("reports the rows actually returned when the transport budget prunes the section", async () => {
-    count = 120;
+    // The default text budget forces whole-result row pruning with this bounded fixture.
+    count = 64;
     const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
     await createServer({ repo }, runtime()).connect(serverSide);
     const client = new Client({ name: "parity", version: "1.0.0" });
@@ -368,7 +400,7 @@ describe("--section and the MCP section input report the same section (#311)", (
     try {
       const raw = await client.callTool({
         name: "triage_briefing",
-        arguments: { agent: "me", role: "implementer", section: "pickup", maxChars: 1000 },
+        arguments: { agent: "me", role: "implementer", section: "pickup", maxChars: 10000 },
       });
       const parsed = boundedEnvelope.parse(raw.structuredContent);
       const focus = (
@@ -376,10 +408,15 @@ describe("--section and the MCP section input report the same section (#311)", (
           focus: { total: number; shown: number; omitted: number; items: unknown[] };
         }
       ).focus;
-      expect(focus.total).toBe(120);
-      expect(focus.items.length).toBeLessThan(120);
+      expect(parsed.status).toBe("complete");
+      expect(resultBytes(raw)).toBeLessThanOrEqual(budgetBytes);
+      expect(focus.total).toBe(count);
+      expect(focus.items.length).toBeGreaterThan(0);
+      expect(focus.items.length).toBeLessThan(count);
       expect(focus.shown).toBe(focus.items.length);
-      expect(focus.omitted).toBe(120 - focus.items.length);
+      expect(focus.omitted).toBe(count - focus.items.length);
+      expect(parsed.presentation.omitted["focus.items"]).toBe(focus.omitted);
+      expect(JSON.stringify(raw.content)).toContain(`(${focus.shown} shown of ${focus.total})`);
     } finally {
       count = 8;
       await client.close();

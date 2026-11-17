@@ -1,3 +1,12 @@
+import {
+  captureProcessIdentity,
+  readPackageBuildIdentity,
+  withProcessIdentity,
+} from "./serve/process-footer.js";
+import { disabledEffectiveHuman } from "./config/effectiveidentity.js";
+import { humanContextEnabled } from "./config/humancontext.js";
+import { startLocalIdentity } from "./config/serveridentity.js";
+import { serverHumanContext } from "./config/humancontext.js";
 import { servedPages, shellContext, selectionErrorPage } from "./serve/shell.js";
 /**
  * `pdb serve`: a foreground local HTTP server (doc/design/serve.md, #373).
@@ -58,6 +67,7 @@ import {
 import { ticketPage, ticketScript } from "./serve/ticket-page.js";
 import { humanPage, humanScript } from "./serve/human-page.js";
 import { activityPage, activityScript } from "./serve/activity-page.js";
+import { diagnosticsPage, diagnosticsScript } from "./serve/diagnostics-page.js";
 import { quotasPage, quotasScript } from "./serve/quotas-page.js";
 
 export { serveHelp } from "./serve/options.js";
@@ -82,6 +92,9 @@ import { ghAuthContext } from "./github/ghauth.js";
 export { ghAuthContext };
 
 export const defaultServeRuntime = (): ServeRuntime => ({
+  ...(!process.env.PDB_NO_EFFECTIVE_IDENTITY
+    ? { identityRuntime: { env: process.env, git: nodeGit } }
+    : {}),
   cwd: process.cwd(),
   git: nodeGit,
   currentRepository,
@@ -92,6 +105,7 @@ export const defaultServeRuntime = (): ServeRuntime => ({
   signals: process,
   exit: (code) => process.exit(code),
   version: async () => (await installedVersion()).version,
+  buildIdentity: readPackageBuildIdentity,
   platform: process.platform,
 });
 
@@ -187,6 +201,7 @@ const dashboardFiles = (): Map<string, { type: string; body: string }> =>
     ["/activity.js", { type: "text/javascript; charset=utf-8", body: activityScript() }],
     // The account-scoped quota meters (#548): the page reads nothing until Refresh.
     ["/quotas.js", { type: "text/javascript; charset=utf-8", body: quotasScript() }],
+    ["/diagnostics.js", { type: "text/javascript; charset=utf-8", body: diagnosticsScript() }],
   ]);
 
 /**
@@ -229,11 +244,50 @@ export async function startServe(
     auth,
   };
 
+  let buildIdentity = {};
+  try {
+    buildIdentity = (await runtime.buildIdentity?.()) ?? {};
+  } catch {
+    // Optional provenance is unavailable; the running server still starts with honest unknowns.
+  }
+  const processIdentity = captureProcessIdentity(facts, buildIdentity);
+  facts.effectiveHuman = humanContextEnabled()
+    ? { context: serverHumanContext(auth, facts.startedAt), authenticationFailed: false }
+    : disabledEffectiveHuman(auth.host);
+  if (runtime.identityRuntime) {
+    const localProjects = served.filter((entry) => entry.project !== undefined);
+    const selected =
+      localProjects.length === 1 ? localProjects[0] : served.length === 1 ? served[0] : undefined;
+    facts.identitySession = await startLocalIdentity(
+      {
+        project: selected?.project,
+        repository: selected?.repository,
+        agent: options.agent,
+        entry: options.entry,
+        harness: options.harness,
+        role: options.role,
+      },
+      { ...runtime.identityRuntime, human: async () => facts.effectiveHuman! },
+    );
+    const startup = facts.identitySession.startup;
+    for (const notice of startup.setup.notices) runtime.stderr(`pdb serve startup: ${notice}\n`);
+    if (startup.diagnostic)
+      runtime.stderr(
+        `pdb serve startup: ${startup.diagnostic.message} ${startup.diagnostic.recovery}\n`,
+      );
+  }
+
   const dashboard = dashboardFiles();
   const statusDocument = () => ({
     schemaVersion: 1,
     kind: "serve-status",
     version: facts.version,
+    build: {
+      revision: processIdentity.revision,
+      dirty: processIdentity.dirty,
+      source: processIdentity.source,
+    },
+    publicIp: processIdentity.publicIp,
     startedAt: facts.startedAt.toISOString(),
     url: facts.url,
     exposed: facts.exposed,
@@ -249,6 +303,11 @@ export async function startServe(
     }),
     ttlSeconds: options.ttlMs / 1000,
     auth: { host: facts.auth.host, login: facts.auth.login },
+    ...(facts.identitySession
+      ? {
+          identityStartup: { phase: "local-server-startup", result: facts.identitySession.startup },
+        }
+      : {}),
     cache: status.cache(),
     ...(status.diagnostics ? { diagnostics: status.diagnostics() } : {}),
   });
@@ -334,7 +393,15 @@ export async function startServe(
             "referrer-policy": "no-referrer",
             "content-security-policy": dashboardSecurityPolicy,
           });
-          response.end(request.method === "HEAD" ? undefined : selectionErrorPage(selectedPage));
+          response.end(
+            request.method === "HEAD"
+              ? undefined
+              : withProcessIdentity(
+                  selectionErrorPage(selectedPage),
+                  processIdentity,
+                  selectedPage,
+                ),
+          );
           return;
         }
         // Canonical spelling is used by renderers and all generated navigation.
@@ -348,7 +415,11 @@ export async function startServe(
             "referrer-policy": "no-referrer",
             "content-security-policy": dashboardSecurityPolicy,
           });
-          response.end(request.method === "HEAD" ? undefined : html);
+          response.end(
+            request.method === "HEAD"
+              ? undefined
+              : withProcessIdentity(html, processIdentity, selectedPage ?? undefined),
+          );
           return;
         }
       }
@@ -379,7 +450,11 @@ export async function startServe(
           "referrer-policy": "no-referrer",
           "content-security-policy": dashboardSecurityPolicy,
         });
-        response.end(request.method === "HEAD" ? undefined : page.html);
+        response.end(
+          request.method === "HEAD"
+            ? undefined
+            : withProcessIdentity(page.html, processIdentity, selectedPage ?? undefined),
+        );
         return;
       }
       if (path === "/rules") {
@@ -395,6 +470,24 @@ export async function startServe(
           runtime.rulesPage ?? defaultRulesPageRuntime(),
           selectRepository,
         );
+        response.writeHead(page.status, {
+          "content-type": "text/html; charset=utf-8",
+          "cache-control": "no-store",
+          "x-content-type-options": "nosniff",
+          "referrer-policy": "no-referrer",
+          "content-security-policy": dashboardSecurityPolicy,
+        });
+        response.end(
+          request.method === "HEAD"
+            ? undefined
+            : withProcessIdentity(page.html, processIdentity, selectedPage ?? undefined),
+        );
+        return;
+      }
+      if (path === "/diagnostics") {
+        if (request.method !== "GET" && request.method !== "HEAD")
+          throw new HttpFailure(405, "METHOD_NOT_ALLOWED", "Use GET.", [], { allow: "GET, HEAD" });
+        const page = diagnosticsPage(context.url.searchParams, served);
         response.writeHead(page.status, {
           "content-type": "text/html; charset=utf-8",
           "cache-control": "no-store",
@@ -425,7 +518,11 @@ export async function startServe(
           "referrer-policy": "no-referrer",
           "content-security-policy": dashboardSecurityPolicy,
         });
-        response.end(request.method === "HEAD" ? undefined : page.html);
+        response.end(
+          request.method === "HEAD"
+            ? undefined
+            : withProcessIdentity(page.html, processIdentity, selectedPage ?? undefined),
+        );
         return;
       }
       if (path === "/human") {
@@ -442,7 +539,11 @@ export async function startServe(
           "referrer-policy": "no-referrer",
           "content-security-policy": dashboardSecurityPolicy,
         });
-        response.end(request.method === "HEAD" ? undefined : page.html);
+        response.end(
+          request.method === "HEAD"
+            ? undefined
+            : withProcessIdentity(page.html, processIdentity, selectedPage ?? undefined),
+        );
         return;
       }
       if (path === "/activity") {
@@ -459,7 +560,11 @@ export async function startServe(
           "referrer-policy": "no-referrer",
           "content-security-policy": dashboardSecurityPolicy,
         });
-        response.end(request.method === "HEAD" ? undefined : page.html);
+        response.end(
+          request.method === "HEAD"
+            ? undefined
+            : withProcessIdentity(page.html, processIdentity, selectedPage ?? undefined),
+        );
         return;
       }
       if (await routes(context)) return;

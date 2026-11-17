@@ -3,8 +3,9 @@
  *
  * `npm run rules:build` compiles the validated policy bundle into this model and writes it to
  * english.generated.json. The model is structural: every clause of every rule, predicate, query
- * and witness is kept with its variables and grouping, and each input attribute carries only the
- * lexicon phrase from policy/schema.edn. No rule-specific prose is authored anywhere. `pdb rules`
+ * and witness is kept with its variables and grouping, and each input attribute carries the
+ * lexicon phrase from policy/schema.edn. Optional rule-attached purposes are literal
+ * authored metadata; the generated formal conditions remain separate. `pdb rules`
  * and the web rules page (#392) render this model; neither needs the build-time EDN reader.
  */
 
@@ -72,6 +73,7 @@ export interface CompiledEvidence {
 
 export interface CompiledDecision {
   id: string;
+  purpose?: string;
   kind: string;
   band: number;
   preference: number;
@@ -94,6 +96,7 @@ export interface CompiledDecision {
 
 export interface CompiledDenial {
   id: string;
+  purpose?: string;
   /** The predicate whose alternative produces this denial ID. */
   predicate: string;
   /** That alternative's clauses, without the binding that names the ID. */
@@ -115,6 +118,8 @@ export interface EnglishPolicy {
   modelVersion: number;
   policyVersion: number;
   rulesHash: string;
+  /** Optional for older artifacts that contain no authored purposes. */
+  narrationHash?: string | null;
   sources: string[];
   lexicon: { attributes: Record<string, string>; viewer: Record<string, string> };
   constants: Record<string, (string | number | boolean)[]>;

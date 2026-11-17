@@ -1,3 +1,6 @@
+import type { LocalDoctorRuntime } from "../config/localdoctor.js";
+import type { EffectiveHuman, EffectiveIdentityRuntime } from "../config/effectiveidentity.js";
+import type { LocalIdentitySession } from "../config/serveridentity.js";
 /**
  * Shared `pdb serve` interfaces (#445). They live here, apart from the `serve.ts` entry module,
  * so `serve/*` modules can share them without importing `serve.ts`: this module imports no
@@ -55,6 +58,8 @@ export interface ServeReadRuntime {
 
 /** Injected boundaries of `pdb serve`. */
 export interface ServeRuntime {
+  /** Trusted local startup preparation; tests inject disposable boundaries. */
+  identityRuntime?: Omit<EffectiveIdentityRuntime, "human">;
   /** Invoking working directory for resolving relative `--project` paths (#569). */
   cwd?: string;
   /** Git runner for resolving nested `--project` paths and worktrees to their root (#569). */
@@ -70,11 +75,15 @@ export interface ServeRuntime {
   /** Immediate exit for a second signal during shutdown. */
   exit: (code: number) => void;
   version: () => Promise<string | null>;
+  /** Optional trusted process metadata, captured once; absent fields remain unknown. */
+  buildIdentity?: () => Promise<Partial<BuildIdentity>>;
   platform: NodeJS.Platform;
   /** GitHub read boundaries for the data routes; absent means the production gh runners. */
   read?: ServeReadRuntime;
   /** Local read-only git/file boundaries of the rules page (#392); absent means the real ones. */
   rulesPage?: RulesPageRuntime;
+  /** Read-only Doctor probes; run scope/root and cancellation are fixed by the server. */
+  doctor?: LocalDoctorRuntime;
 }
 
 /** One repository of the served set, with the checkout that configures it, if any. */
@@ -83,8 +92,23 @@ export interface ServedRepository {
   project?: string;
 }
 
+/** Provenance of the executing build, never the selected repository or current disk checkout. */
+export interface BuildIdentity {
+  revision: string | null;
+  dirty: boolean | null;
+  publicIp: string | null;
+  source: "package-githead" | "build-metadata" | "unknown";
+}
+export interface ProcessIdentity extends BuildIdentity {
+  version: string | null;
+  startedAt: string | null;
+}
+
 /** Facts fixed at startup, shown by /api/v1/status. */
 export interface ServerFacts {
+  /** Process-local startup identity and the last actual gh-auth observation. */
+  identitySession?: LocalIdentitySession;
+  effectiveHuman?: EffectiveHuman;
   version: string | null;
   startedAt: Date;
   url: string;

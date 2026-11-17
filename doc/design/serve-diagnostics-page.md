@@ -1,6 +1,6 @@
 # Diagnostics page: interactive read-only Doctor and Ticket Doctor runs
 
-Status: proposed contract for #585, delivered under #589. Nothing here is implemented by this document. Sections headed "Shipped today" describe current behaviour and cite the implementing file; everything else is a proposal.
+Status: reviewed implementation contract for #585, delivered under #589. Shared service hooks shipped in #785 and the bounded run registry/API in #786. The final page implements the remaining slice; [validation](../reports/diagnostics-page-validation.md) records native-report, browser and installed-package coverage.
 
 ## Owner decisions (settled)
 
@@ -18,11 +18,11 @@ From #585 and its owner-confirmed split, adopted without reopening:
 
 ### Doctor
 
-`localDoctor(options, runtime)` in `src/config/localdoctor.ts` (`LOCAL_DOCTOR_SCHEMA_VERSION = 1`, `MINIMUM_NODE_MAJOR = 26`) never throws for missing evidence. Injected `LocalDoctorRuntime`: `cwd`, `fs`, `probe` (default `nodeProbe`, `execFile` with a 15 s timeout), `nodeVersion`, `env`, `dependencies`. Options: `repo`, `agent`, `role`, `entry`, `harness`. Check IDs: `runtime.node`, `install.dependencies`, `gh.available`, `gh.auth`, `project.checkout`, `identity.file`, `identity.git-ignored`, `identity.git-tracked`, `identity.agent`, `triage.role`, `identity.parse`, `identity.entry`, `identity.name`, `identity.triage-role`. Status is one of `ok`, `missing`, `invalid`, `access`, `unsupported`, `unknown`; only `ok` is healthy. Each `LocalCheck` has `id`, `status`, `source`, `detail`, `next[]`. Probe output is parsed, never echoed; environment values are never reported. There is no `AbortSignal` and no progress callback. CLI: `pdb doctor` in `src/cli.ts`, exit code from `localDoctorExitCode`.
+`localDoctor(options, runtime)` in `src/config/localdoctor.ts` (`LOCAL_DOCTOR_SCHEMA_VERSION = 1`, `MINIMUM_NODE_MAJOR = 26`) never throws for missing evidence. Injected `LocalDoctorRuntime`: `cwd`, `fs`, `probe` (default `nodeProbe`, `execFile` with a 15 s timeout), `nodeVersion`, `env`, `dependencies`. Options: `repo`, `agent`, `role`, `entry`, `harness`. Check IDs: `runtime.node`, `install.dependencies`, `gh.available`, `gh.auth`, `project.checkout`, `identity.file`, `identity.git-ignored`, `identity.git-tracked`, `identity.agent`, `triage.role`, `identity.parse`, `identity.entry`, `identity.name`, `identity.triage-role`. Status is one of `ok`, `missing`, `invalid`, `access`, `unsupported`, `unknown`; only `ok` is healthy. Each `LocalCheck` has `id`, `status`, `source`, `detail`, `next[]`. Probe output is parsed, never echoed; environment values are never reported. Optional runtime `signal` and `onStep` now propagate cancellation and observed group transitions. The probe takes an optional signal, terminates its owned child and waits for close. A trusted `projectUnavailable` runtime scope runs only host checks and marks project/identity progress groups skipped; default CLI scope and report shape are unchanged. CLI: `pdb doctor` in `src/cli.ts`, exit code from `localDoctorExitCode`.
 
 ### Ticket Doctor
 
-`pdb ticket-doctor [--repo --json --stale-hours --limit --cache --offline --since ISO]` in `src/cli.ts` collects a snapshot, runs `diagnoseDelivery` (`src/workflow/deliverydoctor.ts`) and, with `--since`, `diagnoseClosedDrift`, then the pure synchronous `ticketDoctor(snapshot, options)` (`src/workflow/ticketdoctor.ts`). Bounds: `limit` default 30 (rest counted in `omittedTickets`), `doctorStaleHours = 24`, `deliveryDoctorTicketCap = 20` live delivery evaluations, `closedDriftIssueCap = 50`. `TicketDoctorReport` (`kind: "ticket-doctor"`, `schemaVersion: 1`) carries `freshness`, `scanned`, `summary { tickets, definite, candidate, unknown }`, `tickets`, `omittedTickets`, `completeness { complete, warnings }`, `guidance` and optional `closedScan`. A `DoctorFinding` has `kind`, `certainty` (`definite`, `candidate`, `unknown`), `detail` and a `CorrectionPlan` of `command`, `inspect` or `manual` steps built in `src/workflow/doctorplans.ts`; plans are never executed. Partial evidence turns absence-based findings into `unknown`. Exit 0 when complete, 2 when incomplete. `DeliveryDoctorRuntime` accepts an optional `signal`, which the CLI does not pass; `ticketDoctor` itself takes none; there is no progress callback.
+`pdb ticket-doctor [--repo --json --stale-hours --limit --cache --offline --since ISO]` in `src/cli.ts` collects a snapshot, runs `diagnoseDelivery` (`src/workflow/deliverydoctor.ts`) and, with `--since`, `diagnoseClosedDrift`, then the pure synchronous `ticketDoctor(snapshot, options)` (`src/workflow/ticketdoctor.ts`). Bounds: `limit` default 30 (rest counted in `omittedTickets`), `doctorStaleHours = 24`, `deliveryDoctorTicketCap = 20` live delivery evaluations, `closedDriftIssueCap = 50`. `TicketDoctorReport` (`kind: "ticket-doctor"`, `schemaVersion: 1`) carries `freshness`, `scanned`, `summary { tickets, definite, candidate, unknown }`, `tickets`, `omittedTickets`, `completeness { complete, warnings }`, `guidance` and optional `closedScan`. A `DoctorFinding` has `kind`, `certainty` (`definite`, `candidate`, `unknown`), `detail` and a `CorrectionPlan` of `command`, `inspect` or `manual` steps built in `src/workflow/doctorplans.ts`; plans are never executed. Partial evidence turns absence-based findings into `unknown`. Exit 0 when complete, 2 when incomplete. The CLI delegates this composition to `readTicketDoctor` in `src/workflow/readservices.ts`, also used by the active-run adapter. Its optional signal and phase callbacks preserve the pure synchronous scan. `DeliveryDoctorRuntime` takes a signal and an optional completed-evaluation count callback, bounded by the existing cap. No progress fields are added to CLI output.
 
 ### Passive diagnostics API and cache
 
@@ -30,11 +30,11 @@ From #585 and its owner-confirmed split, adopted without reopening:
 
 ### Serve boundaries
 
-`guardRequest` (`src/serve/http.ts`) enforces Host and same-origin Origin; `readJsonBody` requires JSON and caps the body at 64 KiB (`src/serve/options.ts`); served projects come from `selectRepository` (`src/serve/api.ts`). No page today runs Doctor or Ticket Doctor.
+`guardRequest` (`src/serve/http.ts`) enforces Host and same-origin Origin; `readJsonBody` requires JSON and caps the body at 64 KiB (`src/serve/options.ts`); served projects come from `selectRepository` (`src/serve/api.ts`). The Diagnostics page starts Doctor or Ticket Doctor only after an explicit Run.
 
 ## Typed run service
 
-Proposed module `src/serve/runs.ts`, one generic run registry with two registered run kinds. It reuses the existing services; it adds no checks or findings of its own.
+Module `src/serve/runs.ts` defines one generic run registry with two registered run kinds. `src/serve/diagnostic-runs.ts` binds it to registered host/project read services and the explicit HTTP routes. The page in `src/serve/diagnostics-page.ts` reuses the existing services; it adds no checks or findings of its own.
 
 ```ts
 type RunKind = "doctor" | "ticket-doctor";
@@ -76,6 +76,43 @@ Rules:
 7. **Doctor context.** With no project: only `runtime.node`, `install.dependencies`, `gh.available`, `gh.auth`; project and identity checks appear as `skipped` with "select a registered project with a local checkout". With a project: the served project's verified local root becomes `cwd`; a project registered without a local root skips project checks with that reason. The browser never supplies a path, executable or argument.
 8. **Ticket Doctor** runs the same code path as the CLI, through the serve read runtime and cache, so counts and findings match `pdb ticket-doctor --json` for the same snapshot. `--offline`, `--cache` and `--since` are not exposed in the first slice.
 9. **Redaction.** Results pass through the existing local-path and diagnostic redaction (`redactLocalText` in `src/mcp/redact.ts`); credentials, environment values and raw process output never appear.
+
+## Resource and lifecycle clarification (#585)
+
+The registry is process-local and bounded independently of the fact cache. Retained
+terminal runs use the existing serve limits: at most 256 runs and 64 MiB of
+serialized status/result data. Thirty minutes is the maximum retention age, not
+a promise against earlier resource eviction. Evict oldest terminal runs first;
+never evict an active run to make room. Expired or evicted results are absent,
+not fresh, healthy or evidence that a previous run succeeded.
+
+Each execution accepts at most 128 waiter handles; the registry holds at most
+1,024 handles in total. Reclaim expired and oldest terminal handles first; never
+drop an active waiter to admit another. If no capacity remains, POST returns
+429 `RUNS_BUSY` without starting, joining or queuing work. Unknown or expired GET
+handles return 404; DELETE remains idempotent and cannot affect another waiter.
+Handles expire with their retained run. Closing the server aborts all executions
+and clears timers, handles and retained data.
+
+A run has a ten-minute execution deadline, matching the existing bounded polling
+collection allowance. Deadline expiry aborts its owned work and reports `failed`
+with `RUN_TIMEOUT`; explicit waiter cancellation remains `cancelled`. A late
+completion after either transition cannot overwrite the terminal state. Enforce
+the existing 4 MiB HTTP response bound on the whole redacted status/result; an
+oversized result becomes a bounded `RESULT_TOO_LARGE` failure with CLI guidance,
+not an unbounded retained payload. Error messages are registered safe text, never
+raw exceptions, subprocess output or environment values.
+
+`latest` uses the cache's last verified auth context without a new auth probe or
+collection. Its timestamps identify historical evidence. An explicit POST uses
+the cache's normal auth verification boundary before keying a run. If that
+verification is unavailable, Ticket Doctor cannot start; Doctor may still inspect
+the host with a null login, since diagnosing broken gh/auth is its purpose. A
+null-login run cannot join a run keyed to a previously verified login. Doctor
+host-only scope reports the project and identity **progress groups** as skipped
+with the registered-checkout reason, while its unchanged LocalDoctorReport
+contains only the four applicable host checks. CLI default scope and JSON remain
+unchanged.
 
 ## HTTP API
 

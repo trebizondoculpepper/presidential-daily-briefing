@@ -104,14 +104,18 @@
           {:e 207 "record-trust" "unverified" "record-to" "owner" "record-version" 2 "record-outcome" "none"}]
   :expect {:actions [{:subject 100 :rule "D-HUMAN-ORPHANED-YOU" :kind "orphaned-question" :band 1
               :why "The ticket is closed but its trusted question routed to you (owner) has no recorded resolve or withdraw; closure is not an answer."
-              :overridden []}
+              :overridden []
+              :attention-section {:section "input" :rule "HS-INPUT-ACTIONABLE" :why "Requires human input or review from the observed evidence."}}
             {:subject 101 :rule "D-HUMAN-ORPHANED" :kind "orphaned-question" :band 3
               :why "The ticket is closed but its trusted question routed to designer-a has no recorded resolve or withdraw; closure is not an answer."
-              :overridden []}
+              :overridden []
+              :attention-section {:section "input" :rule "HS-INPUT-ACTIONABLE" :why "Requires human input or review from the observed evidence."}}
             {:subject 102 :rule "D-HUMAN-ORPHANED-UNKNOWN" :kind "orphaned-question" :band 3
               :why "The ticket is closed and whether its trusted question routed to owner was resolved could not be established; it is not read as answered."
-              :overridden []}
-            {:subject 106 :rule "D-HUMAN-ORPHANED-UNKNOWN" :kind "orphaned-question" :band 3 :overridden []}]
+              :overridden []
+              :attention-section {:section "waiting" :rule "HS-WAITING-UNKNOWN" :why "Whether this question was resolved could not be established; shown under Waiting for inspection, not as answered."}}
+            {:subject 106 :rule "D-HUMAN-ORPHANED-UNKNOWN" :kind "orphaned-question" :band 3 :overridden []
+              :attention-section {:section "waiting" :rule "HS-WAITING-UNKNOWN" :why "Whether this question was resolved could not be established; shown under Waiting for inspection, not as answered."}}]
            :denials #{}}}
 
  {:id "closed-sources-are-human-only"
@@ -154,4 +158,34 @@
               :why "A trusted question record routed to designer-a awaits answers on the ticket."
               :overridden []}
             {:subject 102 :rule "D-HUMAN-DECIDE" :kind "decide" :band 3 :overridden []}]
+           :denials #{}}}
+
+ ;; #643 (doc/design/human-briefing.md): shared native Input vs Waiting section grouping.
+ {:id "human-attention-section-grouping"
+  :doc "actionable open and closed items map to Input; closed sources with any unknown resolution (including mixed known-unanswered and unknown-resolution questions) map to Waiting"
+  :viewer {:role "human" :agent "owner"}
+  :facts [{:e 1 "forward-complete" true}
+          {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "not-a-pr" "question-record" 200}
+          {:e 200 "record-trust" "trusted" "record-to" "owner" "record-version" 2 "record-outcome" "none"}
+          {:e 101 "kind" "issue" "state" "CLOSED" "number" 2 "target" "https://github.com/o/r/issues/2" "created" 1767225600000 "labels-complete" true "reverse-complete" false "native-complete" false "open-blockers" -1 "blocking-complete" false "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "not-a-pr" "question-record" [201 202]}
+          {:e 201 "record-trust" "trusted" "record-to" "owner" "record-version" 2 "record-outcome" "none"}
+          {:e 202 "record-trust" "trusted" "record-to" "owner" "record-version" 2 "record-outcome" "unknown"}
+          {:e 102 "kind" "issue" "state" "CLOSED" "number" 3 "target" "https://github.com/o/r/issues/3" "created" 1767225600000 "labels-complete" true "reverse-complete" false "native-complete" false "open-blockers" -1 "blocking-complete" false "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "not-a-pr" "question-record" 203}
+          {:e 203 "record-trust" "trusted" "record-to" "owner" "record-version" 2 "record-outcome" "unknown"}]
+  :expect {:actions [{:subject 100 :rule "D-HUMAN-ASK-YOU" :kind "answer-questions" :band 1
+              :why "A trusted question record routed to you (owner) awaits answers on the ticket."
+              :overridden []
+              :attention-section {:section "input" :rule "HS-INPUT-ACTIONABLE" :why "Requires human input or review from the observed evidence."}}
+            {:subject 101 :rule "D-HUMAN-ORPHANED-YOU" :kind "orphaned-question" :band 1
+              :why "The ticket is closed but its trusted question routed to you (owner) has no recorded resolve or withdraw; closure is not an answer."
+              :overridden []
+              :attention-section {:section "waiting" :rule "HS-WAITING-UNKNOWN" :why "Whether this question was resolved could not be established; shown under Waiting for inspection, not as answered."}}
+            {:subject 101 :rule "D-HUMAN-ORPHANED-UNKNOWN" :kind "orphaned-question" :band 3
+              :why "The ticket is closed and whether its trusted question routed to owner was resolved could not be established; it is not read as answered."
+              :overridden []
+              :attention-section {:section "waiting" :rule "HS-WAITING-UNKNOWN" :why "Whether this question was resolved could not be established; shown under Waiting for inspection, not as answered."}}
+            {:subject 102 :rule "D-HUMAN-ORPHANED-UNKNOWN" :kind "orphaned-question" :band 3
+              :why "The ticket is closed and whether its trusted question routed to owner was resolved could not be established; it is not read as answered."
+              :overridden []
+              :attention-section {:section "waiting" :rule "HS-WAITING-UNKNOWN" :why "Whether this question was resolved could not be established; shown under Waiting for inspection, not as answered."}}]
            :denials #{}}}]}

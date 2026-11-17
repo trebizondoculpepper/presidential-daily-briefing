@@ -9,6 +9,7 @@ import type { BaseIdentity, ProjectSourceIO } from "./source.js";
 import type { ProjectGrammar, ProjectPreference } from "./grammar.js";
 export interface CompiledProjectPreference {
   id: string;
+  purpose?: string;
   /** The admitted actions satisfying `:when` alone; each must then bind exactly one priority. */
   matchQuery: string;
   query: string;
@@ -20,7 +21,7 @@ export interface CompiledProjectPreference {
 export interface CompiledProjectPolicy {
   phase: "validated-project-policy";
   sourceFile: typeof projectRulesFile;
-  formatVersion: 1;
+  formatVersion: 1 | 2;
   projectionVersion: 1;
   basePolicyVersion: number;
   defaultRulesHash: string;
@@ -40,19 +41,20 @@ export function compileProjectPolicy(text: string, base: BaseIdentity): Compiled
   return {
     phase: "validated-project-policy",
     sourceFile: projectRulesFile,
-    formatVersion: 1,
+    formatVersion: source.formatVersion,
     projectionVersion: 1,
     basePolicyVersion: source.basePolicyVersion,
     defaultRulesHash: source.baseRulesHash,
     projectRulesHash: source.sourceDigest,
     effectiveRulesHash: digest(
-      JSON.stringify([1, source.baseRulesHash, 1, source.canonicalSource]),
+      JSON.stringify([source.formatVersion, source.baseRulesHash, 1, source.canonicalSource]),
     ),
     canonicalSource: source.canonicalSource,
     rules: printEdn(source.rules, "pdb.rules.edn :rules"),
     helpers: grammar.helpers,
     preferences: grammar.preferences.map((p) => ({
       id: p.id,
+      ...(p.purpose !== undefined ? { purpose: p.purpose } : {}),
       why: p.why,
       matchQuery: `[:find ?a :in $ % :where [?a "pdb.action-id" _] ${body(p.when)}]`,
       // Fix the initial action domain; #515 must still validate every returned action identity.

@@ -112,6 +112,12 @@ export interface Explanation {
 export interface DatalogAction extends RankedAction {
   ruleIds: string[];
   why: Explanation;
+  /** Human role only (#643): native section grouping (`input` vs `waiting`) and its reason. */
+  attentionSection?: {
+    section: "input" | "waiting";
+    ruleId: string;
+    reason: string;
+  };
 }
 export interface DatalogResult extends RankedActions {
   items: DatalogAction[];
@@ -479,6 +485,7 @@ export function evaluateDatalog(
       unlocksUnknown: decision.unlocksUnknown,
       ruleIds: decision.why.ruleIds,
       why: decision.why,
+      ...(decision.attentionSection ? { attentionSection: decision.attentionSection } : {}),
     };
   });
   const elapsed = clock() - started;

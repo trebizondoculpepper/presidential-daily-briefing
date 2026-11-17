@@ -69,6 +69,15 @@ export const servedPages: readonly ServedPage[] = [
     shipped: true,
   },
   {
+    id: "diagnostics",
+    path: "/diagnostics",
+    label: "Diagnostics",
+    scope: "global-or-project",
+    parameters: ["repo", "tab"],
+    carries: ["tab"],
+    shipped: true,
+  },
+  {
     id: "quotas",
     path: "/quotas",
     label: "Quotas",
@@ -267,6 +276,8 @@ html { scroll-padding-top: var(--toolbar-height); }
 .shell-toolbar { z-index: 10; position: sticky; top: 0; background: Canvas; padding: .5rem 0; border-bottom: 1px solid GrayText; }
 .shell-context { display: flex; flex-wrap: wrap; gap: .25rem 1rem; align-items: baseline; overflow-wrap: anywhere; }
 .product { font-weight: 700; }
+.process-identity { display: flex; flex-wrap: wrap; gap: .3rem 1rem; margin-top: .7rem; padding-top: .5rem; border-top: 1px solid GrayText; font-size: .85rem; overflow-wrap: anywhere; }
+.process-identity code { overflow-wrap: anywhere; }
 .project-menu { position: relative; }
 .project-menu summary { cursor: pointer; font-size: .85rem; border: 1px solid GrayText; border-radius: .25rem; padding: .15rem .5rem; }
 .shell-menus { display: flex; gap: .5rem 1rem; align-items: start; margin-top: .5rem; }

@@ -50,6 +50,11 @@ export interface ExpectedAction {
   unlocks?: number;
   unknown?: string[];
   otherClaims?: number[];
+  attentionSection?: {
+    section: "input" | "waiting";
+    ruleId: string;
+    reason?: string;
+  };
 }
 export interface Scenario {
   id: string;
@@ -131,7 +136,7 @@ function actionOf(form: Form, where: string): ExpectedAction {
     form,
     where,
     ["subject", "rule", "kind", "band"],
-    ["why", "facts", "overridden", "unlocks", "unknown", "other-claims"],
+    ["why", "facts", "overridden", "unlocks", "unknown", "other-claims", "attention-section"],
   );
   const action: ExpectedAction = {
     subject: integer(m.get("subject"), `${where} :subject`),
@@ -160,6 +165,27 @@ function actionOf(form: Form, where: string): ExpectedAction {
     action.otherClaims = vector(m.get("other-claims"), `${where} :other-claims`).map((x) =>
       integer(x, `${where} :other-claims`),
     );
+  if (m.has("attention-section")) {
+    const sec = fields(
+      m.get("attention-section"),
+      `${where} :attention-section`,
+      ["section", "rule"],
+      ["why"],
+    );
+    const section = text(sec.get("section"), `${where} :attention-section :section`);
+    if (section !== "input" && section !== "waiting")
+      return fail(
+        where,
+        `:attention-section :section must be "input" or "waiting", found ${section}`,
+      );
+    action.attentionSection = {
+      section,
+      ruleId: text(sec.get("rule"), `${where} :attention-section :rule`),
+      ...(sec.has("why")
+        ? { reason: text(sec.get("why"), `${where} :attention-section :why`) }
+        : {}),
+    };
+  }
   return action;
 }
 
@@ -246,6 +272,19 @@ export function differences(scenario: Scenario, result: PolicyResult): string[] 
       check("unlocks", a.unlocks, d.unlocks);
       check("unknown", a.unknown, d.unlocksUnknown);
       check("other-claims", a.otherClaims, d.otherClaims);
+      if (a.attentionSection !== undefined) {
+        const expectedSec =
+          a.attentionSection.reason === undefined
+            ? { section: a.attentionSection.section, ruleId: a.attentionSection.ruleId }
+            : a.attentionSection;
+        const actualSec =
+          d.attentionSection === undefined
+            ? undefined
+            : a.attentionSection.reason === undefined
+              ? { section: d.attentionSection.section, ruleId: d.attentionSection.ruleId }
+              : d.attentionSection;
+        check("attention-section", expectedSec, actualSec);
+      }
     });
   const key = ([s, r]: [number, string]) => `${s} ${r}`;
   const wantDenials = scenario.expect.denials.map(key).sort();

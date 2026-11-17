@@ -996,7 +996,11 @@ describe("complete arguments", () => {
       json: false,
       dryRun: true,
     });
-    expect(() => completeArguments(["42"])).toThrow(/Usage/);
+    expect(completeArguments(["42", "--entry", "codex", "--role", "designer"])).toMatchObject({
+      request: { number: 42, agent: undefined },
+      entry: "codex",
+      role: "designer",
+    });
     expect(() => completeArguments(["x", "--agent", "bob"])).toThrow(/Usage/);
     expect(() => completeArguments(["42", "--agent", "bob", "--repo", "bad"])).toThrow(/owner/);
   });

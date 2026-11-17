@@ -247,6 +247,34 @@ verified facts, not a manually updated version banner. Screenshots use the same
 sanitized output and manifest; no screenshot from another release is mixed in.
 No visitor-side API credential or raw private configuration appears in the bundle.
 
+## Owner-supplied conversation illustrations (#793)
+
+The owner requested three supplied conversation screenshots as editorial website
+content. Keep these distinct from release-validated CLI examples: label their
+source and historical date, describe an assistant explaining PDB evidence rather
+than presenting assistant prose as native PDB output, and do not infer release
+capabilities, live priorities or product completion from the depicted tickets.
+Provide useful captions/alt text, responsive previews and full-image links.
+Preserve original image bytes; use a filename extension matching actual encoding.
+
+A code-owned list in website/conversations.ts names the three static image assets
+under assets/conversations/. The renderer and builder share that list. The build
+copies only those files; siteFiles admits only those exact image paths in addition
+to its current HTML/CSS/JS paths, rejects symlinks/other files as before, and hashes
+the images into the existing manifest files map and artifact digest. No generic
+binary extension allowlist, fetched image URL or unverified manifest field is added.
+Editorial images never become captured command examples or receive fabricated
+capture metadata. Require every listed image in a release artifact and verify its
+bytes match the reviewed source asset, so an absent or substituted illustration
+cannot pass simply by rewriting file hashes.
+
+The owner-authorized manual preview may receive this labelled editorial update
+through its existing gh-pages branch, preserving CNAME and HTTPS configuration.
+That is not a release-driven build or proof of #602 completion. Future verified
+release builds still use images/templates from the exact published source and all
+existing capture, publication and manifest checks. Do not append these assets to
+an already-hashed release artifact or rewrite its capture provenance.
+
 ## Deployment ordering and recovery
 
 Build/capture/test jobs are read-only. A separate protected deploy job receives

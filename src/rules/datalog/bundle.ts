@@ -14,6 +14,7 @@ export const requiredQueries = [
   "check-ready",
   "check-blockers",
   "pr-blockers",
+  "human-sections",
   "q0",
   "declared-overrides",
   "q1",
@@ -48,6 +49,8 @@ export interface OverridePair {
 
 export interface DecisionRule {
   id: string;
+  /** Authored literal purpose, excluded from rule matching. */
+  purpose?: string;
   kind: string;
   band: number;
   preference: number;
@@ -88,6 +91,8 @@ export interface PolicyBundle {
   sortClauses: string;
   definitions: DecisionRule[];
   denials: Record<string, string>;
+  /** Optional literal purposes keyed by declared denial ID. */
+  denialPurposes?: Record<string, string>;
   /** Named queries as canonical EDN, keyed by their queries.edn keyword without the colon. */
   queries: Record<RequiredQuery, string>;
   keyQueries: [string, string][];

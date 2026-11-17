@@ -1,7 +1,8 @@
 {
   "modelVersion": 2,
   "policyVersion": 1,
-  "rulesHash": "017d781821f07a45492b8aff30d69cfc06d33dcbc938f86465c0a1c3301eb0a8",
+  "rulesHash": "e4f6c8c3eb51725257e9478030dc70ad4100eabb9f4ec52fe807d274ee715d52",
+  "narrationHash": "21a9666a3027e9459301872158c39ce83e4967a0495ba0e2ffe1f60db7ec4583",
   "sources": [
     "policy/schema.edn",
     "policy/rules.edn",
@@ -368,6 +369,7 @@
   "decisions": [
     {
       "id": "D-ATTENTION",
+      "purpose": "Bring work explicitly addressed to this agent to the front of its queue.",
       "kind": "addressed-response",
       "band": 1,
       "preference": 0,
@@ -445,6 +447,7 @@
     },
     {
       "id": "D-PR-FAIL",
+      "purpose": "Prioritize repairing failed PR checks before the change can progress toward merge.",
       "kind": "pr-follow-up",
       "band": 2,
       "preference": 0,
@@ -564,6 +567,7 @@
     },
     {
       "id": "D-PR-REVIEW",
+      "purpose": "Prioritize resolving substantive PR review findings on the current change.",
       "kind": "pr-follow-up",
       "band": 2,
       "preference": 0,
@@ -670,6 +674,7 @@
     },
     {
       "id": "D-PR-CONFLICT",
+      "purpose": "Surface merge conflicts that need integration work.",
       "kind": "pr-follow-up",
       "band": 2,
       "preference": 1,
@@ -738,6 +743,7 @@
     },
     {
       "id": "D-PR-MERGE",
+      "purpose": "Offer a final merge-inspection step for PRs whose checks and review evidence are satisfied.",
       "kind": "pr-follow-up",
       "band": 2,
       "preference": 2,
@@ -859,6 +865,7 @@
     },
     {
       "id": "D-PR-INTEGRATE",
+      "purpose": "Surface accepted PRs that still need mergeability refreshed or integration work.",
       "kind": "pr-follow-up",
       "band": 2,
       "preference": 3,
@@ -961,6 +968,7 @@
     },
     {
       "id": "D-DECIDE",
+      "purpose": "Bring recorded design decisions into the designer's queue before implementation proceeds.",
       "kind": "decide",
       "band": 3,
       "preference": 0,
@@ -1043,6 +1051,7 @@
     },
     {
       "id": "D-DOCUMENT",
+      "purpose": "Make agreed decisions awaiting documentation visible to the designer.",
       "kind": "document",
       "band": 3,
       "preference": 1,
@@ -1125,6 +1134,7 @@
     },
     {
       "id": "D-DESIGN-REVIEW",
+      "purpose": "Surface design and documentation PRs for a designer's review.",
       "kind": "design-review",
       "band": 3,
       "preference": 2,
@@ -1270,6 +1280,7 @@
     },
     {
       "id": "D-EASY",
+      "purpose": "Prefer known high-impact, low-effort opportunities when ordering work by impact.",
       "kind": "implement",
       "band": 4,
       "preference": 0,
@@ -1340,6 +1351,7 @@
     },
     {
       "id": "D-OWN-EASY",
+      "purpose": "Highlight an active claim that is already known to have high impact and low effort.",
       "kind": "continue-implementation",
       "band": 4,
       "preference": 0,
@@ -1397,6 +1409,7 @@
     },
     {
       "id": "D-COMPLEXITY-BOOST",
+      "purpose": "Prioritize estimating effort when known high impact could make the work valuable.",
       "kind": "estimate-complexity",
       "band": 5,
       "preference": 0,
@@ -1463,6 +1476,7 @@
     },
     {
       "id": "D-COMPLEXITY",
+      "purpose": "Surface missing or stale effort estimates so implementation choices use better evidence.",
       "kind": "estimate-complexity",
       "band": 5,
       "preference": 1,
@@ -1520,6 +1534,7 @@
     },
     {
       "id": "D-IMPACT-BOOST",
+      "purpose": "Prioritize assessing benefit when known low effort could reveal an easy win.",
       "kind": "assess-impact",
       "band": 5,
       "preference": 0,
@@ -1586,6 +1601,7 @@
     },
     {
       "id": "D-IMPACT",
+      "purpose": "Surface missing or stale benefit assessments for the designer to judge.",
       "kind": "assess-impact",
       "band": 5,
       "preference": 1,
@@ -1643,6 +1659,7 @@
     },
     {
       "id": "D-BAD-COMPLEXITY",
+      "purpose": "Surface unusable effort evidence for inspection and correction.",
       "kind": "inspect-assessment",
       "band": 5,
       "preference": 1,
@@ -1700,6 +1717,7 @@
     },
     {
       "id": "D-BAD-IMPACT",
+      "purpose": "Surface unusable benefit evidence for inspection and correction.",
       "kind": "inspect-assessment",
       "band": 5,
       "preference": 1,
@@ -1757,6 +1775,7 @@
     },
     {
       "id": "D-ORDINARY",
+      "purpose": "Offer eligible implementation work after the more specific priorities are considered.",
       "kind": "implement",
       "band": 6,
       "preference": 0,
@@ -1805,6 +1824,7 @@
     },
     {
       "id": "D-OWN",
+      "purpose": "Keep an agent's active implementation claim visible as continuation work.",
       "kind": "continue-implementation",
       "band": 6,
       "preference": 0,
@@ -1853,6 +1873,7 @@
     },
     {
       "id": "D-DESIGN",
+      "purpose": "Offer design work when a required design contract is missing.",
       "kind": "design",
       "band": 6,
       "preference": 0,
@@ -1931,6 +1952,7 @@
     },
     {
       "id": "D-UNFAVORABLE",
+      "purpose": "Flag eligible work whose known effort is high relative to its benefit.",
       "kind": "implement",
       "band": 7,
       "preference": 0,
@@ -2001,6 +2023,7 @@
     },
     {
       "id": "D-OWN-UNFAVORABLE",
+      "purpose": "Prompt reconsideration of active work with high effort and limited known benefit.",
       "kind": "continue-implementation",
       "band": 7,
       "preference": 0,
@@ -2058,6 +2081,7 @@
     },
     {
       "id": "D-OWN-RESUME",
+      "purpose": "Surface retained claims whose recorded wait has cleared and need explicit resumption.",
       "kind": "resume-claim",
       "band": 3,
       "preference": 0,
@@ -2139,6 +2163,7 @@
     },
     {
       "id": "D-REVIEW-OWNED",
+      "purpose": "Prompt a review of multiple retained implementation claims before starting more work.",
       "kind": "review-owned-work",
       "band": 3,
       "preference": 1,
@@ -2258,6 +2283,7 @@
     },
     {
       "id": "D-REVIEW-OWNED-PARTIAL",
+      "purpose": "Prompt review of the observed retained claims while making incomplete ownership evidence explicit.",
       "kind": "review-owned-work",
       "band": 3,
       "preference": 1,
@@ -2377,6 +2403,7 @@
     },
     {
       "id": "D-INVENTORY-UNKNOWN",
+      "purpose": "Surface an incomplete claim inventory even when no active claim was observed.",
       "kind": "inspect-ownership",
       "band": 3,
       "preference": 3,
@@ -2455,6 +2482,7 @@
     },
     {
       "id": "D-OWNED-INCOMPLETE",
+      "purpose": "Keep an observed claim visible while asking the agent to verify its incomplete ownership inventory.",
       "kind": "inspect",
       "band": 3,
       "preference": 3,
@@ -2542,6 +2570,7 @@
     },
     {
       "id": "D-OWN-UNKNOWN",
+      "purpose": "Surface a retained claim whose activity or wait evidence cannot be established.",
       "kind": "inspect",
       "band": 3,
       "preference": 2,
@@ -2623,6 +2652,7 @@
     },
     {
       "id": "D-OWN-WAIT",
+      "purpose": "Keep a verified waiting claim visible without suggesting immediate continuation.",
       "kind": "wait-claim",
       "band": 8,
       "preference": 0,
@@ -2704,6 +2734,7 @@
     },
     {
       "id": "D-INSPECT",
+      "purpose": "Show work needing eligibility or platform evidence without declaring it ready for pickup.",
       "kind": "inspect",
       "band": 6,
       "preference": 0,
@@ -2893,6 +2924,7 @@
     },
     {
       "id": "D-HUMAN-ASK-YOU",
+      "purpose": "Put trusted questions explicitly routed to the selected human ahead of general human attention.",
       "kind": "answer-questions",
       "band": 1,
       "preference": 0,
@@ -2982,6 +3014,7 @@
     },
     {
       "id": "D-HUMAN-ASK",
+      "purpose": "Surface trusted questions routed to a human so their answers can be recorded on the ticket.",
       "kind": "answer-questions",
       "band": 3,
       "preference": 0,
@@ -3077,6 +3110,7 @@
     },
     {
       "id": "D-HUMAN-UNVERIFIED",
+      "purpose": "Show question labels with unverified authorship as inferred attention needing confirmation.",
       "kind": "decide",
       "band": 3,
       "preference": 1,
@@ -3167,6 +3201,7 @@
     },
     {
       "id": "D-HUMAN-DECIDE",
+      "purpose": "Show decision labels without a trusted question record as inferred human attention.",
       "kind": "decide",
       "band": 3,
       "preference": 2,
@@ -3248,6 +3283,7 @@
     },
     {
       "id": "D-HUMAN-ORPHANED-YOU",
+      "purpose": "Keep unresolved trusted questions routed to the selected human visible after ticket closure.",
       "kind": "orphaned-question",
       "band": 1,
       "preference": 1,
@@ -3328,6 +3364,7 @@
     },
     {
       "id": "D-HUMAN-ORPHANED",
+      "purpose": "Surface trusted questions left unresolved on closed tickets.",
       "kind": "orphaned-question",
       "band": 3,
       "preference": 0,
@@ -3423,6 +3460,7 @@
     },
     {
       "id": "D-HUMAN-ORPHANED-UNKNOWN",
+      "purpose": "Make unknown question-resolution evidence explicit on closed tickets.",
       "kind": "orphaned-question",
       "band": 3,
       "preference": 1,
@@ -3503,6 +3541,7 @@
     },
     {
       "id": "D-HUMAN-SIGNOFF",
+      "purpose": "Surface accepted PRs as inferred human sign-off candidates, subject to ordinary merge authority.",
       "kind": "sign-off",
       "band": 3,
       "preference": 3,
@@ -9095,6 +9134,181 @@
       "set": "rules"
     },
     {
+      "name": "human-waiting-item",
+      "params": ["?t"],
+      "alternatives": [
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "viewer",
+              "entity": {
+                "lit": 1
+              },
+              "attribute": "role",
+              "value": {
+                "lit": "human"
+              },
+              "phrase": "role",
+              "many": false
+            },
+            {
+              "type": "call",
+              "predicate": "has-orphan-unknown",
+              "args": [
+                {
+                  "var": "?t"
+                }
+              ]
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 117
+          }
+        }
+      ],
+      "calls": ["has-orphan-unknown"],
+      "set": "rules"
+    },
+    {
+      "name": "human-attention-section",
+      "params": ["?t", "?section", "?code", "?reason"],
+      "alternatives": [
+        {
+          "params": ["?t", "?section", "?code", "?reason"],
+          "clauses": [
+            {
+              "type": "call",
+              "predicate": "human-waiting-item",
+              "args": [
+                {
+                  "var": "?t"
+                }
+              ]
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "waiting"
+                }
+              ],
+              "result": "?section"
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "HS-WAITING-UNKNOWN"
+                }
+              ],
+              "result": "?code"
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "Whether this question was resolved could not be established; shown under Waiting for inspection, not as answered."
+                }
+              ],
+              "result": "?reason"
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 118
+          }
+        },
+        {
+          "params": ["?t", "?section", "?code", "?reason"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "viewer",
+              "entity": {
+                "lit": 1
+              },
+              "attribute": "role",
+              "value": {
+                "lit": "human"
+              },
+              "phrase": "role",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "matched",
+              "value": {
+                "wild": true
+              },
+              "phrase": "matched decision rule",
+              "many": true
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "call",
+                  "predicate": "human-waiting-item",
+                  "args": [
+                    {
+                      "var": "?t"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "input"
+                }
+              ],
+              "result": "?section"
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "HS-INPUT-ACTIONABLE"
+                }
+              ],
+              "result": "?code"
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "Requires human input or review from the observed evidence."
+                }
+              ],
+              "result": "?reason"
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 119
+          }
+        }
+      ],
+      "calls": ["human-waiting-item"],
+      "set": "rules"
+    },
+    {
       "name": "declared-review-coverage",
       "params": ["?t"],
       "alternatives": [
@@ -9117,7 +9331,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 117
+            "index": 120
           }
         },
         {
@@ -9139,7 +9353,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 118
+            "index": 121
           }
         }
       ],
@@ -9178,7 +9392,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 119
+            "index": 122
           }
         }
       ],
@@ -9228,7 +9442,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 120
+            "index": 123
           }
         },
         {
@@ -9252,7 +9466,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 121
+            "index": 124
           }
         },
         {
@@ -9351,7 +9565,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 122
+            "index": 125
           }
         },
         {
@@ -9438,7 +9652,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 123
+            "index": 126
           }
         },
         {
@@ -9525,7 +9739,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 124
+            "index": 127
           }
         },
         {
@@ -9582,7 +9796,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 125
+            "index": 128
           }
         },
         {
@@ -9624,7 +9838,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 126
+            "index": 129
           }
         },
         {
@@ -9666,7 +9880,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 127
+            "index": 130
           }
         },
         {
@@ -9727,7 +9941,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 128
+            "index": 131
           }
         },
         {
@@ -9833,7 +10047,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 132
+            "index": 135
           }
         },
         {
@@ -9875,7 +10089,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 133
+            "index": 136
           }
         },
         {
@@ -9917,7 +10131,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 134
+            "index": 137
           }
         },
         {
@@ -9974,7 +10188,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 135
+            "index": 138
           }
         },
         {
@@ -10050,7 +10264,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 136
+            "index": 139
           }
         },
         {
@@ -10107,7 +10321,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 137
+            "index": 140
           }
         },
         {
@@ -10190,7 +10404,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 138
+            "index": 141
           }
         },
         {
@@ -10277,7 +10491,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 139
+            "index": 142
           }
         },
         {
@@ -10379,7 +10593,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 140
+            "index": 143
           }
         },
         {
@@ -10440,7 +10654,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 141
+            "index": 144
           }
         },
         {
@@ -10497,7 +10711,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 142
+            "index": 145
           }
         },
         {
@@ -10584,7 +10798,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 143
+            "index": 146
           }
         },
         {
@@ -10666,7 +10880,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 144
+            "index": 147
           }
         }
       ],
@@ -10714,7 +10928,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 129
+            "index": 132
           }
         },
         {
@@ -10749,7 +10963,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 130
+            "index": 133
           }
         },
         {
@@ -10784,7 +10998,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 131
+            "index": 134
           }
         }
       ],
@@ -10816,7 +11030,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 145
+            "index": 148
           }
         }
       ],
@@ -10888,7 +11102,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 146
+            "index": 149
           }
         },
         {
@@ -10925,7 +11139,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 147
+            "index": 150
           }
         },
         {
@@ -10995,7 +11209,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 148
+            "index": 151
           }
         }
       ],
@@ -11977,6 +12191,7 @@
   "denials": [
     {
       "id": "D-DENY-CLAIM",
+      "purpose": "Keep already claimed tickets out of new implementation pickup.",
       "predicate": "implementation-deny",
       "clauses": [
         {
@@ -12002,6 +12217,7 @@
     },
     {
       "id": "D-DENY-PREREQUISITE",
+      "purpose": "Keep work with design, question, blocked or parked prerequisites out of implementation pickup.",
       "predicate": "implementation-deny",
       "clauses": [
         {
@@ -12027,6 +12243,7 @@
     },
     {
       "id": "D-DENY-OPEN-PR",
+      "purpose": "Avoid proposing a new implementation while an open PR already closes the ticket.",
       "predicate": "implementation-deny",
       "clauses": [
         {
@@ -12052,6 +12269,7 @@
     },
     {
       "id": "D-DENY-BLOCKER",
+      "purpose": "Keep tickets with open native blockers out of implementation pickup.",
       "predicate": "implementation-deny",
       "clauses": [
         {
@@ -12077,6 +12295,7 @@
     },
     {
       "id": "D-DENY-LABELS-UNKNOWN",
+      "purpose": "Withhold implementation pickup when label evidence is incomplete.",
       "predicate": "implementation-deny",
       "clauses": [
         {
@@ -12106,6 +12325,7 @@
     },
     {
       "id": "D-DENY-NATIVE-UNKNOWN",
+      "purpose": "Withhold implementation pickup when native dependency evidence is incomplete.",
       "predicate": "implementation-deny",
       "clauses": [
         {
@@ -12135,6 +12355,7 @@
     },
     {
       "id": "D-DENY-CLOSING-UNKNOWN",
+      "purpose": "Withhold implementation pickup when existing closing PRs cannot be ruled out.",
       "predicate": "implementation-deny",
       "clauses": [
         {
@@ -12166,6 +12387,7 @@
     },
     {
       "id": "D-DENY-PLATFORM",
+      "purpose": "Keep platform-restricted work out of pickup without a matching viewer platform.",
       "predicate": "implementation-deny",
       "clauses": [
         {
@@ -12197,6 +12419,7 @@
     },
     {
       "id": "D-DENY-INVENTORY-UNKNOWN",
+      "purpose": "Withhold new implementation pickup while the viewer's claim inventory is incomplete.",
       "predicate": "implementation-deny",
       "clauses": [
         {
@@ -13217,6 +13440,33 @@
       "ruleSet": "rules"
     },
     {
+      "name": "human-sections",
+      "find": ["?t", "?section", "?code", "?reason"],
+      "inputs": ["$", "%"],
+      "clauses": [
+        {
+          "type": "call",
+          "predicate": "human-attention-section",
+          "args": [
+            {
+              "var": "?t"
+            },
+            {
+              "var": "?section"
+            },
+            {
+              "var": "?code"
+            },
+            {
+              "var": "?reason"
+            }
+          ]
+        }
+      ],
+      "calls": ["human-attention-section"],
+      "ruleSet": "rules"
+    },
+    {
       "name": "q1",
       "find": ["?t", "?d"],
       "inputs": ["$", "%"],
@@ -13862,15 +14112,15 @@
   ],
   "coverage": {
     "decisions": 38,
-    "predicates": 81,
-    "alternatives": 159,
+    "predicates": 83,
+    "alternatives": 162,
     "denials": 9,
-    "queries": 18,
+    "queries": 19,
     "keyQueries": 4,
     "evidence": 39,
     "overrides": 4,
     "constants": 14,
     "attributes": 94,
-    "clauses": 833
+    "clauses": 847
   }
 }
