@@ -63,7 +63,9 @@ export type ProjectRootVerifier = (
 export const defaultProjectRootVerifier: ProjectRootVerifier = (localRoot) =>
   typeof localRoot === "string" &&
   localRoot !== "" &&
-  (localRoot.startsWith("/") || /^[A-Za-z]:[\\/]/.test(localRoot))
+  (localRoot.startsWith("/") ||
+    /^[A-Za-z]:[\\/]/.test(localRoot) ||
+    /^\\\\[^\\]+\\[^\\]+/.test(localRoot))
     ? null
     : "localRoot must be an absolute path to a verified checkout.";
 
