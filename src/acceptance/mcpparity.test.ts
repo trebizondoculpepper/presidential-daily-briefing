@@ -15,6 +15,7 @@ import { collect } from "../github/github.js";
 import type { Query } from "../github/github.js";
 import { boundedEnvelope, createServer } from "../mcp.js";
 import { parityDifference } from "../mcp/parity.js";
+import { budgetBytes, resultBytes } from "../mcp/bounded.js";
 import type { McpRuntime } from "../mcp.js";
 import type { Issue, Page } from "../github/types.js";
 
@@ -390,7 +391,8 @@ describe("--section and the MCP section input report the same section (#311)", (
   });
 
   it("reports the rows actually returned when the transport budget prunes the section", async () => {
-    count = 120;
+    // The default text budget forces whole-result row pruning with this bounded fixture.
+    count = 64;
     const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
     await createServer({ repo }, runtime()).connect(serverSide);
     const client = new Client({ name: "parity", version: "1.0.0" });
@@ -398,7 +400,7 @@ describe("--section and the MCP section input report the same section (#311)", (
     try {
       const raw = await client.callTool({
         name: "triage_briefing",
-        arguments: { agent: "me", role: "implementer", section: "pickup", maxChars: 1000 },
+        arguments: { agent: "me", role: "implementer", section: "pickup", maxChars: 10000 },
       });
       const parsed = boundedEnvelope.parse(raw.structuredContent);
       const focus = (
@@ -406,10 +408,15 @@ describe("--section and the MCP section input report the same section (#311)", (
           focus: { total: number; shown: number; omitted: number; items: unknown[] };
         }
       ).focus;
-      expect(focus.total).toBe(120);
-      expect(focus.items.length).toBeLessThan(120);
+      expect(parsed.status).toBe("complete");
+      expect(resultBytes(raw)).toBeLessThanOrEqual(budgetBytes);
+      expect(focus.total).toBe(count);
+      expect(focus.items.length).toBeGreaterThan(0);
+      expect(focus.items.length).toBeLessThan(count);
       expect(focus.shown).toBe(focus.items.length);
-      expect(focus.omitted).toBe(120 - focus.items.length);
+      expect(focus.omitted).toBe(count - focus.items.length);
+      expect(parsed.presentation.omitted["focus.items"]).toBe(focus.omitted);
+      expect(JSON.stringify(raw.content)).toContain(`(${focus.shown} shown of ${focus.total})`);
     } finally {
       count = 8;
       await client.close();

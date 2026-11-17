@@ -37,3 +37,23 @@ not claim #724 or #534 complete.
 
 A default parallel full-suite baseline on the fixed fixtures passed 2,650 tests
 with zero failures (one skipped) on 2026-11-17. This is a baseline, not 50 runs.
+
+The first repeated-load batch is being stopped before completion after PR #780's
+Ubuntu CI run 44013762184 reproduced the separate 20,000 ms section-pruning timeout
+at head 3137416. Its 120-subject fixture is larger than the byte-pruning property
+requires. A smaller fixture must still demonstrate real row pruning, exact
+shown/omitted accounting, nonempty returned rows and the whole-result byte bound.
+The repeated acceptance will restart after that repair; earlier passes are retained
+as diagnostic evidence and do not count toward the new 50-run sequence.
+
+The stopped batch retained 18 successful full suites on 3137416, with four
+concurrent runs capped at two workers each. A nineteenth record is the input-change
+guard stopping further launches, not a failed test. These passes are diagnostic
+only and are not combined with a new source head to claim acceptance.
+
+The section-pruning regression now uses 64 subjects and the normal 10,000-character
+text budget. It still forces genuine row pruning; 32 subjects did not, so that
+candidate was rejected. It additionally asserts complete source status, a nonempty
+returned section, exact structured and text row counts, presentation omission
+accounting, and the 16,384-byte whole-result bound. Its targeted run passed in about
+2.5 seconds locally. The 20-second test deadline remains unchanged.
