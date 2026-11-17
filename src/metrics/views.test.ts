@@ -8,6 +8,7 @@ const noAssessment = {
   revisions: { known: true as const, value: 0 },
   records: [],
   ignored: [],
+  unresolved: [],
 };
 // Synthetic fixtures only: no real repository, agent or comment.
 const repo = "example/project";

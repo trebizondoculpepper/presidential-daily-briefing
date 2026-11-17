@@ -503,6 +503,20 @@ describe("first assessment endpoints (#833)", () => {
     });
   });
 
+  it("keeps the revision count unknown when a revision's authority is unresolved", async () => {
+    const l = await ticketLedger(
+      withComments([
+        estimate("complexity", "S", t(2)),
+        estimate("complexity", "M", t(4), "flaky", ["S"]),
+      ]),
+      trust,
+      now,
+    );
+    expect(l.assessments.complexity.first).toMatchObject({ status: "found", at: t(2) });
+    expect(l.assessments.complexity.revisions).toMatchObject({ known: false, observed: 0 });
+    expect(l.assessments.complexity.unresolved).toHaveLength(1);
+  });
+
   it("is none only with complete history and unknown when comments were cut off", async () => {
     const none = await ticketLedger(withComments([]), trust, now);
     expect(none.assessments.impact.first).toEqual({ status: "none" });
