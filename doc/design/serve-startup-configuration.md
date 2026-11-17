@@ -1,5 +1,8 @@
 # Global serve configuration and one local instance
 
+See [configuration layers and serve controls](serve-configuration-layers.md) for
+the superseding owner-approved layer split, reload/shutdown scope and delivery order.
+
 Contract for design #443 and implementation #452. Implements the owner decisions
 in serve-global-dashboard-roadmap.md. This extends the original serve.md startup
 contract only when the implementation ships; it does not claim the installed

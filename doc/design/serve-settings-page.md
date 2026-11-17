@@ -1,5 +1,8 @@
 # Settings page: registered scopes, explicit save and safe local writes
 
+See [configuration layers and serve controls](serve-configuration-layers.md) for
+the superseding owner-approved layer split, reload/shutdown scope and delivery order.
+
 Status: proposed contract for #584, delivered under #589. Nothing here is implemented by this document. Sections headed "Shipped today" describe current behaviour and cite the implementing file; everything else is a proposal. Implementation is blocked natively by #452 (global configuration and project registration) and must not claim a scope is editable before its underlying service ships.
 
 ## Owner decisions (settled)
