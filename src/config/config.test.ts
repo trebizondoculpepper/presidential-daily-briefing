@@ -269,6 +269,22 @@ describe("repository configuration service (#116, doc/design/repository-configur
     expect(memory.writes).toEqual([]);
   });
 
+  // Scope separation (#804): global serve keys belong to the per-user file and are never
+  // accepted into, or written beside, repository settings.
+  it("refuses the global scope's serve keys", async () => {
+    const memory = memoryFs();
+    for (const [key, value] of [
+      ["serve.port", "4800"],
+      ["serve.ttl", "5m"],
+      ["serve.projects", "owner/name"],
+    ] as const) {
+      await expect(
+        updateConfig(target, new Map([[key, value]]), { fs: memory.fs, token }),
+      ).rejects.toMatchObject({ code: "unknown-key" });
+    }
+    expect(memory.writes).toEqual([]);
+  });
+
   it("detects an intervening edit and leaves the other writer's file in place", async () => {
     const memory = memoryFs('{"schemaVersion":1}');
     const theirs = '{"schemaVersion":1,"processGuide":false}';

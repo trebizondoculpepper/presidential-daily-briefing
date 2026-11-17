@@ -330,6 +330,20 @@ function valueOf(document: Record<string, unknown>, key: string): unknown {
 }
 
 /**
+ * Every leaf path in a parsed document (`serve.port`), treating an array such as
+ * `serve.projects` as one leaf rather than descending into it.
+ */
+function leafPaths(document: Record<string, unknown>, prefix = ""): string[] {
+  const found: string[] = [];
+  for (const [key, value] of Object.entries(document)) {
+    const path = prefix ? `${prefix}.${key}` : key;
+    if (isRecord(value) && !(value instanceof Date)) found.push(...leafPaths(value, path));
+    else found.push(path);
+  }
+  return found;
+}
+
+/**
  * Read-only load of the global configuration. Missing file yields defaults; nothing is created.
  * Refuses malformed, future and (on read) unrelated-to-registry data rather than guessing.
  */
@@ -423,6 +437,18 @@ export async function parseGlobalConfig(
     const value = valueOf(body, key);
     if (value !== undefined)
       explicit.set(key, await validateGlobalValue(key, value, verifyProjectRoot));
+  }
+  // A mistyped leaf inside a registered table (`serve.prot = 4800`) would otherwise be silently
+  // ignored and the setting would keep its default: refuse it like any other unknown key (#804).
+  const registered = new Set(GLOBAL_KEYS.map((k) => k.key));
+  for (const leaf of leafPaths(body)) {
+    if (!registered.has(leaf)) {
+      throw new GlobalConfigError(
+        "malformed",
+        `${path} contains unsupported configuration key "${leaf}".`,
+        `Remove or fix ${path} (supported global keys: ${GLOBAL_KEYS.map((k) => k.key).join(", ")}), then retry.`,
+      );
+    }
   }
   return { path, storedVersion, explicit, settings: effective(explicit), raw };
 }
