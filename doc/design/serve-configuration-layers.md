@@ -110,3 +110,11 @@ context invalidation and graceful stop. UI checks cover keyboard/narrow layouts,
 feedback and preserved input. No live credentials, machine configuration or
 research benchmarks enter normal CI. Estimates on child issues are provisional
 scope assessments; a native blocker remains until its real prerequisite finishes.
+
+## Application composition clarification
+
+The application state service does not own construction of unrelated services.
+The separate [service-composition contract](github-service-composition.md) assigns
+startup wiring/lifecycle extraction to #870 and keeps #816 focused on saved,
+running and applied configuration. #816 and existing reload work need not wait
+for every GH-service migration.
