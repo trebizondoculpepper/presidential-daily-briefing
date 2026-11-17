@@ -1931,3 +1931,114 @@ describe("pdb serve ticket detail (#454)", () => {
     }
   });
 });
+
+describe("pipeline metrics endpoint (#573 slice 5b)", () => {
+  // Clock: 2026-11-12T10:00Z. One quiet issue and one standalone merged PR on the 11th.
+  const metricsQuery = (counter: { n: number }) => () => async (q: string) => {
+    counter.n++;
+    if (q.includes("issues(first:50"))
+      return {
+        repository: {
+          issues: {
+            nodes: [
+              {
+                number: 3,
+                createdAt: "2026-11-01T00:00:00Z",
+                updatedAt: "2026-11-11T09:00:00Z",
+                lastEditedAt: null,
+                state: "OPEN",
+                closedAt: null,
+                stateReason: null,
+                labels: { nodes: [], pageInfo: { hasNextPage: false } },
+                comments: { totalCount: 0, nodes: [] },
+              },
+            ],
+            pageInfo: { hasNextPage: false, endCursor: null },
+          },
+        },
+      };
+    if (q.includes("pullRequests(first:50"))
+      return {
+        repository: {
+          pullRequests: {
+            nodes: [
+              {
+                number: 40,
+                updatedAt: "2026-11-11T08:00:00Z",
+                mergedAt: "2026-11-11T08:00:00Z",
+                closingIssuesReferences: { nodes: [], pageInfo: { hasNextPage: false } },
+              },
+            ],
+            pageInfo: { hasNextPage: false, endCursor: null },
+          },
+        },
+      };
+    if (q.includes("timelineItems"))
+      return {
+        repository: {
+          issue: {
+            timelineItems: { nodes: [], pageInfo: { hasPreviousPage: false, startCursor: null } },
+          },
+        },
+      };
+    return { repository: null };
+  };
+
+  it("serves the daily view with walked merges and caches the read for the window", async () => {
+    const counter = { n: 0 };
+    const s = await setup(["--repo", repo], {
+      queryWith: metricsQuery(counter) as never,
+      rest: (async () => null) as never,
+    });
+    try {
+      const reply = await call(s.running.port, "/api/v1/metrics?view=daily&days=7");
+      expect(reply.status).toBe(200);
+      expect(reply.json).toMatchObject({ view: "metrics", status: "complete" });
+      const result = reply.json.result;
+      expect(result).toMatchObject({ kind: "pipeline-metrics", view: "daily", days: 7 });
+      const day = result.figures.prMerges.series.days.find(
+        (d: { day: string }) => d.day === "2026-11-11",
+      );
+      expect(day).toMatchObject({ status: "known", count: 1, members: [`${repo}#40`] });
+      expect(result.limitations.join(" ")).toMatch(/another repository/);
+      const before = counter.n;
+      // The timing view for the same window reuses the cached read.
+      const timing = await call(s.running.port, "/api/v1/metrics?view=timing&days=7");
+      expect(timing.json.result).toMatchObject({
+        view: "timing",
+        groupBasis: "latest-valid-complexity",
+      });
+      expect(counter.n).toBe(before);
+    } finally {
+      await s.close();
+    }
+  });
+
+  it("rejects unsupported views and window sizes before any GitHub read", async () => {
+    const counter = { n: 0 };
+    const s = await setup(["--repo", repo], {
+      queryWith: metricsQuery(counter) as never,
+      rest: (async () => null) as never,
+    });
+    try {
+      for (const path of [
+        "/api/v1/metrics?view=sankey",
+        "/api/v1/metrics?view=daily&days=14",
+        "/api/v1/metrics?view=news&hours=3",
+        "/api/v1/metrics?view=news&days=7",
+      ]) {
+        const reply = await call(s.running.port, path);
+        expect([path, reply.status, reply.json.error?.code]).toEqual([
+          path,
+          400,
+          "INVALID_ARGUMENT",
+        ]);
+      }
+      expect(counter.n).toBe(0);
+      const news = await call(s.running.port, "/api/v1/metrics?view=news&hours=6");
+      expect(news.json.result).toMatchObject({ view: "news" });
+    } finally {
+      await s.close();
+    }
+  });
+});
