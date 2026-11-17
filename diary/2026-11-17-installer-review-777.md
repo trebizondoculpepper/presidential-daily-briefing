@@ -34,3 +34,8 @@ was changed.
 After consolidating the duplicate size-table execution, all 151 test files /
 2,753 tests pass (one skip), with check and build also passing. The one fewer test
 is the aggregate duplicate; all individual tool/argument cases remain.
+
+Integrated current main after its independent Doctor-link test repair conflicted
+with the same assertion. Preserved both the valid scoped link and no-context
+control. Check, all 154 files / 2,789 tests (one skip), and build pass on the
+combined tree; this also resolves the conflict that prevented PR CI from starting.

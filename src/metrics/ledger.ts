@@ -117,6 +117,16 @@ export interface TicketLedger {
   membership: "complete" | "open" | null | "unknown";
   /** Required PR members of the folded set; null when the fold is unknown. */
   requiredPullRequests: { repository: string; number: number }[] | null;
+  /**
+   * Required members of the folded set that are not pull requests (for example commits); null
+   * when the fold is unknown. Such members carry no reliable "became contained" time, so a
+   * delivery instant cannot be dated from merges alone (#573 slice 4).
+   */
+  requiredOtherMembers: number | null;
+  /** The issue's state as read now, so closed undelivered work is never treated as open. */
+  currentState: "open" | "closed" | "unknown";
+  /** GitHub's close reason (for example NOT_PLANNED or COMPLETED) when closed; else null. */
+  stateReason: string | null;
   coverage: LedgerCoverage;
   /** Why evidence is missing or unknown. */
   omissions: string[];
@@ -382,6 +392,7 @@ export async function ticketLedger(
   // Delivery records, through the existing trust classification and fold.
   let membership: TicketLedger["membership"] = "unknown";
   let requiredPullRequests: TicketLedger["requiredPullRequests"] = null;
+  let requiredOtherMembers: TicketLedger["requiredOtherMembers"] = null;
   if (facts.comments !== null) {
     const classified = await classifyDeliveryRecords(
       comments as DeliveryComment[],
@@ -413,6 +424,7 @@ export async function ticketLedger(
           ? [{ repository: m.deliverable.repository, number: m.deliverable.number }]
           : [],
       );
+      requiredOtherMembers = fold.members.filter((m) => m.deliverable.kind !== "pr").length;
     }
   }
 
@@ -468,6 +480,9 @@ export async function ticketLedger(
     reopens,
     membership,
     requiredPullRequests,
+    requiredOtherMembers,
+    currentState: issue.state === "OPEN" ? "open" : issue.state === "CLOSED" ? "closed" : "unknown",
+    stateReason: issue.state === "CLOSED" ? issue.stateReason : null,
     coverage,
     omissions,
     ignored,
