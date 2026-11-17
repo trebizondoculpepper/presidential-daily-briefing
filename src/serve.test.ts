@@ -114,9 +114,7 @@ describe("pdb serve arguments (#373)", () => {
   });
 
   it("requires a repository or project and never falls back to the working directory", () => {
-    expect(() => serveArguments([])).toThrow(
-      "pdb serve needs --repo owner/name or --project /absolute/project/path",
-    );
+    expect(() => serveArguments([])).toThrow("pdb serve needs --repo owner/name or --project PATH");
   });
 
   it("rejects a non-loopback host without --allow-remote", () => {
@@ -135,7 +133,11 @@ describe("pdb serve arguments (#373)", () => {
     expect(options.repos).toEqual(["o/one", "o/two"]);
     expect(options.projects).toEqual([absolute]);
     expect(() => serveArguments(["--repo", "bad"])).toThrow(/owner\/name/);
-    expect(() => serveArguments(["--project", "relative/path"])).toThrow(/absolute/);
+    expect(() => serveArguments(["--project", "   "])).toThrow(/empty/);
+    const base = resolve("work-base");
+    expect(serveArguments(["--project", ".", "--project", "../other repo"], base).projects).toEqual(
+      [base, resolve(base, "../other repo")],
+    );
     expect(() => serveArguments(["--repo", "o/n", "--port", "65536"])).toThrow(/--port/);
     expect(() => serveArguments(["--repo", "o/n", "--port", "-1"])).toThrow();
     expect(() => serveArguments(["--repo", "o/n", "--entry", "a", "--harness", "claude"])).toThrow(
@@ -156,6 +158,36 @@ describe("pdb serve arguments (#373)", () => {
     const top: string[] = [];
     await main(["--help"], async (text) => void top.push(text), stubRuntime);
     expect(top.join("")).toContain("serve --repo owner/name");
+  });
+
+  it("resolves relative and nested --project paths against invoking cwd via git root (#569)", async () => {
+    const repoRoot = resolve("tmp-repo-root");
+    const subDir = resolve(repoRoot, "packages/app");
+    const h = harness();
+    const git = async (args: readonly string[], cwd: string) => {
+      if (args[0] === "rev-parse" && (cwd === subDir || cwd === repoRoot)) return `${repoRoot}\n`;
+      if (args[0] === "remote" && cwd === repoRoot)
+        return "origin\thttps://github.com/example/rel.git (fetch)\n";
+      throw new Error("not a git repository");
+    };
+    const running = await startServe(
+      serveArguments(["--port", "0", "--project", "./packages/app", "--project", "."], repoRoot),
+      { ...h.runtime, cwd: repoRoot, git },
+    );
+    try {
+      expect(running.facts.served).toEqual([{ repository: "example/rel", project: repoRoot }]);
+    } finally {
+      await running.close();
+    }
+
+    const bad = harness();
+    await expect(
+      startServe(serveArguments(["--port", "0", "--project", "missing-dir"], repoRoot), {
+        ...bad.runtime,
+        cwd: repoRoot,
+        git,
+      }),
+    ).rejects.toThrow(/not inside a Git checkout/);
   });
 });
 
