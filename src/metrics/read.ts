@@ -88,6 +88,7 @@ const issueFields =
   "number createdAt updatedAt lastEditedAt state closedAt stateReason labels(first:100){nodes{name} pageInfo{hasNextPage}} comments(first:100){totalCount nodes{" +
   commentFields +
   "}}";
+const openQuery = `query($owner:String!,$name:String!,$cursor:String){repository(owner:$owner,name:$name){issues(first:50,after:$cursor,states:[OPEN],orderBy:{field:CREATED_AT,direction:ASC}){nodes{${issueFields}} pageInfo{hasNextPage endCursor}}}}`;
 const walkQuery = `query($owner:String!,$name:String!,$cursor:String){repository(owner:$owner,name:$name){issues(first:50,after:$cursor,states:[OPEN,CLOSED],orderBy:{field:UPDATED_AT,direction:DESC}){nodes{${issueFields}} pageInfo{hasNextPage endCursor}}}}`;
 const prWalkQuery = `query($owner:String!,$name:String!,$cursor:String){repository(owner:$owner,name:$name){pullRequests(first:50,after:$cursor,states:[MERGED],orderBy:{field:UPDATED_AT,direction:DESC}){nodes{number updatedAt mergedAt closingIssuesReferences(first:50){nodes{number repository{nameWithOwner}} pageInfo{hasNextPage}}} pageInfo{hasNextPage endCursor}}}}`;
 const issueQuery = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){${issueFields}}}}`;
@@ -197,6 +198,31 @@ export async function readMetrics(
   }
   const issueFrom = reachedStart ? from : oldest;
   if (!reachedStart) warnings.push(`issue walk stopped at ${bounds.maxPages} pages before ${from}`);
+
+  // 1a. Current open inventory, whatever its update time: quiet open tickets are exactly what a
+  // window walk misses, and open work belongs in timing (contract: current state uses the full
+  // open-issue inventory). Beyond the page cap the rest is unknown.
+  let openComplete = false;
+  let openCursor: string | null = null;
+  for (let page = 0; page < bounds.maxPages; page++) {
+    const conn = prop(
+      prop(
+        await query(openQuery, { owner, name, ...(openCursor ? { cursor: openCursor } : {}) }),
+        "repository",
+      ),
+      "issues",
+    );
+    if (!conn) throw new Error(`Repository unavailable: ${repository}`);
+    for (const issue of (prop(conn, "nodes") as WalkIssue[] | undefined) ?? [])
+      if (!walked.some((i) => i.number === issue.number)) walked.push(issue);
+    const info = prop(conn, "pageInfo");
+    if (prop(info, "hasNextPage") !== true) {
+      openComplete = true;
+      break;
+    }
+    openCursor = (prop(info, "endCursor") as string | null) ?? null;
+  }
+  if (!openComplete) warnings.push(`open inventory stopped at ${bounds.maxPages} pages`);
 
   // 1b. Merged pull requests by their own update time: a merge need not update its ticket, so
   // tickets closed by an in-window merge are added even when the issue walk did not reach them.
