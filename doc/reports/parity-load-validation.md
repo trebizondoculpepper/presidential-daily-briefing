@@ -32,13 +32,13 @@ Neither test timeouts nor required acceptance have been relaxed.
 ## Validation status
 
 The controlled reproduction passes, as do all 74 tests in the MCP parity and HTTP
-API suites. The repeated full-suite load acceptance is pending; this report does
-not claim #724 or #534 complete.
+API suites. The repeated full-suite load acceptance is recorded below; #534 retains its
+separate acceptance requirements.
 
 A default parallel full-suite baseline on the fixed fixtures passed 2,650 tests
 with zero failures (one skipped) on 2026-11-17. This is a baseline, not 50 runs.
 
-The first repeated-load batch is being stopped before completion after PR #780's
+The first repeated-load batch was stopped before completion after PR #780's
 Ubuntu CI run 44013762184 reproduced the separate 20,000 ms section-pruning timeout
 at head 3137416. Its 120-subject fixture is larger than the byte-pruning property
 requires. A smaller fixture must still demonstrate real row pruning, exact
@@ -57,3 +57,26 @@ candidate was rejected. It additionally asserts complete source status, a nonemp
 returned section, exact structured and text row counts, presentation omission
 accounting, and the 16,384-byte whole-result bound. Its targeted run passed in about
 2.5 seconds locally. The 20-second test deadline remains unchanged.
+
+## Completed acceptance (2026-11-17)
+
+All 50 consecutive full-suite runs passed on unchanged code head
+`cad68fe4e88954125f056b26bd9c84c3185dd191`, from 04:25:01 through
+05:30:32 UTC. Four suites ran concurrently, each using
+`npm test -- --maxWorkers 2 --reporter=json --outputFile <run-report>`.
+Every run passed 2,650 tests with zero failures and the same one skipped test:
+132,500 passing test executions in total. Individual suites took 207.755–351.149
+seconds. The sampled one-minute system load ranged from 1.772 to 74.917;
+samples were taken every 15 seconds. The longest reported individual test was
+13,128.431 ms, within its unchanged deadline. Neither retries nor timeout
+increases were used. The driver guarded both HEAD and tracked source changes.
+
+The earlier 18 passes are excluded. This result satisfies #724's repeated-load
+acceptance and removes that validation blocker for #534; it does not establish
+completion of #534's other acceptance requirements. Required Ubuntu/Windows CI
+and the trial FreeBSD job also passed on the tested code head.
+
+The compact machine-readable record is [parity-load-runs.json](parity-load-runs.json).
+It retains every run's outcome, timestamps and duration, all load samples, and
+SHA-256 digests of the individual Vitest JSON reports. The raw reports remain
+local in `/tmp/pdb724-load-cad68fe/`; that temporary path is not a durable artifact.
