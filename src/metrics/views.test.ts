@@ -128,6 +128,40 @@ describe("daily view (#573 slice 5a)", () => {
   });
 });
 
+describe("daily evidence gaps (#573 slice 5a)", () => {
+  it("marks figures as lower bounds when a ticket's evidence is missing", () => {
+    const unreadPrs = ticket(30, "delivered", {
+      requiredPullRequests: [{ repository: repo, number: 80 }],
+      coverage: {
+        comments: "complete",
+        timeline: "complete",
+        deliveryRecords: "complete",
+        prs: "unavailable",
+      },
+    });
+    const unknownVerdict = ticket(31, "unknown", {});
+    const v = dailyView(NOW, 7, [unreadPrs, unknownVerdict], covered);
+    expect(v.figures.prMerges).toMatchObject({
+      lowerBound: true,
+      incomplete: { count: 1, members: [`${repo}#30`] },
+    });
+    expect(v.figures.deliveries).toMatchObject({
+      lowerBound: true,
+      incomplete: { members: [`${repo}#31`] },
+    });
+    const clean = dailyView(NOW, 7, [], covered);
+    expect(clean.figures.prMerges).toMatchObject({ lowerBound: false, incomplete: { count: 0 } });
+  });
+
+  it("counts an undated delivery once however often it is passed", () => {
+    const t = ticket(32, "delivered", { requiredOtherMembers: 1 });
+    expect(dailyView(NOW, 7, [t, t], covered).deliveredDateUnknown).toEqual({
+      count: 1,
+      members: [`${repo}#32`],
+    });
+  });
+});
+
 describe("news view (#573 slice 5a)", () => {
   it("lists events in [now − 6h, now), newest first, each event once", () => {
     const t = ticket(7, "none", {
@@ -142,6 +176,19 @@ describe("news view (#573 slice 5a)", () => {
     expect(v.items.map((i) => i.key)).toEqual(["pr:32", "pr:31"]);
     expect(v.omitted).toBe(0);
     expect(newsView(NOW, 6, [t], covered, 1)).toMatchObject({ omitted: 1 });
+    expect(v.incomplete).toEqual({ count: 0, members: [] });
+    const partial = ticket(8, "none", {
+      coverage: {
+        comments: "partial",
+        timeline: "complete",
+        deliveryRecords: "complete",
+        prs: "complete",
+      },
+    });
+    expect(newsView(NOW, 6, [partial], covered).incomplete).toEqual({
+      count: 1,
+      members: [`${repo}#8`],
+    });
   });
 });
 

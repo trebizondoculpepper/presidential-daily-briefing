@@ -76,6 +76,8 @@ export interface NewsResult extends Envelope<"news"> {
   items: NewsItem[];
   /** Events in the window beyond the item limit: counted, never silently dropped. */
   omitted: number;
+  /** Tickets with a partly read source: their recent events may be missing from `items`. */
+  incomplete: { count: number; members: string[] };
 }
 
 function detailOf(e: LedgerEvent): string | null {
@@ -108,7 +110,9 @@ export function newsView(
   const window = { from, through };
   const seen = new Set<string>();
   const all: NewsItem[] = [];
+  const gaps = new Set<string>();
   for (const t of tickets) {
+    if (Object.values(t.ledger.coverage).some((c) => c !== "complete")) gaps.add(t.member);
     for (const e of t.ledger.events) {
       if (inWindow(e.at, window) !== true || seen.has(e.key)) continue;
       seen.add(e.key);
@@ -124,6 +128,7 @@ export function newsView(
     coverage: { historyCompleteFrom: coverage.completeFrom, note: coverageNote(from, coverage) },
     items: all.slice(0, limit),
     omitted: Math.max(0, all.length - limit),
+    incomplete: { count: gaps.size, members: [...gaps] },
   };
 }
 
@@ -133,6 +138,12 @@ export function newsView(
 export interface DailyFigure {
   series: DailySeries;
   average: DailyAverage;
+  /**
+   * Tickets whose evidence for this figure is missing (unread PRs, unknown verdict or state).
+   * When any exist, every count and the average are lower bounds, never known totals.
+   */
+  incomplete: { count: number; members: string[] };
+  lowerBound: boolean;
 }
 
 export interface DailyResult extends Envelope<"daily"> {
@@ -174,14 +185,19 @@ export function dailyView(
   const unverified: { at: string; key: string }[] = [];
   const notPlanned: { at: string; key: string }[] = [];
   const merges = new Map<string, string>();
-  const undated: string[] = [];
+  const undated = new Set<string>();
+  // Per-figure evidence gaps, so missing evidence is never shown as known zero activity.
+  const outcomeGaps = new Set<string>();
+  const mergeGaps = new Set<string>();
 
   for (const t of tickets) {
+    if (t.verdict === "unknown" || t.ledger.currentState === "unknown") outcomeGaps.add(t.member);
+    if (t.ledger.coverage.prs !== "complete") mergeGaps.add(t.member);
     if (t.verdict === "delivered" || t.verdict === "attested") {
       const d = deliveryInstant(t.ledger, t.verdict);
       if (d.status === "dated") {
         (t.verdict === "attested" ? attested : deliveries).push({ at: d.at, key: t.member });
-      } else undated.push(t.member);
+      } else undated.add(t.member);
     } else if (t.verdict === "none") {
       const closure = currentClosure(t.ledger);
       if (closure?.reason === "NOT_PLANNED") notPlanned.push({ at: closure.at, key: t.member });
@@ -194,9 +210,14 @@ export function dailyView(
     }
   }
 
-  const figure = (events: { at: string; key: string }[]): DailyFigure => {
+  const figure = (events: { at: string; key: string }[], gaps: Set<string>): DailyFigure => {
     const series = dailySeries(events, window, coverage);
-    return { series, average: dailyAverage(series) };
+    return {
+      series,
+      average: dailyAverage(series),
+      incomplete: { count: gaps.size, members: [...gaps] },
+      lowerBound: gaps.size > 0,
+    };
   };
   const from = `${window.days[0]}T00:00:00.000Z`;
   return {
@@ -207,13 +228,16 @@ export function dailyView(
     coverage: { historyCompleteFrom: coverage.completeFrom, note: coverageNote(from, coverage) },
     days,
     figures: {
-      deliveries: figure(deliveries),
-      attested: figure(attested),
-      closedCompletedUnverified: figure(unverified),
-      closedNotPlanned: figure(notPlanned),
-      prMerges: figure([...merges].map(([key, at]) => ({ at, key }))),
+      deliveries: figure(deliveries, outcomeGaps),
+      attested: figure(attested, outcomeGaps),
+      closedCompletedUnverified: figure(unverified, outcomeGaps),
+      closedNotPlanned: figure(notPlanned, outcomeGaps),
+      prMerges: figure(
+        [...merges].map(([key, at]) => ({ at, key })),
+        mergeGaps,
+      ),
     },
-    deliveredDateUnknown: { count: undated.length, members: undated },
+    deliveredDateUnknown: { count: undated.size, members: [...undated] },
   };
 }
 
