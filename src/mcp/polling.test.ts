@@ -1126,10 +1126,14 @@ describe("polling startup binds only an explicit startup target (#271, #291)", (
     ]);
     const snap1 = snap([linkedIssue], [pullWithFinding]);
     let call = 0;
+    let restFails = false;
     const b = boundaries(async () => repo);
     b.runtime.collect = async () => (call++ === 0 ? snap0 : snap1);
     b.runtime.reviewPolicy = { state: "declared", policy: "codex-or-copilot" };
-    b.runtime.rest = (async () => ({ status: 200, body: { permission: "write" } })) as never;
+    b.runtime.rest = (async () =>
+      restFails
+        ? { status: 500, body: { message: "transient" } }
+        : { status: 200, body: { permission: "write" } }) as never;
     const watcher = await bindPolling(
       mcpArguments(["--repo", repo, "--poll"]),
       b.runtime,
@@ -1139,16 +1143,28 @@ describe("polling startup binds only an explicit startup target (#271, #291)", (
     watcher!.start();
     await b.time.advance(0);
     await b.time.advance(45 * minute);
-    watcher!.stop();
     expect(call).toBe(2);
     expect(watcher!.status().lastOutcome).toBe("complete");
+
+    // Transient permission lookup failure leaves responsibility unknown -> incomplete poll,
+    // preserving the prior complete baseline; recovery does not re-emit unchanged findings.
+    restFails = true;
+    await b.time.advance(45 * minute);
+    expect(watcher!.status().lastOutcome).toBe("incomplete");
+    restFails = false;
+    await b.time.advance(45 * minute);
+    expect(watcher!.status().lastOutcome).toBe("complete");
+
+    watcher!.stop();
     const events = watcher!.log.read(undefined, 20).items;
     expect(
       events.map((e) => ({ kind: e.kind, evidence: e.evidence, destinations: e.destinations })),
-    ).toContainEqual({
-      kind: "review-feedback",
-      evidence: [`https://github.com/${repo}/pull/40#issuecomment-99`],
-      destinations: ["alice"],
-    });
+    ).toEqual([
+      {
+        kind: "review-feedback",
+        evidence: [`https://github.com/${repo}/pull/40#issuecomment-99`],
+        destinations: ["alice"],
+      },
+    ]);
   });
 });

@@ -946,7 +946,7 @@ export async function bindPolling(
         const trust = runtime.rest
           ? markerTrust(permissionLookup(repository, runtime.rest, signal))
           : undefined;
-        return (await readSnapshotResponsibility(snap, trust, signal)).responsible;
+        return readSnapshotResponsibility(snap, trust, signal);
       },
     },
   );

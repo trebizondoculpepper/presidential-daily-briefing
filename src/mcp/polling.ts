@@ -135,6 +135,8 @@ function checkProblem(outcome: string): "failed" | "cancelled" | "unknown" | nul
 export interface ObserveOptions {
   /** Trusted delivery responsibility per issue/PR URL (after claim release or handoff). */
   responsible?: ReadonlyMap<string, readonly string[]>;
+  /** Issue URLs whose delivery responsibility is unknown (e.g. transient permission lookup failure). */
+  unknownResponsibilityIssues?: ReadonlySet<string>;
 }
 
 /**
@@ -200,7 +202,9 @@ export function observe(
       issue,
       "issue",
       eligibility,
-      !incomplete.has(issue.url) && closingPrEvidence(issue, prs).complete,
+      !incomplete.has(issue.url) &&
+        closingPrEvidence(issue, prs).complete &&
+        !options.unknownResponsibilityIssues?.has(issue.url),
     );
     attention(subject, issue);
     if (eligibility === "eligible")
@@ -222,13 +226,15 @@ export function observe(
     const linked = issues.filter((issue) =>
       pr.closingIssuesReferences.nodes.some((ref) => ref.url === issue.url),
     );
-    // A PR's routed destinations come from its linked issues' owner labels, so truncated
-    // evidence on a linked issue leaves the PR's facts incomplete too.
+    // A PR's routed destinations come from its linked issues' owner labels and delivery
+    // responsibility, so truncated evidence or unknown responsibility leaves it incomplete too.
     const subject = add(
       pr,
       "pull-request",
       null,
-      !incomplete.has(pr.url) && linked.every((issue) => !incomplete.has(issue.url)),
+      !incomplete.has(pr.url) &&
+        linked.every((issue) => !incomplete.has(issue.url)) &&
+        !(options.unknownResponsibilityIssues && options.unknownResponsibilityIssues.size > 0),
     );
     attention(subject, pr);
     const head = pr.headRefOid;
@@ -566,7 +572,19 @@ export interface WatcherRuntime {
   responsible?: (
     snapshot: Snapshot,
     signal?: AbortSignal,
-  ) => Promise<ReadonlyMap<string, readonly string[]>> | ReadonlyMap<string, readonly string[]>;
+  ) =>
+    | Promise<
+        | ReadonlyMap<string, readonly string[]>
+        | {
+            readonly responsible: ReadonlyMap<string, readonly string[]>;
+            readonly unknown: readonly { issue: string }[];
+          }
+      >
+    | ReadonlyMap<string, readonly string[]>
+    | {
+        readonly responsible: ReadonlyMap<string, readonly string[]>;
+        readonly unknown: readonly { issue: string }[];
+      };
 }
 
 export interface WatcherOptions {
@@ -771,10 +789,15 @@ export class Watcher {
     // A repository-level gap (truncation, missing pages) makes the whole observation unknown.
     if (global.length) return "incomplete";
     const now = this.runtime.clock.now().toISOString();
-    const responsible = this.runtime.responsible
+    const resolved = this.runtime.responsible
       ? await this.runtime.responsible(snapshot, signal)
       : undefined;
-    const next = observe(snapshot, now, { responsible });
+    const responsible = resolved && "responsible" in resolved ? resolved.responsible : resolved;
+    const unknownResponsibilityIssues =
+      resolved && "unknown" in resolved && resolved.unknown.length
+        ? new Set(resolved.unknown.map((u) => u.issue))
+        : undefined;
+    const next = observe(snapshot, now, { responsible, unknownResponsibilityIssues });
     // A subject-scoped gap still leaves that subject without a trustworthy baseline, so the
     // poll is reported as incomplete rather than describing the observation as complete.
     const outcome: PollOutcome = [...next.subjects.values()].every((subject) => subject.complete)
