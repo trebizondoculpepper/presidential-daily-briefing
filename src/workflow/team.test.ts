@@ -224,5 +224,27 @@ describe("team view (#41, doc/design/diagnostics.md)", () => {
     const rendered = teamText(view);
     expect(rendered).toContain("checks satisfied, ready");
     expect(rendered).not.toContain("verify");
+
+    // Pending advisory check does not block readiness.
+    prNoVerify.requiredChecks!.checks.push({
+      name: "advisory-job",
+      databaseId: null,
+      appId: null,
+      required: "advisory",
+    });
+    prNoVerify.commits!.nodes[0]!.commit.statusCheckRollup!.contexts.nodes.push({
+      name: "advisory-job",
+      status: "IN_PROGRESS",
+      conclusion: undefined,
+      detailsUrl: "https://github.com/o/r/runs/2",
+    });
+    const withAdvisory = teamView(snapshot([claimed], [prNoVerify]), { now: new Date(time) });
+    expect(withAdvisory.agents[0]?.claims[0]?.pullRequests[0]?.ready).toBe(true);
+
+    // Truncated review threads keep readiness unproven (ready: false).
+    prNoVerify.reviewThreads = { nodes: [], pageInfo: { hasNextPage: true, endCursor: "c1" } };
+    const truncatedThreads = teamView(snapshot([claimed], [prNoVerify]), { now: new Date(time) });
+    expect(truncatedThreads.agents[0]?.claims[0]?.pullRequests[0]?.ready).toBe(false);
+    expect(contributionFinished(prNoVerify)).toBe(false);
   });
 });

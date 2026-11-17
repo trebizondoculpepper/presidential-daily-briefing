@@ -685,8 +685,8 @@ export function snapshotPrReadiness(
   const checkEvidence = requiredCheckEvidence(pr);
   const checkPolicy = evaluateCheckPolicy(checkEvidence);
   const contexts = pr.commits?.nodes?.[0]?.commit?.statusCheckRollup?.contexts.nodes ?? [];
-  const pendingCount = checkEvidence.checks.filter((c) =>
-    workflow.unfinished.includes(c.outcome),
+  const pendingCount = checkEvidence.checks.filter(
+    (c) => workflow.unfinished.includes(c.outcome) && c.required !== "advisory",
   ).length;
   const noRunTimeChecks = contexts.map((c) => !("startedAt" in c ? c.startedAt : true));
   const unresolvedThreadCount = (pr.reviewThreads?.nodes ?? []).filter((t) => !t.isResolved).length;
@@ -762,8 +762,14 @@ export function snapshotPrReadiness(
     },
     reviewRequestStatus: null,
   });
+  const threadsIncomplete = !pr.reviewThreads || !!pr.reviewThreads.pageInfo?.hasNextPage;
+  const blockers = threadsIncomplete
+    ? [...readiness.blockers, "review thread evidence is incomplete"]
+    : readiness.blockers;
   return {
     ...readiness,
+    ready: readiness.ready && !threadsIncomplete,
+    blockers,
     requirements: (checkPolicy.ready ? "satisfied" : "unproven") as "satisfied" | "unproven",
   };
 }
