@@ -14,6 +14,8 @@ import { RateLimitError } from "../github/dependencies.js";
 import type { collect as collectFn } from "../github/github.js";
 import { closingPrEvidence, pickupEligibility } from "../briefing/ranking.js";
 import type { Issue, Snapshot } from "../github/types.js";
+import { codexMarker } from "../workflow/reviewevidence.js";
+import { reviewProviders, snapshotPolicyReview } from "../workflow/reviewpolicy.js";
 
 export const eventKinds = [
   "attention-requested",
@@ -130,12 +132,23 @@ function checkProblem(outcome: string): "failed" | "cancelled" | "unknown" | nul
   return "unknown";
 }
 
+export interface ObserveOptions {
+  /** Trusted delivery responsibility per issue/PR URL (after claim release or handoff). */
+  responsible?: ReadonlyMap<string, readonly string[]>;
+  /** Issue URLs whose delivery responsibility is unknown (e.g. transient permission lookup failure). */
+  unknownResponsibilityIssues?: ReadonlySet<string>;
+}
+
 /**
  * Derive normalized facts from a collected snapshot through the shared rules and ranking
  * policy. Returns null facts for subjects whose evidence is incomplete (they keep their
  * previous baseline facts instead of being treated as absent).
  */
-export function observe(snapshot: Snapshot, observedAt: string): Observation {
+export function observe(
+  snapshot: Snapshot,
+  observedAt: string,
+  options: ObserveOptions = {},
+): Observation {
   const { urls: incomplete } = subjectWarnings(snapshot);
   const issues = snapshot.issues.filter(active);
   const prs = snapshot.pullRequests.filter(active);
@@ -189,7 +202,9 @@ export function observe(snapshot: Snapshot, observedAt: string): Observation {
       issue,
       "issue",
       eligibility,
-      !incomplete.has(issue.url) && closingPrEvidence(issue, prs).complete,
+      !incomplete.has(issue.url) &&
+        closingPrEvidence(issue, prs).complete &&
+        !options.unknownResponsibilityIssues?.has(issue.url),
     );
     attention(subject, issue);
     if (eligibility === "eligible")
@@ -211,18 +226,27 @@ export function observe(snapshot: Snapshot, observedAt: string): Observation {
     const linked = issues.filter((issue) =>
       pr.closingIssuesReferences.nodes.some((ref) => ref.url === issue.url),
     );
-    // A PR's routed destinations come from its linked issues' owner labels, so truncated
-    // evidence on a linked issue leaves the PR's facts incomplete too.
+    // A PR's routed destinations come from its linked issues' owner labels and delivery
+    // responsibility, so truncated evidence or unknown responsibility leaves it incomplete too.
     const subject = add(
       pr,
       "pull-request",
       null,
-      !incomplete.has(pr.url) && linked.every((issue) => !incomplete.has(issue.url)),
+      !incomplete.has(pr.url) &&
+        linked.every((issue) => !incomplete.has(issue.url)) &&
+        !(options.unknownResponsibilityIssues && options.unknownResponsibilityIssues.size > 0),
     );
     attention(subject, pr);
     const head = pr.headRefOid;
+    const responsible = [
+      ...(options.responsible?.get(pr.url) ?? []),
+      ...linked.flatMap((issue) => options.responsible?.get(issue.url) ?? []),
+    ];
     const routed = [
-      ...new Set([pr, ...linked].flatMap((item) => prefixed(item, workflow.ownerPrefix))),
+      ...new Set([
+        ...[pr, ...linked].flatMap((item) => prefixed(item, workflow.ownerPrefix)),
+        ...responsible,
+      ]),
     ].sort();
     for (const thread of pr.reviewThreads.nodes) {
       const first = thread.comments.nodes[0];
@@ -239,7 +263,65 @@ export function observe(snapshot: Snapshot, observedAt: string): Observation {
         origin: null,
       });
     }
-    for (const review of pr.reviews.nodes)
+    const policy = snapshotPolicyReview(pr, snapshot.warnings, snapshot.reviewPolicy);
+    if (policy.detail.findings.length > 0) {
+      for (const finding of policy.detail.findings) {
+        put(subject, {
+          key: `finding/${finding.provider}/${head}/${finding.source}`,
+          kind: "review-feedback",
+          evidence: [finding.source],
+          sourceEventAt: null,
+          currentSha: head,
+          reviewedSha: head,
+          reason: `${reviewProviders[finding.provider].label} reports unresolved findings on the current head.`,
+          destinations: routed,
+          origin: null,
+        });
+      }
+    } else if (policy.headFindings) {
+      // Legacy review policy reports headFindings without populating detail.findings.
+      const receiptComments = (pr.comments?.nodes ?? []).filter((c) => {
+        const state = codexMarker(c.body)?.code_review;
+        return state?.commit_sha === head && state.has_unresolved_findings === true;
+      });
+      const sources = receiptComments.length
+        ? receiptComments.map((c) => c.url ?? pr.url)
+        : [pr.url];
+      for (const source of sources) {
+        put(subject, {
+          key: `finding/codex/${head}/${source}`,
+          kind: "review-feedback",
+          evidence: [source],
+          sourceEventAt: null,
+          currentSha: head,
+          reviewedSha: head,
+          reason: "Codex reports unresolved findings on the current head.",
+          destinations: routed,
+          origin: null,
+        });
+      }
+    }
+    const latestReviewByAuthorCommit = new Map<string, number>();
+    for (const [i, review] of pr.reviews.nodes.entries()) {
+      const who = review.author?.login;
+      const sha = review.commit?.oid;
+      if (!who || !sha || review.state === "COMMENTED") continue;
+      const k = `${who}\0${sha}`;
+      const prev = latestReviewByAuthorCommit.get(k);
+      const prevTime =
+        prev === undefined
+          ? ""
+          : (pr.reviews.nodes[prev]?.submittedAt ?? pr.reviews.nodes[prev]?.createdAt ?? "");
+      const curTime = review.submittedAt ?? review.createdAt ?? "";
+      if (prev === undefined || curTime >= prevTime) latestReviewByAuthorCommit.set(k, i);
+    }
+    for (const [i, review] of pr.reviews.nodes.entries()) {
+      if (
+        review.author?.login &&
+        review.commit?.oid &&
+        latestReviewByAuthorCommit.get(`${review.author.login}\0${review.commit.oid}`) !== i
+      )
+        continue;
       if (workflow.changesRequested.includes(review.state) && review.url)
         put(subject, {
           key: `review/${review.url}`,
@@ -252,6 +334,7 @@ export function observe(snapshot: Snapshot, observedAt: string): Observation {
           destinations: routed,
           origin: null,
         });
+    }
     const contexts = pr.commits.nodes[0]?.commit.statusCheckRollup?.contexts.nodes ?? [];
     for (const [index, check] of prChecks(pr).entries()) {
       const problem = checkProblem(check.outcome);
@@ -345,7 +428,13 @@ export function diffObservations(
       continue;
     }
     for (const fact of subject.facts.values()) {
-      if (before?.facts.has(fact.key)) continue;
+      const prior = before?.facts.get(fact.key);
+      if (prior) {
+        const added = fact.destinations.filter((d) => !prior.destinations.includes(d));
+        if (!added.length) continue;
+        drafts.push({ subject, fact: { ...fact, destinations: added } });
+        continue;
+      }
       // Only a known-ineligible -> eligible transition counts; first sight is not a transition.
       if (fact.kind === "work-became-eligible" && before?.eligibility !== "ineligible") continue;
       drafts.push({ subject, fact });
@@ -498,7 +587,25 @@ export interface WatcherRuntime {
   random?: () => number;
   /** Opaque process generation for cursors. */
   generation?: string;
+  /** Reliable operation identity for exact echoes of an agent's own mechanical writes. */
   origins?: OperationOrigins;
+  /** Optional delivery-responsibility resolver for routing findings after claim release. */
+  responsible?: (
+    snapshot: Snapshot,
+    signal?: AbortSignal,
+  ) =>
+    | Promise<
+        | ReadonlyMap<string, readonly string[]>
+        | {
+            readonly responsible: ReadonlyMap<string, readonly string[]>;
+            readonly unknown: readonly { issue: string }[];
+          }
+      >
+    | ReadonlyMap<string, readonly string[]>
+    | {
+        readonly responsible: ReadonlyMap<string, readonly string[]>;
+        readonly unknown: readonly { issue: string }[];
+      };
 }
 
 export interface WatcherOptions {
@@ -646,7 +753,7 @@ export class Watcher {
       if (snapshot.metrics) this.lastRequestCount = snapshot.metrics.requestCount;
       this.resetAt =
         snapshot.rateLimit && snapshot.rateLimit.remaining <= 0 ? snapshot.rateLimit.resetAt : null;
-      outcome = this.absorb(snapshot);
+      outcome = await this.absorb(snapshot, controller.signal);
     } catch (error) {
       if (this.stopped || controller.signal.aborted)
         outcome = this.stopped ? "cancelled" : "failed";
@@ -698,12 +805,21 @@ export class Watcher {
   }
 
   /** Fold one snapshot into the baseline; returns whether it was complete. */
-  private absorb(snapshot: Snapshot): PollOutcome {
+  private async absorb(snapshot: Snapshot, signal?: AbortSignal): Promise<PollOutcome> {
     const { global } = subjectWarnings(snapshot);
     // A repository-level gap (truncation, missing pages) makes the whole observation unknown.
     if (global.length) return "incomplete";
     const now = this.runtime.clock.now().toISOString();
-    const next = observe(snapshot, now);
+    const resolved = this.runtime.responsible
+      ? await this.runtime.responsible(snapshot, signal)
+      : undefined;
+    if (this.stopped || signal?.aborted) return "cancelled";
+    const responsible = resolved && "responsible" in resolved ? resolved.responsible : resolved;
+    const unknownResponsibilityIssues =
+      resolved && "unknown" in resolved && resolved.unknown.length
+        ? new Set(resolved.unknown.map((u) => u.issue))
+        : undefined;
+    const next = observe(snapshot, now, { responsible, unknownResponsibilityIssues });
     // A subject-scoped gap still leaves that subject without a trustworthy baseline, so the
     // poll is reported as incomplete rather than describing the observation as complete.
     const outcome: PollOutcome = [...next.subjects.values()].every((subject) => subject.complete)

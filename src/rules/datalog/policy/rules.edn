@@ -77,6 +77,7 @@
 [(pr-unknown ?t) [?t "check" ?c] [?c "outcome" ?o] (not [1 "known-check" ?o])]
 [(pr-review ?t) [?t "review-decision" "CHANGES_REQUESTED"]]
 [(pr-review ?t) [?t "thread" ?c] [?c "resolved" false]]
+[(pr-review ?t) (head-findings ?t)]
 ;; Required-check readiness is target evidence, never a universal check name (#676).
 [(required-unsatisfied ?t) [?t "check" ?c] [?c "required" "required"] [?c "outcome" ?o] [(not= ?o "SUCCESS")]]
 [(required-unknown ?t) [?t "check" ?c] [?c "required" "unknown"]]

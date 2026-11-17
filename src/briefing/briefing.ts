@@ -16,7 +16,7 @@ import { labelEstimationReport } from "../estimation/complexitylabels.js";
 import type { LabelEstimationInput } from "../estimation/complexitylabels.js";
 import type { Action, Dependency, Issue, PullRequest, Snapshot } from "../github/types.js";
 import { classifyChecks, requiredCheckEvidence } from "../github/requiredchecks.js";
-import { snapshotPolicyReview } from "../workflow/reviewpolicy.js";
+import { reviewProviders, snapshotPolicyReview } from "../workflow/reviewpolicy.js";
 import { workflow } from "../workflow/definition.js";
 
 export { urgencyBand };
@@ -382,6 +382,7 @@ analysisRules.set("pull-requests", ({ snapshot, prs }) =>
         ![...workflow.pass, ...workflow.failure, ...workflow.unfinished].includes(check.outcome),
     );
     const unresolved = pr.reviewThreads.nodes.filter((thread) => !thread.isResolved);
+    const review = snapshotPolicyReview(pr, snapshot.warnings, snapshot.reviewPolicy);
     const findings: Action[] = [];
     if (failed.length)
       findings.push(
@@ -395,21 +396,36 @@ analysisRules.set("pull-requests", ({ snapshot, prs }) =>
           failed.map((check) => check.url),
         ),
       );
-    if (unresolved.length || workflow.changesRequested.includes(pr.reviewDecision ?? ""))
+    if (
+      unresolved.length ||
+      workflow.changesRequested.includes(pr.reviewDecision ?? "") ||
+      review.headFindings
+    ) {
+      const headFindingSummary = review.detail.findings.length
+        ? `; ${review.detail.findings.map((f) => `${reviewProviders[f.provider].label} reports unresolved findings on the current head`).join("; ")}`
+        : review.headFindings
+          ? "; unresolved findings on the current head"
+          : "";
       findings.push(
         action(
           "pr-review-findings",
           pr,
           95,
-          `${unresolved.length} unresolved review threads; review decision ${pr.reviewDecision ?? "not required/unknown"}.`,
+          `${unresolved.length} unresolved review threads; review decision ${pr.reviewDecision ?? "not required/unknown"}${headFindingSummary}.`,
           "Read findings, fix or explain them, and resolve each thread before merge.",
           "factual",
           [
-            pr.url,
-            ...unresolved.flatMap((thread) => thread.comments.nodes.map((comment) => comment.url)),
+            ...new Set([
+              pr.url,
+              ...unresolved.flatMap((thread) =>
+                thread.comments.nodes.map((comment) => comment.url),
+              ),
+              ...review.detail.findings.map((f) => f.source),
+            ]),
           ],
         ),
       );
+    }
     if (workflow.conflicts.includes(pr.mergeable))
       findings.push(
         action(
@@ -451,6 +467,7 @@ analysisRules.set("pull-requests", ({ snapshot, prs }) =>
       !missingRequired.length &&
       !unknown.length &&
       !unresolved.length &&
+      !review.headFindings &&
       !workflow.changesRequested.includes(pr.reviewDecision ?? "") &&
       workflow.currentMergeStates.includes(pr.mergeStateStatus) &&
       !pr.isDraft;
@@ -464,11 +481,12 @@ analysisRules.set("pull-requests", ({ snapshot, prs }) =>
       !missingRequired.length &&
       !unknown.length &&
       !unresolved.length &&
+      !review.headFindings &&
       !workflow.changesRequested.includes(pr.reviewDecision ?? "") &&
       !workflow.conflicts.includes(pr.mergeable) &&
       !pr.isDraft &&
       // #301: the declared review policy (legacy when the front end resolved none).
-      snapshotPolicyReview(pr, snapshot.warnings, snapshot.reviewPolicy).headReviewed;
+      review.headReviewed;
     if (
       accepted &&
       (workflow.unknownMergeable.includes(pr.mergeable) ||

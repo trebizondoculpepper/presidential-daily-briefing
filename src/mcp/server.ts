@@ -17,11 +17,20 @@ import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod";
-import { collect, currentRepository, ghQueryWith, ghRest } from "../github/github.js";
+import {
+  collect,
+  currentRepository,
+  ghQueryWith,
+  ghRest,
+  permissionLookup,
+} from "../github/github.js";
 import { collectShortlist } from "../github/shortlist.js";
 import { dependencyReport } from "../github/dependencies.js";
 import { impactGuidanceSummary } from "../estimation/impact.js";
 import { readBriefing, readDependencies } from "../briefing/service.js";
+import { resolveReviewPolicy } from "../config/review-setting.js";
+import { markerTrust } from "../workflow/delivery.js";
+import { readSnapshotResponsibility } from "../workflow/responsibility.js";
 import { humanContextEnabled, resolveHumanContext } from "../config/humancontext.js";
 import { ghAuthContext } from "../github/ghauth.js";
 import { onboardingDocument, onboardingInstructions } from "../briefing/onboarding.js";
@@ -921,10 +930,25 @@ export async function bindPolling(
     throw new Error("--poll needs --repo owner/name or --project /absolute/project/path.");
   const repository = options.repo ?? (await runtime.currentRepository(options.project));
   if (!repoPattern.test(repository)) throw new Error("--poll needs a resolvable --repo.");
-  runtime.collect = sharedCollect(runtime.collect);
+  const reviewPolicy =
+    runtime.reviewPolicy ?? (await resolveReviewPolicy(repository, runtime.guide));
+  const shared = sharedCollect(runtime.collect);
+  runtime.collect = async (target, collectOptions, query, now) => {
+    const snap = await shared(target, collectOptions, query, now);
+    return snap.reviewPolicy ? snap : { ...snap, reviewPolicy };
+  };
   runtime.watcher = new Watcher(
     { repository, intervalMinutes: options.pollIntervalMinutes },
-    { collect: runtime.collect, clock },
+    {
+      collect: runtime.collect,
+      clock,
+      responsible: async (snap, signal) => {
+        const trust = runtime.rest
+          ? markerTrust(permissionLookup(repository, runtime.rest, signal))
+          : undefined;
+        return readSnapshotResponsibility(snap, trust, signal);
+      },
+    },
   );
   return runtime.watcher;
 }

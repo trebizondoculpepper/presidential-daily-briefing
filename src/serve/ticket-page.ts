@@ -209,13 +209,27 @@ export function ticketRenderers(): TicketRenderers {
     if (p.responsible) facts.push(`responsible ${escapeHtml(p.responsible)}`);
     if (p.followUp) facts.push(`follow-up ${escapeHtml(p.followUp)}`);
     const allBlockers = list(p.blockers);
+    const allReviewFindings = list(record(p.review).findings);
+    const reviewFindings = allReviewFindings
+      .slice(0, 5)
+      .map((item) => {
+        const f = record(item);
+        const url = typeof f.url === "string" ? f.url : null;
+        const reason = typeof f.reason === "string" ? f.reason : "review finding";
+        return `<li>${link(url, reason)}</li>`;
+      })
+      .join("");
     const blockers =
       allBlockers
         .slice(0, 5)
         .map((b) => `<li>${escapeHtml(b)}</li>`)
         .join("") +
+      reviewFindings +
       (allBlockers.length > 5
         ? `<li>${allBlockers.length - 5} more blocker(s) not shown; see the source.</li>`
+        : "") +
+      (allReviewFindings.length > 5
+        ? `<li>${allReviewFindings.length - 5} more review finding(s) not shown; see the source.</li>`
         : "");
     const counts = Object.entries(record(record(p.checks).counts))
       .map(([k, v]) => `${escapeHtml(k)} ${escapeHtml(v)}`)
