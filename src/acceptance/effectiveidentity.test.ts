@@ -82,6 +82,9 @@ describe("effective identity in actual CLI results (#677)", () => {
       expect(stderr.join("")).toContain(
         `created agent identity ${first.document.effectiveIdentity.agent}`,
       );
+      // #681: optional next-step guidance appears only on first creation, with exact commands.
+      expect(stderr.join("")).toContain("Optional next steps (nothing runs automatically):");
+      expect(stderr.join("")).toContain("pdb doctor");
       stderr.length = 0;
       const again = await invoke(runtime, ["--json"]);
       expect(again.document.effectiveIdentity).toMatchObject({
@@ -90,6 +93,7 @@ describe("effective identity in actual CLI results (#677)", () => {
         setup: { state: "reused", notices: [] },
       });
       expect(stderr.join("")).not.toContain("created agent identity");
+      expect(stderr.join("")).not.toContain("Optional next steps");
       expect(JSON.stringify(first.document)).not.toContain(env.CODEX_THREAD_ID);
     }));
 
