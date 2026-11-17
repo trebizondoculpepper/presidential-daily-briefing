@@ -132,3 +132,12 @@ Record one representative client walkthrough separately if it is run; template
 tests prove content/commands, not that all models obey the prompt. #350's report
 is bounded research, not empirical agent-adherence evidence. Do not delay the
 urgent standalone rules compiler waiting for onboarding or a web UI.
+
+## Human-operated observations
+
+An agent identity is optional for observational reads. A human can run
+`pdb --role implementer` or `pdb --role designer` to inspect work without creating
+an agent or choosing among configured entries. Existing explicit/verified agent
+identities may personalize the view. Claiming or submitting work still requires
+agent attribution. See [effective identity](effective-identity.md#read-only-operations-and-service-execution)
+for the shared boundary and #865 for implementation.
