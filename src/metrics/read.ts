@@ -23,8 +23,7 @@ import { legacyRelease } from "../workflow/deliverables.js";
 import type { DeliverablesRuntime } from "../workflow/deliverables.js";
 import { classifyDeliveryRecords, foldDelivery } from "../workflow/delivery.js";
 import type { DeliveryComment } from "../workflow/delivery.js";
-import { classifyEstimate, complexityProvenanceDecision } from "../estimation/estimation.js";
-import { labelSizeReading } from "../estimation/complexitylabels.js";
+import { assessmentGroups } from "./assessment.js";
 import type { CompletionVerdict } from "./aggregate.js";
 import { ticketLedger } from "./ledger.js";
 import type { LedgerFacts, LedgerPullRequest, LedgerTrust } from "./ledger.js";
@@ -96,40 +95,6 @@ const prQuery = `query($owner:String!,$name:String!,$number:Int!){repository(own
 
 function prop(v: unknown, k: string): unknown {
   return v && typeof v === "object" ? (v as Record<string, unknown>)[k] : undefined;
-}
-
-/**
- * Latest valid complexity group (owner decision), through the same classifier as the
- * estimation report: a valid size, or explicit stale, conflict, unknown and unassessed groups.
- */
-async function complexityGroup(
-  issue: WalkIssue,
-  complete: boolean,
-  trust: LedgerTrust,
-): Promise<string> {
-  const labels = issue.labels ?? { nodes: [], pageInfo: { hasNextPage: true } };
-  const reading = labelSizeReading({ labels } as Parameters<typeof labelSizeReading>[0]);
-  const decision =
-    reading.kind === "known" && reading.size !== null
-      ? await complexityProvenanceDecision(issue.comments.nodes, !complete, trust.comment)
-      : { authority: "none" as const, record: null, ignored: [] };
-  const { state, size } = classifyEstimate(reading, decision, {
-    lastEditedAt: issue.lastEditedAt ?? null,
-    historyIncomplete: !complete,
-    evidence: "complexity size label",
-  });
-  switch (state) {
-    case "estimated":
-      return size ?? "unknown";
-    case "stale":
-      return "stale";
-    case "conflicting":
-      return "conflict";
-    case "unestimated":
-      return "unassessed";
-    default:
-      return "unknown";
-  }
 }
 
 /** The later of two instants; null (never complete) wins. */
@@ -390,11 +355,21 @@ export async function readMetrics(
     // Evidence readers turn failed requests (aborts included) into missing evidence, so a
     // cancellation during collection must be re-checked here, not mistaken for a partial result.
     rt.signal?.throwIfAborted();
+    const assessment = await assessmentGroups(
+      {
+        labels: issue.labels ?? { nodes: [], pageInfo: { hasNextPage: true } },
+        lastEditedAt: issue.lastEditedAt ?? null,
+        comments,
+        commentsComplete,
+      },
+      rt.trust.comment,
+    );
     tickets.push({
       member: member(issue.number),
       ledger,
       verdict: verdictOf(evaluateDelivery(facts).delivery),
-      complexity: await complexityGroup(issue, commentsComplete, rt.trust),
+      complexity: assessment.complexity.group,
+      assessment,
     });
   }
   if (skipped.length)

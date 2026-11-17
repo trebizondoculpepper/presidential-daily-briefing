@@ -142,7 +142,12 @@ export const classifyComplexityLabels = (issue: Pick<Issue, "labels">): LabelCla
 
 /** Classification as a size reading for the shared report builder. */
 export function labelSizeReading(issue: Pick<Issue, "labels">): SizeReading {
-  const c = classifyComplexityLabels(issue);
+  return metricSizeReading(complexityMetric, issue);
+}
+
+/** One metric's current size reading from its labels (#832), as the complexity reader does. */
+export function metricSizeReading(d: MetricDescriptor, issue: Pick<Issue, "labels">): SizeReading {
+  const c = classifyMetricLabels(d, issue);
   if (c.state === "conflicting") return { kind: "conflict", sizes: c.sizes, reason: c.detail };
   if (c.state === "unknown") return { kind: "unknown", reason: c.detail };
   return { kind: "known", size: c.size };
