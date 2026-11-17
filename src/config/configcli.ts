@@ -12,6 +12,7 @@ import { join } from "node:path";
 import {
   CONVERT_COMMAND,
   ConfigError,
+  configChanges,
   convertConfig,
   LEGACY_CONFIG_PATH,
   TOML_CONFIG_PATH,
@@ -25,6 +26,7 @@ import {
   filesystemRefusal,
   updateConfig,
   validateValue,
+  type ConfigChange,
 } from "./config.js";
 import {
   IDENTITY_FILE,
@@ -46,11 +48,13 @@ import {
   GLOBAL_KEYS,
   GLOBAL_CONFIG_FILE,
   GlobalConfigError,
+  globalChanges,
   globalConfigDirectory,
   loadGlobalConfig,
   validateGlobalValue,
   writeGlobalConfig,
   type EffectiveGlobalSetting,
+  type GlobalChange,
   type GlobalValue,
   type ProjectRootVerifier,
 } from "./globalconfig.js";
@@ -102,6 +106,21 @@ type Parsed =
 
 /** The supported configuration scopes (#804): repository (implicit) and global (per-user). */
 export type ConfigScope = "repository" | "global";
+
+/**
+ * One factual change as `config set` reports it (#815): the effective value before and after,
+ * with `undefined` meaning the registered default. Values are shown as they are stored, never
+ * as free-form text from the file.
+ */
+const shownValue = (value: ConfigValue | GlobalValue | undefined): string => {
+  if (value === undefined) return "default";
+  if (typeof value === "string") return value;
+  if (typeof value === "boolean") return String(value);
+  return JSON.stringify(value);
+};
+
+const changeLine = (change: ConfigChange | GlobalChange): string =>
+  `${change.key}: ${shownValue(change.oldValue)} -> ${shownValue(change.newValue)}`;
 
 /** Explicit entry selection; both absent means harness detection decides. */
 interface Selection {
@@ -428,6 +447,9 @@ export async function runConfig(
       return 0;
     }
     const entry = keyEntry(parsed.key);
+    // The baseline is read-only and in memory: a short-lived CLI reports what this one write
+    // changed, never a persisted history (#815, doc/design/configuration-service.md).
+    const before = await loadConfig(target.root, fs).catch(() => null);
     const write = await updateConfig(
       target,
       new Map([[entry.key, typedValue(entry, parsed.value)]]),
@@ -435,17 +457,19 @@ export async function runConfig(
     );
     const setting = settingFor(write.config, entry.key);
     const where = at(write.config);
+    const changes = before ? configChanges(before.explicit, write.config.explicit) : [];
     const result = {
       schemaVersion: 1,
       kind: "config-set",
       ...where,
       changed: write.changed,
+      changes,
       ...settingJson(setting),
     };
     await output(
       parsed.json
         ? JSON.stringify(result, null, 2) + "\n"
-        : `${settingText(setting)} — ${write.changed ? `written to ${where.path} (not committed)` : "unchanged"}\n${legacyNotice(write.config)}`,
+        : `${settingText(setting)} — ${write.changed ? `written to ${where.path} (not committed)` : "unchanged"}\n${changes.map((change) => `  ${changeLine(change)}\n`).join("")}${legacyNotice(write.config)}`,
     );
     return 0;
   } catch (caught) {
@@ -773,18 +797,21 @@ async function runGlobal(
       `Supported keys: ${GLOBAL_KEYS.map((k) => k.key).join(", ")}.`,
     );
   const value = await parsedGlobalValue(entry.kind, parsed.key, parsed.value);
+  const before = await loadGlobalConfig(dir, fs).catch(() => null);
   const write = await writeGlobalConfig(dir, new Map([[parsed.key, value]]), { fs });
   const setting = write.config.settings.find((s) => s.key === parsed.key)!;
+  const changes = before ? globalChanges(before.explicit, write.config.explicit) : [];
   const result = {
     schemaVersion: 1,
     kind: "config-set",
     ...on(write.config),
     changed: write.changed,
+    changes,
     ...settingJson(setting),
   };
   return parsed.json
     ? JSON.stringify(result, null, 2) + "\n"
-    : `${setting.key} = ${display(setting.value)} — ${write.changed ? `written to ${write.config.path} (global, not committed)` : "unchanged"}\n`;
+    : `${setting.key} = ${display(setting.value)} — ${write.changed ? `written to ${write.config.path} (global, not committed)` : "unchanged"}\n${changes.map((change) => `  ${changeLine(change)}\n`).join("")}`;
 }
 
 /** Identity section of `config list`: only registered values of the selected entry. */
