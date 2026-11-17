@@ -247,6 +247,10 @@ describe("pdb serve lifecycle (#373)", () => {
     expect(page.headers["content-security-policy"]).toContain("script-src 'self'");
     expect(page.body).toContain("No project selected");
     expect(page.body).not.toMatch(/<script>|https?:\/\/(?!127)/);
+    const selectionScript = await call(port, "/project-selection.js");
+    expect(selectionScript.status).toBe(200);
+    expect(selectionScript.headers["content-type"]).toContain("javascript");
+    expect(selectionScript.body).toContain("pdb.selected-project");
     const script = await call(port, "/dashboard.js");
     expect(script.status).toBe(200);
     expect(script.headers["content-type"]).toBe("text/javascript; charset=utf-8");
@@ -487,7 +491,9 @@ describe("shared HTML route binding (#605)", () => {
         expect(reply.status).toBe(400);
         expect(reply.headers["content-type"]).toContain("text/html");
         expect(reply.body).toContain('role="alert"');
-        expect(reply.body).not.toContain("<script");
+        expect(
+          reply.body.replace('<script src="/project-selection.js" defer></script>', ""),
+        ).not.toContain("<script");
       }
       expect((await call(running.port, "/?repo=unserved/repo")).status).toBe(403);
       const noSelection = await call(running.port, "/");
