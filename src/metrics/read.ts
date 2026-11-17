@@ -19,8 +19,8 @@ import { legacyRelease } from "../workflow/deliverables.js";
 import type { DeliverablesRuntime } from "../workflow/deliverables.js";
 import { classifyDeliveryRecords, foldDelivery } from "../workflow/delivery.js";
 import type { DeliveryComment } from "../workflow/delivery.js";
-import { scanProvenance } from "../estimation/estimate.js";
-import { complexityMetric } from "../estimation/metrics.js";
+import { classifyEstimate, complexityProvenanceDecision } from "../estimation/estimation.js";
+import { labelSizeReading } from "../estimation/complexitylabels.js";
 import type { CompletionVerdict } from "./aggregate.js";
 import { ticketLedger } from "./ledger.js";
 import type { LedgerFacts, LedgerPullRequest, LedgerTrust } from "./ledger.js";
@@ -47,6 +47,15 @@ export interface MetricsRead {
   /** Requests made by this read. */
   requests: number;
   warnings: string[];
+  /** Structural limits of this read, always stated so an absence is never assumed. */
+  limitations: string[];
+}
+
+interface WalkPr {
+  number: number;
+  updatedAt: string;
+  mergedAt: string | null;
+  closingIssuesReferences?: { nodes: { number: number; repository: { nameWithOwner: string } }[] };
 }
 
 interface WalkIssue {
@@ -56,28 +65,58 @@ interface WalkIssue {
   state: string;
   closedAt: string | null;
   stateReason: string | null;
+  lastEditedAt?: string | null;
+  labels?: { nodes: { name: string }[]; pageInfo?: { hasNextPage?: boolean } };
   comments: { totalCount: number; nodes: Comment[] };
 }
 
 const commentFields =
   "databaseId url body createdAt author{__typename login} lastEditedAt includesCreatedEdit editor{__typename login}";
-const walkQuery = `query($owner:String!,$name:String!,$cursor:String){repository(owner:$owner,name:$name){issues(first:50,after:$cursor,states:[OPEN,CLOSED],orderBy:{field:UPDATED_AT,direction:DESC}){nodes{number createdAt updatedAt state closedAt stateReason comments(first:100){totalCount nodes{${commentFields}}}} pageInfo{hasNextPage endCursor}}}}`;
+const issueFields =
+  "number createdAt updatedAt lastEditedAt state closedAt stateReason labels(first:100){nodes{name} pageInfo{hasNextPage}} comments(first:100){totalCount nodes{" +
+  commentFields +
+  "}}";
+const walkQuery = `query($owner:String!,$name:String!,$cursor:String){repository(owner:$owner,name:$name){issues(first:50,after:$cursor,states:[OPEN,CLOSED],orderBy:{field:UPDATED_AT,direction:DESC}){nodes{${issueFields}} pageInfo{hasNextPage endCursor}}}}`;
+const prWalkQuery = `query($owner:String!,$name:String!,$cursor:String){repository(owner:$owner,name:$name){pullRequests(first:50,after:$cursor,states:[MERGED],orderBy:{field:UPDATED_AT,direction:DESC}){nodes{number updatedAt mergedAt closingIssuesReferences(first:10){nodes{number repository{nameWithOwner}}}} pageInfo{hasNextPage endCursor}}}}`;
+const issueQuery = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){${issueFields}}}}`;
 const prQuery = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){number state mergedAt}}}`;
 
 function prop(v: unknown, k: string): unknown {
   return v && typeof v === "object" ? (v as Record<string, unknown>)[k] : undefined;
 }
 
-/** Latest valid complexity group (owner decision), from trusted provenance only. */
+/**
+ * Latest valid complexity group (owner decision), through the same classifier as the
+ * estimation report: a valid size, or explicit stale, conflict, unknown and unassessed groups.
+ */
 async function complexityGroup(
-  comments: Comment[],
+  issue: WalkIssue,
   complete: boolean,
   trust: LedgerTrust,
 ): Promise<string> {
-  const scan = await scanProvenance(complexityMetric, comments, trust.comment);
-  if (scan.status === "trusted") return complete ? scan.provenance.size : "unknown";
-  if (scan.status === "unknown" || !complete) return "unknown";
-  return "unassessed";
+  const labels = issue.labels ?? { nodes: [], pageInfo: { hasNextPage: true } };
+  const reading = labelSizeReading({ labels } as Parameters<typeof labelSizeReading>[0]);
+  const decision =
+    reading.kind === "known" && reading.size !== null
+      ? await complexityProvenanceDecision(issue.comments.nodes, !complete, trust.comment)
+      : { authority: "none" as const, record: null, ignored: [] };
+  const { state, size } = classifyEstimate(reading, decision, {
+    lastEditedAt: issue.lastEditedAt ?? null,
+    historyIncomplete: !complete,
+    evidence: "complexity size label",
+  });
+  switch (state) {
+    case "estimated":
+      return size ?? "unknown";
+    case "stale":
+      return "stale";
+    case "conflicting":
+      return "conflict";
+    case "unestimated":
+      return "unassessed";
+    default:
+      return "unknown";
+  }
 }
 
 /** The later of two instants; null (never complete) wins. */
@@ -144,8 +183,55 @@ export async function readMetrics(
     }
     cursor = (prop(info, "endCursor") as string | null) ?? null;
   }
-  const completeFrom = reachedStart ? from : oldest;
+  const issueFrom = reachedStart ? from : oldest;
   if (!reachedStart) warnings.push(`issue walk stopped at ${bounds.maxPages} pages before ${from}`);
+
+  // 1b. Merged pull requests by their own update time: a merge need not update its ticket, so
+  // tickets closed by an in-window merge are added even when the issue walk did not reach them.
+  const linked = new Set<number>();
+  let prCursor: string | null = null;
+  let prReachedStart = false;
+  let prOldest: string | null = null;
+  for (let page = 0; page < bounds.maxPages; page++) {
+    const conn = prop(
+      prop(
+        await query(prWalkQuery, { owner, name, ...(prCursor ? { cursor: prCursor } : {}) }),
+        "repository",
+      ),
+      "pullRequests",
+    );
+    if (!conn) throw new Error(`Repository unavailable: ${repository}`);
+    for (const pr of (prop(conn, "nodes") as WalkPr[] | undefined) ?? []) {
+      prOldest = pr.updatedAt;
+      if (Date.parse(pr.updatedAt) < fromMs) {
+        prReachedStart = true;
+        break;
+      }
+      if (pr.mergedAt && Date.parse(pr.mergedAt) >= fromMs)
+        for (const ref of pr.closingIssuesReferences?.nodes ?? [])
+          if (ref.repository.nameWithOwner.toLowerCase() === repository.toLowerCase())
+            linked.add(ref.number);
+    }
+    const info = prop(conn, "pageInfo");
+    if (prReachedStart || prop(info, "hasNextPage") !== true) {
+      prReachedStart = true;
+      break;
+    }
+    prCursor = (prop(info, "endCursor") as string | null) ?? null;
+  }
+  if (!prReachedStart)
+    warnings.push(`pull request walk stopped at ${bounds.maxPages} pages before ${from}`);
+  const prFrom = prReachedStart ? from : prOldest;
+  const completeFrom = issueFrom === null || prFrom === null ? null : latest(issueFrom, prFrom);
+  for (const number of linked) {
+    if (walked.some((i) => i.number === number)) continue;
+    const issue = prop(
+      prop(await query(issueQuery, { owner, name, number }), "repository"),
+      "issue",
+    ) as WalkIssue | null | undefined;
+    if (issue) walked.push(issue);
+    else warnings.push(`issue #${number}, closed by an in-window merge, could not be read`);
+  }
 
   // 2. Ledgers, verdicts and groups for the first `maxTickets` tickets.
   const member = (n: number) => `${repository}#${n}`;
@@ -180,10 +266,18 @@ export async function readMetrics(
     let prsComplete = required !== null;
     for (const pr of required ?? []) {
       const [o, nm] = pr.repository.split("/") as [string, string];
-      const node = prop(
-        prop(await query(prQuery, { owner: o, name: nm, number: pr.number }), "repository"),
-        "pullRequest",
-      ) as { number: number; state: string; mergedAt: string | null } | null | undefined;
+      let node: { number: number; state: string; mergedAt: string | null } | null | undefined;
+      try {
+        node = prop(
+          prop(await query(prQuery, { owner: o, name: nm, number: pr.number }), "repository"),
+          "pullRequest",
+        ) as { number: number; state: string; mergedAt: string | null } | null | undefined;
+      } catch (error) {
+        // An inaccessible deliverable is missing evidence for this ticket, not a failed read;
+        // cancellation still propagates.
+        if (rt.signal?.aborted) throw error;
+        node = null;
+      }
       if (!node) prsComplete = false;
       else
         prs.push({
@@ -217,7 +311,7 @@ export async function readMetrics(
       member: member(issue.number),
       ledger,
       verdict: verdictOf(evaluateDelivery(facts).delivery),
-      complexity: await complexityGroup(comments, commentsComplete, rt.trust),
+      complexity: await complexityGroup(issue, commentsComplete, rt.trust),
     });
   }
   if (skipped.length)
@@ -237,5 +331,8 @@ export async function readMetrics(
     historyNotRead: { count: skipped.length, members: skipped },
     requests,
     warnings,
+    limitations: [
+      "a deliverable in another repository that merges without updating or closing its ticket is not discovered",
+    ],
   };
 }

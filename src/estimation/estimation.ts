@@ -111,7 +111,7 @@ export interface ProvenanceDecision {
 }
 
 /** A v2 (label-backed) marker comment as a recorded estimate; v1 field-era markers are not. */
-function recordOf(comment: { body: string; url: string }): RecordedEstimate | null {
+export function recordOf(comment: { body: string; url: string }): RecordedEstimate | null {
   const p = parseLabelProvenance(comment.body);
   return p
     ? {
@@ -137,6 +137,31 @@ function unevaluated(issue: Issue): ProvenanceDecision {
 }
 
 /**
+ * One ticket's complexity provenance decision (#269), from its comments oldest first. Missing
+ * newer comments make it unknown even when an older trusted record was found. Shared by the
+ * open-ticket reader above and the metrics read (#573), which also judges closed tickets.
+ */
+export async function complexityProvenanceDecision(
+  comments: readonly { body: string; url?: string }[],
+  newerHistoryIncomplete: boolean,
+  trust: TrustDecision,
+): Promise<ProvenanceDecision> {
+  const scan = await scanProvenance(complexityMetric, comments, trust);
+  const ignored = scan.ignored;
+  if (newerHistoryIncomplete && scan.status !== "unknown")
+    return { authority: "unknown", record: null, ignored, why: "newer comment history incomplete" };
+  if (scan.status === "unknown")
+    return { authority: "unknown", record: null, ignored, why: scan.why };
+  if (scan.status === "trusted")
+    return {
+      authority: "trusted",
+      record: recordOf(scan.node as { body: string; url: string }),
+      ignored,
+    };
+  return { authority: ignored.length ? "untrusted" : "none", record: null, ignored };
+}
+
+/**
  * Trust decisions for complexity provenance (#269), made once per snapshot before the pure report
  * builder runs: the shared newest-first scanner with the run's `TrustDecision` (the per-run
  * permission cache, so requests stay bounded by distinct marker authors and editors). Only open
@@ -153,29 +178,14 @@ export async function readComplexityProvenance(
   for (const issue of issues) {
     signal?.throwIfAborted();
     if (issue.state !== "OPEN" || classifyComplexityLabels(issue).state !== "estimated") continue;
-    const scan = await scanProvenance(complexityMetric, issue.comments.nodes, trust);
-    const ignored = scan.ignored;
-    if (issue.comments.pageInfo.hasNextPage && scan.status !== "unknown")
-      decisions.set(issue.url, {
-        authority: "unknown",
-        record: null,
-        ignored,
-        why: "newer comment history incomplete",
-      });
-    else if (scan.status === "unknown")
-      decisions.set(issue.url, { authority: "unknown", record: null, ignored, why: scan.why });
-    else if (scan.status === "trusted")
-      decisions.set(issue.url, {
-        authority: "trusted",
-        record: recordOf(scan.node as { body: string; url: string }),
-        ignored,
-      });
-    else
-      decisions.set(issue.url, {
-        authority: ignored.length ? "untrusted" : "none",
-        record: null,
-        ignored,
-      });
+    decisions.set(
+      issue.url,
+      await complexityProvenanceDecision(
+        issue.comments.nodes,
+        issue.comments.pageInfo.hasNextPage,
+        trust,
+      ),
+    );
   }
   return decisions;
 }
@@ -199,6 +209,82 @@ export interface SizeSource {
   read: (issue: Issue) => SizeReading;
   /** Prepared provenance trust decisions by issue URL (#269); absent ones are unevaluated. */
   provenance?: ReadonlyMap<string, ProvenanceDecision>;
+}
+
+/**
+ * Classify one ticket's current size evidence (#269, #281): the label reading, its provenance
+ * decision and the freshness evidence. Shared by the open-ticket report and the metrics read
+ * (#573), so both apply the same stale, conflicting and unknown rules.
+ */
+export function classifyEstimate(
+  reading: SizeReading,
+  decision: ProvenanceDecision,
+  context: { lastEditedAt: string | null; historyIncomplete: boolean; evidence: string },
+): { state: EstimateState; size: ComplexitySize | null; reasons: string[] } {
+  const recorded = decision.record;
+  const reasons: string[] = [];
+  let state: EstimateState;
+  let size: ComplexitySize | null = null;
+  if (reading.kind === "unknown") {
+    state = "unknown";
+    reasons.push(reading.reason);
+  } else if (reading.kind === "conflict") {
+    state = "conflicting";
+    reasons.push(reading.reason);
+  } else if (reading.size === null) {
+    // As before #269: an unlabelled ticket with incomplete history is unknown, not unestimated.
+    if (context.historyIncomplete) {
+      state = "unknown";
+      reasons.push("comment history incomplete; provenance unknown");
+    } else {
+      state = "unestimated";
+      reasons.push(`no ${context.evidence}`);
+    }
+  } else if (decision.authority === "unknown") {
+    // The label size stands, but freshness cannot be established: inspect, never re-queue.
+    size = reading.size;
+    state = "unknown";
+    reasons.push(
+      ...decision.ignored,
+      `provenance authority unknown (${decision.why ?? "unverified"}); freshness not established`,
+    );
+  } else {
+    size = reading.size;
+    state = "estimated";
+    reasons.push(...decision.ignored);
+    if (!recorded)
+      reasons.push(
+        decision.authority === "untrusted"
+          ? "no trusted recorded rationale"
+          : "no recorded rationale (value set outside pdb)",
+      );
+    else {
+      if (recorded.size !== size) {
+        state = "stale";
+        reasons.push(`${context.evidence} ${size} differs from recorded estimate ${recorded.size}`);
+      }
+      if ((recorded.guidanceVersion ?? 0) < complexityGuidance.guidanceVersion) {
+        state = "stale";
+        reasons.push(
+          `guidance version ${recorded.guidanceVersion ?? "unknown"} < ${complexityGuidance.guidanceVersion}`,
+        );
+      }
+      const edited = context.lastEditedAt ? Date.parse(context.lastEditedAt) : NaN;
+      const at = recorded.recordedAt ? Date.parse(recorded.recordedAt) : NaN;
+      if (edited > at) {
+        state = "stale";
+        reasons.push(`description edited ${context.lastEditedAt} after the estimate`);
+      } else if (!Number.isNaN(edited) && Number.isNaN(at)) {
+        // An unparseable or missing recordedAt is unavailable freshness evidence: a later
+        // description edit cannot be ruled out, so it never reads as fresh (#281).
+        state = "stale";
+        reasons.push(
+          `description edited ${context.lastEditedAt}; recorded time unknown, so the estimate cannot be shown fresh`,
+        );
+      }
+    }
+  }
+  return { state, size, reasons };
 }
 
 /** Shared report builder over any size reader. Pure. */
@@ -235,71 +321,12 @@ export function sizeReport(
         reading.kind === "known" && reading.size !== null
           ? (input.provenance?.get(issue.url) ?? unevaluated(issue))
           : { authority: "none" as const, record: null, ignored: [] };
+      const { state, size, reasons } = classifyEstimate(reading, decision, {
+        lastEditedAt: issue.lastEditedAt ?? null,
+        historyIncomplete: issue.comments.pageInfo.hasNextPage,
+        evidence: input.evidence,
+      });
       const recorded = decision.record;
-      const reasons: string[] = [];
-      let state: EstimateState;
-      let size: ComplexitySize | null = null;
-      if (reading.kind === "unknown") {
-        state = "unknown";
-        reasons.push(reading.reason);
-      } else if (reading.kind === "conflict") {
-        state = "conflicting";
-        reasons.push(reading.reason);
-      } else if (reading.size === null) {
-        // As before #269: an unlabelled ticket with incomplete history is unknown, not unestimated.
-        if (issue.comments.pageInfo.hasNextPage) {
-          state = "unknown";
-          reasons.push("comment history incomplete; provenance unknown");
-        } else {
-          state = "unestimated";
-          reasons.push(`no ${input.evidence}`);
-        }
-      } else if (decision.authority === "unknown") {
-        // The label size stands, but freshness cannot be established: inspect, never re-queue.
-        size = reading.size;
-        state = "unknown";
-        reasons.push(
-          ...decision.ignored,
-          `provenance authority unknown (${decision.why ?? "unverified"}); freshness not established`,
-        );
-      } else {
-        size = reading.size;
-        state = "estimated";
-        reasons.push(...decision.ignored);
-        if (!recorded)
-          reasons.push(
-            decision.authority === "untrusted"
-              ? "no trusted recorded rationale"
-              : "no recorded rationale (value set outside pdb)",
-          );
-        else {
-          if (recorded.size !== size) {
-            state = "stale";
-            reasons.push(
-              `${input.evidence} ${size} differs from recorded estimate ${recorded.size}`,
-            );
-          }
-          if ((recorded.guidanceVersion ?? 0) < complexityGuidance.guidanceVersion) {
-            state = "stale";
-            reasons.push(
-              `guidance version ${recorded.guidanceVersion ?? "unknown"} < ${complexityGuidance.guidanceVersion}`,
-            );
-          }
-          const edited = issue.lastEditedAt ? Date.parse(issue.lastEditedAt) : NaN;
-          const at = recorded.recordedAt ? Date.parse(recorded.recordedAt) : NaN;
-          if (edited > at) {
-            state = "stale";
-            reasons.push(`description edited ${issue.lastEditedAt} after the estimate`);
-          } else if (!Number.isNaN(edited) && Number.isNaN(at)) {
-            // An unparseable or missing recordedAt is unavailable freshness evidence: a later
-            // description edit cannot be ruled out, so it never reads as fresh (#281).
-            state = "stale";
-            reasons.push(
-              `description edited ${issue.lastEditedAt}; recorded time unknown, so the estimate cannot be shown fresh`,
-            );
-          }
-        }
-      }
       return {
         number: issue.number,
         title: issue.title,

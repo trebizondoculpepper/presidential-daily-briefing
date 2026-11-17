@@ -153,6 +153,14 @@ describe("daily evidence gaps (#573 slice 5a)", () => {
     expect(clean.figures.prMerges).toMatchObject({ lowerBound: false, incomplete: { count: 0 } });
   });
 
+  it("treats tickets the read could not ledger as gaps in every figure", () => {
+    const v = dailyView(NOW, 7, [], covered, [`${repo}#99`]);
+    for (const f of Object.values(v.figures)) {
+      expect(f).toMatchObject({ lowerBound: true, incomplete: { members: [`${repo}#99`] } });
+    }
+    expect(newsView(NOW, 6, [], covered, 200, [`${repo}#99`]).incomplete.count).toBe(1);
+  });
+
   it("counts an undated delivery once however often it is passed", () => {
     const t = ticket(32, "delivered", { requiredOtherMembers: 1 });
     expect(dailyView(NOW, 7, [t, t], covered).deliveredDateUnknown).toEqual({

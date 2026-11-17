@@ -104,13 +104,15 @@ export function newsView(
   tickets: readonly MetricTicket[],
   coverage: HistoryCoverage,
   limit = 200,
+  /** Tickets in the window the read could not ledger: their events are missing. */
+  unread: readonly string[] = [],
 ): NewsResult {
   const through = new Date(Date.parse(now)).toISOString();
   const from = new Date(Date.parse(now) - hours * 3_600_000).toISOString();
   const window = { from, through };
   const seen = new Set<string>();
   const all: NewsItem[] = [];
-  const gaps = new Set<string>();
+  const gaps = new Set<string>(unread);
   for (const t of tickets) {
     if (Object.values(t.ledger.coverage).some((c) => c !== "complete")) gaps.add(t.member);
     for (const e of t.ledger.events) {
@@ -178,6 +180,8 @@ export function dailyView(
   days: number,
   tickets: readonly MetricTicket[],
   coverage: HistoryCoverage,
+  /** Tickets in the window the read could not ledger: every figure is then a lower bound. */
+  unread: readonly string[] = [],
 ): DailyResult {
   const window = trailingWindow(now, days);
   const deliveries: { at: string; key: string }[] = [];
@@ -187,8 +191,8 @@ export function dailyView(
   const merges = new Map<string, string>();
   const undated = new Set<string>();
   // Per-figure evidence gaps, so missing evidence is never shown as known zero activity.
-  const outcomeGaps = new Set<string>();
-  const mergeGaps = new Set<string>();
+  const outcomeGaps = new Set<string>(unread);
+  const mergeGaps = new Set<string>(unread);
 
   for (const t of tickets) {
     if (t.verdict === "unknown" || t.ledger.currentState === "unknown") outcomeGaps.add(t.member);
