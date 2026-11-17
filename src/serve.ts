@@ -1,3 +1,8 @@
+import {
+  captureProcessIdentity,
+  readPackageBuildIdentity,
+  withProcessIdentity,
+} from "./serve/process-footer.js";
 import { disabledEffectiveHuman } from "./config/effectiveidentity.js";
 import { humanContextEnabled } from "./config/humancontext.js";
 import { startLocalIdentity } from "./config/serveridentity.js";
@@ -99,6 +104,7 @@ export const defaultServeRuntime = (): ServeRuntime => ({
   signals: process,
   exit: (code) => process.exit(code),
   version: async () => (await installedVersion()).version,
+  buildIdentity: readPackageBuildIdentity,
   platform: process.platform,
 });
 
@@ -236,6 +242,13 @@ export async function startServe(
     auth,
   };
 
+  let buildIdentity = {};
+  try {
+    buildIdentity = (await runtime.buildIdentity?.()) ?? {};
+  } catch {
+    // Optional provenance is unavailable; the running server still starts with honest unknowns.
+  }
+  const processIdentity = captureProcessIdentity(facts, buildIdentity);
   facts.effectiveHuman = humanContextEnabled()
     ? { context: serverHumanContext(auth, facts.startedAt), authenticationFailed: false }
     : disabledEffectiveHuman(auth.host);
@@ -267,6 +280,12 @@ export async function startServe(
     schemaVersion: 1,
     kind: "serve-status",
     version: facts.version,
+    build: {
+      revision: processIdentity.revision,
+      dirty: processIdentity.dirty,
+      source: processIdentity.source,
+    },
+    publicIp: processIdentity.publicIp,
     startedAt: facts.startedAt.toISOString(),
     url: facts.url,
     exposed: facts.exposed,
@@ -372,7 +391,15 @@ export async function startServe(
             "referrer-policy": "no-referrer",
             "content-security-policy": dashboardSecurityPolicy,
           });
-          response.end(request.method === "HEAD" ? undefined : selectionErrorPage(selectedPage));
+          response.end(
+            request.method === "HEAD"
+              ? undefined
+              : withProcessIdentity(
+                  selectionErrorPage(selectedPage),
+                  processIdentity,
+                  selectedPage,
+                ),
+          );
           return;
         }
         // Canonical spelling is used by renderers and all generated navigation.
@@ -386,7 +413,11 @@ export async function startServe(
             "referrer-policy": "no-referrer",
             "content-security-policy": dashboardSecurityPolicy,
           });
-          response.end(request.method === "HEAD" ? undefined : html);
+          response.end(
+            request.method === "HEAD"
+              ? undefined
+              : withProcessIdentity(html, processIdentity, selectedPage ?? undefined),
+          );
           return;
         }
       }
@@ -417,7 +448,11 @@ export async function startServe(
           "referrer-policy": "no-referrer",
           "content-security-policy": dashboardSecurityPolicy,
         });
-        response.end(request.method === "HEAD" ? undefined : page.html);
+        response.end(
+          request.method === "HEAD"
+            ? undefined
+            : withProcessIdentity(page.html, processIdentity, selectedPage ?? undefined),
+        );
         return;
       }
       if (path === "/rules") {
@@ -440,7 +475,11 @@ export async function startServe(
           "referrer-policy": "no-referrer",
           "content-security-policy": dashboardSecurityPolicy,
         });
-        response.end(request.method === "HEAD" ? undefined : page.html);
+        response.end(
+          request.method === "HEAD"
+            ? undefined
+            : withProcessIdentity(page.html, processIdentity, selectedPage ?? undefined),
+        );
         return;
       }
       if (path === "/quotas") {
@@ -463,7 +502,11 @@ export async function startServe(
           "referrer-policy": "no-referrer",
           "content-security-policy": dashboardSecurityPolicy,
         });
-        response.end(request.method === "HEAD" ? undefined : page.html);
+        response.end(
+          request.method === "HEAD"
+            ? undefined
+            : withProcessIdentity(page.html, processIdentity, selectedPage ?? undefined),
+        );
         return;
       }
       if (path === "/human") {
@@ -480,7 +523,11 @@ export async function startServe(
           "referrer-policy": "no-referrer",
           "content-security-policy": dashboardSecurityPolicy,
         });
-        response.end(request.method === "HEAD" ? undefined : page.html);
+        response.end(
+          request.method === "HEAD"
+            ? undefined
+            : withProcessIdentity(page.html, processIdentity, selectedPage ?? undefined),
+        );
         return;
       }
       if (path === "/activity") {
@@ -497,7 +544,11 @@ export async function startServe(
           "referrer-policy": "no-referrer",
           "content-security-policy": dashboardSecurityPolicy,
         });
-        response.end(request.method === "HEAD" ? undefined : page.html);
+        response.end(
+          request.method === "HEAD"
+            ? undefined
+            : withProcessIdentity(page.html, processIdentity, selectedPage ?? undefined),
+        );
         return;
       }
       if (await routes(context)) return;

@@ -75,6 +75,8 @@ export interface ServeRuntime {
   /** Immediate exit for a second signal during shutdown. */
   exit: (code: number) => void;
   version: () => Promise<string | null>;
+  /** Optional trusted process metadata, captured once; absent fields remain unknown. */
+  buildIdentity?: () => Promise<Partial<BuildIdentity>>;
   platform: NodeJS.Platform;
   /** GitHub read boundaries for the data routes; absent means the production gh runners. */
   read?: ServeReadRuntime;
@@ -88,6 +90,18 @@ export interface ServeRuntime {
 export interface ServedRepository {
   repository: string;
   project?: string;
+}
+
+/** Provenance of the executing build, never the selected repository or current disk checkout. */
+export interface BuildIdentity {
+  revision: string | null;
+  dirty: boolean | null;
+  publicIp: string | null;
+  source: "package-githead" | "build-metadata" | "unknown";
+}
+export interface ProcessIdentity extends BuildIdentity {
+  version: string | null;
+  startedAt: string | null;
 }
 
 /** Facts fixed at startup, shown by /api/v1/status. */
