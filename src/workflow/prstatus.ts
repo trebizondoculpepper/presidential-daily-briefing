@@ -334,73 +334,8 @@ export function prStatus(
 
   // Review receipts may be ordinary comments; requests are comments asking for a review.
   const comments = pr.comments.nodes;
-  const receipts = comments
-    .filter((c) => isBot(c.author?.login))
-    .map((c) => ({
-      by: c.author?.login ?? "unknown",
-      at: c.createdAt,
-      url: c.url,
-      summary: excerpt(c.body).slice(0, 160),
-      codexState: codexMarker(c.body),
-    }));
-  const codex =
-    receipts
-      .map((r) => r.codexState)
-      .filter((m): m is CodexMarker => m !== null)
-      .at(-1)?.code_review ?? null;
-  // Bots often update one summary comment in place, so a receipt's creation time does not show
-  // whether a later request was answered. Codex's state marker records the commit it reviewed.
-  // Bot replies often quote "@coderabbitai review" as an instruction; only non-bot comments
-  // count as requests, so a receipt can never replace the request it answers.
-  const lastRequest =
-    comments.filter((c) => !isBot(c.author?.login) && requestPattern.test(c.body ?? "")).at(-1) ??
-    null;
-  const requested =
-    reviewerFor[(requestPattern.exec(lastRequest?.body ?? "")?.[1] ?? "").toLowerCase()];
-  const answerer = (login: string | undefined): string => (login ?? "").replace(/\[bot\]$/, "");
-  const codexComments = comments.filter((c) => answerer(c.author?.login) === reviewerFor.codex);
-  const parsedCodexReceipts = codexComments.map((c) => codexReviewReceipt(c.body));
-  const knownCommits = [
-    ...pr.reviews.nodes.map((r) => r.commit?.oid),
-    ...receipts.map((r) => r.codexState?.code_review?.commit_sha),
-    ...parsedCodexReceipts.map((r) => r?.commitSha),
-  ];
-  const hasRunningHeadCodex = receipts.some(
-    (r) =>
-      answerer(r.by) === reviewerFor.codex &&
-      r.codexState?.code_review?.commit_sha === head &&
-      typeof r.codexState.code_review.status === "string" &&
-      r.codexState.code_review.status !== "completed",
-  );
-  const codexCleanReceipt = parsedCodexReceipts.some((r) =>
-    Boolean(
-      r?.clean &&
-      (codexCommitMatches(head, r.commitSha) ||
-        (hasRunningHeadCodex && codexReceiptMatchesPrefix(head, r.commitSha, knownCommits))),
-    ),
-  );
-  const newerReceipt = (at: string): boolean =>
-    receipts.some((r) => answerer(r.by) === requested && (r.at ?? "") > at && !r.codexState) ||
-    // A formal review by the requested service also answers the request.
-    pr.reviews.nodes.some(
-      (r) => answerer(r.author?.login) === requested && (r.submittedAt ?? "") > at,
-    );
-  const request: PrStatusReport["reviewRequest"] = lastRequest
-    ? {
-        at: lastRequest.createdAt,
-        url: lastRequest.url,
-        // The Codex state marker answers only a Codex request; other services need their own reply.
-        status:
-          requested === reviewerFor.codex &&
-          ((codex?.commit_sha === head && codex.status === "completed") || codexCleanReceipt)
-            ? "current head reviewed (Codex)"
-            : requested === reviewerFor.codex && codex?.commit_sha === head
-              ? `review in progress on the current head (Codex: ${codex.status})`
-              : newerReceipt(lastRequest.createdAt)
-                ? "a reviewer has posted since the request"
-                : "no reaction yet",
-      }
-    : null;
+  const { receipts, codex, codexCleanReceipt, request, reviewRequestStatus, answerer } =
+    deriveReviewSignals(comments, pr.reviews.nodes, head, pr.url);
 
   const linkedIssues = pr.closingIssuesReferences.nodes.map((i) => ({
     number: i.number,
@@ -487,11 +422,7 @@ export function prStatus(
           ? codex.status
           : null,
     },
-    reviewRequestStatus:
-      request &&
-      (request.status === "no reaction yet" || request.status.startsWith("review in progress"))
-        ? request.status
-        : null,
+    reviewRequestStatus,
   });
   const blockers = readiness.blockers;
 
@@ -672,6 +603,98 @@ export function prStatusText(r: PrStatusReport): string {
   return lines.join("\n") + "\n";
 }
 
+interface ReviewSignalComment {
+  author?: { login?: string } | null;
+  body?: string | null;
+  createdAt?: string;
+  url?: string;
+}
+
+interface ReviewSignalReview {
+  author?: { login?: string } | null;
+  commit?: { oid: string } | null;
+  submittedAt?: string | null;
+}
+
+function deriveReviewSignals(
+  comments: readonly ReviewSignalComment[],
+  reviews: readonly ReviewSignalReview[],
+  head: string,
+  fallbackUrl: string,
+) {
+  const receipts = comments
+    .filter((c) => isBot(c.author?.login))
+    .map((c) => ({
+      by: c.author?.login ?? "unknown",
+      at: c.createdAt ?? "",
+      url: c.url ?? fallbackUrl,
+      summary: excerpt(c.body).slice(0, 160),
+      codexState: codexMarker(c.body),
+    }));
+  const codex =
+    receipts
+      .map((r) => r.codexState)
+      .filter((m): m is CodexMarker => m !== null)
+      .at(-1)?.code_review ?? null;
+  // Bots often update one summary comment in place, so a receipt's creation time does not show
+  // whether a later request was answered. Codex's state marker records the commit it reviewed.
+  // Bot replies often quote "@coderabbitai review" as an instruction; only non-bot comments
+  // count as requests, so a receipt can never replace the request it answers.
+  const lastRequest =
+    comments.filter((c) => !isBot(c.author?.login) && requestPattern.test(c.body ?? "")).at(-1) ??
+    null;
+  const requested =
+    reviewerFor[(requestPattern.exec(lastRequest?.body ?? "")?.[1] ?? "").toLowerCase()];
+  const answerer = (login: string | undefined): string => (login ?? "").replace(/\[bot\]$/, "");
+  const codexComments = comments.filter((c) => answerer(c.author?.login) === reviewerFor.codex);
+  const parsedCodexReceipts = codexComments.map((c) => codexReviewReceipt(c.body));
+  const knownCommits = [
+    ...reviews.map((r) => r.commit?.oid),
+    ...receipts.map((r) => r.codexState?.code_review?.commit_sha),
+    ...parsedCodexReceipts.map((r) => r?.commitSha),
+  ];
+  const hasRunningHeadCodex = receipts.some(
+    (r) =>
+      answerer(r.by) === reviewerFor.codex &&
+      r.codexState?.code_review?.commit_sha === head &&
+      typeof r.codexState.code_review.status === "string" &&
+      r.codexState.code_review.status !== "completed",
+  );
+  const codexCleanReceipt = parsedCodexReceipts.some((r) =>
+    Boolean(
+      r?.clean &&
+      (codexCommitMatches(head, r.commitSha) ||
+        (hasRunningHeadCodex && codexReceiptMatchesPrefix(head, r.commitSha, knownCommits))),
+    ),
+  );
+  const newerReceipt = (at: string): boolean =>
+    receipts.some((r) => answerer(r.by) === requested && (r.at ?? "") > at && !r.codexState) ||
+    // A formal review by the requested service also answers the request.
+    reviews.some((r) => answerer(r.author?.login) === requested && (r.submittedAt ?? "") > at);
+  const request: PrStatusReport["reviewRequest"] = lastRequest
+    ? {
+        at: lastRequest.createdAt ?? "",
+        url: lastRequest.url ?? fallbackUrl,
+        // The Codex state marker answers only a Codex request; other services need their own reply.
+        status:
+          requested === reviewerFor.codex &&
+          ((codex?.commit_sha === head && codex.status === "completed") || codexCleanReceipt)
+            ? "current head reviewed (Codex)"
+            : requested === reviewerFor.codex && codex?.commit_sha === head
+              ? `review in progress on the current head (Codex: ${codex.status})`
+              : newerReceipt(lastRequest.createdAt ?? "")
+                ? "a reviewer has posted since the request"
+                : "no reaction yet",
+      }
+    : null;
+  const reviewRequestStatus =
+    request &&
+    (request.status === "no reaction yet" || request.status.startsWith("review in progress"))
+      ? request.status
+      : null;
+  return { receipts, codex, codexCleanReceipt, request, reviewRequestStatus, answerer };
+}
+
 /**
  * Shared native PR-readiness evaluation over a collected snapshot PR (#711), reusing the same
  * `evaluatePrReadiness` Datalog rules as `pdb pr`.
@@ -691,30 +714,12 @@ export function snapshotPrReadiness(
   const noRunTimeChecks = contexts.map((c) => !("startedAt" in c ? c.startedAt : true));
   const unresolvedThreadCount = (pr.reviewThreads?.nodes ?? []).filter((t) => !t.isResolved).length;
   const policy = snapshotPolicyReview(pr, [...warnings], reviewPolicy);
-  const answerer = (login: string | undefined) => (login ?? "").replace(/\[bot\]$/, "");
-  const codexComments = (pr.comments?.nodes ?? []).filter(
-    (c) => answerer(c.author?.login) === reviewerFor.codex,
+  const { codex, codexCleanReceipt, reviewRequestStatus, answerer } = deriveReviewSignals(
+    pr.comments?.nodes ?? [],
+    pr.reviews?.nodes ?? [],
+    head,
+    pr.url,
   );
-  const codexStates = codexComments
-    .map((c) => codexMarker(c.body)?.code_review)
-    .filter((s): s is NonNullable<typeof s> => !!s);
-  const codex = codexStates.at(-1) ?? null;
-  const knownCommits = [
-    ...(pr.reviews?.nodes ?? []).map((r) => r.commit?.oid),
-    ...codexStates.map((s) => s.commit_sha),
-    ...codexComments.map((c) => codexReviewReceipt(c.body)?.commitSha),
-  ];
-  const hasRunningHeadCodex = codexStates.some(
-    (s) => s.commit_sha === head && typeof s.status === "string" && s.status !== "completed",
-  );
-  const codexCleanReceipt = codexComments.some((c) => {
-    const r = codexReviewReceipt(c.body);
-    return Boolean(
-      r?.clean &&
-      (codexCommitMatches(head, r.commitSha) ||
-        (hasRunningHeadCodex && codexReceiptMatchesPrefix(head, r.commitSha, knownCommits))),
-    );
-  });
   const state = pr.state ?? "OPEN";
   const readiness = evaluatePrReadiness({
     state,
@@ -760,7 +765,7 @@ export function snapshotPrReadiness(
           ? codex.status
           : null,
     },
-    reviewRequestStatus: null,
+    reviewRequestStatus,
   });
   const threadsIncomplete = !pr.reviewThreads || !!pr.reviewThreads.pageInfo?.hasNextPage;
   const blockers = threadsIncomplete

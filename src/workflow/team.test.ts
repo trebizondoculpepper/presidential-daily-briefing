@@ -242,9 +242,38 @@ describe("team view (#41, doc/design/diagnostics.md)", () => {
     expect(withAdvisory.agents[0]?.claims[0]?.pullRequests[0]?.ready).toBe(true);
 
     // Truncated review threads keep readiness unproven (ready: false).
-    prNoVerify.reviewThreads = { nodes: [], pageInfo: { hasNextPage: true, endCursor: "c1" } };
-    const truncatedThreads = teamView(snapshot([claimed], [prNoVerify]), { now: new Date(time) });
+    const withTruncatedThreads = {
+      ...prNoVerify,
+      reviewThreads: { nodes: [], pageInfo: { hasNextPage: true, endCursor: "c1" } },
+    };
+    const truncatedThreads = teamView(snapshot([claimed], [withTruncatedThreads]), {
+      now: new Date(time),
+    });
     expect(truncatedThreads.agents[0]?.claims[0]?.pullRequests[0]?.ready).toBe(false);
-    expect(contributionFinished(prNoVerify)).toBe(false);
+    expect(contributionFinished(withTruncatedThreads)).toBe(false);
+
+    // Unanswered @codex review request under legacy policy blocks readiness.
+    const withUnansweredReviewRequest = {
+      ...prNoVerify,
+      comments: {
+        nodes: [
+          {
+            author: { login: "alice" },
+            body: "@codex review",
+            createdAt: "2026-04-01T09:50:00Z",
+            url: "https://github.com/o/r/pull/41#issuecomment-1",
+          },
+        ],
+        pageInfo: { hasNextPage: false, endCursor: null },
+      },
+    };
+    const awaitingReview = teamView(snapshot([claimed], [withUnansweredReviewRequest]), {
+      now: new Date(time),
+    });
+    expect(awaitingReview.agents[0]?.claims[0]?.pullRequests[0]).toMatchObject({
+      ready: false,
+      blockers: ["a review was requested and has had no reaction"],
+    });
+    expect(contributionFinished(withUnansweredReviewRequest)).toBe(false);
   });
 });
