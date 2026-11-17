@@ -184,7 +184,7 @@ describe("bounded MCP results (#266)", () => {
 
   it.each(defaults)(
     "%s fits the whole-result budget with an exact byte count",
-    async (_, name, args) => {
+    async (label, name, args) => {
       const client = await connect();
       try {
         const { raw, bytes, structured, text } = await call(client, name, args);
@@ -192,6 +192,8 @@ describe("bounded MCP results (#266)", () => {
         expect(bytes).toBeLessThanOrEqual(budgetBytes);
         // The server's own measure is of the same final serialization.
         expect(structured.presentation.bytes).toBe(bytes);
+        // Record the #266 size table here instead of repeating every expensive read.
+        console.log(JSON.stringify({ [label]: bytes }));
         expect(structured.schemaVersion).toBe(2);
         expect(structured.freshness).not.toBeNull();
         expect(structured.sourceCompleteness).not.toBeNull();
@@ -203,25 +205,6 @@ describe("bounded MCP results (#266)", () => {
       }
     },
   );
-
-  it("reports the sizes measured before and after (#266 table)", async () => {
-    const client = await connect();
-    try {
-      const sizes = Object.fromEntries(
-        await Promise.all(
-          defaults.map(async ([label, name, args]) => [
-            label,
-            (await call(client, name, args)).bytes,
-          ]),
-        ),
-      );
-      // Printed for the PR record; the assertion is the budget.
-      console.log(JSON.stringify(sizes));
-      for (const size of Object.values(sizes)) expect(size).toBeLessThanOrEqual(budgetBytes);
-    } finally {
-      await client.close();
-    }
-  });
 
   it("ranks before limiting and reports omissions explicitly", async () => {
     const client = await connect();
