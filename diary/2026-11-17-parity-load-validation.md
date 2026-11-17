@@ -27,3 +27,5 @@ The repaired fixture passed the full 144-file suite: 2,650 tests passed, one ski
 Check passed with zero errors and 54 existing warnings; build passed. The new
 assertions verify actual text counts and presentation omissions as well as the
 whole-result byte bound. Restart acceptance on this repaired committed source.
+
+Completed 50 consecutive full suites on cad68fe4e889, all 2,650 passing and one skipped. Recorded per-run results, load samples and raw-report digests in the validation report. Earlier 18 runs excluded; no deadline changes or retries. #534 retains its separate acceptance.
