@@ -267,8 +267,8 @@ export function timingView(
       // missing history never makes it disappear; proven never-picked-up tickets belong to
       // the creation-to-pickup metric instead.
       include =
-        anyEventInWindow ||
-        (t.ledger.currentState !== "closed" && pickupStatus(t.ledger) !== "none");
+        pickupStatus(t.ledger) !== "none" &&
+        (anyEventInWindow || t.ledger.currentState !== "closed");
     } else include = false;
     if (include) samples.push({ ...s, group: t.complexity });
   }

@@ -194,7 +194,10 @@ describe("timing view (#573 slice 5a)", () => {
         label: { status: "none" },
       },
     });
-    const neverPicked = ticket(14, "none", {});
+    // Created inside the window and never picked up: belongs to creation-to-pickup.
+    const neverPicked = ticket(14, "none", {
+      events: [{ kind: "created", source: "issue", at: "2026-11-16T00:00:00Z", key: "c:14" }],
+    });
     const v = timingView(NOW, 7, [quiet, neverPicked], covered);
     expect(v.groups["S"]).toMatchObject({ unknown: 1 });
     expect(v.groups["S"]!.members.unknown).toEqual([`${repo}#13`]);
