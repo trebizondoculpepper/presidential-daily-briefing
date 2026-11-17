@@ -42,7 +42,10 @@ export async function evaluateProjectPreferences<A extends Actions>(
   options: ProjectEvaluationOptions,
 ): Promise<ProjectEvaluation<A>> {
   if (policy.phase !== "validated-project-policy" || policy.projectionVersion !== 1)
-    throw new ProjectEvaluationError("invalid-policy", "only a validated v1 policy is evaluated");
+    throw new ProjectEvaluationError(
+      "invalid-policy",
+      "only a validated projection v1 policy is evaluated",
+    );
   const identity = {
     generation: options.generation,
     effectiveRulesHash: policy.effectiveRulesHash,

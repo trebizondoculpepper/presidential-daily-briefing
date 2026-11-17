@@ -77,6 +77,13 @@ li { margin: 0 0 1rem; }
 code { font-size: .85rem; word-break: break-all; }
 footer { margin-top: 2rem; font-size: .8rem; color: GrayText; }
 pre.rules { white-space: pre-wrap; overflow-wrap: anywhere; font-size: .85rem; }
+.rule-purpose { border: 1px solid GrayText; border-radius: .3rem; padding: .75rem; margin-block: .75rem; }
+.rule-purpose :is(h3, h4) { font-size: 1rem; margin: 0 0 .4rem; }
+.rule-purpose p { margin: .4rem 0 .75rem; }
+.rule-formal > summary { cursor: pointer; }
+.identity.rules-identity { grid-template-columns: minmax(0, max-content) minmax(0, 1fr); }
+@media (max-width: 40rem) { .identity.rules-identity { grid-template-columns: minmax(0, 1fr); } .rules-identity dd { margin-bottom: .5rem; } }
+.rule-formal[open] > summary { margin-bottom: .5rem; }
 .identity { display: grid; grid-template-columns: max-content 1fr; gap: .2rem 1rem; }
 .identity dd { margin: 0; }
 ul.projects { display: inline; padding: 0; }
