@@ -1036,6 +1036,7 @@ export interface FocusOptions {
   /** Records requests and coverage; the caller reports `meter.collection()`. */
   meter: ReadMeter;
   locate?: (repository: string, number: number) => Promise<IssueDiagnosis>;
+  rest?: Rest;
   signal?: AbortSignal;
   /**
    * Also read the issue's direct native edges (`pdb ticket N`, #197): selected with the issue,
@@ -1219,6 +1220,16 @@ export async function collectIssueFocus(
     { meter, signal, warnings, role: "linked" },
     base,
   );
+  if (pullRequests.length) {
+    const reqQuery = meter.query(base, "required-checks", repository);
+    const reqRest = meter.rest(options.rest ?? ghRestWith(signal), "required-checks", repository);
+    warnings.push(
+      ...(await hydrateRequiredChecks(repository, pullRequests, {
+        query: (q, v) => reqQuery(q, v),
+        rest: (path) => reqRest(path, { signal }),
+      })),
+    );
+  }
   const telemetry = meter.collection().telemetry;
   return {
     schemaVersion: 1,
