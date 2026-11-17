@@ -241,9 +241,15 @@ The exhaustive formal-comprehension research validator is manual/local only: `np
 
 Read [CONTRIBUTING.md](CONTRIBUTING.md) for contribution requirements and the [design index](doc/design/README.md) for architectural contracts and planned capabilities. Tests use injected boundaries and fixtures rather than live GitHub credentials.
 
-## License
+## License and credits
 
-[MIT](LICENSE).
+Copyright (c) 2026 Presidential Daily Briefing contributors.
+
+Presidential Daily Briefing is free software: you can redistribute it and/or modify it under the terms of the **GNU General Public License, version 3 or (at your option) any later version**. It is distributed without warranty. See [LICENSE](LICENSE) for the full terms. Corresponding project source and build instructions are available in the [repository](https://github.com/trebizondoculpepper/presidential-daily-briefing); use the release tag or published package’s `gitHead` to find the matching revision.
+
+PDB's Datalog rules engine uses [DataScript](https://github.com/tonsky/datascript), by **Nikita Prokopov and the DataScript contributors**, as a separately installed dependency. DataScript 1.8.1 is licensed under the **Eclipse Public License 1.0**, with its own terms for use and distribution. PDB's GPL notice does not relicense DataScript. Its [license](third-party/datascript-LICENSE) and [source/notices](third-party/README.md) are retained.
+
+Previously published MIT grants and attribution are preserved in the [historical project notice](third-party/legacy-project-MIT-LICENSE); this change does not withdraw those earlier grants.
 
 Complexity is stored in repository labels (`complexity:XS`–`complexity:XXL`); no setup is needed. The native-field `setup complexity` command and the `complexity.fieldId` setting were removed (#153); an old configuration file that still contains the key keeps working, and `config list` shows how to drop it. See the [contract](doc/design/complexity-estimation.md). No field migration or separate field permissions are needed.
 
