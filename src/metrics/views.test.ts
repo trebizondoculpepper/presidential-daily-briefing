@@ -173,4 +173,30 @@ describe("timing view (#573 slice 5a)", () => {
       open: { count: 1, longestElapsedMs: 24 * H },
     });
   });
+  it("starts at midnight UTC on the first complete day, like the daily view", () => {
+    // 7 days at 2026-11-17T09:00Z starts 2026-11-10T00:00Z, so a 03:00 delivery is inside.
+    const early = ticket(12, "delivered", {
+      firstPickup: picked("2026-11-09T23:00:00Z"),
+      requiredPullRequests: [{ repository: repo, number: 50 }],
+      events: [merged(50, "2026-11-10T03:00:00Z")],
+    });
+    const v = timingView(NOW, 7, [early], covered);
+    expect(v.window.from).toBe("2026-11-10T00:00:00.000Z");
+    expect(v.groups["S"]).toMatchObject({ completed: 1 });
+    const d = dailyView(NOW, 7, [early], covered);
+    expect(d.window.from).toBe(v.window.from);
+  });
+
+  it("keeps quiet open tickets with unread pickup history as unknown", () => {
+    const quiet = ticket(13, "none", {
+      firstPickup: {
+        "claim-marker": { status: "unknown", reason: "comments cut off", observed: null },
+        label: { status: "none" },
+      },
+    });
+    const neverPicked = ticket(14, "none", {});
+    const v = timingView(NOW, 7, [quiet, neverPicked], covered);
+    expect(v.groups["S"]).toMatchObject({ unknown: 1 });
+    expect(v.groups["S"]!.members.unknown).toEqual([`${repo}#13`]);
+  });
 });
