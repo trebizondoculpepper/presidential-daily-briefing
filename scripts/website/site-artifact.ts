@@ -3,6 +3,11 @@ import { createHash } from "node:crypto";
 import { readFile, readdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { siteManifestSchema, type SiteManifest } from "./manifest.js";
+import { conversations } from "../../website/conversations.js";
+
+const illustrationHashes = new Map<string, string>(
+  conversations.map((item) => [`assets/conversations/${item.file}`, item.sha256]),
+);
 
 export const hash = (bytes: string | Uint8Array): string =>
   createHash("sha256").update(bytes).digest("hex");
@@ -17,10 +22,18 @@ export async function siteFiles(root: string, prefix = ""): Promise<Record<strin
       continue;
     }
     if (entry.isDirectory()) Object.assign(files, await siteFiles(root, `${path}/`));
-    else if (entry.isFile() && /^(?:[a-z-]+\/)*[a-z-]+\.(?:html|css|js)$/.test(path))
-      files[path] = hash(await readFile(resolve(root, path)));
-    else throw new CaptureFailure("Unexpected or symlinked website artifact entry.");
+    else if (
+      entry.isFile() &&
+      (/^(?:[a-z-]+\/)*[a-z-]+\.(?:html|css|js)$/.test(path) || illustrationHashes.has(path))
+    ) {
+      const digest = hash(await readFile(resolve(root, path)));
+      if (illustrationHashes.has(path) && illustrationHashes.get(path) !== digest)
+        throw new CaptureFailure("Conversation illustration differs from its reviewed source.");
+      files[path] = digest;
+    } else throw new CaptureFailure("Unexpected or symlinked website artifact entry.");
   }
+  if (!prefix && [...illustrationHashes.keys()].some((path) => !files[path]))
+    throw new CaptureFailure("Conversation illustration missing.");
   return files;
 }
 export async function verifySiteArtifact(root: string, raw: string): Promise<SiteManifest> {
