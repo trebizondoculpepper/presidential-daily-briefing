@@ -387,9 +387,6 @@ describe("accepted PRs needing refresh are integration actions (#182 S9)", () =>
       // Acceptance needs attributable review evidence bound to the current head.
       { mergeState: "BEHIND", evidence: "none" },
       { mergeState: "BEHIND", evidence: "stale" },
-      { mergeState: "BEHIND", evidence: "codex-findings" },
-      // A current-head approval does not override Codex findings on the same head.
-      { mergeState: "BEHIND", evidence: "approved-codex-findings" },
       { mergeState: "BEHIND", evidence: "untrusted-codex" },
       { mergeable: "UNKNOWN", mergeState: "UNKNOWN", evidence: "none" },
     ] as Partial<PrShape>[]) {
@@ -399,6 +396,37 @@ describe("accepted PRs needing refresh are integration actions (#182 S9)", () =>
       expect(ranked(r)).toEqual(["continue-implementation#6", "implement#7"]);
       const ts = await cli(world(shape), "implementer", typescript);
       expect(next(ts), JSON.stringify(shape)).not.toContain(22);
+    }
+
+    // Current-head Codex findings route as review follow-up (D-PR-REVIEW), never integration.
+    for (const shape of [
+      { mergeState: "BEHIND", evidence: "codex-findings" },
+      // A current-head approval does not override Codex findings on the same head.
+      { mergeState: "BEHIND", evidence: "approved-codex-findings" },
+    ] as Partial<PrShape>[]) {
+      const r = await cli(world(shape), "implementer");
+      const prItem = (
+        r.rankedActions!.items as unknown as {
+          url?: string;
+          target?: string;
+          reasonCodes: string[];
+          why: { ruleIds: string[] };
+        }[]
+      ).find((s) => (s.target ?? s.url ?? "").endsWith("/22"));
+      expect(prItem?.why.ruleIds, JSON.stringify(shape)).toEqual(["D-PR-REVIEW"]);
+      expect(prItem?.reasonCodes, JSON.stringify(shape)).toContain("pr-review-findings");
+      expect(prItem?.reasonCodes, JSON.stringify(shape)).not.toContain("pr-integrate");
+      const ts = await cli(world(shape), "implementer", typescript);
+      expect(next(ts), JSON.stringify(shape)).toContain(22);
+      const tsItem = (
+        ts.rankedActions!.items as unknown as {
+          url?: string;
+          target?: string;
+          reasonCodes: string[];
+        }[]
+      ).find((s) => (s.target ?? s.url ?? "").endsWith("/22"));
+      expect(tsItem?.reasonCodes, JSON.stringify(shape)).toContain("pr-follow-up");
+      expect(tsItem?.reasonCodes, JSON.stringify(shape)).not.toContain("pr-integrate");
     }
   });
 });

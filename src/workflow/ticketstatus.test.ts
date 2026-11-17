@@ -90,6 +90,7 @@ interface LivePr {
   verify?: string | null;
   approvedOn?: string;
   repository?: string;
+  reviewThreads?: unknown[];
 }
 const statusNode = (n: number, p: LivePr) => ({
   number: n,
@@ -154,7 +155,7 @@ const statusNode = (n: number, p: LivePr) => ({
         ]
       : [],
   ),
-  reviewThreads: page([]),
+  reviewThreads: page(p.reviewThreads ?? []),
   comments: page([]),
   closingIssuesReferences: page([]),
 });
@@ -652,5 +653,50 @@ describe("pdb ticket CLI (#197)", () => {
     expect(text.out).toMatch(/#90 owner\/name \[closing-reference\] OPEN/);
     expect(json.code).toBe(text.code);
     expect(json.code).toBe(report.completeness.complete ? 0 : 2);
+  });
+
+  it("includes actionable review finding links and reasons in report and text (#696)", async () => {
+    const w: World = {
+      issue: ticket(1),
+      prs: {
+        90: {
+          state: "OPEN",
+          reviewThreads: [
+            {
+              isResolved: false,
+              isOutdated: true,
+              path: "src/app.ts",
+              line: 42,
+              first: {
+                totalCount: 1,
+                nodes: [
+                  {
+                    url: `https://github.com/${repo}/pull/90#discussion_r1`,
+                    author: { login: "copilot-pull-request-reviewer" },
+                    body: "Fix null check",
+                    createdAt: "2026-11-16T00:00:00Z",
+                  },
+                ],
+              },
+              latest: { nodes: [] },
+            },
+          ],
+        },
+      },
+      links: [{ number: 90, url: prLink(90), state: "OPEN" }],
+    };
+    const json = await run(["ticket", "1", "--repo", repo, "--json"], w);
+    const report = JSON.parse(json.out) as TicketStatus;
+    expect(report.pullRequests[0]?.review?.findings).toEqual([
+      {
+        reason: "Unresolved thread at src/app.ts:42 (outdated)",
+        url: `https://github.com/${repo}/pull/90#discussion_r1`,
+        outdated: true,
+      },
+    ]);
+    const text = await run(["ticket", "1", "--repo", repo], w);
+    expect(text.out).toContain(
+      `finding: Unresolved thread at src/app.ts:42 (outdated) https://github.com/${repo}/pull/90#discussion_r1`,
+    );
   });
 });
