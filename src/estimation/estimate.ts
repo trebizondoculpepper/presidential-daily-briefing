@@ -1,3 +1,4 @@
+import { identitySelectionOptions, type CommandActorOptions } from "../config/commandidentity.js";
 /**
  * `estimate N --size S --rationale TEXT` (#152, doc/design/complexity-estimation.md
  * "Recording and revising an estimate").
@@ -61,7 +62,8 @@ issue comment (marker github-triage:complexity-estimate v2).
   --assumption TEXT     Repeatable: stated conditions, e.g. "blocker #B supplies the API;
                         waiting excluded" — sizing a blocked ticket does not unblock it
   --reference REF       Repeatable reference anchor: #N, owner/name#N or an https URL
-  --agent NAME          Estimator identity to record; omitted means null (never inferred).
+  --agent NAME          Override the effective estimator identity for this call; normal CLI
+                        preparation reuses or safely initializes the configured agent.
                         Attribution only: authority is the GitHub account that writes it
   --replace SIZE        Optional guard: refuse unless the ticket still carries this size
   --replace-invalid     Also remove complexity: labels that are not a recognized size (e.g.
@@ -81,6 +83,8 @@ labels/history unreadable (retry); 1 invalid arguments, refused (stale guard, co
 unrecognized complexity label without --replace-invalid) or API denial.`;
 
 export interface EstimateRuntime {
+  /** CLI effective attribution, called after syntax validation and before planning writes. */
+  readonly prepareActor?: (options: CommandActorOptions) => Promise<string>;
   readonly fs?: ConfigFileSystem;
   readonly git?: GitRunner;
   readonly cwd?: string;
@@ -472,6 +476,7 @@ export async function runEstimate(
         assumption: { type: "string", multiple: true },
         reference: { type: "string", multiple: true },
         agent: { type: "string" },
+        ...identitySelectionOptions,
         replace: { type: "string" },
         "replace-invalid": { type: "boolean" },
         json: { type: "boolean" },
@@ -505,11 +510,14 @@ export async function runEstimate(
   const badReference = references.find((r) => !REFERENCE.test(r));
   if (badReference !== undefined)
     throw new Error(`--reference ${badReference}: use #N, owner/name#N or an https URL.`);
-  const estimator = values.agent?.trim() || null;
+
   const replaceInvalid = !!values["replace-invalid"];
   if (values.repo !== undefined && !/^[\w.-]+\/[\w.-]+$/.test(values.repo))
     throw new Error("--repo must be owner/name.");
 
+  const estimator = runtime.prepareActor
+    ? await runtime.prepareActor(values)
+    : values.agent?.trim() || null;
   const json = !!values.json;
   const fs = runtime.fs ?? nodeFileSystem;
   const git = runtime.git ?? nodeGit;

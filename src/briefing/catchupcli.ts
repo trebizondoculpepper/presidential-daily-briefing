@@ -1,3 +1,8 @@
+import {
+  identitySelection,
+  identitySelectionOptions,
+  type CommandActorOptions,
+} from "../config/commandidentity.js";
 /**
  * `pdb briefing`: the repository catch-up command (#170, slice 3 of
  * doc/design/briefing-mode.md). Argument validation, the checkpoint and cache files and the
@@ -121,6 +126,7 @@ export async function collectBriefing(
 }
 
 export interface BriefingRuntime {
+  prepareViewer?: (options: BriefingArguments) => Promise<string | undefined>;
   collect: typeof collect;
   currentRepository: () => Promise<string>;
   now?: () => Date;
@@ -163,7 +169,7 @@ Exit: 0 complete; 2 incomplete or unavailable evidence; 1 invalid arguments, ope
 failure or checkpoint write failure (stderr says how to recover).
 `;
 
-export interface BriefingArguments {
+export interface BriefingArguments extends CommandActorOptions {
   help?: boolean;
   repo?: string;
   agent?: string;
@@ -186,6 +192,7 @@ export function briefingArgumentsFor(args: string[]): BriefingArguments {
       options: {
         repo: { type: "string" },
         agent: { type: "string" },
+        ...identitySelectionOptions,
         json: { type: "boolean" },
         limit: { type: "string" },
         "max-chars": { type: "string" },
@@ -241,6 +248,7 @@ export function briefingArgumentsFor(args: string[]): BriefingArguments {
   return {
     repo: values.repo,
     agent: values.agent,
+    ...identitySelection(values),
     json: !!values.json,
     limit,
     maxChars,
@@ -281,6 +289,7 @@ export async function runBriefing(
     await output(briefingHelp);
     return 0;
   }
+  if (runtime.prepareViewer) options.agent = await runtime.prepareViewer(options);
   const stderr = runtime.stderr ?? ((text: string) => void process.stderr.write(text));
   const now = runtime.now ?? (() => new Date());
   try {

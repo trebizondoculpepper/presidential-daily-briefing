@@ -61,13 +61,25 @@ pdb --repo owner/repository --order oldest
 
 `--agent` is an explicit workflow identity, not your GitHub login. It highlights attention addressed to that name and recorded ownership; it does not authenticate an agent or claim work.
 
-A new agent gets its own identity once, from the checkout, with:
+A new agent can start directly from the checkout:
 
 ```sh
-pdb setup identity --role implementer        # or --role designer; --dry-run previews
+pdb --repo owner/repository --role implementer  # or --role designer
 ```
 
-It generates a locally unique name for your harness's entry in the checkout's Git-ignored `pdb.toml`, keeps it on later runs, never reuses another harness's entry (under Ori, add `--entry ori.SERVER`), contacts no service and prints the `--agent` to use.
+Briefings and attributed CLI workflow commands reuse a safely selected local identity. When a verified session or an
+explicit `--entry KEY` selects a missing identity, PDB generates a name, saves it in the
+checkout's Git-ignored `pdb.toml`, reports what happened on stderr and continues the command.
+Returning commands need no name lookup or `--agent` echo. An existing unbound entry or an
+unsupported/ambiguous session needs an explicit entry selection once; PDB never borrows
+another agent's generic harness entry. A new name requires your explicit role.
+
+`--agent NAME` remains a per-call override. Explicit `pdb setup identity` remains available
+for identity management. Config reads, Doctor, rules, onboarding, help, offline reads and dry-run
+previews do not initialize identities. A dry-run needing a new name reports proposed setup
+without allocating or persisting one. Attributed CLI JSON adds `effectiveIdentity` separately
+from human attention and `employingHuman`; setup errors distinguish known persistence from
+uncertain outcomes. A saved identity survives a failure of the original command.
 
 ### Inspect a ticket or a blocked PR
 

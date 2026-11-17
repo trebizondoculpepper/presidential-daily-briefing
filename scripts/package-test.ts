@@ -971,6 +971,7 @@ try {
       PDB_NO_UPDATE_CHECK: "1",
       PDB_NO_FIRST_USE_HINT: "1",
       PDB_NO_HUMAN_CONTEXT: "1",
+      PDB_NO_EFFECTIVE_IDENTITY: "1",
       ...(windows ? { SystemRoot: process.env.SystemRoot, ComSpec: process.env.ComSpec } : {}),
     };
     const rules = (rulesArgs: string[]) =>
@@ -1074,6 +1075,7 @@ try {
       PDB_NO_UPDATE_CHECK: "1",
       PDB_NO_FIRST_USE_HINT: "1",
       PDB_NO_HUMAN_CONTEXT: "1",
+      PDB_NO_EFFECTIVE_IDENTITY: "1",
     };
     await nativeStopSmoke(join(packageDir, "dist", "cli.mjs"), work, env);
     console.log("ok   installed native Codex offer and duplicate guard with fake gh");
@@ -1241,6 +1243,7 @@ try {
       PDB_NO_UPDATE_CHECK: "1",
       PDB_NO_FIRST_USE_HINT: "1",
       PDB_NO_HUMAN_CONTEXT: "1",
+      PDB_NO_EFFECTIVE_IDENTITY: "1",
     };
     const selected = await resolveEngineSetting(live, { cwd: root });
     for (const role of ["implementer", "designer"]) {
