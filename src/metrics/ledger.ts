@@ -131,6 +131,8 @@ export interface AssessmentEndpoints {
   records: AssessmentRecord[];
   /** Records excluded as lacking authority. */
   ignored: string[];
+  /** Records whose authority could not be established: neither counted nor excluded. */
+  unresolved: string[];
 }
 
 export interface TicketLedger {
@@ -554,6 +556,8 @@ async function assessmentEndpoints(
 ): Promise<AssessmentEndpoints> {
   const records: AssessmentRecord[] = [];
   const ignored: string[] = [];
+  const unresolved: string[] = [];
+  let unresolvedRevisions = 0;
   let unknownBefore: string | null = null;
   let firstUnknownAt: string | null = null;
   for (const c of [...comments].sort(byCommentTime)) {
@@ -570,9 +574,15 @@ async function assessmentEndpoints(
     if (authority.status === "trusted") records.push(record);
     else if (authority.status === "untrusted")
       ignored.push(`${d.provenanceKind} record ${record.key} (${authority.why})`);
-    else if (records.length === 0 && unknownBefore === null) {
-      unknownBefore = `${d.provenanceKind} record ${record.key} has unknown authority (${authority.why})`;
-      firstUnknownAt = record.at;
+    else {
+      // Unknown authority: it could be the first record or a revision, so it is held open.
+      const why = `${d.provenanceKind} record ${record.key} has unknown authority (${authority.why})`;
+      unresolved.push(why);
+      if (record.previous.length > 0) unresolvedRevisions++;
+      if (records.length === 0 && unknownBefore === null) {
+        unknownBefore = why;
+        firstUnknownAt = record.at;
+      }
     }
   }
   const earliest = records[0] ?? null;
@@ -592,11 +602,18 @@ async function assessmentEndpoints(
   const revisionCount = records.filter((r) => r.previous.length > 0).length;
   return {
     first,
-    revisions: complete
-      ? { known: true, value: revisionCount }
-      : { known: false, reason: "comment history incomplete", observed: revisionCount },
+    revisions: !complete
+      ? { known: false, reason: "comment history incomplete", observed: revisionCount }
+      : unresolvedRevisions > 0
+        ? {
+            known: false,
+            reason: `${unresolvedRevisions} revision record(s) of unknown authority`,
+            observed: revisionCount,
+          }
+        : { known: true, value: revisionCount },
     records,
     ignored,
+    unresolved,
   };
 }
 
