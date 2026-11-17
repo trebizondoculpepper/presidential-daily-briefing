@@ -1046,23 +1046,24 @@ export type CatchUpReport = ReturnType<typeof catchUp>;
  * never disagree: a cancelled check is incomplete verification, not a failure.
  */
 function classifyChecks(pr: PullRequest) {
-  const checks = prChecks(pr);
-  const nonAdvisory = new Set(
-    requiredCheckEvidence(pr)
-      .checks.filter((c) => c.required !== "advisory")
-      .map((c) => c.name),
-  );
+  // The shared normalizer preserves observed context order. Keep each run's requiredness
+  // alongside its outcome; names alone cannot distinguish different apps/runs.
+  const evidence = requiredCheckEvidence(pr);
+  const checks = prChecks(pr).map((check, index) => ({
+    ...check,
+    required: evidence.checks[index]!.required,
+  }));
   return {
     checks,
     failed: checks.filter((c) => workflow.failure.includes(c.outcome) && c.outcome !== "CANCELLED"),
     cancelled: checks.filter((c) => c.outcome === "CANCELLED"),
     pending: checks.filter(
-      (c) => workflow.unfinished.includes(c.outcome) && nonAdvisory.has(c.name),
+      (c) => workflow.unfinished.includes(c.outcome) && c.required !== "advisory",
     ),
     /** Outcomes that are neither a supported pass, failure nor unfinished state. */
     unknown: checks.filter(
       (c) =>
-        nonAdvisory.has(c.name) &&
+        c.required !== "advisory" &&
         ![...workflow.pass, ...workflow.failure, ...workflow.unfinished].includes(c.outcome),
     ),
     /** False when the check connection was truncated: more outcomes exist than were seen. */

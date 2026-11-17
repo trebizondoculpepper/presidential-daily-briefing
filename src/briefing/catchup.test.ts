@@ -909,6 +909,28 @@ describe("repository catch-up aggregation (#169)", () => {
     expect(JSON.stringify({ row, blockers })).not.toContain("verify");
   });
 
+  it.each(["IN_PROGRESS", "UNKNOWN"])(
+    "keeps same-name advisory run identity for %s (#710)",
+    (outcome) => {
+      const subject = withChecks(186, [
+        { name: "build", databaseId: 1, status: "COMPLETED", conclusion: "SUCCESS" },
+        { name: "build", databaseId: 2, status: outcome, conclusion: null },
+      ]);
+      subject.requiredChecks = {
+        head: subject.headRefOid,
+        base: subject.baseRefName,
+        expected: [{ context: "build", appId: 10 }],
+        checks: [
+          { name: "build", databaseId: 1, appId: 10, required: "required" },
+          { name: "build", databaseId: 2, appId: 20, required: "advisory" },
+        ],
+        gaps: [],
+      };
+      expect(snapshotPrReadiness(subject).ready).toBe(true);
+      expect(verificationOf(subject).blockers).toEqual([]);
+    },
+  );
+
   it("distinguishes a proven empty required set from absent or stale requirements (#710)", () => {
     const subject = withChecks(184, []);
     subject.requiredChecks = {
