@@ -515,7 +515,7 @@ export async function editJsonEntry(params: {
   }
   const nextText = `${JSON.stringify(updatedDoc, null, 2)}\n`;
   const action = ownership === "owned" || ownership === "foreign" ? "replace" : "create";
-  const diff = previewDiff(safeFile, originalText, nextText);
+  const diff = previewDiff(safeFile, inspected.canonicalText, desired);
   const record: ManifestRecord = {
     file: safeFile,
     kind: params.adapter.kind,
@@ -668,7 +668,7 @@ export async function removeJsonEntry(params: {
 
   const updatedDoc = params.adapter.remove(doc);
   const nextText = `${JSON.stringify(updatedDoc, null, 2)}\n`;
-  const diff = previewDiff(safeFile, originalText, nextText);
+  const diff = previewDiff(safeFile, inspected.canonicalText, null);
   if (params.dryRun) {
     return {
       action: "remove",
@@ -711,7 +711,7 @@ function findTomlTableRange(
   let end = lines.length;
   for (let i = start + 1; i < lines.length; i++) {
     const trimmed = lines[i]!.trim();
-    if (/^\[[^\]]+\]$/.test(trimmed) && !trimmed.startsWith(`[${tableHeader}.`)) {
+    if (/^\[\[?.+\]\]?(?:\s*#.*)?$/.test(trimmed) && !trimmed.startsWith(`[${tableHeader}.`)) {
       end = i;
       break;
     }
@@ -951,7 +951,7 @@ export async function editTomlTable(params: {
   }
 
   const action = ownership === "owned" || ownership === "foreign" ? "replace" : "create";
-  const diff = previewDiff(safeFile, originalText, nextText);
+  const diff = previewDiff(safeFile, observedBlock, canonicalDesired);
   const record: ManifestRecord = {
     file: safeFile,
     kind,
@@ -1126,7 +1126,7 @@ export async function removeTomlTable(params: {
     };
   }
 
-  const diff = previewDiff(safeFile, originalText, nextText);
+  const diff = previewDiff(safeFile, observedBlock, null);
   if (params.dryRun) {
     return {
       action: "remove",
