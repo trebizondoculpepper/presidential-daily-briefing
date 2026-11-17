@@ -42,14 +42,22 @@ pdb --help
 
 Run `pdb` inside a repository checkout, or pass `--repo owner/repository` explicitly. Update the global installation with the same `npm install -g` command. Add `@next` to the package name only when you want a development prerelease.
 
-This README describes the current repository version. Published releases may lag behind it; use your installed command's `--help` to confirm which features are available.
+This README describes the current repository version. Published releases may lag behind it; use your installed command's `--help` to confirm which features are available. The dated [rollout verification](doc/reports/pdb-rollout-verification.md) records the published version tested and its differences from source.
+
+Older releases that require an explicit agent support `pdb setup identity --role implementer --entry KEY --repo owner/repository`; follow its emitted commands. The automatic first-use flow below describes current source.
+
+For a one-off invocation without a global installation, name the executable explicitly:
+
+```sh
+npx --yes --package @trebizondoculpepper/presidential-daily-briefing pdb --help
+```
 
 ## Examples
 
 ### Find the next useful action
 
 ```sh
-pdb --repo owner/repository
+pdb --repo owner/repository --role implementer
 ```
 
 The briefing groups attention, PR follow-up, active work and eligible pickup. General pickup defaults to urgency and immediate-unlock impact; explicit age ordering is available for backlog cleanup:
