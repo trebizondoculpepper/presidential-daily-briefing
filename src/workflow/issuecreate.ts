@@ -375,7 +375,11 @@ export async function createIssue(
       fullName,
       "--title",
       request.title,
-      ...(userBody ? ["--body", userBody] : []),
+      ...(request.bodyFile !== undefined && request.bodyFile !== "-"
+        ? ["--body-file", request.bodyFile]
+        : userBody
+          ? ["--body-file", "<path-to-body-file>"]
+          : []),
       ...request.labels.flatMap((l) => ["--label", l]),
       ...(request.assignees ?? []).flatMap((a) => ["--assignee", a]),
     ];

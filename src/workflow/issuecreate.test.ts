@@ -606,11 +606,15 @@ describe("issue create: human ownership and verified context (#666, #674)", () =
         reason: "No PDB policy configuration (.github/triage.toml) found.",
       }),
     });
-    const result = await createIssue(request({ title: "Outside bug", labels: ["bug"] }), f.rt);
+    const result = await createIssue(
+      request({ title: "Outside bug", body: "secret body text", labels: ["bug"] }),
+      f.rt,
+    );
     expect(result.status).toBe("refused");
     expect(result.error?.id).toBe("UNVERIFIED_TARGET_CONTEXT");
     expect(result.recovery[0]).toContain("gh issue create");
     expect(result.recovery[0]).toContain(target);
+    expect(result.recovery[0]).not.toContain("secret body text");
     expect(f.posts).toHaveLength(0);
     expect(issueCreateExitCode(result)).toBe(1);
   });
