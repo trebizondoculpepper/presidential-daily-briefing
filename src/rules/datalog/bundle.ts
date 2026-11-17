@@ -13,6 +13,7 @@ import type { Schema } from "datascript";
 export const requiredQueries = [
   "check-ready",
   "check-blockers",
+  "pr-blockers",
   "q0",
   "declared-overrides",
   "q1",

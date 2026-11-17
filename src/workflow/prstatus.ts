@@ -1,4 +1,4 @@
-import { evaluateCheckPolicy } from "../rules/datalog/engine.js";
+import { evaluateCheckPolicy, evaluatePrReadiness } from "../rules/datalog/engine.js";
 import {
   hydrateRequiredChecks,
   requiredCheckEvidence,
@@ -440,109 +440,58 @@ export function prStatus(
       !pr.reviews.pageInfo?.hasPreviousPage &&
       !pr.reviewThreads.pageInfo.hasNextPage,
   });
-  const declaredCoverage =
-    policy.detail.effective === "codex-or-coderabbit" ||
-    policy.detail.effective === "codex-or-copilot";
-  // A satisfied declared policy makes another provider's pending or stale state detail only.
-  const optionalDetail = declaredCoverage && policy.headReviewed;
-
-  /** Every current blocker, simultaneously; no single merge verdict. */
-  const blockers: string[] = [];
   const open = pr.state === "OPEN";
-  if (!open) blockers.push(`pull request is ${pr.merged ? "merged" : pr.state.toLowerCase()}`);
-  // Merge-readiness blockers only make sense for an open pull request.
-  if (open) {
-    if (pr.isDraft) blockers.push("draft");
-    blockers.push(...checkPolicy.blockers);
-    for (const c of byClass("failed")) blockers.push(`check ${c.name} failed`);
-    for (const c of byClass("cancelled"))
-      blockers.push(
-        `check ${c.name} cancelled${c.noRunTime ? " without running (likely infrastructure, not a code defect)" : ""}: verification incomplete`,
-      );
-    if (byClass("pending").length)
-      blockers.push(`${byClass("pending").length} check(s) still pending: waiting`);
-    if (pr.mergeable === "CONFLICTING") blockers.push("merge conflicts with the base branch");
-    else if (pr.mergeable === "UNKNOWN")
-      blockers.push("mergeability unknown (GitHub still computing)");
-    // A merge state outside the registered current states (workflow.currentMergeStates, as used
-    // by the pr-merge-state rule) blocks merging. BLOCKED is explained below; DIRTY and DRAFT
-    // are already reported as conflicts and draft.
-    const state = pr.mergeStateStatus;
-    if (
-      !workflow.currentMergeStates.includes(state) &&
-      state !== "BLOCKED" &&
-      !(state === "DIRTY" && pr.mergeable === "CONFLICTING") &&
-      !(state === "DRAFT" && pr.isDraft) &&
-      !(state === "UNKNOWN" && pr.mergeable === "UNKNOWN")
-    )
-      blockers.push(
-        state === "BEHIND"
-          ? `branch is behind ${pr.baseRefName}: update it before merging`
-          : `merge state ${state} is not current: merging is not possible yet`,
-      );
-    if (pr.reviewDecision === "CHANGES_REQUESTED") blockers.push("changes requested");
-    if (pr.reviewDecision === "REVIEW_REQUIRED")
-      blockers.push("a required approving review is missing");
-    if (unresolved.length) blockers.push(`${unresolved.length} unresolved review thread(s)`);
-    // A declared policy reports only authenticated provider findings (below); legacy keeps this.
-    if (
-      !declaredCoverage &&
-      policy.detail.effective !== "unknown" &&
-      codex?.has_unresolved_findings &&
-      codex.commit_sha === head
-    )
-      blockers.push("Codex reports unresolved findings on the current head");
-    else if (
-      !optionalDetail &&
-      codex &&
-      codex.commit_sha !== head &&
-      !codexCleanReceipt &&
-      // A formal Codex review or clean receipt of the current head covers it even if the marker comment is stale.
-      !pr.reviews.nodes.some(
-        (r) => answerer(r.author?.login) === reviewerFor.codex && r.commit?.oid === head,
-      )
-    )
-      blockers.push("Codex's latest review is for an older commit; current head not yet covered");
-    // A declared provider's known finding is a veto whatever the other provider says (#301).
-    for (const f of declaredCoverage || policy.detail.effective === "unknown"
-      ? policy.detail.findings
-      : [])
-      if (
-        !(
-          f.provider === "codex" &&
-          blockers.includes("Codex reports unresolved findings on the current head")
-        )
-      )
-        blockers.push(
-          `${reviewProviders[f.provider].label} reports unresolved findings on the current head ${f.source}`,
-        );
-    if (declaredCoverage && !policy.headReviewed && !policy.detail.findings.length)
-      blockers.push(
-        `review policy ${policy.detail.effective}: no configured provider has accepted the current head yet (${policy.detail.providers.map((o) => `${reviewProviders[o.provider].label} ${o.state}`).join(", ")})`,
-      );
-    if (policy.detail.effective === "unknown")
-      blockers.push(
-        `review policy unknown (${reviewPolicy.state === "unknown" ? reviewPolicy.reason : "unresolved"}): review coverage cannot be established`,
-      );
-    if (optionalDetail) {
-      // Coverage is satisfied: an outstanding request or running optional review is detail.
-    } else if (request?.status === "no reaction yet")
-      blockers.push("a review was requested and has had no reaction");
-    else if (request?.status.startsWith("review in progress"))
-      blockers.push(`waiting for the requested review to finish (${request.status})`);
-    // An automatically started review is still running even when nobody asked for it.
-    else if (
-      !codexCleanReceipt &&
-      codex?.commit_sha === head &&
-      codex.status &&
-      codex.status !== "completed"
-    )
-      blockers.push(`waiting for Codex's review of the current head to finish (${codex.status})`);
-  }
-
-  // GitHub says merging is blocked but nothing above explains it: report that, never "no blocker".
-  if (open && !blockers.length && pr.mergeStateStatus === "BLOCKED")
-    blockers.push("GitHub reports merging is blocked (branch protection); inspect the rules");
+  const readiness = evaluatePrReadiness({
+    state: pr.state,
+    closedLabel: pr.merged ? "merged" : pr.state.toLowerCase(),
+    draft: !!pr.isDraft,
+    baseRefName: pr.baseRefName,
+    mergeable: pr.mergeable,
+    mergeStateStatus: pr.mergeStateStatus,
+    reviewDecision: pr.reviewDecision ?? null,
+    unresolvedThreadCount: unresolved.length,
+    pendingCount: byClass("pending").length,
+    checkEvidence,
+    noRunTimeChecks: contexts.map((c) => c.noRunTime),
+    policy: {
+      effective: policy.detail.effective,
+      headReviewed: policy.headReviewed,
+      hasFindings: policy.detail.findings.length > 0,
+      summary: policy.detail.providers
+        .map((o) => `${reviewProviders[o.provider].label} ${o.state}`)
+        .join(", "),
+      unknownReason: reviewPolicy.state === "unknown" ? reviewPolicy.reason : "unresolved",
+      findings: policy.detail.findings.map((f) => ({
+        provider: f.provider,
+        label: reviewProviders[f.provider].label,
+        source: f.source,
+      })),
+    },
+    codex: {
+      findingsOnHead: Boolean(codex?.has_unresolved_findings && codex.commit_sha === head),
+      staleHead: Boolean(
+        codex &&
+        codex.commit_sha !== head &&
+        !codexCleanReceipt &&
+        !pr.reviews.nodes.some(
+          (r) => answerer(r.author?.login) === reviewerFor.codex && r.commit?.oid === head,
+        ),
+      ),
+      runningStatus:
+        !codexCleanReceipt &&
+        codex?.commit_sha === head &&
+        codex.status &&
+        codex.status !== "completed"
+          ? codex.status
+          : null,
+    },
+    reviewRequestStatus:
+      request &&
+      (request.status === "no reaction yet" || request.status.startsWith("review in progress"))
+        ? request.status
+        : null,
+  });
+  const blockers = readiness.blockers;
 
   const incomplete: string[] = open ? [...checkEvidence.gaps] : [];
   if (rollup?.contexts.pageInfo.hasNextPage) incomplete.push("more than 100 check contexts");
@@ -617,9 +566,7 @@ export function prStatus(
     reviewRequest: request,
     linkedIssues,
     blockers,
-    verdict: blockers.length
-      ? "Blocked: address every listed blocker."
-      : "No blocker found in current evidence: inspect the diff and consider merging. This is not approval.",
+    verdict: readiness.verdict,
     completeness: { complete: !incomplete.length, warnings: incomplete },
   };
 }

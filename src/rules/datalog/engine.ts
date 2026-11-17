@@ -350,3 +350,139 @@ export function evaluateCheckPolicy(input: import("./check-types.js").CheckEvide
     rulesHash,
   };
 }
+
+export interface PrReadinessInput {
+  state: string;
+  closedLabel: string;
+  draft: boolean;
+  baseRefName: string;
+  mergeable: string;
+  mergeStateStatus: string;
+  reviewDecision: string | null;
+  unresolvedThreadCount: number;
+  pendingCount: number;
+  checkEvidence: import("./check-types.js").CheckEvidence;
+  noRunTimeChecks?: readonly boolean[];
+  policy: {
+    effective: string;
+    headReviewed: boolean;
+    hasFindings: boolean;
+    summary: string;
+    unknownReason?: string;
+    findings: readonly { provider: string; label: string; source: string }[];
+  };
+  codex: {
+    findingsOnHead: boolean;
+    staleHead: boolean;
+    runningStatus: string | null;
+  };
+  reviewRequestStatus: string | null;
+}
+
+/** Pure PR-readiness diagnostic seam (#707); all blocker rules live in native EDN. */
+export function evaluatePrReadiness(input: PrReadinessInput): {
+  ready: boolean;
+  blockers: string[];
+  reasons: { ruleId: string; text: string }[];
+  verdict: string;
+  policyVersion: number;
+  rulesHash: string;
+} {
+  const facts: Datom[] = [];
+  for (const [attr, vals] of Object.entries(bundle.constants)) {
+    for (const v of vals) facts.push([1, attr, v]);
+  }
+  facts.push(
+    [100, "state", input.state],
+    [100, "closed-label", input.closedLabel],
+    [100, "draft", input.draft],
+    [100, "base-ref", input.baseRefName],
+    [100, "mergeable", input.mergeable],
+    [100, "merge-state", input.mergeStateStatus],
+    [100, "review-decision", input.reviewDecision ?? ""],
+    [100, "unresolved-threads", input.unresolvedThreadCount],
+    [100, "pending-count", input.pendingCount],
+    [100, "required-evidence-complete", input.checkEvidence.complete],
+    [100, "policy-effective", input.policy.effective],
+    [100, "policy-head-reviewed", input.policy.headReviewed],
+    [100, "policy-has-findings", input.policy.hasFindings],
+    [100, "policy-summary", input.policy.summary],
+    [100, "codex-findings", input.codex.findingsOnHead],
+    [100, "codex-stale", input.codex.staleHead],
+  );
+  if (input.policy.unknownReason)
+    facts.push([100, "policy-unknown-reason", input.policy.unknownReason]);
+  if (input.codex.runningStatus) facts.push([100, "codex-running", input.codex.runningStatus]);
+  if (input.reviewRequestStatus)
+    facts.push([100, "review-request-status", input.reviewRequestStatus]);
+  for (const gap of input.checkEvidence.gaps) facts.push([100, "required-evidence-gap", gap]);
+  for (const name of input.checkEvidence.missing) facts.push([100, "missing-required", name]);
+
+  let nextId = 101;
+  for (const [i, check] of input.checkEvidence.checks.entries()) {
+    const id = nextId++;
+    facts.push(
+      [100, "check", id],
+      [id, "name", check.name],
+      [id, "outcome", check.outcome],
+      [id, "required", check.required],
+      [id, "no-run-time", Boolean(input.noRunTimeChecks?.[i])],
+    );
+  }
+  for (const finding of input.policy.findings) {
+    const id = nextId++;
+    facts.push(
+      [100, "provider-finding", id],
+      [id, "provider", finding.provider],
+      [id, "provider-label", finding.label],
+      [id, "finding-source", finding.source],
+    );
+  }
+
+  const rank = (code: string): number => {
+    if (code === "PR-CLOSED") return 0;
+    if (code === "PR-DRAFT") return 1;
+    if (code.startsWith("RC-")) return 2;
+    if (code === "PR-CHECK-FAILED") return 3;
+    if (code === "PR-CHECK-CANCELLED") return 4;
+    if (code === "PR-CHECK-PENDING") return 5;
+    if (code === "PR-CONFLICTS" || code === "PR-MERGEABLE-UNKNOWN") return 6;
+    if (code === "PR-BEHIND" || code === "PR-MERGE-STATE") return 7;
+    if (code === "PR-CHANGES-REQUESTED") return 8;
+    if (code === "PR-REVIEW-REQUIRED") return 9;
+    if (code === "PR-UNRESOLVED-THREADS") return 10;
+    if (code === "PR-CODEX-FINDINGS" || code === "PR-CODEX-STALE") return 11;
+    if (code === "PR-PROVIDER-FINDINGS") return 12;
+    if (code === "PR-POLICY-UNSATISFIED" || code === "PR-POLICY-UNKNOWN") return 13;
+    if (
+      code === "PR-REVIEW-REQUEST-NONE" ||
+      code === "PR-REVIEW-REQUEST-PENDING" ||
+      code === "PR-CODEX-RUNNING"
+    )
+      return 14;
+    return 15;
+  };
+  const db = ds.init_db(facts, bundle.schema);
+  const raw = ds.q(bundle.queries["pr-blockers"], db, bundle.clauses) as [number, string, string][];
+  const seen = new Set<string>();
+  const reasons: { ruleId: string; text: string }[] = [];
+  for (const [, ruleId, text] of raw.sort(
+    (a, b) => rank(a[1]) - rank(b[1]) || a[2].localeCompare(b[2]),
+  )) {
+    const key = `${ruleId}:${text}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    reasons.push({ ruleId, text });
+  }
+  const blockers = reasons.map((r) => r.text);
+  return {
+    ready: blockers.length === 0,
+    blockers,
+    reasons,
+    verdict: blockers.length
+      ? "Blocked: address every listed blocker."
+      : "No blocker found in current evidence: inspect the diff and consider merging. This is not approval.",
+    policyVersion,
+    rulesHash,
+  };
+}
