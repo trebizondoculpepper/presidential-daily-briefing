@@ -11,6 +11,7 @@ import type { LocalIdentitySession } from "../config/serveridentity.js";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { ReadRuntime } from "../briefing/service.js";
 import type { ConfigFileSystem, GitRunner } from "../config/config.js";
+import type { GlobalConfigFileSystem } from "../config/globalconfig.js";
 import type { Environment } from "../config/harness.js";
 import type { dependencyReport as DependencyReportFn } from "../github/dependencies.js";
 import type {
@@ -56,6 +57,13 @@ export interface ServeReadRuntime {
   projectRuntime?: (project: string | undefined) => Pick<ReadRuntime, "estimation" | "guide">;
 }
 
+/** The verified per-user configuration boundary `serve` resolves and records projects in (#805). */
+export interface GlobalConfigBoundary {
+  /** The per-OS-user directory holding `config.toml` (doc/design/configuration-service.md). */
+  readonly dir: string;
+  readonly fs?: GlobalConfigFileSystem;
+}
+
 /** Injected boundaries of `pdb serve`. */
 export interface ServeRuntime {
   /** Trusted local startup preparation; tests inject disposable boundaries. */
@@ -64,6 +72,12 @@ export interface ServeRuntime {
   cwd?: string;
   /** Git runner for resolving nested `--project` paths and worktrees to their root (#569). */
   git?: GitRunner;
+  /**
+   * Verified global configuration boundary (#805). When present, `serve` resolves saved
+   * registrations and the working directory's repository, and records new ones; when absent it
+   * serves only the explicit targets.
+   */
+  globalConfig?: GlobalConfigBoundary;
   /** Resolve a local checkout to its owner/name (startup only). */
   currentRepository: (cwd?: string, signal?: AbortSignal) => Promise<string>;
   /** The gh host and login (startup, and before live collections at most once per TTL). */

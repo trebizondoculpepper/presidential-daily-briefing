@@ -113,8 +113,10 @@ describe("pdb serve arguments (#373)", () => {
       expect(() => serveArguments(["--repo", "o/n", "--ttl", ttl])).toThrow(/--ttl must be/);
   });
 
-  it("requires a repository or project and never falls back to the working directory", () => {
-    expect(() => serveArguments([])).toThrow("pdb serve needs --repo owner/name or --project PATH");
+  it("accepts no explicit target: saved registrations and the checkout decide (#805)", () => {
+    const options = serveArguments([]);
+    expect(options.repos).toEqual([]);
+    expect(options.projects).toEqual([]);
   });
 
   it("rejects a non-loopback host without --allow-remote", () => {
@@ -147,9 +149,24 @@ describe("pdb serve arguments (#373)", () => {
   });
 
   it("exits 2 with guidance for usage errors, through the CLI", async () => {
-    const h = harness();
+    const h = harness({
+      cwd: "/not/a/checkout",
+      git: async () => {
+        throw new Error("not a git repository");
+      },
+      globalConfig: {
+        dir: "/global",
+        fs: {
+          readText: async () => null,
+          writeText: async () => undefined,
+          rename: async () => undefined,
+          remove: async () => undefined,
+          makeDirectory: async () => undefined,
+        },
+      },
+    });
     expect(await main(["serve"], async () => {}, { ...stubRuntime, serve: h.runtime })).toBe(2);
-    expect(h.err.join("")).toContain("pdb serve needs --repo owner/name");
+    expect(h.err.join("")).toContain("nothing to serve");
     const helped = harness();
     expect(
       await main(["serve", "--help"], async () => {}, { ...stubRuntime, serve: helped.runtime }),
@@ -157,7 +174,7 @@ describe("pdb serve arguments (#373)", () => {
     expect(helped.out.join("")).toMatch(/^Usage: pdb serve/);
     const top: string[] = [];
     await main(["--help"], async (text) => void top.push(text), stubRuntime);
-    expect(top.join("")).toContain("serve --repo owner/name");
+    expect(top.join("")).toContain("serve [--repo owner/name | --project PATH]");
   });
 
   it("resolves relative and nested --project paths against invoking cwd via git root (#569)", async () => {

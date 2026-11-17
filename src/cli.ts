@@ -350,8 +350,9 @@ ${crashDisclosure()}
                         limits are unmetered (quotas --help)
   rebrief init|check|ack --json  Shared bounded continuation core (rebrief --help); no hook installed
   rebrief codex-stop     Experimental native stdin/JSON adapter (rebrief codex-stop --help)
-  serve --repo owner/name | --project PATH [--port N]  Foreground local HTTP server: read-only
-                        JSON API and HTTP MCP over a short-lived memory cache (serve --help)
+  serve [--repo owner/name | --project PATH]... [--port N]  Foreground local HTTP server:
+                        read-only JSON API and HTTP MCP over a short-lived memory cache; without
+                        targets, saved registrations and this checkout are served (serve --help)
   team [--stale-hours N]  Read-only: each agent's claims, linked PRs, activity and warnings
   who N [--stale-hours N]  Read-only: who is working on ticket N? Claims, PRs, activity,
                         handoff evidence and contradictions in one operation
