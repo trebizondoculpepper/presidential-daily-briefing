@@ -449,11 +449,13 @@ export async function runConfig(
     const entry = keyEntry(parsed.key);
     // The baseline is read-only and in memory: a short-lived CLI reports what this one write
     // changed, never a persisted history (#815, doc/design/configuration-service.md).
+    // The baseline is also the write's precondition: if another writer changed the file since
+    // this read, the service refuses instead of reporting changes against a stale snapshot.
     const before = await loadConfig(target.root, fs).catch(() => null);
     const write = await updateConfig(
       target,
       new Map([[entry.key, typedValue(entry, parsed.value)]]),
-      { fs },
+      before ? { fs, expectedRaw: before.raw } : { fs },
     );
     const setting = settingFor(write.config, entry.key);
     const where = at(write.config);
@@ -798,7 +800,11 @@ async function runGlobal(
     );
   const value = await parsedGlobalValue(entry.kind, parsed.key, parsed.value);
   const before = await loadGlobalConfig(dir, fs).catch(() => null);
-  const write = await writeGlobalConfig(dir, new Map([[parsed.key, value]]), { fs });
+  const write = await writeGlobalConfig(
+    dir,
+    new Map([[parsed.key, value]]),
+    before ? { fs, expectedRaw: before.raw } : { fs },
+  );
   const setting = write.config.settings.find((s) => s.key === parsed.key)!;
   const changes = before ? globalChanges(before.explicit, write.config.explicit) : [];
   const result = {
