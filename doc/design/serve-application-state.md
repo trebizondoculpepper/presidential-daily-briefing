@@ -40,7 +40,8 @@ type KeyState =
   | { status: "in-sync" } // saved equals applied
   | { status: "pending-live"; reason: string } // live key differs, not yet applied
   | { status: "failed-live"; reason: string; error: string } // live application of this revision failed
-  | { status: "restart-required"; reason: string }; // restart key differs from the running value
+  | { status: "restart-required"; reason: string } // restart key differs from the running value
+  | { status: "overridden"; source: string }; // the running value comes from a CLI override
 
 interface KeyView {
   key: string;
@@ -65,13 +66,14 @@ interface ApplicationStateView {
 
 Rules, each covered by a test:
 
-1. **Initial state:** at startup every key is `in-sync`, and `appliedRevision` is the startup revision.
+1. **Initial state:** at startup every key that isn't overridden is `in-sync`, and `appliedRevision` is the startup revision. A key whose running value comes from a CLI override (for example `--port 9000` while the file says 4372) is `overridden`, never `restart-required`: the file wasn't what was applied, so a difference from it is expected.
 2. **Restart keys:** a saved value that differs from the running value is `restart-required`. Reverting the saved value to the running value clears it, with no flag left over.
 3. **Live keys:** a saved value that differs from applied is `pending-live` until #808 reports. Success advances `applied` and `appliedRevision` to the revision that was applied. Failure leaves `applied` unchanged and marks the key `failed-live` with the error. A failure never implies success.
 4. **No-op reload:** a reload whose saved revision equals `appliedRevision` changes nothing and reports nothing new.
 5. **Partial application:** if #808 applies some live keys and not others, only the applied keys advance, and the rest stay `pending-live` or `failed-live` with their reasons.
 6. **Invalid or unreadable saved config:** `readError` is set, `saved` is `null` for every key, and `applied` keeps the last valid values, as serve-configuration-layers.md already requires.
 7. **After a restart:** a new process starts with fresh snapshots, so earlier restart notices disappear by construction.
+8. **Overridden keys:** an `overridden` key shows its saved value for information and never produces `pending-live` or `restart-required`, whatever is saved later. Its saved value takes effect only on a restart without the override. An acceptance case starts with `--port 9000` over a saved 4372, observes the unchanged file and expects `overridden` with no restart notice. It then saves 5000 and still expects no restart notice.
 
 ## Interface
 
@@ -103,4 +105,4 @@ The service makes no reads or writes itself: callers pass in the snapshots, so t
 
 ## Delivery and validation
 
-One implementation PR after this contract merges: `src/serve/appstate.ts` with injected-input tests covering rules 1–7, plus the consequence registry next to `GLOBAL_KEYS`. Wiring into reload (#813), live application (#808) and the Settings page (#584) belongs to those tickets.
+One implementation PR after this contract merges: `src/serve/appstate.ts` with injected-input tests covering rules 1–8, plus the consequence registry next to `GLOBAL_KEYS`. Wiring into reload (#813), live application (#808) and the Settings page (#584) belongs to those tickets.
