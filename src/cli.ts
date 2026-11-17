@@ -2645,13 +2645,25 @@ async function run(
         options.label,
         runtime.query ?? ghQuery,
       );
+    const rawCheckpointText = options.checkpoint
+      ? `Checkpoint: ${!snapshot.since ? "establishing current baseline" : `previous window ${snapshot.since}`}; Advance only after complete successful live output; offline/incomplete results never advance.\n`
+      : "";
+    const checkpointText =
+      rawCheckpointText && rawCheckpointText.length + 31 <= options.maxChars
+        ? rawCheckpointText
+        : "";
+    const briefingBudget = options.maxChars - checkpointText.length;
     // #368: a shortlist read is presented through the shared presentation that ranked it (same
     // configuration, permission cache and read meter), with its PROVISIONAL notice in budget.
-    const shortlistLineText = snapshot.shortlist ? shortlistLine(snapshot, options.maxChars) : "";
+    const shortlistLineText = snapshot.shortlist ? shortlistLine(snapshot, briefingBudget) : "";
     const { report, text } =
       snapshot.shortlist && presentation
         ? withShortlist(
-            await presentation.present(snapshot, true, shortlistLineText.length),
+            await presentation.present(
+              snapshot,
+              true,
+              shortlistLineText.length + checkpointText.length,
+            ),
             snapshot,
             presentation.meter,
             shortlistLineText,
@@ -2660,6 +2672,7 @@ async function run(
             snapshot,
             {
               ...options,
+              maxChars: briefingBudget,
               ...(human ? { employingHuman: human } : {}),
               ...(labels ? { labels } : {}),
               ...(stale ? { stale } : {}),
@@ -2710,9 +2723,6 @@ async function run(
             "Advance only after complete successful live output; offline/incomplete results never advance.",
         }
       : null;
-    const checkpointText = checkpoint
-      ? `Checkpoint: ${checkpoint.establishesBaseline ? "establishing current baseline" : `previous window ${checkpoint.previousWindow}`}; ${checkpoint.policy}\n`
-      : "";
     await output(
       options.json
         ? JSON.stringify({ ...report, checkpoint }, null, 2) + "\n"
