@@ -50,9 +50,7 @@ import {
 } from "./github/dependencies.js";
 import { briefingRoleNames, roleSectionIds } from "./briefing/roles.js";
 import { labelsFromSnapshot, normalizeLabelRequest } from "./github/labels.js";
-import { doctorStaleHours, ticketDoctor, ticketDoctorText } from "./workflow/ticketdoctor.js";
-import { diagnoseClosedDrift, diagnoseDelivery } from "./workflow/deliverydoctor.js";
-import { deliveryRead, withDeliveryCompleteness } from "./workflow/deliveryread.js";
+import { doctorStaleHours } from "./workflow/ticketdoctor.js";
 import {
   applyPlan,
   claimPolicy,
@@ -80,9 +78,7 @@ import {
   describeCheckout,
 } from "./updates/checkout.js";
 import { installedVersion, optOutEnv, legacyOptOutEnv, updateAdvisory } from "./updates/updates.js";
-import { defaultStaleHours, teamView } from "./workflow/team.js";
-import { readTeamActivity } from "./workflow/retainedfacts.js";
-import type { GraphQuery } from "./workflow/claims.js";
+import { defaultStaleHours } from "./workflow/team.js";
 import { migrationPlanText, planMigration } from "./github/migration.js";
 import {
   humanRole,
@@ -169,6 +165,7 @@ import type { Query, Rest } from "./github/github.js";
 import type { Snapshot } from "./github/types.js";
 import {
   readPullRequest,
+  readTicketDoctor,
   readReviewHistory,
   readTeam,
   readWho,
@@ -1753,51 +1750,24 @@ async function run(
     const impact = await metricStatus(impactMetric, snapshot.repository, runtime.estimation).catch(
       () => "unknown" as const,
     );
-    // #192: delivery records are folded with the per-run permission cache and evaluated live;
-    // offline (or without a permission boundary) they are reported unknown, never absent.
     const rest = values.offline ? undefined : runtime.rest;
-    const delivery = await diagnoseDelivery(snapshot, {
-      trust: rest ? markerTrust(permissionLookup(snapshot.repository, rest)) : undefined,
-      live: rest ? { query: runtime.query ?? ghQuery, rest } : undefined,
-    });
-    const closedDrift =
-      values.since !== undefined && rest
-        ? await diagnoseClosedDrift(snapshot.repository, new Date(values.since).toISOString(), {
-            trust: markerTrust(permissionLookup(snapshot.repository, rest)),
-            live: { query: runtime.query ?? ghQuery, rest },
-          })
-        : undefined;
-    // #413: claim activity, read live with the claim guard's own reader (bounded like team).
-    const claimAgents = teamView(snapshot, {}).agents.map((a) => a.agent);
-    const teamActivity =
-      rest && claimAgents.length
-        ? await readTeamActivity(snapshot, claimAgents, {
-            query: (runtime.query ?? ghQuery) as GraphQuery,
-            permission: permissionLookup(snapshot.repository, rest),
-          })
-        : undefined;
-    const report = ticketDoctor(snapshot, {
-      delivery,
-      closedDrift,
-      ...(teamActivity?.activity.size ? { claimActivity: teamActivity.activity } : {}),
-      ...(teamActivity?.omitted.length ? { omittedAgents: teamActivity.omitted } : {}),
-      staleHours,
-      limit,
-      now: runtime.now?.() ?? new Date(),
-      offline: !!values.offline,
-      impactEnabled: impact !== "disabled",
-    });
-    // #192: the same delivery block as the briefing, for tickets with delivery evidence.
-    const read = deliveryRead(snapshot, delivery);
-    // Per-ticket coverage gaps join the scan's completeness, as on every read surface.
-    const coverage = read.omissions.filter((o) => !delivery.warnings.includes(o));
-    const doctor = withDeliveryCompleteness(report, {
-      complete: !coverage.length,
-      omissions: coverage,
-    });
-    const json = read.tickets.length ? { ...doctor, delivery: read } : doctor;
-    await output(values.json ? JSON.stringify(json, null, 2) + "\n" : ticketDoctorText(doctor));
-    return doctor.completeness.complete ? 0 : 2;
+    const read = await readTicketDoctor(
+      snapshot,
+      {
+        staleHours,
+        limit,
+        now: runtime.now?.() ?? new Date(),
+        offline: !!values.offline,
+        impactEnabled: impact !== "disabled",
+        ...(values.since !== undefined ? { since: values.since } : {}),
+      },
+      {
+        trust: rest ? markerTrust(permissionLookup(snapshot.repository, rest)) : undefined,
+        live: rest ? { query: runtime.query ?? ghQuery, rest } : undefined,
+      },
+    );
+    await output(values.json ? JSON.stringify(read.report, null, 2) + "\n" : read.text);
+    return read.complete ? 0 : 2;
   }
   if (args[0] === "submit" || args[0] === "deliverables") {
     const submit = args[0] === "submit";
