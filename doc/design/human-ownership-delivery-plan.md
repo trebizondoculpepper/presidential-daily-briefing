@@ -1,5 +1,8 @@
 # Review index: small workflow and dashboard tickets
 
+See [small dashboard and delivery slices](small-dashboard-delivery.md) for the
+current owner-approved child-ticket map and shipped-versus-remaining boundaries.
+
 Drafting index for the owner's 2026-11-16 review. Ticket bodies and native dependencies carry acceptance and sequencing; this index is not a competing scheduler. PR #671 remains draft for owner review. No implementation activation or live ownership migration was performed by this planning pass.
 
 The scope is the discussed ownership, issue/review bugs, identity, architecture/audit and Pipeline Health batch: **41 issues**, including coordination parents. Every issue has an impact label and provenance rationale recorded through PDB. Impact is benefit, not effort or summed child points; child complexity is separately estimated. Waiting for prerequisites is excluded. Coordination parents do not reserve an omnibus runtime PR.
