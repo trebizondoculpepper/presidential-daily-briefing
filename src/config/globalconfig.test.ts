@@ -125,10 +125,20 @@ repository = "c/d"
     await expect(
       validateGlobalValue("serve.projects", [{ repository: "a/b", localRoot: "../other" }]),
     ).rejects.toMatchObject({ code: "invalid-value" });
-    // An absolute root passes the default verifier.
+    // Absolute roots pass the default verifier (POSIX, drive letter, Windows UNC).
     await expect(
       validateGlobalValue("serve.projects", [{ repository: "a/b", localRoot: "/a/b" }]),
     ).resolves.toEqual([{ host: "github.com", repository: "a/b", localRoot: "/a/b" }]);
+    await expect(
+      validateGlobalValue("serve.projects", [{ repository: "a/b", localRoot: "C:\\checkouts\\a" }]),
+    ).resolves.toEqual([{ host: "github.com", repository: "a/b", localRoot: "C:\\checkouts\\a" }]);
+    await expect(
+      validateGlobalValue("serve.projects", [
+        { repository: "a/b", localRoot: "\\\\server\\share\\a" },
+      ]),
+    ).resolves.toEqual([
+      { host: "github.com", repository: "a/b", localRoot: "\\\\server\\share\\a" },
+    ]);
   });
 
   it("refuses a future schema version without writing", async () => {
