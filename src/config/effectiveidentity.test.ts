@@ -477,6 +477,39 @@ describe("effective identity preparation (#677)", () => {
       expect(await f.fs.readText(f.file)).not.toContain("earlier_agent");
     }));
 
+  it.each(["same-session", "different-session"] as const)(
+    "converges when %s commits between the selection snapshot and entry read",
+    async (kind) =>
+      fixture(async (f) => {
+        let reads = 0;
+        let winner: Awaited<ReturnType<typeof f.setup>> | undefined;
+        const result = await run(
+          f,
+          {},
+          {
+            fs: {
+              ...f.fs,
+              readText: async (path) => {
+                if (path === f.file && ++reads === 3)
+                  winner = await f.setup(
+                    kind === "same-session" ? env.CODEX_THREAD_ID : "other-session",
+                  );
+                return f.fs.readText(path);
+              },
+            },
+          },
+        );
+        expect(winner).toBeDefined();
+        expect(result.state).toBe("resolved");
+        expect(result.diagnostic).toBeNull();
+        if (kind === "same-session") expect(result.agent).toBe(winner!.record.name);
+        else expect(result.agent).not.toBe(winner!.record.name);
+        expect((await readIdentityBindings(f.root, f.fs)).size).toBe(
+          kind === "same-session" ? 1 : 2,
+        );
+      }),
+  );
+
   it("invalid selections perform no human lookup or local initialization", async () =>
     fixture(async (f) => {
       let reads = 0;

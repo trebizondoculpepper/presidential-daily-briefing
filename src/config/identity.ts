@@ -414,6 +414,13 @@ export async function readBoundIdentity(
 ): Promise<{ entry: string; record: IdentityRecord } | null> {
   validateIdentityBindingKey(key);
   const document = await bindingDocument(root, fs);
+  return boundIdentity(document, key);
+}
+
+function boundIdentity(
+  document: Table | null,
+  key: string,
+): { entry: string; record: IdentityRecord } | null {
   const entry = bindingsFor(document).get(key);
   if (entry === undefined) return null;
   const record = recordFor(document, entry);
@@ -428,6 +435,33 @@ export async function readBoundIdentity(
 
 const agentKeys = (document: Table | null): string[] =>
   document !== null && isTable(document.agents) ? Object.keys(document.agents) : [];
+
+/** Canonical entry keys, bindings and bound record from one atomic document snapshot.
+ * Legacy keys are needed only for an unbound session; their values never leave this reader.
+ */
+export async function readIdentityBindingSelection(
+  root: string,
+  key: string,
+  fs: ConfigFileSystem = nodeFileSystem,
+): Promise<{
+  bindings: ReadonlyMap<string, string>;
+  bound: { entry: string; record: IdentityRecord } | null;
+  entries: string[];
+}> {
+  validateIdentityBindingKey(key);
+  const document = await bindingDocument(root, fs);
+  const bindings = bindingsFor(document);
+  const bound = boundIdentity(document, key);
+  const entries = agentKeys(document);
+  if (bound) return { bindings, bound, entries };
+  try {
+    const raw = await fs.readText(join(root, LEGACY_IDENTITY_FILE));
+    const legacy = agentKeys(raw === null ? null : parseLegacyIdentityDocument(raw));
+    return { bindings, bound, entries: [...new Set([...entries, ...legacy])] };
+  } catch (error) {
+    throw error instanceof ConfigError ? error : unreadable(LEGACY_IDENTITY_FILE, error);
+  }
+}
 
 /**
  * Entry keys present in pdb.toml and in a legacy agent-inbox.toml at the same root

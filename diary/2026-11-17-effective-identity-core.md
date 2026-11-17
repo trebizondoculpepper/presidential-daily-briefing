@@ -30,3 +30,10 @@ identity was used or written by these tests.
 Validation: `npm run check` (zero errors; 54 existing warnings), `npm test -- --maxWorkers 1`
 (140 files, 2,590 passed and one skipped), `npm run build`, and a targeted rerun of 88 identity
 tests after the final guard adjustment. The normal Vite+ pre-commit hook runs on commit.
+
+Codex review identified a mixed-snapshot selection race: a concurrent initializer could add a
+coherent entry/binding after the early binding read but before the entry inventory, causing a
+false ambiguity refusal. The selection reader now returns canonical keys, bindings and the
+bound record from one atomic document snapshot. Deterministic same-session and different-session
+interleavings both failed on the original reviewed head and pass with this fix. The locked writer
+still rechecks selection before allocating. Full checks are rerun before the review update.
