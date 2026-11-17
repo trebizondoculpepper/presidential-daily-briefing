@@ -23,8 +23,9 @@ supported; it is not evidence the rule has no effect. Keep existing policy/schem
 versions and decision shapes for this additive documentation field; never remove
 or reinterpret a required field. If a separate project-rule format needs a
 version change, follow its own explicit compatibility contract rather than accept
-unknown executable syntax. The artifact revision/hash may change as source
-provenance; that is not a claim that a ranking or admission decision changed.
+unknown executable syntax. The narration revision changes as documentation provenance; that is not a claim
+that ranking or admission changed. Preserve existing project base-hash pins when
+only these new purposes change, as specified below.
 
 Author purposes for built-in rules displayed by this page in the first delivery.
 Project/override rules may supply their own purpose through the same validated
@@ -67,3 +68,56 @@ binding, override revisions, HTML escaping and unchanged formal CLI conditions.
 Check one narrow/wide Rules page and keyboard expansion; do not duplicate every
 rule-policy scenario through each transport or claim VoiceOver without testing.
 No new collector, ranking engine, configuration write or paid experiment is needed.
+
+## Compatibility clarification: independent narration revision
+
+A purpose is literal single-line text, at most 320 Unicode code points, excluding
+ASCII control characters. Markup, URLs and template-like text remain literal; no
+witness interpolation is part of a generic purpose.
+
+Keep the existing `rulesHash` algorithm for every pre-existing bundle field,
+including explanations, witnesses and lexicon. Exclude only the newly introduced
+decision `purpose` and top-level `denialPurposes` fields. Thus this feature's
+annotations alone do not invalidate an existing project's `:base-rules-hash`, alter
+a briefing's engine identity or require regenerating decision goldens. This is a
+compatibility guarantee, not a broader redefinition of which existing fields count
+as semantic policy.
+
+Add a nullable `narrationHash` for presentation provenance. When any purpose is
+supplied, hash the canonical JSON array
+`[1, rulesHash, decisionPurposes, denialPurposes]`, where the last two arrays contain
+`[declaredRuleId, purposeOrNull]` pairs in declared source order. Include missing
+purposes as null, so gaps and future IDs remain bound to that exact policy. With
+no authored purposes, the hash is null; older matching artifacts may omit the
+field. A matching English model and native bundle must agree on both identities,
+normalizing an absent narration hash to null. Reject mixed/stale narration rather
+than borrowing text by rule ID from another revision.
+
+Carry the narration identity additively in the shared document/JSON and show it
+on the web page. Keep formal CLI text unchanged for purpose-only edits. Existing
+policy, English-model and rules-document versions stay unchanged for these optional
+fields; validated missing metadata still renders an explicit gap with conditions.
+
+## Project source format compatibility
+
+The existing project source v1 has a closed preference-key set. Preserve that
+format exactly: a v1 preference containing `:purpose` remains invalid. Introduce
+explicit `:format-version 2` for project-purpose annotations; retain projection
+version 1, the same required top-level fields and the same required preference
+fields. Only v2 permits optional `:purpose`, with the same literal validation above.
+All other unknown/duplicate keys and unknown future format versions remain errors.
+Both formats retain every execution, grounding, authority and resource restriction.
+
+Keep `pdb rules init` generating v1. Adding project narration requires an explicit,
+reviewed file edit to version 2; never migrate, rewrite configuration or install
+anything as a side effect. A v2 file without purposes is also valid. Older clients
+reject version 2 rather than silently interpreting new fields as executable syntax.
+
+Preserve v1 project/effective hash calculations byte-for-byte. For v2, the composite
+identity is SHA-256 over `[2, defaultRulesHash, 1, canonicalProjectForm]`; the project
+source hash continues to cover its entire canonical form, including purpose text.
+These source identities can change for project documentation while identical
+queries still produce identical priorities and reasons. Expose the actual format
+version and exact source revision with the annotation. Verify v1 pins remain valid
+after bundled-purpose changes, v1 rejects the new key, v2 round-trips metadata and
+keeps execution identical, future versions refuse, and stale narration is detected.
