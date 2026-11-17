@@ -1034,6 +1034,75 @@ describe("pdb serve cache races (#373)", () => {
     cache.close();
   });
 
+  it("marks an A to B to A collection stale and never stores its potentially mixed facts", async () => {
+    const clock = new ManualClock();
+    let login = "old";
+    const cache = makeCache(clock, () => login);
+    let finish!: (value: string) => void;
+    const key = { repository: "o/r", collector: "c", coverage: { n: 1 } };
+    const slow = cache.track(false, () =>
+      cache.read(
+        key,
+        () =>
+          new Promise<string>((done) => {
+            finish = done;
+          }),
+      ),
+    );
+    await until(() => finish !== undefined);
+    clock.advance(301_000);
+    login = "new";
+    await cache.verifiedAuth(false);
+    clock.advance(301_000);
+    login = "old";
+    await cache.verifiedAuth(false);
+    finish("potentially-mixed");
+    const observed = await slow;
+    expect(observed.freshness[0]).toMatchObject({
+      source: "stale",
+      stale: true,
+      refreshError: { code: "CACHE_INVALIDATED" },
+    });
+    expect(cache.status().entries).toBe(0);
+    expect(await cache.read(key, async () => "fresh-as-old")).toBe("fresh-as-old");
+    cache.close();
+  });
+
+  it.each([undefined, "o/r"])(
+    "does not adopt a manual refresh during login verification (%s)",
+    async (repository) => {
+      const clock = new ManualClock();
+      let checking = false;
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const cache = new ServeCache({
+        ttlMs: 300_000,
+        clock,
+        initialAuth: { host: "h", login: "old" },
+        authContext: async () => {
+          checking = true;
+          await gate;
+          return { host: "h", login: "new" };
+        },
+      });
+      clock.advance(301_000);
+      const read = cache.track(false, () =>
+        cache.read({ repository: "o/r", collector: "c", coverage: {} }, async () => "fresh-as-new"),
+      );
+      await until(() => checking);
+      cache.refresh(repository);
+      release();
+      expect((await read).freshness[0]).toMatchObject({
+        source: "stale",
+        refreshError: { code: "CACHE_INVALIDATED" },
+      });
+      expect(cache.status().entries).toBe(0);
+      cache.close();
+    },
+  );
+
   it("a queued read does not start once a rate-limit cooldown has begun", async () => {
     const clock = new ManualClock();
     const cache = makeCache(clock, () => "old", 1);

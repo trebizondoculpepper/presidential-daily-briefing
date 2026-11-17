@@ -704,6 +704,8 @@ export class ServeCache {
         if (auth.host !== this.auth.host || auth.login !== this.auth.login) {
           this.auth = auth;
           this.cooldownUntil = 0;
+          // Every transition invalidates existing flights, including A -> B -> A.
+          this.epochs.set("*", (this.epochs.get("*") ?? 0) + 1);
           for (const key of this.entries.keys()) this.remove(key);
           this.closedQuestions.reset(undefined, "the GitHub login changed");
           this.options.onAuthChange?.(auth);
@@ -759,7 +761,7 @@ export class ServeCache {
     const { repository, collector } = cacheKey;
     const controller = new AbortController();
     const generation = ++this.generation;
-    const epoch = this.epochOf(repository);
+    let epoch = this.epochOf(repository);
     const flight = {
       id: `f${++this.nextId}`,
       auth: this.auth,
@@ -786,11 +788,27 @@ export class ServeCache {
           throw new CollectionError("GITHUB_UNAVAILABLE", "pdb serve is shutting down.");
         // A cooldown that began while this read was queued applies to it too.
         if (this.cooldownUntil > this.now() && this.cooldownError) throw this.cooldownError;
+        const beforeAuth = this.auth;
+        const globalBefore = this.epochs.get("*") ?? 0;
+        const repositoryBefore = this.epochs.get(repository.toLowerCase()) ?? 0;
+        const untouched = epoch === this.epochOf(repository);
         await this.checkAuth();
+        // A flight that itself discovers one login change before producing any facts can
+        // adopt that admission context. Never adopt an invalidation while queued, a manual
+        // refresh during auth, or a later account transition during actual collection.
+        if (
+          untouched &&
+          this.auth !== beforeAuth &&
+          (this.epochs.get("*") ?? 0) === globalBefore + 1 &&
+          (this.epochs.get(repository.toLowerCase()) ?? 0) === repositoryBefore
+        ) {
+          epoch = this.epochOf(repository);
+          flight.epoch = epoch;
+        }
         // The login these facts are collected under. If it changes before the collection
-        // finishes (another collection noticed gh auth switch), the result is still returned
-        // to this flight's own waiters, whose key names the old login, but never stored where
-        // the new login's reads would find it.
+        // finishes (another collection noticed gh auth switch), the value can still reach this
+        // flight's own waiters, but the epoch marks it stale and prevents insertion. Returning
+        // to the original login does not restore the old epoch or make these facts current.
         const collectedAs = this.auth;
         flight.auth = collectedAs;
         const storeKey = this.keyOf(cacheKey);

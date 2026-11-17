@@ -69,3 +69,13 @@ The isolated native-smoke repair passed check, all 148 files/2,714 tests (one
 skip), build and the full installed-package validation. The fake-gh successful
 native offer/duplicate checks still run explicitly. The unchanged-deadline local
 reproduction is retained in /tmp/pdb786-native-init-repro-results.json.
+
+CodeRabbit review identified an A -> B -> A freshness hole: object identity already
+prevented insertion, but the old flight could still be returned live and accepted
+by the diagnostic's final string comparison. Reproduced both cache freshness and
+real HTTP acceptance before the fix. Advance the epoch on every observed login
+transition. A flight may adopt one login change that its own pre-read verification
+discovers, preserving ordinary new-login caching; it cannot adopt queued, manual-
+refresh or later collection invalidations. Added global/project refresh-during-
+auth controls. All 112 focused cache/diagnostic/passive/import-cycle tests pass;
+full validation passes: check, 148 files/2,718 tests (one skip), build and installed-package validation. No caller gets mixed-account evidence marked current.
