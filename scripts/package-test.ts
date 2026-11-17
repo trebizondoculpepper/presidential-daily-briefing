@@ -289,6 +289,7 @@ async function serveSmoke(bin: string, env: NodeJS.ProcessEnv, cwd: string): Pro
       "setup",
       "rules",
       "quotas",
+      "diagnostics?repo=example%2Fparity&tab=ticket-doctor",
     ]) {
       const response = await fetch(`${url}${path}`);
       const html = await response.text();
@@ -298,6 +299,47 @@ async function serveSmoke(bin: string, env: NodeJS.ProcessEnv, cwd: string): Pro
         !html.includes('href="#content"')
       )
         throw new Error(`Installed shared shell missing on ${path}`);
+    }
+    // Diagnostics UI and explicit runs must work from the installed artifact, with no source tree.
+    const diagnosticsScript = await fetch(`${url}diagnostics.js`);
+    if (
+      diagnosticsScript.status !== 200 ||
+      !(await diagnosticsScript.text()).includes("diagnostic-runs")
+    )
+      throw new Error("Installed diagnostics client is missing.");
+    for (const kind of ["doctor", "ticket-doctor"] as const) {
+      const query = `kind=${kind}&repo=example%2Fparity`;
+      const latest = await (await fetch(`${url}api/v1/diagnostic-runs/latest?${query}`)).json();
+      if (JSON.stringify(latest) !== '{"state":"none"}')
+        throw new Error(`Opening the installed diagnostics page started ${kind}.`);
+      const started = await fetch(`${url}api/v1/diagnostic-runs`, {
+        method: "POST",
+        headers: { "content-type": "application/json", origin: new URL(url).origin },
+        body: JSON.stringify({ kind, repo: "example/parity" }),
+      });
+      const handle = (await started.json()) as { waiterId?: string };
+      if (started.status !== 202 || !handle.waiterId)
+        throw new Error(`Installed ${kind} did not create a waiter: ${JSON.stringify(handle)}`);
+      const runDeadline = Date.now() + 20_000;
+      for (;;) {
+        const response = await fetch(`${url}api/v1/diagnostic-runs/waiters/${handle.waiterId}`);
+        const run = (await response.json()) as {
+          state?: string;
+          result?: { scope?: string; checks?: unknown[]; kind?: string };
+        };
+        if (run.state !== "running") {
+          if (!["completed", "partial"].includes(run.state ?? "") || !run.result)
+            throw new Error(`Installed ${kind} failed: ${JSON.stringify(run).slice(0, 600)}`);
+          if (
+            kind === "doctor" &&
+            (run.result.scope !== "local-configuration" || run.result.checks?.length !== 4)
+          )
+            throw new Error("Installed host-only Doctor did not return its four checks.");
+          break;
+        }
+        if (Date.now() > runDeadline) throw new Error(`Installed ${kind} did not finish.`);
+        await new Promise((done) => setTimeout(done, 50));
+      }
     }
     // HTTP MCP from the installed artifact (#390): initialize, list the read tools and read one
     // role briefing through the shared cache, as a real SDK client would.
