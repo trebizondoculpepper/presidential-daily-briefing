@@ -555,6 +555,37 @@ function differingKeys(left: LoadedConfig, right: LoadedConfig): string[] {
     .sort();
 }
 
+/** One factual configuration change between two snapshots (#804 revisions). */
+export interface ConfigChange {
+  readonly key: string;
+  readonly oldValue: ConfigValue | undefined;
+  readonly newValue: ConfigValue | undefined;
+}
+
+/**
+ * Revisioned change report for a long-lived consumer (doc/design/configuration-service.md).
+ * Compares an in-memory baseline snapshot of explicit values to the current explicit values and
+ * returns changed keys with safe old/new values. A key absent from a snapshot takes its
+ * registered default as its effective value, so a no-op or reverted edit reports no change.
+ * Nothing is persisted here: the baseline is held in memory by the caller, never written.
+ */
+export function configChanges(
+  baseline: ReadonlyMap<string, ConfigValue>,
+  explicit: ReadonlyMap<string, ConfigValue>,
+  schema: ConfigSchema = DEFAULT_SCHEMA,
+): ConfigChange[] {
+  const effectiveValue = (source: ReadonlyMap<string, ConfigValue>, key: string): ConfigValue =>
+    source.has(key) ? source.get(key)! : findKey(schema, key).defaultValue;
+  return schema.keys
+    .map((entry) => entry.key)
+    .filter((key) => effectiveValue(baseline, key) !== effectiveValue(explicit, key))
+    .map((key) => ({
+      key,
+      oldValue: baseline.has(key) ? baseline.get(key) : undefined,
+      newValue: explicit.has(key) ? explicit.get(key) : undefined,
+    }));
+}
+
 const preferCommands = (): string =>
   (["toml", "json"] as const).map((format) => `${CONVERT_COMMAND} --prefer ${format}`).join("\n");
 
