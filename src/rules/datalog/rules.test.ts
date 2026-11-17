@@ -203,6 +203,13 @@ describe("rule runner outcome categories (#348)", () => {
         ),
       ),
     ).toThrow(/denials differ/);
+    expect(() =>
+      run(
+        minimal(
+          `{:actions [{:subject 100 :rule "D-EASY" :kind "implement" :band 4 :attention-section {:section "waiting" :rule "HS-WAITING-UNKNOWN"}}] :denials #{}}`,
+        ),
+      ),
+    ).toThrow(/action 0 .* attention-section: expected/);
   });
 
   it("treats broken or malformed scenarios as infrastructure, never as a pass or skip", () => {
@@ -212,6 +219,9 @@ describe("rule runner outcome categories (#348)", () => {
       minimal(`{:actions [{:subject 100 :rule "D-EASY" :kind "implement"}] :denials #{}}`), // no band
       minimal(
         `{:actions [{:subject 100 :rule "D-EASY" :kind "implement" :band 4 :facts []}] :denials #{}}`,
+      ),
+      minimal(
+        `{:actions [{:subject 100 :rule "D-EASY" :kind "implement" :band 4 :attention-section {:section "other" :rule "HS-X"}}] :denials #{}}`,
       ),
       minimal(`{:actions [] :denials #{}}`).replace(":e 100", ":e 10"), // reserved entity
       minimal(`{:actions [] :denials #{}}`).replace('"implementer"', '"owner"'), // evaluator rejects

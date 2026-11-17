@@ -777,6 +777,17 @@ describe("human briefing role (#457)", () => {
         [record("owner", ["Comments truncated?"], { v2: 67 })],
         true,
       );
+      const closedMixedQuestions: Issue = {
+        ...closedIssue(
+          68,
+          [],
+          [
+            record("owner", ["Mixed unanswered v2?"], { v2: 68 }),
+            record("owner", ["Mixed v1 truncated labels?"]),
+          ],
+        ),
+        labels: page([{ name: "status:ready" }], true),
+      };
       const { view, report, text } = await human(
         [openUnanswered, openResolved, openIncompleteHistory],
         [],
@@ -786,6 +797,7 @@ describe("human briefing role (#457)", () => {
             closedUntrustedEdit,
             closedUnknownOutcome,
             closedIncompleteHistory,
+            closedMixedQuestions,
           ],
           trust: trustAll({ outsider: "read", ghost: "unknown" }),
         },
@@ -795,14 +807,16 @@ describe("human briefing role (#457)", () => {
           i.target.split("/").pop(),
           i.attentionSection,
           i.attentionSectionReason.ruleId,
+          i.resolution,
         ]),
       ).toEqual([
-        ["61", "input", "HS-INPUT-ACTIONABLE"],
-        ["63", "input", "HS-INPUT-ACTIONABLE"],
-        ["64", "input", "HS-INPUT-ACTIONABLE"],
-        ["67", "input", "HS-INPUT-ACTIONABLE"],
-        ["65", "waiting", "HS-WAITING-UNKNOWN"],
-        ["66", "waiting", "HS-WAITING-UNKNOWN"],
+        ["61", "input", "HS-INPUT-ACTIONABLE", undefined],
+        ["63", "input", "HS-INPUT-ACTIONABLE", "unresolved"],
+        ["64", "input", "HS-INPUT-ACTIONABLE", "unresolved"],
+        ["67", "input", "HS-INPUT-ACTIONABLE", undefined],
+        ["68", "waiting", "HS-WAITING-UNKNOWN", "unknown"],
+        ["65", "waiting", "HS-WAITING-UNKNOWN", "unknown"],
+        ["66", "waiting", "HS-WAITING-UNKNOWN", "unknown"],
       ]);
       expect(text).toContain("Section: waiting (HS-WAITING-UNKNOWN)");
       const mcp = briefingView(
