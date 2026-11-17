@@ -139,6 +139,12 @@
 [(orphan-source ?t) (has-orphaned ?t)]
 [(orphan-source ?t) (has-orphan-unknown ?t)]
 [(orphan-asks-viewer ?t) (orphaned-record ?t ?r) [?r "record-to" ?a] [1 "agent" ?a]]
+;; Native human-attention section grouping (#643, doc/design/human-briefing.md): items with any
+;; unknown question resolution appear in Waiting; actionable items requiring the human's input or
+;; review appear in Input.
+[(human-waiting-item ?t) [1 "role" "human"] (has-orphan-unknown ?t)]
+[(human-attention-section ?t ?section ?code ?reason) (human-waiting-item ?t) [(str "waiting") ?section] [(str "HS-WAITING-UNKNOWN") ?code] [(str "Whether this question was resolved could not be established; shown under Waiting for inspection, not as answered.") ?reason]]
+[(human-attention-section ?t ?section ?code ?reason) [1 "role" "human"] [?t "matched" _] (not (human-waiting-item ?t)) [(str "input") ?section] [(str "HS-INPUT-ACTIONABLE") ?code] [(str "Requires human input or review from the observed evidence.") ?reason]]
 ;; Native PR-readiness diagnostics (#707): every current blocker for one PR, decided by rules.
 [(declared-review-coverage ?t) [?t "policy-effective" "codex-or-coderabbit"]]
 [(declared-review-coverage ?t) [?t "policy-effective" "codex-or-copilot"]]

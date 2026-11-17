@@ -1,8 +1,8 @@
 {
   "modelVersion": 2,
   "policyVersion": 1,
-  "rulesHash": "017d781821f07a45492b8aff30d69cfc06d33dcbc938f86465c0a1c3301eb0a8",
-  "narrationHash": "2da0fb437421076fb735b01eb72731fcef4cc0e386dca9eb05a9d8b75743d0b2",
+  "rulesHash": "e4f6c8c3eb51725257e9478030dc70ad4100eabb9f4ec52fe807d274ee715d52",
+  "narrationHash": "21a9666a3027e9459301872158c39ce83e4967a0495ba0e2ffe1f60db7ec4583",
   "sources": [
     "policy/schema.edn",
     "policy/rules.edn",
@@ -9134,6 +9134,181 @@
       "set": "rules"
     },
     {
+      "name": "human-waiting-item",
+      "params": ["?t"],
+      "alternatives": [
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "viewer",
+              "entity": {
+                "lit": 1
+              },
+              "attribute": "role",
+              "value": {
+                "lit": "human"
+              },
+              "phrase": "role",
+              "many": false
+            },
+            {
+              "type": "call",
+              "predicate": "has-orphan-unknown",
+              "args": [
+                {
+                  "var": "?t"
+                }
+              ]
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 117
+          }
+        }
+      ],
+      "calls": ["has-orphan-unknown"],
+      "set": "rules"
+    },
+    {
+      "name": "human-attention-section",
+      "params": ["?t", "?section", "?code", "?reason"],
+      "alternatives": [
+        {
+          "params": ["?t", "?section", "?code", "?reason"],
+          "clauses": [
+            {
+              "type": "call",
+              "predicate": "human-waiting-item",
+              "args": [
+                {
+                  "var": "?t"
+                }
+              ]
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "waiting"
+                }
+              ],
+              "result": "?section"
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "HS-WAITING-UNKNOWN"
+                }
+              ],
+              "result": "?code"
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "Whether this question was resolved could not be established; shown under Waiting for inspection, not as answered."
+                }
+              ],
+              "result": "?reason"
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 118
+          }
+        },
+        {
+          "params": ["?t", "?section", "?code", "?reason"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "viewer",
+              "entity": {
+                "lit": 1
+              },
+              "attribute": "role",
+              "value": {
+                "lit": "human"
+              },
+              "phrase": "role",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "matched",
+              "value": {
+                "wild": true
+              },
+              "phrase": "matched decision rule",
+              "many": true
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "call",
+                  "predicate": "human-waiting-item",
+                  "args": [
+                    {
+                      "var": "?t"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "input"
+                }
+              ],
+              "result": "?section"
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "HS-INPUT-ACTIONABLE"
+                }
+              ],
+              "result": "?code"
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "Requires human input or review from the observed evidence."
+                }
+              ],
+              "result": "?reason"
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 119
+          }
+        }
+      ],
+      "calls": ["human-waiting-item"],
+      "set": "rules"
+    },
+    {
       "name": "declared-review-coverage",
       "params": ["?t"],
       "alternatives": [
@@ -9156,7 +9331,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 117
+            "index": 120
           }
         },
         {
@@ -9178,7 +9353,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 118
+            "index": 121
           }
         }
       ],
@@ -9217,7 +9392,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 119
+            "index": 122
           }
         }
       ],
@@ -9267,7 +9442,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 120
+            "index": 123
           }
         },
         {
@@ -9291,7 +9466,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 121
+            "index": 124
           }
         },
         {
@@ -9390,7 +9565,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 122
+            "index": 125
           }
         },
         {
@@ -9477,7 +9652,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 123
+            "index": 126
           }
         },
         {
@@ -9564,7 +9739,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 124
+            "index": 127
           }
         },
         {
@@ -9621,7 +9796,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 125
+            "index": 128
           }
         },
         {
@@ -9663,7 +9838,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 126
+            "index": 129
           }
         },
         {
@@ -9705,7 +9880,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 127
+            "index": 130
           }
         },
         {
@@ -9766,7 +9941,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 128
+            "index": 131
           }
         },
         {
@@ -9872,7 +10047,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 132
+            "index": 135
           }
         },
         {
@@ -9914,7 +10089,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 133
+            "index": 136
           }
         },
         {
@@ -9956,7 +10131,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 134
+            "index": 137
           }
         },
         {
@@ -10013,7 +10188,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 135
+            "index": 138
           }
         },
         {
@@ -10089,7 +10264,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 136
+            "index": 139
           }
         },
         {
@@ -10146,7 +10321,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 137
+            "index": 140
           }
         },
         {
@@ -10229,7 +10404,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 138
+            "index": 141
           }
         },
         {
@@ -10316,7 +10491,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 139
+            "index": 142
           }
         },
         {
@@ -10418,7 +10593,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 140
+            "index": 143
           }
         },
         {
@@ -10479,7 +10654,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 141
+            "index": 144
           }
         },
         {
@@ -10536,7 +10711,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 142
+            "index": 145
           }
         },
         {
@@ -10623,7 +10798,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 143
+            "index": 146
           }
         },
         {
@@ -10705,7 +10880,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 144
+            "index": 147
           }
         }
       ],
@@ -10753,7 +10928,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 129
+            "index": 132
           }
         },
         {
@@ -10788,7 +10963,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 130
+            "index": 133
           }
         },
         {
@@ -10823,7 +10998,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 131
+            "index": 134
           }
         }
       ],
@@ -10855,7 +11030,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 145
+            "index": 148
           }
         }
       ],
@@ -10927,7 +11102,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 146
+            "index": 149
           }
         },
         {
@@ -10964,7 +11139,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 147
+            "index": 150
           }
         },
         {
@@ -11034,7 +11209,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 148
+            "index": 151
           }
         }
       ],
@@ -13265,6 +13440,33 @@
       "ruleSet": "rules"
     },
     {
+      "name": "human-sections",
+      "find": ["?t", "?section", "?code", "?reason"],
+      "inputs": ["$", "%"],
+      "clauses": [
+        {
+          "type": "call",
+          "predicate": "human-attention-section",
+          "args": [
+            {
+              "var": "?t"
+            },
+            {
+              "var": "?section"
+            },
+            {
+              "var": "?code"
+            },
+            {
+              "var": "?reason"
+            }
+          ]
+        }
+      ],
+      "calls": ["human-attention-section"],
+      "ruleSet": "rules"
+    },
+    {
       "name": "q1",
       "find": ["?t", "?d"],
       "inputs": ["$", "%"],
@@ -13910,15 +14112,15 @@
   ],
   "coverage": {
     "decisions": 38,
-    "predicates": 81,
-    "alternatives": 159,
+    "predicates": 83,
+    "alternatives": 162,
     "denials": 9,
-    "queries": 18,
+    "queries": 19,
     "keyQueries": 4,
     "evidence": 39,
     "overrides": 4,
     "constants": 14,
     "attributes": 94,
-    "clauses": 833
+    "clauses": 847
   }
 }

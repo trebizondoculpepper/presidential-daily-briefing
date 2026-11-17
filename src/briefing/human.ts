@@ -227,6 +227,14 @@ export interface HumanItem {
    * (the outcome could not be established). A closed source is never shown as answered.
    */
   resolution?: "unresolved" | "unknown";
+  /**
+   * Shared native human-attention grouping (#643, doc/design/human-briefing.md): `"input"` for
+   * actionable items requiring human input or review, `"waiting"` when question resolution could
+   * not be established.
+   */
+  attentionSection: "input" | "waiting";
+  /** Native rule ID and explanation that placed the item in `attentionSection` (#643). */
+  attentionSectionReason: { ruleId: string; text: string };
 }
 export interface HumanBriefing {
   schemaVersion: 1;
@@ -364,6 +372,17 @@ export function humanBriefing(
         .filter((w) => w.startsWith(`${target}:`))
         .map((w) => w.slice(target.length + 2)),
     );
+    const sectionDecision = matched[0].attentionSection ?? {
+      section: codes.includes(humanPolicy.unknownResolutionCode)
+        ? ("waiting" as const)
+        : ("input" as const),
+      ruleId: codes.includes(humanPolicy.unknownResolutionCode)
+        ? "HS-WAITING-UNKNOWN"
+        : "HS-INPUT-ACTIONABLE",
+      reason: codes.includes(humanPolicy.unknownResolutionCode)
+        ? "Whether this question was resolved could not be established; shown under Waiting for inspection, not as answered."
+        : "Requires human input or review from the observed evidence.",
+    };
     items.push({
       id: `${snapshot.repository} ${target} ${matched[0].kind}`,
       kind: matched[0].kind,
@@ -398,11 +417,17 @@ export function humanBriefing(
       sourceState: sourceClosed || subject.state !== "OPEN" ? "closed" : "open",
       ...(sourceClosed
         ? {
-            resolution: codes.includes(humanPolicy.unknownResolutionCode)
-              ? ("unknown" as const)
-              : ("unresolved" as const),
+            resolution:
+              sectionDecision.section === "waiting"
+                ? ("unknown" as const)
+                : ("unresolved" as const),
           }
         : {}),
+      attentionSection: sectionDecision.section,
+      attentionSectionReason: {
+        ruleId: sectionDecision.ruleId,
+        text: sectionDecision.reason,
+      },
     });
   }
   // A current legacy record whose ticket no longer carries a question label is resolved. Absence
@@ -498,15 +523,20 @@ export function humanText(
       [
         `${i + 1}. [${[
           item.explicit ? (item.addressed ? "explicit, to you" : "explicit") : "inferred",
-          ...(item.resolution
+          ...(item.sourceState === "closed"
             ? [
-                item.resolution === "unknown"
+                item.attentionSection === "waiting"
                   ? "ticket closed, resolution unknown"
                   : "ticket closed, unanswered",
               ]
             : []),
         ].join(", ")}] ${item.kind} ${item.target} — ${item.title}`,
         `   Why: ${item.reason}`,
+        ...(item.attentionSection === "waiting"
+          ? [
+              `   Section: waiting (${item.attentionSectionReason.ruleId}) — ${item.attentionSectionReason.text}`,
+            ]
+          : []),
         ...item.requested.map((r) => `   Requested: ${r}`),
         `   Blocks: ${item.blocks.subjects.join(", ") || "nothing known"}${item.blocks.unknown.length ? ` (${item.blocks.unknown.join("; ")})` : ""}`,
         `   Source: ${item.source}`,
