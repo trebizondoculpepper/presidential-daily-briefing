@@ -189,4 +189,31 @@ describe("bounded metrics read (#573 slice 5b)", () => {
     // Live delivery evidence the fake cannot supply is never presented as delivered.
     for (const t of r.tickets) expect(t.verdict).not.toBe("delivered");
   });
+  it("keeps the PR source unread when delivery membership is unknown", async () => {
+    // Over 100 comments: records may be unseen, so membership (and the PR set) is unknown.
+    const { rt } = fake(
+      [
+        {
+          number: 1,
+          updatedAt: "2026-11-16T00:00:00Z",
+          comments: [submit(1, [10], "2026-11-12T00:00:00Z")],
+          totalCount: 150,
+        },
+      ],
+      50,
+      { 10: "2026-11-13T00:00:00Z" },
+    );
+    const r = await readMetrics(repo, FROM, NOW, rt);
+    expect(r.tickets[0]!.ledger.requiredPullRequests).toBeNull();
+    expect(r.tickets[0]!.ledger.coverage.prs).not.toBe("complete");
+  });
+
+  it("counts REST evidence requests and stops them after cancellation", async () => {
+    const { rt } = fake([{ number: 1, updatedAt: "2026-11-16T00:00:00Z" }], 50);
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      readMetrics(repo, FROM, NOW, { ...(rt as object), signal: controller.signal } as never),
+    ).rejects.toThrow();
+  });
 });
