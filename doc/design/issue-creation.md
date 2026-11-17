@@ -5,9 +5,9 @@ MCP mutation wrapper. This document does not implement a command or create a liv
 ticket as a test. Use the shared authenticated `gh` boundary without a shell or
 new credentials, preserving configuration and workflow authority boundaries.
 
-## Pending owner-reviewed creation amendment (#666 / #674)
+## Human-assignment creation amendment (#666 / #674)
 
-The [draft human-assignment contract](human-assignment-safeguard.md) narrows managed creation to a verified checkout/policy context matching the target repository. Default new PDB issues to the creating/employing human at creation, verify assignment alongside labels, and keep agent claims separate. Unmanaged/unfamiliar/no-checkout issue reporting uses ordinary gh rather than another repository's PDB process. This prospective change is held for owner review; it is not implemented by this document.
+The [human-assignment contract](human-assignment-safeguard.md) (whose owner-review hold was explicitly lifted by the owner on #666/#674) narrows managed creation to a verified checkout/policy context matching the target repository. Default new PDB issues to the creating/employing human at creation, verify assignment alongside labels, and keep agent claims separate. Unmanaged/unfamiliar/no-checkout issue reporting uses ordinary gh rather than another repository's PDB process. This document alone changes no runtime behavior; #666 owns the runtime implementation.
 
 GitHub may drop assignment even on successful creation. Preserve the one-attempt/partial/unknown guarantees below and never report fully assigned success or blindly repeat creation. Any resulting unassigned issue enters explicit guarded routing/original-ticket attention; do not create a separate guidance issue or run an implicit transfer after creation. #666 owns one shared implementation; #674 tracks the user report.
 
