@@ -17,14 +17,27 @@ Coverage includes successful recovery and ownership, permanent denial, zero/shor
 alternating contention/refusal without deadline reset, other platforms/error codes, verification
 failure and the legacy wrapper. The focused lock/JSON/storage suite passed all 88 tests.
 
-The Windows fixtures retain the temporary 100-batch diagnostic count for the repair experiment
+The initial repair experiment retained the temporary 100-batch Windows diagnostic count
 and now count create refusals followed by successful updates. Those counters can distinguish
 actual recovery from a passing run with no refusal. Restore ten batches before final merge.
 Counts, cleanup checks and per-case limits remain unchanged. No live/private file was touched.
-No root TODO.md exists. Windows recovery evidence and final normal-count head validation remain
-outstanding at this commit.
+No root TODO.md exists. At the initial repair push, Windows recovery evidence and final
+normal-count head validation were still outstanding.
 
 Before pushing the repair experiment, check/build passed and the complete local suite passed
 135 files / 2,522 tests (one skipped), using one worker and existing per-test limits. The lock
-unit suite also passed after the final warning cleanup. Windows recovery counters remain to be
-observed; local injected success alone is not the required live Windows evidence.
+unit suite also passed after the final warning cleanup. At that push, Windows recovery counters were still to be
+observed; local injected success alone was not the required live Windows evidence.
+
+Repair head 79c5ff6 passed required CI, including all 100 batches per Windows fixture
+(5,000 updates), and a completed clean Codex review. The Windows log contains one
+"Recovered JSON lock-create EPERM" report: an actual exclusive-create refusal was
+followed by successful writes. No storage create refusal occurred in that passing
+run; its exact thirty-record assertions still passed in every batch. The specific
+Windows component issuing the refusal remains unidentified.
+Evidence: https://github.com/trebizondoculpepper/presidential-daily-briefing/actions/runs/43985870064/job/133713796392
+
+Restored the normal ten batches per Windows fixture before the final repair head.
+Check/build and all 135 local files passed again (2,522 tests, one skipped), with
+one worker and unchanged time limits. The final normal-count head requires fresh
+review and verify before merge; see PR #744 for that exact-head evidence.
