@@ -1,6 +1,6 @@
 # Human ownership, routing and agent handoff defaults
 
-Draft contract for #663, parent #662, in PR #671. Reconciled with the owner's scenario review on 2026-11-16. **Held for owner review: do not merge, activate or implement this contract before that review.** This document changes no runtime behavior. The [research report](../reports/human-assignment-safeguard.md) records the audited source/API baseline.
+Contract for #663, parent #662, reconciled with the owner's scenario review on 2026-11-16. The owner explicitly lifted the earlier owner-review hold on the drafted child implementation tickets (including #666/#674) and marked them ready to implement, while normal exact-head CI/review and native prerequisite checks remain required. This document changes no runtime behavior. The [research report](../reports/human-assignment-safeguard.md) records the audited source/API baseline.
 
 ## Authority and the rules-engine boundary
 
