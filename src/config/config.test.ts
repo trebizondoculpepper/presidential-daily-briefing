@@ -6,6 +6,7 @@ import { main } from "../cli.js";
 import {
   CONFIG_PATH,
   ConfigError,
+  configChanges,
   convertConfig,
   LEGACY_CONFIG_PATH,
   TOML_CONFIG_PATH,
@@ -19,6 +20,7 @@ import {
   updateConfig,
   type ConfigFileSystem,
   type ConfigSchema,
+  type ConfigValue,
   type GitRunner,
 } from "./config.js";
 import { GLOBAL_CONFIG_FILE } from "./globalconfig.js";
@@ -78,6 +80,30 @@ describe("repository configuration service (#116, doc/design/repository-configur
     const config = parseConfig('{"schemaVersion":1,"complexity":{"enabled":true}}', undefined);
     expect(settingFor(config, "complexity.enabled").source).toBe("explicit");
     expect(settingFor(config, "processGuide").source).toBe("default");
+  });
+
+  it("reports revisioned changes against an in-memory baseline, and clears on revert (#804)", () => {
+    // A fresh long-lived consumer's baseline: nothing explicit, all defaults.
+    const baseline = new Map<string, ConfigValue>();
+    const changed = new Map<string, ConfigValue>([["complexity.enabled", false]]);
+    expect(configChanges(baseline, changed)).toEqual([
+      { key: "complexity.enabled", oldValue: undefined, newValue: false },
+    ]);
+    // Setting a key back to its effective default is not a change.
+    const reverted = new Map<string, ConfigValue>([["complexity.enabled", true]]);
+    expect(configChanges(baseline, reverted)).toEqual([]);
+    // A change between two explicit snapshots reports both values.
+    const later = new Map<string, ConfigValue>([
+      ["complexity.enabled", false],
+      ["processGuide", true],
+    ]);
+    const fromChanged = configChanges(changed, later);
+    expect(fromChanged).toContainEqual({
+      key: "processGuide",
+      oldValue: undefined,
+      newValue: true,
+    });
+    expect(fromChanged).not.toContainEqual(expect.objectContaining({ key: "complexity.enabled" }));
   });
 
   it("reports explicit settings and their source", async () => {
