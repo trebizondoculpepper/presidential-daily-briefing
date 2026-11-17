@@ -2,6 +2,8 @@
 
 Status: proposed contract for #627, implemented under #605. This document implements nothing. Sections headed "Shipped today" describe current behaviour on `origin/main` at ae4c5dd and cite the file that implements it. Sections headed "#452 foundations" describe work that the merged [serve-startup-configuration.md](serve-startup-configuration.md) specifies and that #452 is still building. Every other section is a proposal for #605. Merging this document does not close #605, and it does not mean the toolbar, the Agents page or any other page has shipped.
 
+Current follow-up contract: [project-first toolbar and running-process footer](served-shell-followups.md) (#733, #730). It supersedes historical layout/footer details below; it does not claim those runtime follow-ups have shipped.
+
 ## Contents
 
 - [Owner direction](#owner-direction)
