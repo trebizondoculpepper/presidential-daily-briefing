@@ -1,8 +1,8 @@
 {
   "modelVersion": 2,
   "policyVersion": 1,
-  "rulesHash": "434bfa1a80d37f5773724a6183a0182c371d4443ac3fb32de3e513f4e92dadaa",
-  "narrationHash": "1c764f3150d524976b9519a09449557e788c92d8d3d05d846a19ea2054c67f94",
+  "rulesHash": "e4f6c8c3eb51725257e9478030dc70ad4100eabb9f4ec52fe807d274ee715d52",
+  "narrationHash": "21a9666a3027e9459301872158c39ce83e4967a0495ba0e2ffe1f60db7ec4583",
   "sources": [
     "policy/schema.edn",
     "policy/rules.edn",
@@ -9161,21 +9161,6 @@
                   "var": "?t"
                 }
               ]
-            },
-            {
-              "type": "not",
-              "join": null,
-              "body": [
-                {
-                  "type": "call",
-                  "predicate": "has-orphaned",
-                  "args": [
-                    {
-                      "var": "?t"
-                    }
-                  ]
-                }
-              ]
             }
           ],
           "source": {
@@ -9184,7 +9169,7 @@
           }
         }
       ],
-      "calls": ["has-orphan-unknown", "has-orphaned"],
+      "calls": ["has-orphan-unknown"],
       "set": "rules"
     },
     {
@@ -14136,6 +14121,6 @@
     "overrides": 4,
     "constants": 14,
     "attributes": 94,
-    "clauses": 849
+    "clauses": 847
   }
 }
