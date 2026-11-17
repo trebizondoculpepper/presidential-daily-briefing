@@ -1,118 +1,94 @@
-# Human-view Unassign: releasing a claim and its GitHub assignment
+# Human-view Unassign: release an agent claim, preserve human ownership
 
-Status: proposed contract for #588, delivered under #589. Nothing here is implemented by this document. Sections headed "Shipped today" describe current behaviour and cite the implementing file; everything else is a proposal. The read-only human view (#458) does not wait for this feature.
+Implementation contract for #588, reconciled under #751. Supersedes the earlier
+proposal to remove a mapped GitHub assignee and to restore a readiness label.
+Those earlier proposals are historical, not an alternative implementation path.
+The shared [human-assignment contract](human-assignment-safeguard.md) and
+[native workflow decision boundary](workflow-policy-boundary.md) remain authoritative.
+This document alone implements no control or runtime mutation.
 
-## Human-ownership amendment (#662 / #663)
+## Owner decisions
 
-The [draft human-assignment contract](human-assignment-safeguard.md), held for owner review, supersedes the older coupling of agent claim release and GitHub human-assignee removal. Agent unclaim preserves human assignment. Removing a human invalidates claims of that human's agents; valid remaining human owners and their agents are preserved.
+- Start with one reusable Unassign control wherever tickets appear in Human mode.
+- Confirm which agent claim will be released before any write.
+- Release means ending that agent's responsibility for the active claim; it is
+  not evidence that work is fixed, ready, delivered or complete.
+- Preserve every GitHub human assignee, including multiple assignees. No mapping
+  from agent name to a human username is required or permitted for this operation.
+- Preserve ticket state, readiness labels as currently observed, native blockers,
+  questions, attention, estimates, comments, work links and other agents' claims.
+- Do not automatically reclaim the task because the same human still owns it.
+  The removed agent follows #692's work-preserving handoff when it observes removal.
+- Human ownership editing is a separate feature. Unassign never transfers or
+  clears human ownership as a side effect.
 
-An eligible owner-side agent may take over a wrong-human claim after verified binding/assignment checks and records the reason. The displaced agent preserves/publishes useful work, ideally a draft PR for the current human owner, without duplicating the takeover explanation or touching the new claim. Leave the original issue open. A human's explicit removal of an agent is respected without automatic reclaim even if that human still owns the issue. Technical errors are reported honestly; no fabricated handoff completion.
+## Shared service and native decision
 
-These are workflow defaults subject to trusted explicit human direction. Last-known facts permit continuity on outages; unavailable evidence is not proof of reassignment. See the reconciled contract for exact exceptions and #690–#693 for focused slices. Do not implement the historical human-assignee-removal or own-claim-only/no-takeover restrictions below as current design; #668 owns shared admission, not all recovery/publication features in one PR. Current release --as readiness effects are not a state-preserving alias. Historical sections below require reconciliation before their runtime adoption.
+Add one transport-neutral preview/apply service, used by the Human page and any
+future CLI/MCP surface. Reuse existing claim/delivery reads, trusted records,
+operation IDs and writers. Do not call `release --as ready` or `--as done` as an
+alias: those commands have different lifecycle effects.
 
-## Owner decisions (settled)
+Preview identifies repository, issue, exact agent and claim-start identity,
+current human assignees, observed labels/state, permission evidence and revision.
+The native rules receive these facts and trusted human-request context and emit
+an Unassign decision, reason and witness set. TypeScript validates literal input,
+resource/protocol binding and executes only the approved plan; a role dropdown or
+`by` string is never human authorization. Preserve #668/#701/#702 admission rules
+and explicit-human-direction precedence rather than invent a page-local policy.
 
-From #588 and its owner comments, adopted without reopening:
+The request contains an unguessable operation ID, the exact selected agent and
+claim-start identity, and the revision returned by preview. The shared operation
+re-reads the issue and native decision immediately before writes. A newer or
+replaced claim is a conflict, not the old claim to be removed. Missing/unknown
+claim history is shown in preview and cannot prove an autonomous destructive
+operation; any permitted human override remains explicit and separately recorded.
 
-- One reusable **Unassign** control, shown initially only where tickets appear in the **human** view. Designer and implementer editing is later.
-- Confirm before mutating, showing exactly whose PDB claim and which GitHub assignment will be removed.
-- Ownership only: human-attention questions, waiting reasons, native blockers, assessments and ticket state are preserved. Never close the ticket, resolve a question or mark delivery complete.
-- Remove only the GitHub assignee corresponding to the released claim and keep the others. When the mapping is ambiguous, require explicit selection. Shared-account agent names are not GitHub usernames.
-- A human role selector is not authentication or authorization.
-- Success means claim and assignment are consistent. If either write fails, show which succeeded, the remaining inconsistency and a retry path. Never roll back over newer ownership or remove unrelated assignments.
-- Invalidate affected ticket, ownership and briefing views after writes. No bulk release and no automatic stale-work repair.
+The plan has only two write kinds: a trusted release-intent/outcome record and
+removal of the exact `agent:NAME` label. It must never patch the whole label or
+assignee set. No readiness/lifecycle field is added or removed. If no selected
+claim remains and no replacement appeared, return an idempotent no-op. Never
+release another claim that happens to reuse the same label after its start changed.
 
-## Shipped today
+Submitted contributions and historical delivery records remain visible, not
+marked complete or deleted. Human removal is not a reason to auto-claim rework;
+follow-up and explicit responsibility handoff use their existing native decisions
+and services. This control does not invent a recipient for an unfinished PR.
 
-- **Claims are labels.** A claim is an `agent:NAME` label (`workflow.ownerPrefix`, `src/workflow/definition.ts`); ownership is read only from those labels (`src/workflow/team.ts`).
-- **Release** (`planRelease` and `applyPlan` in `src/workflow/claims.ts`) releases only the caller's own claim (`NOT_CLAIMED` otherwise) with a mandatory outcome `ready|incomplete|parked|done`. It re-reads the ticket live, finds the claim start from the label timeline (`claimStart`, bounded by `claimHistoryPages = 3`), posts a handoff comment carrying `<!-- github-triage:release:<hash> {json} -->` with `ReleaseRecord { v: 1, agent, outcome, target, remove, retained, claimedAt }` **before** changing labels, then removes the owner label and conflicting readiness labels and adds the target. The operation hash is over repository, number, agent and claim start. Retries: record present and label gone is `noop`; record present and label still there re-applies the recorded plan; a different outcome is `RELEASE_PENDING`. Refusals include `TICKET_NOT_FOUND`, `NOT_AN_ISSUE`, `EVIDENCE_INCOMPLETE`, `MARKER_UNVERIFIED`, `RELEASE_DIVERGED`, `RELEASE_PENDING`, `NOT_CLAIMED`, `TICKET_CLOSED`.
-- **Trust.** Marker authority comes from `newestTrusted` with `permissionLookup` and `writePermissions` (#212) in `src/workflow/claims.ts`. The CLI does not check the caller's permission; the agent name is an argument.
-- **Preservation.** Release leaves `status:blocked`/parked (`claimPolicy.held`), `status:needs-design`, question and attention labels, other agents' claim labels (recorded as `retained`) and question or wait comments untouched (`src/workflow/claims.ts`). Retained and waiting claims (`src/workflow/retained.ts`) never release anything.
-- **Assignees.** No code writes GitHub assignees. The only reference is the read in `ticketGuard` (`src/workflow/claims.ts`), whose freshness fingerprint includes assignee logins. No agent-name-to-login mapping exists (`src/config/identity.ts`, `src/workflow/team.ts`).
-- **Serve writes.** None exist; the only POST is `/api/v1/refresh` (`src/serve/api.ts`). The edit-enable flag, anti-CSRF session, fresh permission check, `operationId` and `expectedRevision` are proposed in [dashboard-assessment-edits.md](dashboard-assessment-edits.md) (#455), not shipped.
+## Write boundary and result
 
-## Service
+Reuse [dashboard-assessment-edits.md](dashboard-assessment-edits.md)'s opt-in
+served-write session, same-origin/Host guards, CSRF protection, bounded JSON,
+verified serving-user permission and literal served repository selection. Shared
+session mechanics may be delivered as a small prerequisite service; this control
+does not require the entire assessment-edit page to ship first. No GET or page
+render performs a release, and read-only mode has no enabled mutation control.
 
-Proposed `planUnassign` / `applyUnassign` in `src/workflow/unassign.ts`, reusing the release planner's reads, guards and record writer rather than copying them. The CLI gains `pdb unassign N --agent NAME --by HUMAN [--assignee LOGIN ...|--no-assignee] [--json]` so the web control and the CLI share one service.
+Preview and apply are separate explicit actions. The confirmation names the
+claim and states that human owners, blockers and ticket state will not change.
+The server returns `applied`, `noop`, `refused` or `partial`, with actual record and
+claim-label outcomes, preserved state, sanitized error and a concrete retry or
+inspect action. An ambiguous/lost response is not success. Reconcile by operation
+ID and exact claim start before retrying; do not blindly repeat a potentially
+committed write or roll back over a newer claim. No distributed transaction with
+GitHub assignees is necessary because this operation never writes them.
 
-```ts
-interface UnassignRequest {
-  repository: string;
-  number: number;
-  agent: string; // the claim being released
-  by: string; // explicit human name: provenance only, never authority
-  assignees: string[]; // exact logins chosen to remove; [] means remove none
-  expected: { revision: string }; // fingerprint the confirmation was built from
-  operationId: string; // client-generated, for idempotent retry
-}
+After actual writes invalidate the affected raw claim/ticket and derived briefing,
+Human, team and responsibility views through existing services. Preserve partial
+facts if the outcome cannot be re-read. The UI explains any remaining inconsistency
+instead of silently disappearing the row or reporting it fixed.
 
-interface UnassignPreview {
-  ticket: { number: number; title: string; url: string };
-  claim: { agent: string; since: string | null };
-  assignees: Array<{ login: string; selectable: boolean }>;
-  preserved: string[]; // labels and records that will not change
-  revision: string; // current ticketGuard fingerprint
-}
+## Focused implementation slices
 
-type UnassignResult = {
-  schemaVersion: 1;
-  kind: "unassign-result";
-  operationId: string;
-  status: "applied" | "noop" | "refused" | "partial";
-  steps: Array<{
-    step: "record" | "claim-label" | "assignee";
-    target: string; // e.g. "agent:kavya_sabbagh", "assignee:octocat"
-    outcome: "applied" | "already" | "failed" | "not-attempted";
-    message: string | null;
-  }>;
-  remaining: string | null; // the inconsistency left, in words
-  retry: string | null; // exact CLI command, also used by the web retry
-  code: UnassignErrorCode | null;
-};
+1. Shared native preview/apply service and preserved-state result, with injected
+   permission, claim history and write boundaries. Keep the operation independent
+   of browser code.
+2. Shared protected HTTP binding using the reviewed served-write session, plus
+   the reusable Human-mode confirmation and progress/error display.
 
-type UnassignErrorCode =
-  | "NOT_CLAIMED" // the agent no longer holds the claim
-  | "OWNERSHIP_CHANGED" // revision differs from the confirmation
-  | "ASSIGNEE_NOT_PRESENT" // a chosen login is no longer assigned
-  | "PERMISSION_DENIED" // host gh credential lacks write/maintain/admin
-  | "PERMISSION_UNKNOWN"
-  | "EVIDENCE_INCOMPLETE"
-  | "TICKET_CLOSED"
-  | "OPERATION_CONFLICT"; // same operationId, different request
-```
-
-Rules:
-
-1. **Preview** reads the ticket live and returns the claim, the current assignees and what will be preserved. No assignee is preselected: there is no reliable mapping from agent to login. The human chooses zero or more of the listed logins.
-2. **Authorization** is the fresh permission of the host's `gh` credential on the repository (write, maintain or admin), checked immediately before applying, as #455 specifies. Unknown permission refuses. `by` is recorded, never trusted.
-3. **New-operation preconditions** apply only when no trusted unassign record with this `operationId` exists on the ticket: live re-read; the agent still holds `agent:NAME`; every chosen login is still assigned; the `ticketGuard` fingerprint equals `expected.revision`. Any difference refuses with nothing written and a fresh preview.
-4. **Order:** (a) post the release record comment, extended additively with `by`, `kind: "unassign"`, `operationId` and the chosen `assignees`; (b) remove `agent:NAME`; (c) remove each chosen assignee with the REST issue-assignees removal endpoint. Readiness labels are handled per open question 1. Nothing else is touched: other `agent:` labels, `status:blocked`, question, attention and needs-design labels, assessments, native dependencies and comments stay.
-5. **Partial failure and retry.** Each step is guarded by `ticketGuard` and reported individually. When a trusted record with this `operationId` already exists, the request is a **retry** and is validated against that durable record, not against `expected.revision` (which the operation's own comment and label changes have already altered):
-   - the request must equal the recorded one (agent and assignees), otherwise `OPERATION_CONFLICT`;
-   - the claim-label step is complete if `agent:NAME` is absent; if present, it is removed only when the timeline shows no `agent:NAME` label added after the record's `createdAt` (a later add is newer ownership and is reported, never removed);
-   - each recorded assignee is complete if absent; if present, it is removed only when no assignment of that login happened after the record's `createdAt` (from the issue timeline's assigned events, bounded like `claimStart`); otherwise reported as newer and kept;
-   - if that timeline evidence is incomplete, the step refuses with `EVIDENCE_INCOMPLETE` rather than guess. The result names the remaining inconsistency, for example "claim released; assignee octocat still assigned", and the exact retry command.
-6. **Idempotence.** A retry whose steps are all complete is `noop`; same `operationId` with a different request is `OPERATION_CONFLICT`.
-7. **Cache.** After any applied step the serve cache invalidates the ticket, team and briefing entries for that repository using the #455 generation guard, so no view shows pre-write ownership as current.
-8. Old release-record readers ignore the additive fields; the record version stays 1 because existing parsers accept extra keys (`releaseRecords` and `allReleases` in `src/workflow/claims.ts`).
-
-## HTTP API and control
-
-- `GET /api/v1/tickets/{n}/unassign?repo=R&agent=NAME`: the `UnassignPreview`. Read only.
-- `POST /api/v1/tickets/{n}/unassign?repo=R` with `UnassignRequest`, under the #455 write session (edits enabled, same-origin, JSON, session cookie plus `X-PDB-CSRF`). Status: 200 applied or noop, 207 partial, 403 permission or session, 409 `OWNERSHIP_CHANGED`/`NOT_CLAIMED`/`ASSIGNEE_NOT_PRESENT`/`OPERATION_CONFLICT`, 422 `EVIDENCE_INCOMPLETE`/`TICKET_CLOSED`.
-- The control appears beside each claimed ticket in the human view only when edits are enabled. Activating it loads the preview into a dialog: "Release `agent:NAME`'s claim on #N", the assignee checkboxes (none ticked), the preserved list, and Confirm/Cancel. Confirm sends the request with the preview's revision. Results list every step's outcome; partial results show the remaining inconsistency and a Retry button that resends the same `operationId`.
-- Accessible dialog with focus management, keyboard use, escaped text and no inline script under the dashboard CSP. MCP stays read-only.
-
-## Test matrix (injected GitHub, clock, permission)
-
-One and several assignees; zero assignees; claim absent; chosen assignee no longer present; another agent's claim and other assignees preserved; blocked, question, attention and needs-design labels preserved; owner changed after preview; each step failing in turn, then retry; retry after a newer claim or assignment (no rollback); permission write, read and unknown; same and conflicting `operationId`; concurrent unassigns; cache invalidation; hostile titles and logins escaped; no secrets in output.
-
-## Implementation slices
-
-1. **Service and CLI** (`pdb unassign`), after open question 1. Checks: all rules above with injected boundaries; CLI and JSON output; no behaviour change to `pdb release`.
-2. **Preview and POST API** after #455's write session ships. Checks: session, Origin and edits-disabled refusals; status codes; cache invalidation.
-3. **Human-view control** after #458 ships. Checks: dialog, no preselection, partial and retry flows, accessibility.
-
-## Open questions for the owner
-
-1. **What happens to readiness when a claim is unassigned?** Claiming removed the ticket's readiness label (for example `status:ready`), and the claim marker does not record which. Options: (a) add `status:ready` unless the ticket is blocked or needs design; (b) let the human choose the readiness in the dialog, as `pdb release --as` requires; (c) add no readiness label, leaving the ticket unpickable until someone triages it. Proposed default: (b), with `ready` preselected only when no blocker, question or needs-design label is present.
+Tests cover a current/absent/replaced claim; several human assignees preserved;
+questions/blockers/state/estimates unchanged; only the chosen label removed;
+permission/CSRF refusal; record-only partial failure; lost response and safe retry;
+newer claim protection; cache invalidation and human-removal no-auto-reclaim.
+Use synthetic facts and focused UI/keyboard/narrow-layout checks. No live release,
+assignment, issue closure or new paid agent turn is required for validation.
