@@ -251,13 +251,16 @@ export async function readMetrics(
     warnings.push(`pull request walk stopped at ${bounds.maxPages} pages before ${from}`);
   const prFrom = prReachedStart ? from : prOldest;
   const completeFrom = issueFrom === null || prFrom === null ? null : latest(issueFrom, prFrom);
+  // Linked lookups share the ticket bound, counted by attempts (failed lookups included), so
+  // unreadable references can never exceed it; beyond it they are unread, not fetched.
+  let linkedBudget = Math.max(0, bounds.maxTickets - walked.length);
   for (const number of linked) {
     if (walked.some((i) => i.number === number)) continue;
-    // Linked lookups share the ticket bound: beyond it they are unread, not fetched.
-    if (walked.length >= bounds.maxTickets) {
+    if (linkedBudget <= 0) {
       unreadLinked.push(member(number));
       continue;
     }
+    linkedBudget--;
     let issue: WalkIssue | null | undefined;
     try {
       issue = prop(
