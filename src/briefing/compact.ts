@@ -750,7 +750,7 @@ export function compactText(
   // repository/role identifier and material warnings. Background sections, totals, assessment
   // counts and unrequested estimation need `context`. A focused --issue intake keeps its detail.
   const brief = !context && !report.detail;
-  const lines = brief
+  const headerLines = brief
     ? [
         `${report.repository} — ${report.role ? `${report.role.name} ` : ""}next steps (fetched ${report.freshness.fetchedAt}${report.freshness.offline ? `; ${cacheWord(report.freshness)}, live verification unavailable` : ""})`,
       ]
@@ -759,19 +759,23 @@ export function compactText(
         `Fetched ${report.freshness.fetchedAt} — ${report.freshness.offline ? `${cacheWord(report.freshness)}; live verification unavailable` : "LIVE fetch window"}`,
         `${report.summary.issues} issues; ${report.summary.pullRequests} PRs; ${report.summary.findings} findings on ${report.summary.distinctSubjects} subjects.`,
       ];
-  if (report.guidance.includes(unfocusedIdentityNotice)) lines.push(unfocusedIdentityNotice);
+  const contextNotices: string[] = [];
+  if (report.guidance.includes(unfocusedIdentityNotice))
+    contextNotices.push(unfocusedIdentityNotice);
   // #312: a filtered view says so once, with the obligations it leaves out.
   const filterNotice =
     "filter" in report && report.filter
       ? `Filtered view: only subjects carrying every label ${report.filter.labels.join(" AND ")}; not a whole-board view.${report.filter.outside.owned || report.filter.outside.addressed ? ` Outside this filter: ${report.filter.outside.owned} owned and ${report.filter.outside.addressed} addressed obligation(s).` : ""}`
       : null;
-  if (filterNotice) lines.push(filterNotice);
+  if (filterNotice) contextNotices.push(filterNotice);
   const rows: string[] = [];
+  const itemRowIndices = new Set<number>();
   const shown = new Set<string>();
   const add = (
     title: string,
     section: Bounded<string>,
     reasons?: ReadonlyMap<string, string>,
+    trackItems = false,
   ): void => {
     if (!section.total && !section.items.length) return;
     rows.push(
@@ -782,27 +786,38 @@ export function compactText(
       const why = reasons?.get(url);
       if (shown.has(url)) {
         rows.push(`- #${s.number}: ${url}${why ? ` — ${why}` : ""}`);
+        if (trackItems) itemRowIndices.add(rows.length - 1);
         continue;
       }
       shown.add(url);
       rows.push(
         `- #${s.number} ${s.title} ${s.owners.join(", ")}${s.assessments ? "" : s.complexity && report.estimation.status === "available" ? ` (${s.complexity.state === "unknown" ? "size unknown" : (s.complexity.size ?? "unestimated")})` : ""}${s.assessments ? `\n  ${assessmentsText(s.assessments)}` : ""}${s.assessments && report.detail?.url === url && provenanceText(s.assessments) ? `\n  ${provenanceText(s.assessments)}` : ""}${why ? `\n  Why: ${why}` : ""}\n  ${s.findings.map((f) => `[${f.uncertainty}] ${f.reason}${markerSource(f)} Next: ${f.next}`).join(" ")}\n  ${url}${s.pullRequest ? `\n  Head ${s.pullRequest.head}; ${s.pullRequest.checks.map((c) => `${c.name}:${c.outcome}`).join(", ")}; ${s.pullRequest.unresolvedThreads} unresolved threads` : ""}\n  ${s.source.chronology}\n  ${s.detailCommand}`,
       );
+      if (trackItems) itemRowIndices.add(rows.length - 1);
     }
   };
+  const warnings = report.completeness.warnings;
+  const shownWarnings = 5;
+  const warningLines = [
+    ...warnings.slice(0, shownWarnings).map((warning) => `INCOMPLETE: ${warning}`),
+    ...(warnings.length > shownWarnings
+      ? [
+          `INCOMPLETE: ${warnings.length - shownWarnings} more warning(s) omitted; use --json for all.`,
+        ]
+      : []),
+  ];
   // #311: an explicit --section request renders only a minimal header, material warnings and
   // that section's rows, under the same byte budget.
   if ("focus" in report && report.focus) {
     const f = report.focus;
-    const header = [
+    const focusHeaderLines = [
       `${report.repository} — ${f.role} section ${f.section} (fetched ${report.freshness.fetchedAt}${report.freshness.offline ? `; ${cacheWord(report.freshness)}, live verification unavailable` : ""})`,
     ];
-    if (report.guidance.includes(unfocusedIdentityNotice)) header.push(unfocusedIdentityNotice);
-    if (filterNotice) header.push(filterNotice);
     add(
       f.background ? `${f.title} (background)` : f.title,
       { total: f.total, omitted: f.omitted, items: f.items.map((row) => row.url) },
       new Map(f.items.map((row) => [row.url, row.reason])),
+      true,
     );
     if (!f.total)
       rows.push(
@@ -810,21 +825,19 @@ export function compactText(
           ? `\nNo rows in section ${f.section}.`
           : `\nNo rows observed in section ${f.section}, but evidence is incomplete: this does not mean none exist.`,
       );
-    const warnings = report.completeness.warnings;
-    for (const warning of warnings.slice(0, 5)) header.push(`INCOMPLETE: ${warning}`);
-    if (warnings.length > 5)
-      header.push(
-        `INCOMPLETE: ${warnings.length - 5} more warning(s) omitted; use --json for all.`,
-      );
-    const cut = "\nTruncated due to maximum size; raise --max-chars or use --json for every row.\n";
-    for (const row of rows) {
-      if (header.join("\n").length + row.length + cut.length + 2 > maxChars) {
-        header.push(cut);
-        break;
-      }
-      header.push(row);
-    }
-    return header.join("\n") + "\n";
+    return fitBriefingText({
+      headerLines: focusHeaderLines,
+      contextNotices,
+      warningLines,
+      incomplete: !report.completeness.complete,
+      rows,
+      itemRowIndices,
+      totalItems: f.total,
+      diagLines: [],
+      omittedGuideLine: [],
+      baseNotice: "Truncated due to maximum size; raise --max-chars or use --json for every row.",
+      maxChars,
+    });
   }
   const estimation = report.estimation;
   const estimationRows = (): void => {
@@ -877,6 +890,7 @@ export function compactText(
         rows.push(
           leanRow(i + 1, item, { title: "Repository ownership inventory" }, item.why?.text),
         );
+        itemRowIndices.add(rows.length - 1);
         continue;
       }
       const s = defined(subjects.get(item.target));
@@ -885,11 +899,13 @@ export function compactText(
       // the detailed row with paired assessments and reason codes.
       if (brief) {
         rows.push(leanRow(i + 1, item, s, why, s.detailCommand));
+        itemRowIndices.add(rows.length - 1);
         continue;
       }
       rows.push(
         `- #${s.number} ${s.title} — ${item.kind} (${item.reasonCodes.join(", ")})${s.assessments ? `\n  ${assessmentsText(s.assessments)}` : ""}${why ? `\n  Why: ${why}` : ""}${item.nextCommand ? `\n  Next: ${item.nextCommand}${item.thenCommand ? `\n  Then: ${item.thenCommand}` : ""}` : `\n  Inspect: ${item.inspection ?? s.detailCommand}`}\n  ${item.target}`,
       );
+      itemRowIndices.add(rows.length - 1);
     }
     if (brief) return;
     // Hidden, never deleted, when impact.enabled is false.
@@ -918,7 +934,7 @@ export function compactText(
   );
   const impact = "impactEstimation" in report ? report.impactEstimation : undefined;
   if (ranked) rankedRows(ranked, impact);
-  else add("NEXT STEPS", report.actions, roleReasons);
+  else add("NEXT STEPS", report.actions, roleReasons, true);
   if (brief && !(ranked ? ranked.total : report.actions.total))
     rows.push(
       filterNotice
@@ -931,7 +947,7 @@ export function compactText(
   if (!brief && !ranked && estimation.offered && !estimation.requested)
     rows.push("- No higher-priority work: estimation is offered below (optional).");
   if (report.role && !brief) {
-    lines.push(`Role ${report.role.name}: ${report.role.question}`);
+    contextNotices.push(`Role ${report.role.name}: ${report.role.question}`);
     for (const section of report.role.sections) {
       const reasons = new Map(section.items.map((row) => [row.url, row.reason]));
       add(
@@ -954,44 +970,175 @@ export function compactText(
     for (const [name, section] of Object.entries(report.sections))
       add(titles[name] ?? name.toUpperCase(), section);
   if (!estimation.requested) estimationRows();
-  // Warnings are always shown, but bounded so they cannot exhaust the text budget alone;
-  // JSON output keeps the full list.
-  const warnings = report.completeness.warnings;
-  const shownWarnings = 5;
-  for (const warning of warnings.slice(0, shownWarnings)) lines.push(`INCOMPLETE: ${warning}`);
-  if (warnings.length > shownWarnings)
-    lines.push(
-      `INCOMPLETE: ${warnings.length - shownWarnings} more warning(s) omitted; use --json for all.`,
-    );
-  const notice = brief
-    ? "\nTruncated due to maximum size; raise --max-chars, or use --json or --context.\n"
-    : "\nTruncated due to maximum size; raise --max-chars, request one section with --section ID, or use --json.\n";
-  // The workflow-guide footer (config diagnostics plus the pointer or omission notice) is
-  // required output, so its space is reserved before evidence rows are allocated (#71).
+  const baseNotice = brief
+    ? "Truncated due to maximum size; raise --max-chars, or use --json or --context."
+    : "Truncated due to maximum size; raise --max-chars, request one section with --section ID, or use --json.";
   const guide = report.process;
-  const footer = guide
-    ? [
-        ...guide.diagnostics.map((d) => `CONFIG: ${d}`),
-        ...(guide.guide ? [`\nWorkflow guide omitted by text budget. ${guide.pointer}`] : []),
-      ].reduce((total, line) => total + line.length + 1, 0)
-    : 0;
-  for (const row of rows) {
-    if (lines.join("\n").length + row.length + notice.length + footer + 2 > maxChars) {
-      lines.push(notice);
+  const diagLines = guide ? guide.diagnostics.map((d) => `CONFIG: ${d}`) : [];
+  const omittedGuideLine = guide?.guide
+    ? [`\nWorkflow guide omitted by text budget. ${guide.pointer}`]
+    : [];
+  const fullGuideLine = guide?.guide ? `\n${guide.guide}` : undefined;
+  const detailLine = report.detail
+    ? `\nFULL ISSUE DETAIL\n${JSON.stringify(report.detail, null, 2)}`
+    : undefined;
+  return fitBriefingText({
+    headerLines,
+    contextNotices,
+    warningLines,
+    incomplete: !report.completeness.complete,
+    rows,
+    itemRowIndices,
+    totalItems: ranked ? ranked.total : report.actions.total,
+    diagLines,
+    omittedGuideLine,
+    ...(fullGuideLine !== undefined ? { fullGuideLine } : {}),
+    ...(detailLine !== undefined ? { detailLine } : {}),
+    baseNotice,
+    maxChars,
+  });
+}
+
+/**
+ * Fit a briefing's header, warnings, whole rows, workflow-guide footer and truncation notice
+ * strictly within `maxChars` (#379). Whole actionable rows are kept in priority order with
+ * reserved notice/footer space; when `--max-chars` is smaller than the fixed header, warnings
+ * and footer, whole lines degrade in priority order (header, INCOMPLETE status, guide footer,
+ * secondary notices) ending with "Truncated due to maximum size." (with shown/total count when
+ * it fits), or "[truncated]" / "…" when the budget is shorter than that notice.
+ */
+export function fitBriefingText(options: {
+  headerLines: string[];
+  contextNotices: string[];
+  warningLines: string[];
+  incomplete: boolean;
+  rows: string[];
+  itemRowIndices: ReadonlySet<number>;
+  totalItems: number;
+  diagLines: string[];
+  omittedGuideLine: string[];
+  fullGuideLine?: string;
+  detailLine?: string;
+  baseNotice: string;
+  maxChars: number;
+}): string {
+  const {
+    headerLines,
+    contextNotices,
+    warningLines,
+    incomplete,
+    rows,
+    itemRowIndices,
+    totalItems,
+    diagLines,
+    omittedGuideLine,
+    fullGuideLine,
+    detailLine,
+    baseNotice,
+    maxChars,
+  } = options;
+  const baseLines = [...headerLines, ...contextNotices, ...warningLines];
+  const tailLines = [...diagLines, ...omittedGuideLine];
+  const allRows = detailLine !== undefined ? [...rows, detailLine] : rows;
+
+  // Stage 1: everything fits without row truncation.
+  if (fullGuideLine !== undefined) {
+    const withFullGuide =
+      [
+        ...baseLines,
+        ...rows,
+        ...diagLines,
+        fullGuideLine,
+        ...(detailLine !== undefined ? [detailLine] : []),
+      ].join("\n") + "\n";
+    if (withFullGuide.length <= maxChars) return withFullGuide;
+  }
+  const withOmittedGuide =
+    [...baseLines, ...rows, ...tailLines, ...(detailLine !== undefined ? [detailLine] : [])].join(
+      "\n",
+    ) + "\n";
+  if (withOmittedGuide.length <= maxChars) return withOmittedGuide;
+
+  // Stage 2: keep whole rows in order while reserving space for the truncation notice and footer.
+  const kept: string[] = [...baseLines];
+  let shown = 0;
+  for (let idx = 0; idx < allRows.length; idx++) {
+    const block = allRows[idx];
+    const nextShown = itemRowIndices.has(idx) ? shown + 1 : shown;
+    const countSuffix = totalItems > 0 ? ` (${nextShown} of ${totalItems} shown)` : "";
+    const noticeBlock = `\n${baseNotice}${countSuffix}\n`;
+    const candidate = [...kept, block, noticeBlock, ...tailLines].join("\n") + "\n";
+    if (candidate.length <= maxChars) {
+      kept.push(block);
+      shown = nextShown;
+    } else {
       break;
     }
-    lines.push(row);
   }
-  // The workflow guide (#71) is optional context: it follows the evidence and counts against the
-  // same budget. When it does not fit, only its pointer is shown and the omission is stated.
-  if (guide) {
-    for (const diagnostic of guide.diagnostics) lines.push(`CONFIG: ${diagnostic}`);
-    const fits = (text: string) => lines.join("\n").length + text.length + 2 <= maxChars;
-    if (guide.guide && fits(`\n${guide.guide}`)) lines.push(`\n${guide.guide}`);
-    else if (guide.guide) lines.push(`\nWorkflow guide omitted by text budget. ${guide.pointer}`);
+  const shownSuffix = totalItems > 0 ? ` (${shown} of ${totalItems} shown)` : "";
+  const withCountNotice =
+    [...kept, `\n${baseNotice}${shownSuffix}\n`, ...tailLines].join("\n") + "\n";
+  if (withCountNotice.length <= maxChars) return withCountNotice;
+  const withoutCountNotice = [...kept, `\n${baseNotice}\n`, ...tailLines].join("\n") + "\n";
+  if (withoutCountNotice.length <= maxChars) return withoutCountNotice;
+
+  // Stage 3: small --max-chars where even the fixed header, warnings, notice and footer exceed
+  // the budget. First try keeping all fixed lines with a shorter "Truncated due to maximum size."
+  // notice; otherwise pack whole lines in priority order before the longest notice that fits.
+  const zeroSuffix = totalItems > 0 ? ` (0 of ${totalItems} shown)` : "";
+  const cleanTail = tailLines.map((l) => l.replace(/^\n+/, ""));
+  for (const shortNotice of [
+    ...(zeroSuffix ? [`Truncated due to maximum size.${zeroSuffix}`] : []),
+    "Truncated due to maximum size.",
+  ]) {
+    const candidate = [...baseLines, shortNotice, ...cleanTail].join("\n") + "\n";
+    if (candidate.length <= maxChars) return candidate;
   }
-  if (report.detail) lines.push(`\nFULL ISSUE DETAIL\n${JSON.stringify(report.detail, null, 2)}`);
-  return lines.join("\n") + "\n";
+
+  const notices = [
+    `${baseNotice}${zeroSuffix}`,
+    baseNotice,
+    ...(zeroSuffix ? [`Truncated due to maximum size.${zeroSuffix}`] : []),
+    "Truncated due to maximum size.",
+    "[truncated]",
+    "…",
+  ];
+  const baseMinNotice = "Truncated due to maximum size.";
+  const countMinNotice = zeroSuffix ? `${baseMinNotice}${zeroSuffix}` : baseMinNotice;
+  const minTruncNotice =
+    zeroSuffix &&
+    (headerLines[0] ? headerLines[0].length + 1 : 0) + countMinNotice.length + 1 <= maxChars
+      ? countMinNotice
+      : baseMinNotice;
+  if (baseMinNotice.length + 1 <= maxChars) {
+    const out: string[] = [];
+    let size = minTruncNotice.length + 1;
+    const tryAdd = (line: string): boolean => {
+      if (!line || size + line.length + 1 > maxChars) return false;
+      out.push(line);
+      size += line.length + 1;
+      return true;
+    };
+    if (headerLines[0]) tryAdd(headerLines[0]);
+    let anyWarningAdded = false;
+    for (const w of warningLines) {
+      if (tryAdd(w)) anyWarningAdded = true;
+    }
+    if (incomplete && !anyWarningAdded) {
+      tryAdd("INCOMPLETE: evidence incomplete; use --json.");
+    }
+    for (const t of cleanTail) tryAdd(t);
+    for (const h of headerLines.slice(1)) tryAdd(h);
+    for (const c of contextNotices) tryAdd(c);
+    const bodySize = out.reduce((sum, l) => sum + l.length + 1, 0);
+    const fullNotices = notices.filter((n) => n.startsWith("Truncated due to maximum size"));
+    const chosenNotice =
+      fullNotices.find((n) => bodySize + n.length + 1 <= maxChars) ?? minTruncNotice;
+    return `${[...out, chosenNotice].join("\n")}\n`;
+  }
+  const fallback = notices.find((n) => n.length + 1 <= maxChars);
+  if (!fallback) return "…".slice(0, Math.max(0, maxChars));
+  return `${fallback}\n`;
 }
 
 /**

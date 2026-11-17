@@ -149,12 +149,13 @@ export async function presentBriefing(
   const employingHuman = args[1].employingHuman;
   if (!employingHuman) return presentBriefingFor(...args);
   const line = `${humanContextText(employingHuman)}\n`;
-  const options = { ...args[1], maxChars: Math.max(0, args[1].maxChars - line.length) };
+  const fitsLine = line.length + 31 <= args[1].maxChars;
+  const options = fitsLine ? { ...args[1], maxChars: args[1].maxChars - line.length } : args[1];
   const presented = await presentBriefingFor(args[0], options, ...(args.slice(2) as []));
   return {
     ...presented,
     report: { ...presented.report, employingHuman },
-    text: line + presented.text,
+    text: (fitsLine ? line : "") + presented.text,
   } as unknown as Awaited<ReturnType<typeof presentBriefingFor>>;
 }
 
@@ -442,11 +443,13 @@ async function presentBriefingFor(
       : {}),
   };
   // The engine banner is evaluator metadata: context only, or the expanded --full report (#355).
-  const engineHeader =
+  const rawEngineHeader =
     experimental && (options.context || !compact)
       ? // #516: the same resolved identity as the JSON, the composite hash when a project policy ranks.
         `Decision engine: Datalog (policy ${experimental.decisionEngine.policyVersion}; ${(decisionEngine.rulesHash ?? "").slice(0, 12)}${effective?.manifest.state === "active" ? `; project preferences from ${effective.manifest.source}` : effective?.manifest.state === "error" ? "; project policy error, default order" : ""})\n`
       : "";
+  const engineHeader =
+    !compact || rawEngineHeader.length + 31 <= options.maxChars ? rawEngineHeader : "";
   // Delivery omissions reach the text through the renderers' own bounded INCOMPLETE warnings
   // (a few lines plus "N more warning(s) omitted; use --json"), inside the same budget as the
   // ranked steps. The JSON keeps every warning.
@@ -877,9 +880,11 @@ export async function readBriefing(
  */
 export function shortlistLine(snapshot: Snapshot, maxChars: number): string {
   const notice = snapshot.shortlist?.notice;
-  if (!notice) return "";
+  if (!notice || maxChars < 60) return "";
   const line = `PROVISIONAL: ${notice}\n`;
-  return line.length <= maxChars ? line : `${line.slice(0, Math.max(0, maxChars - 2))}…\n`;
+  if (line.length + 31 <= maxChars) return line;
+  const budget = maxChars - 31;
+  return `${line.slice(0, Math.max(0, budget - 2))}…\n`;
 }
 
 /** The URLs a presented briefing shows (its subjects), in order; the shortlist to hydrate. */
