@@ -139,7 +139,9 @@ export function deliveryInstant(ledger: TicketLedger, verdict: CompletionVerdict
   if (verdict === "none") return { status: "not-delivered" };
   if (verdict === "unknown") return { status: "undated", reason: "completion verdict unknown" };
   if (verdict === "attested") {
-    const attest = ledger.events.filter((e) => e.kind === "delivery" && e.op === "attest");
+    const attest = ledger.events.filter(
+      (e) => e.kind === "delivery" && (e.op === "attest" || e.op === "legacy-attest"),
+    );
     const last = attest.at(-1);
     return last
       ? { status: "dated", at: last.at, basis: "attestation" }

@@ -216,6 +216,22 @@ describe("delivery instant (#573 slice 4)", () => {
     });
   });
 
+  it("dates a legacy attestation the same way", () => {
+    const l = ledger({
+      events: [
+        {
+          kind: "delivery",
+          source: "delivery-record",
+          op: "legacy-attest",
+          agent: "a",
+          at: "2026-11-12T12:00:00Z",
+          key: "comment:9",
+        },
+      ],
+    });
+    expect(deliveryInstant(l, "attested")).toMatchObject({ status: "dated", basis: "attestation" });
+  });
+
   it("does not date a ticket the verdict says is not delivered or unknown", () => {
     expect(deliveryInstant(ledger(), "none")).toEqual({ status: "not-delivered" });
     expect(deliveryInstant(ledger(), "unknown").status).toBe("undated");
