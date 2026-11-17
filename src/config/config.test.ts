@@ -998,6 +998,8 @@ describe("config get/set/list/help commands (#117)", () => {
       value: 4800,
       source: "explicit",
       changed: true,
+      // The factual change this one write made (#815): default -> 4800.
+      changes: [{ key: "serve.port", newValue: 4800 }],
     });
     expect(await t.call("get", "serve.port", "--scope", "global", "--json")).toBe(0);
     expect(t.json()).toMatchObject({ scope: "global", value: 4800, source: "explicit" });
@@ -1011,6 +1013,39 @@ describe("config get/set/list/help commands (#117)", () => {
     const globalText = t.files.get(globalPath)!;
     expect(globalText).toContain("[serve]");
     expect(globalText).toContain("port = 4800");
+  });
+
+  it("reports the factual repository change, including a revert to the default (#815)", async () => {
+    const t = setup();
+    expect(await t.call("set", "processGuide", "true", "--json")).toBe(0);
+    expect(t.json()).toMatchObject({
+      kind: "config-set",
+      changed: true,
+      changes: [{ key: "processGuide", newValue: true }],
+    });
+    // Reverting to the registered default is a change too, and the text output says so.
+    t.out.length = 0;
+    expect(await t.call("set", "processGuide", "false")).toBe(0);
+    expect(t.out.join("")).toContain("processGuide: true -> false");
+    expect(await t.call("set", "processGuide", "false", "--json")).toBe(0);
+    expect(t.json()).toMatchObject({ changed: false, changes: [] });
+  });
+
+  it("refuses a save whose file changed between the baseline read and the write (#815)", async () => {
+    const t = setup();
+    // The service re-reads before writing; a change landing after our baseline read must be a
+    // conflict, so the reported changes can never describe a stale snapshot.
+    const readText = t.fs.readText;
+    let reads = 0;
+    t.fs.readText = async (path) => {
+      reads++;
+      const text = await readText(path);
+      if (reads === 1) return text;
+      const changed = "schemaVersion = 1\n\n# changed by another writer\n";
+      return path.endsWith(".toml") ? changed : text;
+    };
+    expect(await t.call("set", "processGuide", "true", "--json")).toBe(1);
+    expect(t.json()).toMatchObject({ code: "conflict" });
   });
 
   it("reports filesystem failures as structured refusals but still propagates programming errors", async () => {
