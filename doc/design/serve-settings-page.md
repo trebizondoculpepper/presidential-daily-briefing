@@ -1,5 +1,8 @@
 # Settings page: registered scopes, explicit save and safe local writes
 
+See [small dashboard and delivery slices](small-dashboard-delivery.md) for the
+current owner-approved child-ticket map and shipped-versus-remaining boundaries.
+
 See [configuration layers and serve controls](serve-configuration-layers.md) for
 the superseding owner-approved layer split, reload/shutdown scope and delivery order.
 
