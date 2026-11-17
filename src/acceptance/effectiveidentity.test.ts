@@ -1,9 +1,10 @@
+import { IssueUnavailable } from "../github/github.js";
 import { readdir, mkdir } from "node:fs/promises";
 import { describe, expect, it } from "vite-plus/test";
 import { main, type Runtime } from "../cli.js";
 import { prepareEffectiveIdentity, type EffectiveIdentity } from "../config/effectiveidentity.js";
 import { withIdentityFixture as fixture, type IdentityFixture } from "../testing/identity.js";
-import { snapshot, clock, page } from "../testing/snapshots.js";
+import { snapshot, clock, page, issue } from "../testing/snapshots.js";
 import type { HumanContext } from "../config/humancontext.js";
 
 const human: HumanContext = {
@@ -56,6 +57,8 @@ const invoke = async (runtime: Runtime, flags: string[]) => {
       human?: { human: string | null; routing: string };
       decisionEngine?: { role?: { used: string } };
       kind?: string;
+      repository?: string;
+      transferredFrom?: { repository: string };
       agent?: string;
       preview?: { body: string };
       error?: string;
@@ -373,6 +376,128 @@ describe("effective identity in actual CLI results (#677)", () => {
         setup: { state: "created" },
       });
       expect(queries).toBe(0);
+    }));
+
+  it("follows a transfer with the verified invocation identity and no destination setup", async () =>
+    fixture(async (f) => {
+      const runtime = runtimeFor(f, []);
+      const first = await invoke(runtime, ["--json", "--role", "designer"]);
+      const raw = await f.fs.readText(f.file);
+      const prepared: (string | undefined)[] = [];
+      const collected: string[] = [];
+      const destination = "another/destination";
+      const report = await invoke(
+        {
+          ...runtime,
+          prepareIdentity: async (options) => {
+            prepared.push(options.repository);
+            return runtime.prepareIdentity!(options);
+          },
+          collect: async (repository, options) => {
+            collected.push(`${repository}#${options?.issue}`);
+            if (repository === f.repository)
+              throw new IssueUnavailable({
+                repository: f.repository,
+                number: 7,
+                url: `https://github.com/${f.repository}/issues/7`,
+                state: "moved",
+                detail: "Transferred",
+                next: "Inspect destination",
+                destination: {
+                  repository: destination,
+                  number: 2,
+                  url: `https://github.com/${destination}/issues/2`,
+                },
+              });
+            return {
+              ...snapshot([{ ...issue(2), url: `https://github.com/${destination}/issues/2` }], []),
+              repository,
+            };
+          },
+        },
+        ["--repo", f.repository, "--issue", "7", "--include-transferred", "--json"],
+      );
+      expect(report.document.repository).toBe(destination);
+      expect(report.document.transferredFrom?.repository).toBe(f.repository);
+      expect(report.document.effectiveIdentity).toMatchObject({
+        agent: first.document.effectiveIdentity.agent,
+        role: "designer",
+        setup: { state: "reused" },
+      });
+      expect(prepared).toEqual([f.repository]);
+      expect(collected).toEqual([`${f.repository}#7`, `${destination}#2`]);
+      expect(await f.fs.readText(f.file)).toBe(raw);
+    }));
+
+  it.each(
+    [
+      [],
+      ["claim", "7"],
+      ["complete", "7"],
+      ["submit", "7"],
+      ["issue", "create", "--title", "One"],
+      ["estimate", "7", "--size", "S", "--rationale", "One"],
+      ["deps", "add", "7", "--on", "2", "--note", "One"],
+    ].map((command) => ({ command })),
+  )("validates implicit target before setup: $command", async ({ command }) =>
+    fixture(async (f) => {
+      const blocked = async (): Promise<never> => {
+        throw new Error("must not plan against an unverified target");
+      };
+      const result = await invoke(
+        {
+          ...runtimeFor(f, []),
+          currentRepository: async () => "another/repository",
+          collect: blocked,
+          query: blocked,
+          rest: blocked,
+          ghRun: blocked,
+          planDependencyChange: blocked,
+          estimate: { cwd: f.root, fs: f.fs, git: f.git, api: { query: blocked, mutate: blocked } },
+          issueCreate: { post: blocked },
+        },
+        [...command, "--role", "implementer", "--json"],
+      );
+      expect(result.code).toBe(2);
+      expect(result.document.kind).toBe("identity-preparation");
+      expect(result.document.effectiveIdentity).toMatchObject({
+        state: "unresolved",
+        agent: null,
+        diagnostic: { code: "repository-mismatch" },
+      });
+      expect(JSON.stringify(result.document)).not.toContain(f.root);
+      expect(await readdir(f.root)).toEqual([]);
+    }),
+  );
+
+  it("scopes offline identity to the cache repository without live target lookup", async () =>
+    fixture(async (f) => {
+      const runtime = runtimeFor(f, []);
+      await invoke(runtime, ["--json", "--role", "implementer"]);
+      const before = await f.fs.readText(f.file);
+      const cache = f.root + "/snapshot.json";
+      const repository = "another/repository";
+      await f.fs.writeText(cache, JSON.stringify({ ...snapshot([], []), repository }));
+      const result = await invoke(
+        {
+          ...runtime,
+          currentRepository: async () => {
+            throw new Error("must not resolve live target while offline");
+          },
+          collect: async () => {
+            throw new Error("must not collect offline");
+          },
+        },
+        ["--offline", "--cache", cache, "--json"],
+      );
+      expect(result.document.repository).toBe(repository);
+      expect(result.document.effectiveIdentity).toMatchObject({
+        state: "unresolved",
+        agent: null,
+        diagnostic: { code: "repository-mismatch" },
+      });
+      expect(JSON.stringify(result.document.effectiveIdentity)).not.toContain(f.root);
+      expect(await f.fs.readText(f.file)).toBe(before);
     }));
 
   it("help and rules do not prepare an identity", async () =>

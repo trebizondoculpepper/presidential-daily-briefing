@@ -84,7 +84,9 @@ unrecognized complexity label without --replace-invalid) or API denial.`;
 
 export interface EstimateRuntime {
   /** CLI effective attribution, called after syntax validation and before planning writes. */
-  readonly prepareActor?: (options: CommandActorOptions) => Promise<string>;
+  readonly prepareActor?: (
+    options: CommandActorOptions,
+  ) => Promise<{ agent: string; repository: string }>;
   readonly fs?: ConfigFileSystem;
   readonly git?: GitRunner;
   readonly cwd?: string;
@@ -515,9 +517,8 @@ export async function runEstimate(
   if (values.repo !== undefined && !/^[\w.-]+\/[\w.-]+$/.test(values.repo))
     throw new Error("--repo must be owner/name.");
 
-  const estimator = runtime.prepareActor
-    ? await runtime.prepareActor(values)
-    : values.agent?.trim() || null;
+  const prepared = runtime.prepareActor ? await runtime.prepareActor(values) : undefined;
+  const estimator = prepared?.agent ?? (values.agent?.trim() || null);
   const json = !!values.json;
   const fs = runtime.fs ?? nodeFileSystem;
   const git = runtime.git ?? nodeGit;
@@ -543,7 +544,11 @@ export async function runEstimate(
   };
 
   try {
-    const target = await resolveRepositoryTarget(runtime.cwd ?? process.cwd(), values.repo, git);
+    const target = await resolveRepositoryTarget(
+      runtime.cwd ?? process.cwd(),
+      prepared?.repository ?? values.repo,
+      git,
+    );
     result.repository = target.repository;
     const config = await loadConfig(target.root, fs);
     if (settingFor(config, d.enabledKey).value === false)

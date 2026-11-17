@@ -8,7 +8,11 @@ import {
   IdentityPreparationRequired,
   type PrepareCommandIdentity,
 } from "./config/commandidentity.js";
-import { prepareEffectiveIdentity, resolveEffectiveHuman } from "./config/effectiveidentity.js";
+import {
+  prepareEffectiveIdentity,
+  resolveEffectiveHuman,
+  type EffectiveIdentity,
+} from "./config/effectiveidentity.js";
 import { runRebrief } from "./rebrief/cli.js";
 import type { CliRuntime as RebriefRuntime } from "./rebrief/cli.js";
 import { resolveEngineSetting } from "./config/engine-setting.js";
@@ -1532,12 +1536,14 @@ async function runIssue(
     throw new Error(issueCreateUsage);
   }
   if (values.title === undefined) throw new Error(`--title is required. ${issueCreateUsage}`);
-  if (identity)
+  if (identity) {
+    values.repo ??= await runtime.currentRepository();
     values.agent = await commandActor(
       { ...values, dryRun: !!values["dry-run"] },
       identity,
       issueCreateUsage,
     );
+  }
   const stderr = runtime.stderr ?? ((text: string) => process.stderr.write(text));
   const rt: IssueCreateRuntime = {
     rest: runtime.rest ?? ghRest,
@@ -1621,6 +1627,7 @@ async function run(
   output: Output,
   runtime: Runtime,
   identity?: CommandIdentity,
+  inheritedIdentity?: EffectiveIdentity,
 ): Promise<number> {
   if (args[0] === "rules") return runRules(args.slice(1), output, runtime);
   if (args[0] === "process") {
@@ -1633,8 +1640,17 @@ async function run(
       ...runtime,
       ...(identity
         ? {
-            prepareViewer: (values: import("./briefing/catchupcli.js").BriefingArguments) =>
-              commandViewer(values, identity),
+            prepareViewer: async (values: import("./briefing/catchupcli.js").BriefingArguments) => {
+              values.repo ??= values.offline
+                ? (
+                    await (runtime.briefingFiles?.cachedSnapshot ?? cachedSnapshot)(
+                      values.cache ?? "",
+                      undefined,
+                    )
+                  ).repository
+                : await runtime.currentRepository();
+              return commandViewer(values, identity);
+            },
           }
         : {}),
       files: runtime.briefingFiles ?? {
@@ -1732,10 +1748,18 @@ async function run(
           ? "--since reads closed issues live and cannot be used with --offline."
           : "--since must be an ISO 8601 timestamp.",
       );
+    const identitySnapshot =
+      identity && values.offline
+        ? await cachedSnapshot(values.cache ?? "", values.repo)
+        : undefined;
+    if (identity)
+      values.repo ??= identitySnapshot?.repository ?? (await runtime.currentRepository());
     await commandViewer(values, identity);
-    const snapshot = values.offline
-      ? await cachedSnapshot(values.cache ?? "", values.repo)
-      : await runtime.collect(values.repo ?? (await runtime.currentRepository()), {});
+    const snapshot =
+      identitySnapshot ??
+      (values.offline
+        ? await cachedSnapshot(values.cache ?? "", values.repo)
+        : await runtime.collect(values.repo ?? (await runtime.currentRepository()), {}));
     if (!values.offline && values.cache) await cacheSnapshot(runtime, values.cache, snapshot);
     // #301: the declared review policy, after caching (configuration is never cached).
     snapshot.reviewPolicy = await resolveReviewPolicy(snapshot.repository, runtime.guide ?? {});
@@ -1795,6 +1819,7 @@ async function run(
       return 0;
     }
     const parsed = submit ? submitArguments(args.slice(1)) : deliverablesArguments(args.slice(1));
+    if (identity) parsed.repo ??= await runtime.currentRepository();
     const { repo, json, dryRun } = parsed;
     const request = {
       ...parsed.request,
@@ -1832,6 +1857,7 @@ async function run(
       return 0;
     }
     const parsed = completeArguments(args.slice(1));
+    if (identity) parsed.repo ??= await runtime.currentRepository();
     const { repo, json, dryRun } = parsed;
     const request = {
       ...parsed.request,
@@ -1865,6 +1891,7 @@ async function run(
   }
   if (args[0] === "question") {
     const parsed = questionArgumentsFor(args.slice(1));
+    if (identity) parsed.repo ??= await runtime.currentRepository();
     const values = { ...parsed, agent: await commandActor(parsed, identity, questionUsage) };
     const repository = values.repo ?? (await runtime.currentRepository());
     const query = runtime.query ?? ghQuery;
@@ -1884,6 +1911,7 @@ async function run(
   }
   if (args[0] === "claim" && (args[1] === "wait" || args[1] === "resume")) {
     const parsed = claimActivityArgumentsFor(args[1], args.slice(2));
+    if (identity) parsed.repo ??= await runtime.currentRepository();
     const values = { ...parsed, agent: await commandActor(parsed, identity, claimWaitUsage) };
     const repository = values.repo ?? (await runtime.currentRepository());
     const query = runtime.query ?? ghQuery;
@@ -1924,6 +1952,7 @@ async function run(
   }
   if (args[0] === "claim" || args[0] === "needs-human" || args[0] === "release") {
     const parsed = workflowArgumentsFor(args[0], args.slice(1));
+    if (identity) parsed.repo ??= await runtime.currentRepository();
     const values = {
       ...parsed,
       agent: await commandActor(
@@ -2092,10 +2121,18 @@ async function run(
     if (!Number.isFinite(staleHours) || staleHours <= 0)
       throw new Error("--stale-hours must be a positive number.");
     if (values.offline && !values.cache) throw new Error("--offline requires --cache PATH.");
+    const identitySnapshot =
+      identity && values.offline
+        ? await cachedSnapshot(values.cache ?? "", values.repo)
+        : undefined;
+    if (identity)
+      values.repo ??= identitySnapshot?.repository ?? (await runtime.currentRepository());
     await commandViewer(values, identity);
-    const snapshot = values.offline
-      ? await cachedSnapshot(values.cache ?? "", values.repo)
-      : await runtime.collect(values.repo ?? (await runtime.currentRepository()), {});
+    const snapshot =
+      identitySnapshot ??
+      (values.offline
+        ? await cachedSnapshot(values.cache ?? "", values.repo)
+        : await runtime.collect(values.repo ?? (await runtime.currentRepository()), {}));
     if (!values.offline && values.cache) await cacheSnapshot(runtime, values.cache, snapshot);
     // #301: the declared review policy, after caching (configuration is never cached).
     snapshot.reviewPolicy = await resolveReviewPolicy(snapshot.repository, runtime.guide ?? {});
@@ -2114,6 +2151,7 @@ async function run(
       return 0;
     }
     const { values, positionals, limitPrs, maxChars } = parsed;
+    if (identity) values.repo ??= await runtime.currentRepository();
     values.agent = await commandViewer(values, identity);
     const number = Number(positionals[0]);
     const repository = values.repo ?? (await runtime.currentRepository());
@@ -2172,6 +2210,12 @@ async function run(
     if (!Number.isFinite(staleHours) || staleHours <= 0)
       throw new Error("--stale-hours must be a positive number.");
     if (values.offline && !values.cache) throw new Error("--offline requires --cache PATH.");
+    const identitySnapshot =
+      identity && values.offline
+        ? await cachedSnapshot(values.cache ?? "", values.repo)
+        : undefined;
+    if (identity)
+      values.repo ??= identitySnapshot?.repository ?? (await runtime.currentRepository());
     await commandViewer(values, identity);
     const number = Number(positionals[0]);
     if (!values.offline && !values.cache) {
@@ -2191,11 +2235,13 @@ async function run(
     }
     // A cache is written or read: keep the full compatibility snapshot, which a later offline
     // briefing may read as a repository inventory. A focused read is never cached as one.
-    const snapshot = values.offline
-      ? await cachedSnapshot(values.cache ?? "", values.repo)
-      : await runtime.collect(values.repo ?? (await runtime.currentRepository()), {
-          issue: number,
-        });
+    const snapshot =
+      identitySnapshot ??
+      (values.offline
+        ? await cachedSnapshot(values.cache ?? "", values.repo)
+        : await runtime.collect(values.repo ?? (await runtime.currentRepository()), {
+            issue: number,
+          }));
     if (!values.offline && values.cache) await cacheSnapshot(runtime, values.cache, snapshot);
     // #301: the declared review policy, after caching (configuration is never cached).
     snapshot.reviewPolicy = await resolveReviewPolicy(snapshot.repository, runtime.guide ?? {});
@@ -2240,8 +2286,15 @@ async function run(
       ...runtime.estimate,
       ...(identity
         ? {
-            prepareActor: (values: import("./config/commandidentity.js").CommandActorOptions) =>
-              commandActor(values, identity, estimateUsage),
+            prepareActor: async (
+              values: import("./config/commandidentity.js").CommandActorOptions,
+            ) => {
+              const repository = values.repo ?? (await runtime.currentRepository());
+              return {
+                agent: await commandActor({ ...values, repo: repository }, identity, estimateUsage),
+                repository,
+              };
+            },
           }
         : {}),
     });
@@ -2262,6 +2315,7 @@ async function run(
       throw new Error("Usage: pdb pr N [--history] [--json] [--repo owner/name]");
     if (values.repo && !/^[\w.-]+\/[\w.-]+$/.test(values.repo))
       throw new Error("--repo must be owner/name.");
+    if (identity) values.repo ??= await runtime.currentRepository();
     await commandViewer(values, identity);
     const repository = values.repo ?? (await runtime.currentRepository());
     const query = runtime.query ?? ghQuery;
@@ -2283,6 +2337,7 @@ async function run(
       await output(depsHelp);
       return 0;
     }
+    if (identity) values.repo ??= await runtime.currentRepository();
     if ("action" in values) {
       if (identity) await commandActor(values, identity, depsHelp);
     } else if ("migrate" in values) {
@@ -2358,21 +2413,29 @@ async function run(
     await output(help);
     return 0;
   }
-  const effective = identity
-    ? await identity.select(
-        {
-          repository: options.repo,
-          agent: options.role === "human" ? undefined : options.agent,
-          entry: options.entry,
-          harness: options.harness,
-          role: options.role === "human" ? undefined : options.role,
-          intent: options.role === "human" || options.offline ? "readonly" : "normal",
-          offline: !!options.offline,
-          authenticationRequired: false,
-        },
-        { json: !!options.json, allowUnresolved: options.role === "human" || !!options.offline },
-      )
-    : undefined;
+  const identitySnapshot =
+    identity && options.offline
+      ? await cachedSnapshot(options.cache ?? "", options.repo)
+      : undefined;
+  if (identity && !inheritedIdentity)
+    options.repo ??= identitySnapshot?.repository ?? (await runtime.currentRepository());
+  const effective =
+    inheritedIdentity ??
+    (identity
+      ? await identity.select(
+          {
+            repository: options.repo,
+            agent: options.role === "human" ? undefined : options.agent,
+            entry: options.entry,
+            harness: options.harness,
+            role: options.role === "human" ? undefined : options.role,
+            intent: options.role === "human" || options.offline ? "readonly" : "normal",
+            offline: !!options.offline,
+            authenticationRequired: false,
+          },
+          { json: !!options.json, allowUnresolved: options.role === "human" || !!options.offline },
+        )
+      : undefined);
   // A human view's agent flag is its existing routing filter, never an execution-agent override.
   if (effective && options.role !== "human") {
     options.agent = effective.agent ?? undefined;
@@ -2512,7 +2575,8 @@ async function run(
       return briefingFrom(snapshot, stale, shared.labels);
     }
     return briefingFrom(snapshot, undefined, shared.labels);
-  } else if (options.offline) snapshot = await cachedSnapshot(options.cache ?? "", options.repo);
+  } else if (options.offline)
+    snapshot = identitySnapshot ?? (await cachedSnapshot(options.cache ?? "", options.repo));
   else {
     const repository = options.repo ?? (await runtime.currentRepository());
     const previous = options.checkpoint
@@ -2558,7 +2622,9 @@ async function run(
           [...rest, "--repo", d.destination.repository, "--issue", String(d.destination.number)],
           followed,
           runtime,
-          identity,
+          // An explicit transfer follow is the same invocation, not local setup for another repo.
+          undefined,
+          effective,
         );
       }
       const report = { schemaVersion: 1, kind: "issue-unavailable", ...d };
