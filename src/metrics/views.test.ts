@@ -153,6 +153,28 @@ describe("daily evidence gaps (#573 slice 5a)", () => {
     expect(clean.figures.prMerges).toMatchObject({ lowerBound: false, incomplete: { count: 0 } });
   });
 
+  it("treats tickets the read could not ledger as gaps in every figure", () => {
+    const v = dailyView(NOW, 7, [], covered, [`${repo}#99`]);
+    for (const f of Object.values(v.figures)) {
+      expect(f).toMatchObject({ lowerBound: true, incomplete: { members: [`${repo}#99`] } });
+    }
+    expect(newsView(NOW, 6, [], covered, 200, [`${repo}#99`]).incomplete.count).toBe(1);
+  });
+
+  it("uses walked merges for the PR series when the read supplies them", () => {
+    const v = dailyView(
+      NOW,
+      7,
+      [],
+      covered,
+      [],
+      [{ at: "2026-11-12T08:00:00Z", key: `${repo}#95` }],
+    );
+    const day = v.figures.prMerges.series.days.find((d) => d.day === "2026-11-12");
+    expect(day).toMatchObject({ status: "known", count: 1, members: [`${repo}#95`] });
+    expect(v.figures.prMerges.lowerBound).toBe(false);
+  });
+
   it("counts an undated delivery once however often it is passed", () => {
     const t = ticket(32, "delivered", { requiredOtherMembers: 1 });
     expect(dailyView(NOW, 7, [t, t], covered).deliveredDateUnknown).toEqual({
@@ -176,6 +198,20 @@ describe("news view (#573 slice 5a)", () => {
     expect(v.items.map((i) => i.key)).toEqual(["pr:32", "pr:31"]);
     expect(v.omitted).toBe(0);
     expect(newsView(NOW, 6, [t], covered, 1)).toMatchObject({ omitted: 1 });
+    // Walked merges add standalone PRs and never repeat one already in a ledger.
+    const withWalked = newsView(
+      NOW,
+      6,
+      [t],
+      covered,
+      200,
+      [],
+      [
+        { at: "2026-11-17T08:00:00.000Z", key: `${repo}#32` },
+        { at: "2026-11-17T07:00:00.000Z", key: `${repo}#77` },
+      ],
+    );
+    expect(withWalked.items.map((i) => i.key)).toEqual(["pr:32", `pr-merged:${repo}#77`, "pr:31"]);
     expect(v.incomplete).toEqual({ count: 0, members: [] });
     const partial = ticket(8, "none", {
       coverage: {
