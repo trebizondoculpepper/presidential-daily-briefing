@@ -251,7 +251,12 @@ export function briefingView(
           `Human briefing for ${str(human.human) || "(no human named)"} (${items.length} shown of ${Number(human.total ?? 0)}):`,
           ...items.map(
             (item, i) =>
-              `${i + 1}. [${item.explicit ? (item.addressed ? "explicit, to you" : "explicit") : "inferred"}] ${str(item.kind)} ${str(item.target)} — ${str(item.reason)} Source: ${str(item.source)}`,
+              `${i + 1}. [${[
+                item.explicit ? (item.addressed ? "explicit, to you" : "explicit") : "inferred",
+                ...(str(item.attentionSection) === "waiting" ? ["waiting"] : []),
+              ].join(
+                ", ",
+              )}] ${str(item.kind)} ${str(item.target)} — ${str(item.reason)}${str(item.attentionSection) === "waiting" && str(obj(item.attentionSectionReason).text) ? ` (${str(obj(item.attentionSectionReason).text)})` : ""} Source: ${str(item.source)}`,
           ),
           ...list(human.notices).map(String),
         );

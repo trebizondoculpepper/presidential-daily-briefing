@@ -14,6 +14,7 @@ export const requiredQueries = [
   "check-ready",
   "check-blockers",
   "pr-blockers",
+  "human-sections",
   "q0",
   "declared-overrides",
   "q1",
