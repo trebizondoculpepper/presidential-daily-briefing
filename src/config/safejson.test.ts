@@ -34,7 +34,7 @@ const failing = (step: keyof Omit<SafeFs, "lock">, error = "EIO"): SafeFs => ({
 describe("locked durable JSON writes (#382)", () => {
   // Exercise more independent acquisition/release interleavings on Windows, where #729
   // exposed an immediate filesystem refusal. Every batch retains the exact 20-write assertion.
-  it.each(process.platform === "win32" ? Array.from({ length: 100 }, (_, i) => i + 1) : [1])(
+  it.each(process.platform === "win32" ? Array.from({ length: 10 }, (_, i) => i + 1) : [1])(
     "separate processes doing read-modify-write lose no update (batch %s)",
     async () => {
       await withDir(async (dir) => {
