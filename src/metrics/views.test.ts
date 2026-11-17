@@ -224,4 +224,60 @@ describe("timing view (#573 slice 5a)", () => {
     const v = timingView(NOW, 7, [before, inside], covered);
     expect(v.groups["S"]!.members.unknown).toEqual([`${repo}#16`]);
   });
+  it("follows the population table for every case", () => {
+    const unread = {
+      "claim-marker": { status: "unknown", reason: "cut off", observed: null },
+      label: { status: "none" },
+    } as const;
+    const cases: [MetricTicket, boolean][] = [
+      // Delivered, undated (commit member), never picked up, with an in-window merge: kept.
+      [
+        ticket(20, "delivered", {
+          requiredOtherMembers: 1,
+          events: [merged(70, "2026-11-12T00:00:00Z")],
+        }),
+        true,
+      ],
+      // Delivered, undated, nothing in the window: left out.
+      [ticket(21, "delivered", { requiredOtherMembers: 1 }), false],
+      // Verdict unknown with an in-window event: kept as unknown.
+      [ticket(22, "unknown", { events: [merged(71, "2026-11-12T00:00:00Z")] }), true],
+      // Closed undelivered with unread pickup, closure in the window: kept.
+      [
+        ticket(23, "none", {
+          firstPickup: unread,
+          currentState: "closed",
+          events: [closed(23, "2026-11-12T00:00:00Z", "NOT_PLANNED")],
+        }),
+        true,
+      ],
+      // Closed undelivered, closure before the window: left out.
+      [
+        ticket(24, "none", {
+          firstPickup: picked("2026-10-01T00:00:00Z"),
+          currentState: "closed",
+          events: [closed(24, "2026-10-02T00:00:00Z", "NOT_PLANNED")],
+        }),
+        false,
+      ],
+      // Open with unknown state of history: kept.
+      [ticket(25, "none", { firstPickup: unread, currentState: "unknown" }), true],
+      // Never picked up and open: left out.
+      [ticket(26, "none", {}), false],
+    ];
+    const v = timingView(
+      NOW,
+      7,
+      cases.map(([t]) => t),
+      covered,
+    );
+    const all = Object.values(v.groups).flatMap((g) => [
+      ...g.members.completed,
+      ...g.members.open,
+      ...g.members.unknown,
+      ...g.members.closedUndelivered,
+    ]);
+    for (const [t, expected] of cases)
+      expect([t.member, all.includes(t.member)]).toEqual([t.member, expected]);
+  });
 });
