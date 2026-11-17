@@ -15,8 +15,9 @@
  */
 import { complexityGuidance } from "./complexity.js";
 import type { ComplexitySize } from "./complexity.js";
-import { parseLabelProvenance, scanProvenance } from "./estimate.js";
+import { parseMetricProvenance, scanProvenance } from "./estimate.js";
 import { complexityMetric } from "./metrics.js";
+import type { MetricDescriptor } from "./metrics.js";
 import { classifyComplexityLabels } from "./complexitylabels.js";
 import type { TrustDecision } from "../workflow/delivery.js";
 import { pickupEligibility } from "../briefing/ranking.js";
@@ -112,7 +113,15 @@ export interface ProvenanceDecision {
 
 /** A v2 (label-backed) marker comment as a recorded estimate; v1 field-era markers are not. */
 export function recordOf(comment: { body: string; url: string }): RecordedEstimate | null {
-  const p = parseLabelProvenance(comment.body);
+  return metricRecordOf(complexityMetric, comment);
+}
+
+/** One metric's trusted-record shape from a provenance comment (#832), via the shared parser. */
+export function metricRecordOf(
+  d: MetricDescriptor,
+  comment: { body: string; url: string },
+): RecordedEstimate | null {
+  const p = parseMetricProvenance(d, comment.body);
   return p
     ? {
         size: p.size,
@@ -141,12 +150,21 @@ function unevaluated(issue: Issue): ProvenanceDecision {
  * newer comments make it unknown even when an older trusted record was found. Shared by the
  * open-ticket reader above and the metrics read (#573), which also judges closed tickets.
  */
-export async function complexityProvenanceDecision(
+export function complexityProvenanceDecision(
   comments: readonly { body: string; url?: string }[],
   newerHistoryIncomplete: boolean,
   trust: TrustDecision,
 ): Promise<ProvenanceDecision> {
-  const scan = await scanProvenance(complexityMetric, comments, trust);
+  return metricProvenanceDecision(complexityMetric, comments, newerHistoryIncomplete, trust);
+}
+
+export async function metricProvenanceDecision(
+  d: MetricDescriptor,
+  comments: readonly { body: string; url?: string }[],
+  newerHistoryIncomplete: boolean,
+  trust: TrustDecision,
+): Promise<ProvenanceDecision> {
+  const scan = await scanProvenance(d, comments, trust);
   const ignored = scan.ignored;
   if (newerHistoryIncomplete && scan.status !== "unknown")
     return { authority: "unknown", record: null, ignored, why: "newer comment history incomplete" };
@@ -155,7 +173,7 @@ export async function complexityProvenanceDecision(
   if (scan.status === "trusted")
     return {
       authority: "trusted",
-      record: recordOf(scan.node as { body: string; url: string }),
+      record: metricRecordOf(d, scan.node as { body: string; url: string }),
       ignored,
     };
   return { authority: ignored.length ? "untrusted" : "none", record: null, ignored };
@@ -219,7 +237,13 @@ export interface SizeSource {
 export function classifyEstimate(
   reading: SizeReading,
   decision: ProvenanceDecision,
-  context: { lastEditedAt: string | null; historyIncomplete: boolean; evidence: string },
+  context: {
+    lastEditedAt: string | null;
+    historyIncomplete: boolean;
+    evidence: string;
+    /** The metric's current guidance version (#832); complexity's when omitted. */
+    guidanceVersion?: number;
+  },
 ): { state: EstimateState; size: ComplexitySize | null; reasons: string[] } {
   const recorded = decision.record;
   const reasons: string[] = [];
@@ -263,10 +287,13 @@ export function classifyEstimate(
         state = "stale";
         reasons.push(`${context.evidence} ${size} differs from recorded estimate ${recorded.size}`);
       }
-      if ((recorded.guidanceVersion ?? 0) < complexityGuidance.guidanceVersion) {
+      if (
+        (recorded.guidanceVersion ?? 0) <
+        (context.guidanceVersion ?? complexityGuidance.guidanceVersion)
+      ) {
         state = "stale";
         reasons.push(
-          `guidance version ${recorded.guidanceVersion ?? "unknown"} < ${complexityGuidance.guidanceVersion}`,
+          `guidance version ${recorded.guidanceVersion ?? "unknown"} < ${context.guidanceVersion ?? complexityGuidance.guidanceVersion}`,
         );
       }
       const edited = context.lastEditedAt ? Date.parse(context.lastEditedAt) : NaN;
