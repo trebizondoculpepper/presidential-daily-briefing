@@ -531,7 +531,8 @@ export const info = "pageInfo{hasNextPage endCursor}";
 // are existing IssueComment/PullRequestReviewComment fields, so no request is added.
 export const comment =
   "databaseId body url author{__typename login} createdAt updatedAt lastEditedAt includesCreatedEdit editor{__typename login}";
-export const common = `number title body url state createdAt updatedAt lastEditedAt labels(first:100){nodes{name} ${info}} comments(first:100){nodes{${comment}} ${info}}`;
+export const assigneesField = `assignees(first:100){nodes{__typename login} ${info}}`;
+export const common = `number title body url state createdAt updatedAt lastEditedAt labels(first:100){nodes{name} ${info}} ${assigneesField} comments(first:100){nodes{${comment}} ${info}}`;
 // The issue side of the closing link (#162): proves an issue has no open closing PR when an
 // open PR's closing references are truncated.
 export const closedBy = `closedByPullRequestsReferences(first:10,includeClosedPrs:false){nodes{number url state} ${info}}`;
@@ -822,6 +823,8 @@ export async function collect(
     }
     if (item.labels.pageInfo.hasNextPage)
       warnings.push(`${item.url}: labels exceed 100; label analysis incomplete.`);
+    if (item.assignees?.pageInfo.hasNextPage)
+      warnings.push(`${item.url}: assignees exceed 100; assignment evidence incomplete.`);
   });
   for (const pr of pullRequests) {
     const nested: [string, Page<unknown> | undefined][] = [
@@ -1123,6 +1126,8 @@ export async function collectIssueFocus(
     warnings.push(`${issue.url}: labels exceed 100; label analysis incomplete.`);
     meter.cover("labels", subject, "partial", { omission: "labels beyond the first 100" });
   } else meter.cover("labels", subject, "complete");
+  if (issue.assignees?.pageInfo.hasNextPage)
+    warnings.push(`${issue.url}: assignees exceed 100; assignment evidence incomplete.`);
   if (options.nativeEdges) {
     const sources = ["native-blocked-by", "native-blocking"];
     try {
@@ -1332,6 +1337,8 @@ export async function hydratePullRequests(
         warnings.push(`${pr.url}: ${label} exceed 100; review/merge evidence incomplete.`);
       if (pr.labels.pageInfo.hasNextPage)
         warnings.push(`${pr.url}: labels exceed 100; label analysis incomplete.`);
+      if (pr.assignees?.pageInfo.hasNextPage)
+        warnings.push(`${pr.url}: assignees exceed 100; assignment evidence incomplete.`);
       meter.cover(
         "pull-request",
         prSubject,

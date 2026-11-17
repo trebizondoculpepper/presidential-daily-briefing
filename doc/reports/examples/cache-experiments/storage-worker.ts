@@ -132,6 +132,7 @@ async function main(argv: string[]): Promise<void> {
       renameRetries: 0,
       /** Lock attempts that found the lock already held (EEXIST): evidence of real overlap. */
       lockBusy: 0,
+      lockCreateRefusals: 0,
       firstWriteAt: 0,
       lastWriteAt: 0,
     };
@@ -142,7 +143,10 @@ async function main(argv: string[]): Promise<void> {
         try {
           return await realFs.writeFile(path, data, options);
         } catch (e) {
-          if (errorCode(e) === "EEXIST" && path.endsWith(LOCK_FILE)) tally.lockBusy++;
+          if (path.endsWith(LOCK_FILE)) {
+            if (errorCode(e) === "EEXIST") tally.lockBusy++;
+            if (errorCode(e) === "EPERM") tally.lockCreateRefusals++;
+          }
           throw e;
         }
       },

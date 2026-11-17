@@ -4,6 +4,10 @@ export type Page<T> = {
   pageInfo: { hasNextPage: boolean; endCursor: string | null };
   totalCount?: number;
 };
+export type Assignee = {
+  __typename?: string;
+  login: string;
+};
 export type Comment = {
   /** Stable numeric id; orders delivery records (#182). Absent from older caches: order unknown. */
   databaseId?: number;
@@ -58,6 +62,8 @@ export type Issue = {
   createdAt: string;
   updatedAt: string;
   labels: Page<{ name: string }>;
+  /** GitHub assignees (#665); absent in older caches: assignment completeness unknown. */
+  assignees?: Page<Assignee>;
   comments: Page<Comment>;
   /** Open PRs that would close this issue (#162); absent in snapshots that predate it. */
   closedByPullRequestsReferences?: Page<{ number: number; url: string; state: string }>;

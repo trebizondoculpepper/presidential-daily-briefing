@@ -354,7 +354,7 @@ describe("locking", () => {
   };
 
   it.each(["create", "verify"] as const)(
-    "preserves immediate %s-phase lock failure evidence",
+    "preserves %s-phase lock failure evidence with no retry budget",
     async (phase) => {
       const root = newRoot();
       await write(root, 1);
@@ -377,6 +377,7 @@ describe("locking", () => {
         fs,
         now: () => T0,
         lockNow: clock.now,
+        lockWaitMs: 0,
         sleep: clock.sleep,
       });
       expect(result).toMatchObject({
@@ -483,6 +484,12 @@ describe("separate processes", () => {
         expect(worker.result, JSON.stringify(worker.result)).toMatchObject({ written: 15 });
         expect((worker.result as { notWritten: unknown }).notWritten).toEqual({});
       }
+      const recovered = [ra, rb].reduce(
+        (total, worker) =>
+          total + (worker.result as { lockCreateRefusals: number }).lockCreateRefusals,
+        0,
+      );
+      if (recovered) console.log("Recovered storage lock-create EPERM:", recovered);
       const loaded = await loadSnapshot(root, ctx, { access: "confirmed" });
       expect(loaded.status).toBe("hit");
       if (loaded.status === "hit") expect(loaded.snapshot.records).toHaveLength(30);
