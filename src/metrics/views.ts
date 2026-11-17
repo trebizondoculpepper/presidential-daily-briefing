@@ -17,6 +17,7 @@ import {
   type DurationSample,
   type DurationStats,
 } from "./aggregate.js";
+import type { AssessmentGroups } from "./assessment.js";
 import type { LedgerEvent, TicketLedger } from "./ledger.js";
 import {
   dailyAverage,
@@ -40,6 +41,11 @@ export interface MetricTicket {
    * explicit `unassessed`, `stale`, `conflict` or `unknown` group. Never an untrusted label.
    */
   complexity: string;
+  /**
+   * Current valid complexity and impact groups with their provenance (#832), when the read
+   * supplied them; `complexity` above is the complexity group's name.
+   */
+  assessment?: AssessmentGroups;
 }
 
 /** How far back the historical event walk is known to be complete. */
