@@ -1,5 +1,7 @@
 # Packaged native hook entry points (#398)
 
+The follow-up [approved continuation limits contract](approved-continuation-limits.md) (#657) supersedes arbitrary default total-work caps as requirements. Existing v1 cap/state descriptions below remain implementation facts until that focused migration ships; this is not permission to reset state or invent native stop provenance.
+
 Documentation-first contract reviewed in #571. Extends shared-rebrief-core.md;
 the implementation exposes the entry point documented in doc/rebrief.md.
 
