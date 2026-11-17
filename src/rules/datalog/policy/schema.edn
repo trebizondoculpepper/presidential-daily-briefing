@@ -2,7 +2,7 @@
 ;; Each witness is a vector of where-clauses binding ?value for subject ?t.
 {:policy-version 1
  :many
- ["required-evidence-gap" "missing-required" "label" "owner" "responsible" "platform" "attention" "blocker" "dependent" "closes" "closing" "check" "review" "receipt" "provider-review" "thread" "matched" "overridden" "unlocks-dependent" "permit" "deny" "unknown" "unlock-unknown" "question-record"]
+ ["required-evidence-gap" "missing-required" "label" "owner" "responsible" "platform" "attention" "blocker" "dependent" "closes" "closing" "check" "review" "receipt" "provider-review" "provider-finding" "thread" "matched" "overridden" "unlocks-dependent" "permit" "deny" "unknown" "unlock-unknown" "question-record"]
  :constants
  {"small" ["XS" "S"]
   "large" ["L" "XL" "XXL"]
@@ -112,7 +112,24 @@
    "unlock-count" "number of dependents it unlocks"
    "unlock-unknown" "reason the unlock count is unknown"
    "unlocks-dependent" "dependent it would unlock"
-   "urgency-key" "urgency sort key"}
+   "urgency-key" "urgency sort key"
+   "closed-label" "closed or merged pull request state"
+   "no-run-time" "whether a cancelled check had no recorded run time"
+   "pending-count" "number of pending checks"
+   "base-ref" "pull request base branch"
+   "unresolved-threads" "number of unresolved review threads"
+   "policy-effective" "effective declared review policy"
+   "policy-unknown-reason" "reason the declared review policy is unknown"
+   "policy-head-reviewed" "whether the declared review policy accepted the current head"
+   "policy-has-findings" "whether the declared review policy has unresolved head findings"
+   "policy-summary" "configured review providers' current-head states"
+   "provider-finding" "unresolved finding from a configured review provider"
+   "provider-label" "review provider display label"
+   "finding-source" "review finding source URL"
+   "codex-findings" "whether legacy Codex receipt reports findings on the current head"
+   "codex-stale" "whether legacy Codex coverage is stale against the current head"
+   "codex-running" "in-progress status of Codex's current-head review"
+   "review-request-status" "status of an explicit review request"}
   :viewer
   {"agent" "agent name"
    "role" "role"
