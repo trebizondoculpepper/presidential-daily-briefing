@@ -114,23 +114,10 @@
     }
   },
   "constants": {
-    "small": [
-      "XS",
-      "S"
-    ],
-    "large": [
-      "L",
-      "XL",
-      "XXL"
-    ],
-    "needs-assessment": [
-      "unassessed",
-      "stale"
-    ],
-    "bad-assessment": [
-      "invalid",
-      "conflict"
-    ],
+    "small": ["XS", "S"],
+    "large": ["L", "XL", "XXL"],
+    "needs-assessment": ["unassessed", "stale"],
+    "bad-assessment": ["invalid", "conflict"],
     "prerequisite": [
       "status:needs-design",
       "question",
@@ -138,10 +125,7 @@
       "status:blocked",
       "status:parked"
     ],
-    "design-label": [
-      "documentation",
-      "status:needs-design"
-    ],
+    "design-label": ["documentation", "status:needs-design"],
     "failure": [
       "FAILURE",
       "ERROR",
@@ -151,14 +135,7 @@
       "STARTUP_FAILURE",
       "STALE"
     ],
-    "pending": [
-      "PENDING",
-      "QUEUED",
-      "IN_PROGRESS",
-      "WAITING",
-      "REQUESTED",
-      "EXPECTED"
-    ],
+    "pending": ["PENDING", "QUEUED", "IN_PROGRESS", "WAITING", "REQUESTED", "EXPECTED"],
     "known-check": [
       "SUCCESS",
       "NEUTRAL",
@@ -177,26 +154,11 @@
       "REQUESTED",
       "EXPECTED"
     ],
-    "merge-state": [
-      "CLEAN",
-      "HAS_HOOKS",
-      "UNSTABLE"
-    ],
-    "refresh-state": [
-      "BEHIND",
-      "UNKNOWN"
-    ],
-    "unknown-mergeable": [
-      "UNKNOWN"
-    ],
-    "readiness": [
-      "status:ready",
-      "status:incomplete"
-    ],
-    "question-label": [
-      "question",
-      "design:decision-needed"
-    ]
+    "merge-state": ["CLEAN", "HAS_HOOKS", "UNSTABLE"],
+    "refresh-state": ["BEHIND", "UNKNOWN"],
+    "unknown-mergeable": ["UNKNOWN"],
+    "readiness": ["status:ready", "status:incomplete"],
+    "question-label": ["question", "design:decision-needed"]
   },
   "evidence": [
     {
@@ -409,9 +371,7 @@
       "kind": "addressed-response",
       "band": 1,
       "preference": 0,
-      "codes": [
-        "addressed"
-      ],
+      "codes": ["addressed"],
       "roles": null,
       "clauses": [
         {
@@ -443,11 +403,7 @@
         }
       ],
       "templateClauses": 1,
-      "calls": [
-        "foreground",
-        "open",
-        "addressed"
-      ],
+      "calls": ["foreground", "open", "addressed"],
       "evidence": [
         {
           "name": "addressedAgent",
@@ -492,10 +448,7 @@
       "kind": "pr-follow-up",
       "band": 2,
       "preference": 0,
-      "codes": [
-        "pr-follow-up",
-        "pr-failed-checks"
-      ],
+      "codes": ["pr-follow-up", "pr-failed-checks"],
       "roles": null,
       "clauses": [
         {
@@ -527,11 +480,7 @@
         }
       ],
       "templateClauses": 1,
-      "calls": [
-        "foreground",
-        "pr-action",
-        "pr-failure"
-      ],
+      "calls": ["foreground", "pr-action", "pr-failure"],
       "evidence": [
         {
           "name": "failedChecks",
@@ -618,10 +567,7 @@
       "kind": "pr-follow-up",
       "band": 2,
       "preference": 0,
-      "codes": [
-        "pr-follow-up",
-        "pr-review-findings"
-      ],
+      "codes": ["pr-follow-up", "pr-review-findings"],
       "roles": null,
       "clauses": [
         {
@@ -653,11 +599,7 @@
         }
       ],
       "templateClauses": 1,
-      "calls": [
-        "foreground",
-        "pr-action",
-        "pr-review"
-      ],
+      "calls": ["foreground", "pr-action", "pr-review"],
       "evidence": [
         {
           "name": "reviewDecision",
@@ -731,10 +673,7 @@
       "kind": "pr-follow-up",
       "band": 2,
       "preference": 1,
-      "codes": [
-        "pr-follow-up",
-        "pr-conflicts"
-      ],
+      "codes": ["pr-follow-up", "pr-conflicts"],
       "roles": null,
       "clauses": [
         {
@@ -770,10 +709,7 @@
         }
       ],
       "templateClauses": 1,
-      "calls": [
-        "foreground",
-        "pr-action"
-      ],
+      "calls": ["foreground", "pr-action"],
       "evidence": [
         {
           "name": "mergeable",
@@ -805,10 +741,7 @@
       "kind": "pr-follow-up",
       "band": 2,
       "preference": 2,
-      "codes": [
-        "pr-follow-up",
-        "pr-inspect-merge"
-      ],
+      "codes": ["pr-follow-up", "pr-inspect-merge"],
       "roles": null,
       "clauses": [
         {
@@ -840,11 +773,7 @@
         }
       ],
       "templateClauses": 1,
-      "calls": [
-        "foreground",
-        "pr-action",
-        "clean-pr"
-      ],
+      "calls": ["foreground", "pr-action", "clean-pr"],
       "evidence": [
         {
           "name": "requiredChecksComplete",
@@ -933,10 +862,7 @@
       "kind": "pr-follow-up",
       "band": 2,
       "preference": 3,
-      "codes": [
-        "pr-follow-up",
-        "pr-integrate"
-      ],
+      "codes": ["pr-follow-up", "pr-integrate"],
       "roles": null,
       "clauses": [
         {
@@ -968,11 +894,7 @@
         }
       ],
       "templateClauses": 1,
-      "calls": [
-        "foreground",
-        "pr-action",
-        "integrate-pr"
-      ],
+      "calls": ["foreground", "pr-action", "integrate-pr"],
       "evidence": [
         {
           "name": "mergeable",
@@ -1042,12 +964,8 @@
       "kind": "decide",
       "band": 3,
       "preference": 0,
-      "codes": [
-        "designer-duty"
-      ],
-      "roles": [
-        "designer"
-      ],
+      "codes": ["designer-duty"],
+      "roles": ["designer"],
       "clauses": [
         {
           "type": "call",
@@ -1086,9 +1004,7 @@
         }
       ],
       "templateClauses": 1,
-      "calls": [
-        "foreground"
-      ],
+      "calls": ["foreground"],
       "evidence": [
         {
           "name": "decisionLabel",
@@ -1130,12 +1046,8 @@
       "kind": "document",
       "band": 3,
       "preference": 1,
-      "codes": [
-        "designer-duty"
-      ],
-      "roles": [
-        "designer"
-      ],
+      "codes": ["designer-duty"],
+      "roles": ["designer"],
       "clauses": [
         {
           "type": "call",
@@ -1174,9 +1086,7 @@
         }
       ],
       "templateClauses": 1,
-      "calls": [
-        "foreground"
-      ],
+      "calls": ["foreground"],
       "evidence": [
         {
           "name": "documentationLabel",
@@ -1218,12 +1128,8 @@
       "kind": "design-review",
       "band": 3,
       "preference": 2,
-      "codes": [
-        "designer-duty"
-      ],
-      "roles": [
-        "designer"
-      ],
+      "codes": ["designer-duty"],
+      "roles": ["designer"],
       "clauses": [
         {
           "type": "call",
@@ -1273,11 +1179,7 @@
         }
       ],
       "templateClauses": 1,
-      "calls": [
-        "foreground",
-        "design-pr",
-        "own-follow-up"
-      ],
+      "calls": ["foreground", "design-pr", "own-follow-up"],
       "evidence": [
         {
           "name": "designEvidence",
@@ -1285,10 +1187,7 @@
           "clauses": [
             {
               "type": "or",
-              "join": [
-                "?t",
-                "?value"
-              ],
+              "join": ["?t", "?value"],
               "alternatives": [
                 [
                   {
@@ -1374,12 +1273,8 @@
       "kind": "implement",
       "band": 4,
       "preference": 0,
-      "codes": [
-        "easy-win"
-      ],
-      "roles": [
-        "implementer"
-      ],
+      "codes": ["easy-win"],
+      "roles": ["implementer"],
       "clauses": [
         {
           "type": "call",
@@ -1436,11 +1331,7 @@
         }
       ],
       "templateClauses": 1,
-      "calls": [
-        "foreground",
-        "eligible",
-        "easy"
-      ],
+      "calls": ["foreground", "eligible", "easy"],
       "evidence": [],
       "source": {
         "file": "policy/decisions.edn",
@@ -1452,13 +1343,8 @@
       "kind": "continue-implementation",
       "band": 4,
       "preference": 0,
-      "codes": [
-        "easy-win",
-        "own-claim"
-      ],
-      "roles": [
-        "implementer"
-      ],
+      "codes": ["easy-win", "own-claim"],
+      "roles": ["implementer"],
       "clauses": [
         {
           "type": "call",
@@ -1502,11 +1388,7 @@
         }
       ],
       "templateClauses": 1,
-      "calls": [
-        "foreground",
-        "own-active",
-        "easy"
-      ],
+      "calls": ["foreground", "own-active", "easy"],
       "evidence": [],
       "source": {
         "file": "policy/decisions.edn",
@@ -1518,13 +1400,8 @@
       "kind": "estimate-complexity",
       "band": 5,
       "preference": 0,
-      "codes": [
-        "assessment",
-        "cross-role-boost"
-      ],
-      "roles": [
-        "implementer"
-      ],
+      "codes": ["assessment", "cross-role-boost"],
+      "roles": ["implementer"],
       "clauses": [
         {
           "type": "call",
@@ -1577,12 +1454,7 @@
         }
       ],
       "templateClauses": 1,
-      "calls": [
-        "foreground",
-        "issue",
-        "needs-complexity",
-        "large-impact"
-      ],
+      "calls": ["foreground", "issue", "needs-complexity", "large-impact"],
       "evidence": [],
       "source": {
         "file": "policy/decisions.edn",
@@ -1594,12 +1466,8 @@
       "kind": "estimate-complexity",
       "band": 5,
       "preference": 1,
-      "codes": [
-        "assessment"
-      ],
-      "roles": [
-        "implementer"
-      ],
+      "codes": ["assessment"],
+      "roles": ["implementer"],
       "clauses": [
         {
           "type": "call",
@@ -1643,11 +1511,7 @@
         }
       ],
       "templateClauses": 1,
-      "calls": [
-        "foreground",
-        "issue",
-        "needs-complexity"
-      ],
+      "calls": ["foreground", "issue", "needs-complexity"],
       "evidence": [],
       "source": {
         "file": "policy/decisions.edn",
@@ -1659,13 +1523,8 @@
       "kind": "assess-impact",
       "band": 5,
       "preference": 0,
-      "codes": [
-        "assessment",
-        "cross-role-boost"
-      ],
-      "roles": [
-        "designer"
-      ],
+      "codes": ["assessment", "cross-role-boost"],
+      "roles": ["designer"],
       "clauses": [
         {
           "type": "call",
@@ -1718,12 +1577,7 @@
         }
       ],
       "templateClauses": 1,
-      "calls": [
-        "foreground",
-        "issue",
-        "needs-impact",
-        "small-complexity"
-      ],
+      "calls": ["foreground", "issue", "needs-impact", "small-complexity"],
       "evidence": [],
       "source": {
         "file": "policy/decisions.edn",
@@ -1735,12 +1589,8 @@
       "kind": "assess-impact",
       "band": 5,
       "preference": 1,
-      "codes": [
-        "assessment"
-      ],
-      "roles": [
-        "designer"
-      ],
+      "codes": ["assessment"],
+      "roles": ["designer"],
       "clauses": [
         {
           "type": "call",
@@ -1784,11 +1634,7 @@
         }
       ],
       "templateClauses": 1,
-      "calls": [
-        "foreground",
-        "issue",
-        "needs-impact"
-      ],
+      "calls": ["foreground", "issue", "needs-impact"],
       "evidence": [],
       "source": {
         "file": "policy/decisions.edn",
@@ -1800,13 +1646,8 @@
       "kind": "inspect-assessment",
       "band": 5,
       "preference": 1,
-      "codes": [
-        "assessment",
-        "inspection"
-      ],
-      "roles": [
-        "implementer"
-      ],
+      "codes": ["assessment", "inspection"],
+      "roles": ["implementer"],
       "clauses": [
         {
           "type": "call",
@@ -1850,11 +1691,7 @@
         }
       ],
       "templateClauses": 1,
-      "calls": [
-        "foreground",
-        "issue",
-        "bad-complexity"
-      ],
+      "calls": ["foreground", "issue", "bad-complexity"],
       "evidence": [],
       "source": {
         "file": "policy/decisions.edn",
@@ -1866,13 +1703,8 @@
       "kind": "inspect-assessment",
       "band": 5,
       "preference": 1,
-      "codes": [
-        "assessment",
-        "inspection"
-      ],
-      "roles": [
-        "designer"
-      ],
+      "codes": ["assessment", "inspection"],
+      "roles": ["designer"],
       "clauses": [
         {
           "type": "call",
@@ -1916,11 +1748,7 @@
         }
       ],
       "templateClauses": 1,
-      "calls": [
-        "foreground",
-        "issue",
-        "bad-impact"
-      ],
+      "calls": ["foreground", "issue", "bad-impact"],
       "evidence": [],
       "source": {
         "file": "policy/decisions.edn",
@@ -1932,12 +1760,8 @@
       "kind": "implement",
       "band": 6,
       "preference": 0,
-      "codes": [
-        "ordinary"
-      ],
-      "roles": [
-        "implementer"
-      ],
+      "codes": ["ordinary"],
+      "roles": ["implementer"],
       "clauses": [
         {
           "type": "call",
@@ -1972,10 +1796,7 @@
         }
       ],
       "templateClauses": 1,
-      "calls": [
-        "foreground",
-        "eligible"
-      ],
+      "calls": ["foreground", "eligible"],
       "evidence": [],
       "source": {
         "file": "policy/decisions.edn",
@@ -1987,13 +1808,8 @@
       "kind": "continue-implementation",
       "band": 6,
       "preference": 0,
-      "codes": [
-        "ordinary",
-        "own-claim"
-      ],
-      "roles": [
-        "implementer"
-      ],
+      "codes": ["ordinary", "own-claim"],
+      "roles": ["implementer"],
       "clauses": [
         {
           "type": "call",
@@ -2028,10 +1844,7 @@
         }
       ],
       "templateClauses": 1,
-      "calls": [
-        "foreground",
-        "own-active"
-      ],
+      "calls": ["foreground", "own-active"],
       "evidence": [],
       "source": {
         "file": "policy/decisions.edn",
@@ -2043,12 +1856,8 @@
       "kind": "design",
       "band": 6,
       "preference": 0,
-      "codes": [
-        "ordinary"
-      ],
-      "roles": [
-        "designer"
-      ],
+      "codes": ["ordinary"],
+      "roles": ["designer"],
       "clauses": [
         {
           "type": "call",
@@ -2083,10 +1892,7 @@
         }
       ],
       "templateClauses": 1,
-      "calls": [
-        "foreground",
-        "design-eligible"
-      ],
+      "calls": ["foreground", "design-eligible"],
       "evidence": [
         {
           "name": "designLabel",
@@ -2128,12 +1934,8 @@
       "kind": "implement",
       "band": 7,
       "preference": 0,
-      "codes": [
-        "unfavorable"
-      ],
-      "roles": [
-        "implementer"
-      ],
+      "codes": ["unfavorable"],
+      "roles": ["implementer"],
       "clauses": [
         {
           "type": "call",
@@ -2190,11 +1992,7 @@
         }
       ],
       "templateClauses": 1,
-      "calls": [
-        "foreground",
-        "eligible",
-        "unfavorable"
-      ],
+      "calls": ["foreground", "eligible", "unfavorable"],
       "evidence": [],
       "source": {
         "file": "policy/decisions.edn",
@@ -2206,13 +2004,8 @@
       "kind": "continue-implementation",
       "band": 7,
       "preference": 0,
-      "codes": [
-        "unfavorable",
-        "own-claim"
-      ],
-      "roles": [
-        "implementer"
-      ],
+      "codes": ["unfavorable", "own-claim"],
+      "roles": ["implementer"],
       "clauses": [
         {
           "type": "call",
@@ -2256,11 +2049,7 @@
         }
       ],
       "templateClauses": 1,
-      "calls": [
-        "foreground",
-        "own-active",
-        "unfavorable"
-      ],
+      "calls": ["foreground", "own-active", "unfavorable"],
       "evidence": [],
       "source": {
         "file": "policy/decisions.edn",
@@ -2272,13 +2061,8 @@
       "kind": "resume-claim",
       "band": 3,
       "preference": 0,
-      "codes": [
-        "own-claim",
-        "resume-required"
-      ],
-      "roles": [
-        "implementer"
-      ],
+      "codes": ["own-claim", "resume-required"],
+      "roles": ["implementer"],
       "clauses": [
         {
           "type": "call",
@@ -2326,10 +2110,7 @@
         }
       ],
       "templateClauses": 1,
-      "calls": [
-        "foreground",
-        "own-issue"
-      ],
+      "calls": ["foreground", "own-issue"],
       "evidence": [
         {
           "name": "waitReason",
@@ -2361,13 +2142,8 @@
       "kind": "review-owned-work",
       "band": 3,
       "preference": 1,
-      "codes": [
-        "own-claim",
-        "review-owned-work"
-      ],
-      "roles": [
-        "implementer"
-      ],
+      "codes": ["own-claim", "review-owned-work"],
+      "roles": ["implementer"],
       "clauses": [
         {
           "type": "call",
@@ -2453,10 +2229,7 @@
         }
       ],
       "templateClauses": 1,
-      "calls": [
-        "foreground",
-        "own-issue"
-      ],
+      "calls": ["foreground", "own-issue"],
       "evidence": [
         {
           "name": "ownedClaims",
@@ -2488,14 +2261,8 @@
       "kind": "review-owned-work",
       "band": 3,
       "preference": 1,
-      "codes": [
-        "own-claim",
-        "review-owned-work",
-        "inspection"
-      ],
-      "roles": [
-        "implementer"
-      ],
+      "codes": ["own-claim", "review-owned-work", "inspection"],
+      "roles": ["implementer"],
       "clauses": [
         {
           "type": "call",
@@ -2581,10 +2348,7 @@
         }
       ],
       "templateClauses": 1,
-      "calls": [
-        "foreground",
-        "own-issue"
-      ],
+      "calls": ["foreground", "own-issue"],
       "evidence": [
         {
           "name": "ownedClaims",
@@ -2616,13 +2380,8 @@
       "kind": "inspect-ownership",
       "band": 3,
       "preference": 3,
-      "codes": [
-        "inspection",
-        "inventory-unknown"
-      ],
-      "roles": [
-        "implementer"
-      ],
+      "codes": ["inspection", "inventory-unknown"],
+      "roles": ["implementer"],
       "clauses": [
         {
           "type": "call",
@@ -2687,9 +2446,7 @@
         }
       ],
       "templateClauses": 1,
-      "calls": [
-        "foreground"
-      ],
+      "calls": ["foreground"],
       "evidence": [],
       "source": {
         "file": "policy/decisions.edn",
@@ -2701,13 +2458,8 @@
       "kind": "inspect",
       "band": 3,
       "preference": 3,
-      "codes": [
-        "own-claim",
-        "inspection"
-      ],
-      "roles": [
-        "implementer"
-      ],
+      "codes": ["own-claim", "inspection"],
+      "roles": ["implementer"],
       "clauses": [
         {
           "type": "call",
@@ -2781,10 +2533,7 @@
         }
       ],
       "templateClauses": 1,
-      "calls": [
-        "foreground",
-        "own-issue"
-      ],
+      "calls": ["foreground", "own-issue"],
       "evidence": [],
       "source": {
         "file": "policy/decisions.edn",
@@ -2796,13 +2545,8 @@
       "kind": "inspect",
       "band": 3,
       "preference": 2,
-      "codes": [
-        "own-claim",
-        "inspection"
-      ],
-      "roles": [
-        "implementer"
-      ],
+      "codes": ["own-claim", "inspection"],
+      "roles": ["implementer"],
       "clauses": [
         {
           "type": "call",
@@ -2850,10 +2594,7 @@
         }
       ],
       "templateClauses": 1,
-      "calls": [
-        "foreground",
-        "own-issue"
-      ],
+      "calls": ["foreground", "own-issue"],
       "evidence": [
         {
           "name": "waitReason",
@@ -2885,13 +2626,8 @@
       "kind": "wait-claim",
       "band": 8,
       "preference": 0,
-      "codes": [
-        "own-claim",
-        "waiting"
-      ],
-      "roles": [
-        "implementer"
-      ],
+      "codes": ["own-claim", "waiting"],
+      "roles": ["implementer"],
       "clauses": [
         {
           "type": "call",
@@ -2939,10 +2675,7 @@
         }
       ],
       "templateClauses": 1,
-      "calls": [
-        "foreground",
-        "own-issue"
-      ],
+      "calls": ["foreground", "own-issue"],
       "evidence": [
         {
           "name": "waitReason",
@@ -2974,10 +2707,7 @@
       "kind": "inspect",
       "band": 6,
       "preference": 0,
-      "codes": [
-        "ordinary",
-        "inspection"
-      ],
+      "codes": ["ordinary", "inspection"],
       "roles": null,
       "clauses": [
         {
@@ -3043,12 +2773,7 @@
         }
       ],
       "templateClauses": 1,
-      "calls": [
-        "foreground",
-        "issue",
-        "possible",
-        "uncertain"
-      ],
+      "calls": ["foreground", "issue", "possible", "uncertain"],
       "evidence": [
         {
           "name": "uncertainty",
@@ -3056,10 +2781,7 @@
           "clauses": [
             {
               "type": "or",
-              "join": [
-                "?t",
-                "?value"
-              ],
+              "join": ["?t", "?value"],
               "alternatives": [
                 [
                   {
@@ -3174,13 +2896,8 @@
       "kind": "answer-questions",
       "band": 1,
       "preference": 0,
-      "codes": [
-        "explicit",
-        "addressed"
-      ],
-      "roles": [
-        "human"
-      ],
+      "codes": ["explicit", "addressed"],
+      "roles": ["human"],
       "clauses": [
         {
           "type": "call",
@@ -3224,11 +2941,7 @@
         }
       ],
       "templateClauses": 1,
-      "calls": [
-        "foreground",
-        "open-question",
-        "asks-viewer"
-      ],
+      "calls": ["foreground", "open-question", "asks-viewer"],
       "evidence": [
         {
           "name": "routedTo",
@@ -3272,12 +2985,8 @@
       "kind": "answer-questions",
       "band": 3,
       "preference": 0,
-      "codes": [
-        "explicit"
-      ],
-      "roles": [
-        "human"
-      ],
+      "codes": ["explicit"],
+      "roles": ["human"],
       "clauses": [
         {
           "type": "call",
@@ -3327,11 +3036,7 @@
         }
       ],
       "templateClauses": 1,
-      "calls": [
-        "foreground",
-        "open-question",
-        "asks-viewer"
-      ],
+      "calls": ["foreground", "open-question", "asks-viewer"],
       "evidence": [
         {
           "name": "routedTo",
@@ -3375,12 +3080,8 @@
       "kind": "decide",
       "band": 3,
       "preference": 1,
-      "codes": [
-        "inferred"
-      ],
-      "roles": [
-        "human"
-      ],
+      "codes": ["inferred"],
+      "roles": ["human"],
       "clauses": [
         {
           "type": "call",
@@ -3424,11 +3125,7 @@
         }
       ],
       "templateClauses": 1,
-      "calls": [
-        "foreground",
-        "open-unrecorded",
-        "unverified-record"
-      ],
+      "calls": ["foreground", "open-unrecorded", "unverified-record"],
       "evidence": [
         {
           "name": "questionLabel",
@@ -3473,12 +3170,8 @@
       "kind": "decide",
       "band": 3,
       "preference": 2,
-      "codes": [
-        "inferred"
-      ],
-      "roles": [
-        "human"
-      ],
+      "codes": ["inferred"],
+      "roles": ["human"],
       "clauses": [
         {
           "type": "call",
@@ -3513,10 +3206,7 @@
         }
       ],
       "templateClauses": 1,
-      "calls": [
-        "foreground",
-        "open-unrecorded"
-      ],
+      "calls": ["foreground", "open-unrecorded"],
       "evidence": [
         {
           "name": "questionLabel",
@@ -3561,13 +3251,8 @@
       "kind": "orphaned-question",
       "band": 1,
       "preference": 1,
-      "codes": [
-        "explicit",
-        "addressed"
-      ],
-      "roles": [
-        "human"
-      ],
+      "codes": ["explicit", "addressed"],
+      "roles": ["human"],
       "clauses": [
         {
           "type": "call",
@@ -3602,10 +3287,7 @@
         }
       ],
       "templateClauses": 1,
-      "calls": [
-        "foreground",
-        "orphan-asks-viewer"
-      ],
+      "calls": ["foreground", "orphan-asks-viewer"],
       "evidence": [
         {
           "name": "routedTo",
@@ -3649,12 +3331,8 @@
       "kind": "orphaned-question",
       "band": 3,
       "preference": 0,
-      "codes": [
-        "explicit"
-      ],
-      "roles": [
-        "human"
-      ],
+      "codes": ["explicit"],
+      "roles": ["human"],
       "clauses": [
         {
           "type": "call",
@@ -3704,11 +3382,7 @@
         }
       ],
       "templateClauses": 1,
-      "calls": [
-        "foreground",
-        "has-orphaned",
-        "orphan-asks-viewer"
-      ],
+      "calls": ["foreground", "has-orphaned", "orphan-asks-viewer"],
       "evidence": [
         {
           "name": "routedTo",
@@ -3752,13 +3426,8 @@
       "kind": "orphaned-question",
       "band": 3,
       "preference": 1,
-      "codes": [
-        "explicit",
-        "resolution-unknown"
-      ],
-      "roles": [
-        "human"
-      ],
+      "codes": ["explicit", "resolution-unknown"],
+      "roles": ["human"],
       "clauses": [
         {
           "type": "call",
@@ -3793,10 +3462,7 @@
         }
       ],
       "templateClauses": 1,
-      "calls": [
-        "foreground",
-        "has-orphan-unknown"
-      ],
+      "calls": ["foreground", "has-orphan-unknown"],
       "evidence": [
         {
           "name": "routedTo",
@@ -3840,12 +3506,8 @@
       "kind": "sign-off",
       "band": 3,
       "preference": 3,
-      "codes": [
-        "inferred"
-      ],
-      "roles": [
-        "human"
-      ],
+      "codes": ["inferred"],
+      "roles": ["human"],
       "clauses": [
         {
           "type": "call",
@@ -3898,12 +3560,7 @@
         }
       ],
       "templateClauses": 1,
-      "calls": [
-        "foreground",
-        "open",
-        "accepted-pr",
-        "clean-pr"
-      ],
+      "calls": ["foreground", "open", "accepted-pr", "clean-pr"],
       "evidence": [],
       "source": {
         "file": "policy/decisions.edn",
@@ -3914,14 +3571,10 @@
   "predicates": [
     {
       "name": "issue",
-      "params": [
-        "?t"
-      ],
+      "params": ["?t"],
       "alternatives": [
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "fact",
@@ -3948,14 +3601,10 @@
     },
     {
       "name": "pr",
-      "params": [
-        "?t"
-      ],
+      "params": ["?t"],
       "alternatives": [
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "fact",
@@ -3982,14 +3631,10 @@
     },
     {
       "name": "open",
-      "params": [
-        "?t"
-      ],
+      "params": ["?t"],
       "alternatives": [
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "fact",
@@ -4016,14 +3661,10 @@
     },
     {
       "name": "claimed",
-      "params": [
-        "?t"
-      ],
+      "params": ["?t"],
       "alternatives": [
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "fact",
@@ -4050,14 +3691,10 @@
     },
     {
       "name": "mine",
-      "params": [
-        "?t"
-      ],
+      "params": ["?t"],
       "alternatives": [
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "fact",
@@ -4097,14 +3734,10 @@
     },
     {
       "name": "mine-linked",
-      "params": [
-        "?t"
-      ],
+      "params": ["?t"],
       "alternatives": [
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "call",
@@ -4122,9 +3755,7 @@
           }
         },
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "fact",
@@ -4159,9 +3790,7 @@
           }
         },
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "fact",
@@ -4192,21 +3821,15 @@
           }
         }
       ],
-      "calls": [
-        "mine"
-      ],
+      "calls": ["mine"],
       "set": "rules"
     },
     {
       "name": "addressed",
-      "params": [
-        "?t"
-      ],
+      "params": ["?t"],
       "alternatives": [
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "fact",
@@ -4246,14 +3869,10 @@
     },
     {
       "name": "parked",
-      "params": [
-        "?t"
-      ],
+      "params": ["?t"],
       "alternatives": [
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "fact",
@@ -4280,14 +3899,10 @@
     },
     {
       "name": "foreground",
-      "params": [
-        "?t"
-      ],
+      "params": ["?t"],
       "alternatives": [
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "call",
@@ -4320,9 +3935,7 @@
           }
         },
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "fact",
@@ -4344,9 +3957,7 @@
           }
         },
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "call",
@@ -4373,9 +3984,7 @@
           }
         },
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "call",
@@ -4406,9 +4015,7 @@
           }
         },
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "fact",
@@ -4439,24 +4046,15 @@
           }
         }
       ],
-      "calls": [
-        "open",
-        "parked",
-        "addressed",
-        "orphan-source"
-      ],
+      "calls": ["open", "parked", "addressed", "orphan-source"],
       "set": "rules"
     },
     {
       "name": "own-issue",
-      "params": [
-        "?t"
-      ],
+      "params": ["?t"],
       "alternatives": [
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "call",
@@ -4511,23 +4109,15 @@
           }
         }
       ],
-      "calls": [
-        "issue",
-        "open",
-        "mine"
-      ],
+      "calls": ["issue", "open", "mine"],
       "set": "rules"
     },
     {
       "name": "own-active",
-      "params": [
-        "?t"
-      ],
+      "params": ["?t"],
       "alternatives": [
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "call",
@@ -4564,9 +4154,7 @@
           }
         },
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "call",
@@ -4597,21 +4185,15 @@
           }
         }
       ],
-      "calls": [
-        "own-issue"
-      ],
+      "calls": ["own-issue"],
       "set": "rules"
     },
     {
       "name": "platform-ok",
-      "params": [
-        "?t"
-      ],
+      "params": ["?t"],
       "alternatives": [
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "fact",
@@ -4652,9 +4234,7 @@
           }
         },
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "fact",
@@ -4694,14 +4274,10 @@
     },
     {
       "name": "platform-unknown",
-      "params": [
-        "?t"
-      ],
+      "params": ["?t"],
       "alternatives": [
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "fact",
@@ -4741,14 +4317,10 @@
     },
     {
       "name": "available",
-      "params": [
-        "?t"
-      ],
+      "params": ["?t"],
       "alternatives": [
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "fact",
@@ -4770,9 +4342,7 @@
           }
         },
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "fact",
@@ -4799,14 +4369,10 @@
     },
     {
       "name": "prerequisite",
-      "params": [
-        "?t"
-      ],
+      "params": ["?t"],
       "alternatives": [
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "fact",
@@ -4846,14 +4412,10 @@
     },
     {
       "name": "has-closing",
-      "params": [
-        "?t"
-      ],
+      "params": ["?t"],
       "alternatives": [
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "fact",
@@ -4875,9 +4437,7 @@
           }
         },
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "fact",
@@ -4908,21 +4468,15 @@
           }
         }
       ],
-      "calls": [
-        "open"
-      ],
+      "calls": ["open"],
       "set": "rules"
     },
     {
       "name": "closing-complete",
-      "params": [
-        "?t"
-      ],
+      "params": ["?t"],
       "alternatives": [
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "fact",
@@ -4944,9 +4498,7 @@
           }
         },
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "fact",
@@ -4986,14 +4538,10 @@
     },
     {
       "name": "otherwise",
-      "params": [
-        "?t"
-      ],
+      "params": ["?t"],
       "alternatives": [
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "call",
@@ -5119,14 +4667,10 @@
     },
     {
       "name": "blocked",
-      "params": [
-        "?t"
-      ],
+      "params": ["?t"],
       "alternatives": [
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "fact",
@@ -5160,9 +4704,7 @@
           }
         },
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "fact",
@@ -5202,14 +4744,10 @@
     },
     {
       "name": "implementation-permit",
-      "params": [
-        "?t"
-      ],
+      "params": ["?t"],
       "alternatives": [
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "call",
@@ -5245,25 +4783,15 @@
           }
         }
       ],
-      "calls": [
-        "issue",
-        "open",
-        "available"
-      ],
+      "calls": ["issue", "open", "available"],
       "set": "rules"
     },
     {
       "name": "implementation-deny",
-      "params": [
-        "?t",
-        "?r"
-      ],
+      "params": ["?t", "?r"],
       "alternatives": [
         {
-          "params": [
-            "?t",
-            "?r"
-          ],
+          "params": ["?t", "?r"],
           "clauses": [
             {
               "type": "call",
@@ -5300,10 +4828,7 @@
           }
         },
         {
-          "params": [
-            "?t",
-            "?r"
-          ],
+          "params": ["?t", "?r"],
           "clauses": [
             {
               "type": "call",
@@ -5340,10 +4865,7 @@
           }
         },
         {
-          "params": [
-            "?t",
-            "?r"
-          ],
+          "params": ["?t", "?r"],
           "clauses": [
             {
               "type": "call",
@@ -5380,10 +4902,7 @@
           }
         },
         {
-          "params": [
-            "?t",
-            "?r"
-          ],
+          "params": ["?t", "?r"],
           "clauses": [
             {
               "type": "call",
@@ -5420,10 +4939,7 @@
           }
         },
         {
-          "params": [
-            "?t",
-            "?r"
-          ],
+          "params": ["?t", "?r"],
           "clauses": [
             {
               "type": "call",
@@ -5464,10 +4980,7 @@
           }
         },
         {
-          "params": [
-            "?t",
-            "?r"
-          ],
+          "params": ["?t", "?r"],
           "clauses": [
             {
               "type": "call",
@@ -5508,10 +5021,7 @@
           }
         },
         {
-          "params": [
-            "?t",
-            "?r"
-          ],
+          "params": ["?t", "?r"],
           "clauses": [
             {
               "type": "call",
@@ -5554,10 +5064,7 @@
           }
         },
         {
-          "params": [
-            "?t",
-            "?r"
-          ],
+          "params": ["?t", "?r"],
           "clauses": [
             {
               "type": "call",
@@ -5600,10 +5107,7 @@
           }
         },
         {
-          "params": [
-            "?t",
-            "?r"
-          ],
+          "params": ["?t", "?r"],
           "clauses": [
             {
               "type": "call",
@@ -5692,14 +5196,10 @@
     },
     {
       "name": "implementation-denied",
-      "params": [
-        "?t"
-      ],
+      "params": ["?t"],
       "alternatives": [
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "call",
@@ -5720,21 +5220,15 @@
           }
         }
       ],
-      "calls": [
-        "implementation-deny"
-      ],
+      "calls": ["implementation-deny"],
       "set": "rules"
     },
     {
       "name": "eligible",
-      "params": [
-        "?t"
-      ],
+      "params": ["?t"],
       "alternatives": [
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "call",
@@ -5767,22 +5261,15 @@
           }
         }
       ],
-      "calls": [
-        "implementation-permit",
-        "implementation-denied"
-      ],
+      "calls": ["implementation-permit", "implementation-denied"],
       "set": "rules"
     },
     {
       "name": "design-eligible",
-      "params": [
-        "?t"
-      ],
+      "params": ["?t"],
       "alternatives": [
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "call",
@@ -5902,26 +5389,15 @@
           }
         }
       ],
-      "calls": [
-        "issue",
-        "open",
-        "platform-ok",
-        "closing-complete",
-        "claimed",
-        "has-closing"
-      ],
+      "calls": ["issue", "open", "platform-ok", "closing-complete", "claimed", "has-closing"],
       "set": "rules"
     },
     {
       "name": "possible",
-      "params": [
-        "?t"
-      ],
+      "params": ["?t"],
       "alternatives": [
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "call",
@@ -5999,9 +5475,7 @@
           }
         },
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "fact",
@@ -6066,25 +5540,15 @@
           }
         }
       ],
-      "calls": [
-        "available",
-        "claimed",
-        "prerequisite",
-        "blocked",
-        "has-closing"
-      ],
+      "calls": ["available", "claimed", "prerequisite", "blocked", "has-closing"],
       "set": "rules"
     },
     {
       "name": "uncertain",
-      "params": [
-        "?t"
-      ],
+      "params": ["?t"],
       "alternatives": [
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "fact",
@@ -6106,9 +5570,7 @@
           }
         },
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "fact",
@@ -6130,9 +5592,7 @@
           }
         },
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "fact",
@@ -6169,9 +5629,7 @@
           }
         },
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "call",
@@ -6189,22 +5647,15 @@
           }
         }
       ],
-      "calls": [
-        "closing-complete",
-        "platform-unknown"
-      ],
+      "calls": ["closing-complete", "platform-unknown"],
       "set": "rules"
     },
     {
       "name": "large-impact",
-      "params": [
-        "?t"
-      ],
+      "params": ["?t"],
       "alternatives": [
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "fact",
@@ -6257,14 +5708,10 @@
     },
     {
       "name": "small-complexity",
-      "params": [
-        "?t"
-      ],
+      "params": ["?t"],
       "alternatives": [
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "fact",
@@ -6317,14 +5764,10 @@
     },
     {
       "name": "easy",
-      "params": [
-        "?t"
-      ],
+      "params": ["?t"],
       "alternatives": [
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "call",
@@ -6351,22 +5794,15 @@
           }
         }
       ],
-      "calls": [
-        "large-impact",
-        "small-complexity"
-      ],
+      "calls": ["large-impact", "small-complexity"],
       "set": "rules"
     },
     {
       "name": "unfavorable",
-      "params": [
-        "?t"
-      ],
+      "params": ["?t"],
       "alternatives": [
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "fact",
@@ -6458,14 +5894,10 @@
     },
     {
       "name": "needs-complexity",
-      "params": [
-        "?t"
-      ],
+      "params": ["?t"],
       "alternatives": [
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "fact",
@@ -6505,14 +5937,10 @@
     },
     {
       "name": "needs-impact",
-      "params": [
-        "?t"
-      ],
+      "params": ["?t"],
       "alternatives": [
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "fact",
@@ -6552,14 +5980,10 @@
     },
     {
       "name": "bad-complexity",
-      "params": [
-        "?t"
-      ],
+      "params": ["?t"],
       "alternatives": [
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "fact",
@@ -6599,14 +6023,10 @@
     },
     {
       "name": "bad-impact",
-      "params": [
-        "?t"
-      ],
+      "params": ["?t"],
       "alternatives": [
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "fact",
@@ -6646,14 +6066,10 @@
     },
     {
       "name": "design-pr",
-      "params": [
-        "?t"
-      ],
+      "params": ["?t"],
       "alternatives": [
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "call",
@@ -6697,9 +6113,7 @@
           }
         },
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "call",
@@ -6756,21 +6170,15 @@
           }
         }
       ],
-      "calls": [
-        "pr"
-      ],
+      "calls": ["pr"],
       "set": "rules"
     },
     {
       "name": "pr-failure",
-      "params": [
-        "?t"
-      ],
+      "params": ["?t"],
       "alternatives": [
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "fact",
@@ -6823,14 +6231,10 @@
     },
     {
       "name": "pr-pending",
-      "params": [
-        "?t"
-      ],
+      "params": ["?t"],
       "alternatives": [
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "fact",
@@ -6897,9 +6301,7 @@
           }
         },
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "fact",
@@ -6926,14 +6328,10 @@
     },
     {
       "name": "pr-unknown",
-      "params": [
-        "?t"
-      ],
+      "params": ["?t"],
       "alternatives": [
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "fact",
@@ -6992,14 +6390,10 @@
     },
     {
       "name": "pr-review",
-      "params": [
-        "?t"
-      ],
+      "params": ["?t"],
       "alternatives": [
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "fact",
@@ -7021,9 +6415,7 @@
           }
         },
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "fact",
@@ -7058,9 +6450,7 @@
           }
         },
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "call",
@@ -7078,21 +6468,15 @@
           }
         }
       ],
-      "calls": [
-        "head-findings"
-      ],
+      "calls": ["head-findings"],
       "set": "rules"
     },
     {
       "name": "required-unsatisfied",
-      "params": [
-        "?t"
-      ],
+      "params": ["?t"],
       "alternatives": [
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "fact",
@@ -7157,14 +6541,10 @@
     },
     {
       "name": "required-unknown",
-      "params": [
-        "?t"
-      ],
+      "params": ["?t"],
       "alternatives": [
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "fact",
@@ -7204,14 +6584,10 @@
     },
     {
       "name": "requirements-satisfied",
-      "params": [
-        "?t"
-      ],
+      "params": ["?t"],
       "alternatives": [
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "fact",
@@ -7282,22 +6658,15 @@
           }
         }
       ],
-      "calls": [
-        "required-unsatisfied",
-        "required-unknown"
-      ],
+      "calls": ["required-unsatisfied", "required-unknown"],
       "set": "rules"
     },
     {
       "name": "verified",
-      "params": [
-        "?t"
-      ],
+      "params": ["?t"],
       "alternatives": [
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "fact",
@@ -7324,18 +6693,10 @@
     },
     {
       "name": "check-blocker",
-      "params": [
-        "?t",
-        "?code",
-        "?reason"
-      ],
+      "params": ["?t", "?code", "?reason"],
       "alternatives": [
         {
-          "params": [
-            "?t",
-            "?code",
-            "?reason"
-          ],
+          "params": ["?t", "?code", "?reason"],
           "clauses": [
             {
               "type": "bind",
@@ -7396,11 +6757,7 @@
           }
         },
         {
-          "params": [
-            "?t",
-            "?code",
-            "?reason"
-          ],
+          "params": ["?t", "?code", "?reason"],
           "clauses": [
             {
               "type": "bind",
@@ -7471,11 +6828,7 @@
           }
         },
         {
-          "params": [
-            "?t",
-            "?code",
-            "?reason"
-          ],
+          "params": ["?t", "?code", "?reason"],
           "clauses": [
             {
               "type": "bind",
@@ -7520,11 +6873,7 @@
           }
         },
         {
-          "params": [
-            "?t",
-            "?code",
-            "?reason"
-          ],
+          "params": ["?t", "?code", "?reason"],
           "clauses": [
             {
               "type": "bind",
@@ -7569,11 +6918,7 @@
           }
         },
         {
-          "params": [
-            "?t",
-            "?code",
-            "?reason"
-          ],
+          "params": ["?t", "?code", "?reason"],
           "clauses": [
             {
               "type": "bind",
@@ -7680,14 +7025,10 @@
     },
     {
       "name": "clean-pr",
-      "params": [
-        "?t"
-      ],
+      "params": ["?t"],
       "alternatives": [
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "call",
@@ -7839,26 +7180,15 @@
           }
         }
       ],
-      "calls": [
-        "pr",
-        "verified",
-        "pr-failure",
-        "pr-pending",
-        "pr-unknown",
-        "pr-review"
-      ],
+      "calls": ["pr", "verified", "pr-failure", "pr-pending", "pr-unknown", "pr-review"],
       "set": "rules"
     },
     {
       "name": "legacy-coverage",
-      "params": [
-        "?t"
-      ],
+      "params": ["?t"],
       "alternatives": [
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "fact",
@@ -7875,9 +7205,7 @@
             },
             {
               "type": "not",
-              "join": [
-                "?t"
-              ],
+              "join": ["?t"],
               "body": [
                 {
                   "type": "fact",
@@ -7896,9 +7224,7 @@
             },
             {
               "type": "not",
-              "join": [
-                "?t"
-              ],
+              "join": ["?t"],
               "body": [
                 {
                   "type": "fact",
@@ -7927,14 +7253,10 @@
     },
     {
       "name": "head-reviewed",
-      "params": [
-        "?t"
-      ],
+      "params": ["?t"],
       "alternatives": [
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "call",
@@ -8004,9 +7326,7 @@
           }
         },
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "call",
@@ -8089,9 +7409,7 @@
           }
         },
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "fact",
@@ -8165,21 +7483,15 @@
           }
         }
       ],
-      "calls": [
-        "legacy-coverage"
-      ],
+      "calls": ["legacy-coverage"],
       "set": "rules"
     },
     {
       "name": "head-findings",
-      "params": [
-        "?t"
-      ],
+      "params": ["?t"],
       "alternatives": [
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "call",
@@ -8249,9 +7561,7 @@
           }
         },
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "fact",
@@ -8312,21 +7622,15 @@
           }
         }
       ],
-      "calls": [
-        "legacy-coverage"
-      ],
+      "calls": ["legacy-coverage"],
       "set": "rules"
     },
     {
       "name": "accepted-pr",
-      "params": [
-        "?t"
-      ],
+      "params": ["?t"],
       "alternatives": [
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "call",
@@ -8486,14 +7790,10 @@
     },
     {
       "name": "refresh-needed",
-      "params": [
-        "?t"
-      ],
+      "params": ["?t"],
       "alternatives": [
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "fact",
@@ -8528,9 +7828,7 @@
           }
         },
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "fact",
@@ -8570,14 +7868,10 @@
     },
     {
       "name": "integrate-pr",
-      "params": [
-        "?t"
-      ],
+      "params": ["?t"],
       "alternatives": [
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "call",
@@ -8604,22 +7898,15 @@
           }
         }
       ],
-      "calls": [
-        "accepted-pr",
-        "refresh-needed"
-      ],
+      "calls": ["accepted-pr", "refresh-needed"],
       "set": "rules"
     },
     {
       "name": "follow-up",
-      "params": [
-        "?t"
-      ],
+      "params": ["?t"],
       "alternatives": [
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "call",
@@ -8637,9 +7924,7 @@
           }
         },
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "call",
@@ -8657,9 +7942,7 @@
           }
         },
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "call",
@@ -8690,9 +7973,7 @@
           }
         },
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "call",
@@ -8710,9 +7991,7 @@
           }
         },
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "call",
@@ -8730,25 +8009,15 @@
           }
         }
       ],
-      "calls": [
-        "pr-failure",
-        "pr-review",
-        "pr",
-        "clean-pr",
-        "integrate-pr"
-      ],
+      "calls": ["pr-failure", "pr-review", "pr", "clean-pr", "integrate-pr"],
       "set": "rules"
     },
     {
       "name": "own-follow-up",
-      "params": [
-        "?t"
-      ],
+      "params": ["?t"],
       "alternatives": [
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "call",
@@ -8775,22 +8044,15 @@
           }
         }
       ],
-      "calls": [
-        "mine-linked",
-        "follow-up"
-      ],
+      "calls": ["mine-linked", "follow-up"],
       "set": "rules"
     },
     {
       "name": "pr-action",
-      "params": [
-        "?t"
-      ],
+      "params": ["?t"],
       "alternatives": [
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "call",
@@ -8821,9 +8083,7 @@
           }
         },
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "fact",
@@ -8863,23 +8123,15 @@
           }
         }
       ],
-      "calls": [
-        "pr",
-        "design-pr",
-        "mine-linked"
-      ],
+      "calls": ["pr", "design-pr", "mine-linked"],
       "set": "rules"
     },
     {
       "name": "question-labelled",
-      "params": [
-        "?t"
-      ],
+      "params": ["?t"],
       "alternatives": [
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "fact",
@@ -8919,16 +8171,10 @@
     },
     {
       "name": "trusted-record",
-      "params": [
-        "?t",
-        "?r"
-      ],
+      "params": ["?t", "?r"],
       "alternatives": [
         {
-          "params": [
-            "?t",
-            "?r"
-          ],
+          "params": ["?t", "?r"],
           "clauses": [
             {
               "type": "fact",
@@ -8968,14 +8214,10 @@
     },
     {
       "name": "unverified-record",
-      "params": [
-        "?t"
-      ],
+      "params": ["?t"],
       "alternatives": [
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "fact",
@@ -9015,16 +8257,10 @@
     },
     {
       "name": "record-pending",
-      "params": [
-        "?t",
-        "?r"
-      ],
+      "params": ["?t", "?r"],
       "alternatives": [
         {
-          "params": [
-            "?t",
-            "?r"
-          ],
+          "params": ["?t", "?r"],
           "clauses": [
             {
               "type": "fact",
@@ -9046,10 +8282,7 @@
           }
         },
         {
-          "params": [
-            "?t",
-            "?r"
-          ],
+          "params": ["?t", "?r"],
           "clauses": [
             {
               "type": "fact",
@@ -9080,10 +8313,7 @@
           }
         },
         {
-          "params": [
-            "?t",
-            "?r"
-          ],
+          "params": ["?t", "?r"],
           "clauses": [
             {
               "type": "fact",
@@ -9133,23 +8363,15 @@
           }
         }
       ],
-      "calls": [
-        "question-labelled"
-      ],
+      "calls": ["question-labelled"],
       "set": "rules"
     },
     {
       "name": "asking-record",
-      "params": [
-        "?t",
-        "?r"
-      ],
+      "params": ["?t", "?r"],
       "alternatives": [
         {
-          "params": [
-            "?t",
-            "?r"
-          ],
+          "params": ["?t", "?r"],
           "clauses": [
             {
               "type": "call",
@@ -9197,23 +8419,15 @@
           }
         }
       ],
-      "calls": [
-        "trusted-record",
-        "record-settled",
-        "record-pending"
-      ],
+      "calls": ["trusted-record", "record-settled", "record-pending"],
       "set": "rules"
     },
     {
       "name": "has-asking-record",
-      "params": [
-        "?t"
-      ],
+      "params": ["?t"],
       "alternatives": [
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "call",
@@ -9234,21 +8448,15 @@
           }
         }
       ],
-      "calls": [
-        "asking-record"
-      ],
+      "calls": ["asking-record"],
       "set": "rules"
     },
     {
       "name": "open-question",
-      "params": [
-        "?t"
-      ],
+      "params": ["?t"],
       "alternatives": [
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "call",
@@ -9284,23 +8492,15 @@
           }
         }
       ],
-      "calls": [
-        "issue",
-        "open",
-        "has-asking-record"
-      ],
+      "calls": ["issue", "open", "has-asking-record"],
       "set": "rules"
     },
     {
       "name": "open-unrecorded",
-      "params": [
-        "?t"
-      ],
+      "params": ["?t"],
       "alternatives": [
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "call",
@@ -9351,24 +8551,15 @@
           }
         }
       ],
-      "calls": [
-        "issue",
-        "open",
-        "question-labelled",
-        "has-asking-record"
-      ],
+      "calls": ["issue", "open", "question-labelled", "has-asking-record"],
       "set": "rules"
     },
     {
       "name": "asks-viewer",
-      "params": [
-        "?t"
-      ],
+      "params": ["?t"],
       "alternatives": [
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "call",
@@ -9415,21 +8606,15 @@
           }
         }
       ],
-      "calls": [
-        "asking-record"
-      ],
+      "calls": ["asking-record"],
       "set": "rules"
     },
     {
       "name": "closed",
-      "params": [
-        "?t"
-      ],
+      "params": ["?t"],
       "alternatives": [
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "fact",
@@ -9456,14 +8641,10 @@
     },
     {
       "name": "record-settled",
-      "params": [
-        "?r"
-      ],
+      "params": ["?r"],
       "alternatives": [
         {
-          "params": [
-            "?r"
-          ],
+          "params": ["?r"],
           "clauses": [
             {
               "type": "fact",
@@ -9485,9 +8666,7 @@
           }
         },
         {
-          "params": [
-            "?r"
-          ],
+          "params": ["?r"],
           "clauses": [
             {
               "type": "fact",
@@ -9514,16 +8693,10 @@
     },
     {
       "name": "orphaned-record",
-      "params": [
-        "?t",
-        "?r"
-      ],
+      "params": ["?t", "?r"],
       "alternatives": [
         {
-          "params": [
-            "?t",
-            "?r"
-          ],
+          "params": ["?t", "?r"],
           "clauses": [
             {
               "type": "call",
@@ -9587,26 +8760,15 @@
           }
         }
       ],
-      "calls": [
-        "issue",
-        "closed",
-        "trusted-record",
-        "record-pending"
-      ],
+      "calls": ["issue", "closed", "trusted-record", "record-pending"],
       "set": "rules"
     },
     {
       "name": "orphan-unknown",
-      "params": [
-        "?t",
-        "?r"
-      ],
+      "params": ["?t", "?r"],
       "alternatives": [
         {
-          "params": [
-            "?t",
-            "?r"
-          ],
+          "params": ["?t", "?r"],
           "clauses": [
             {
               "type": "call",
@@ -9670,10 +8832,7 @@
           }
         },
         {
-          "params": [
-            "?t",
-            "?r"
-          ],
+          "params": ["?t", "?r"],
           "clauses": [
             {
               "type": "call",
@@ -9780,14 +8939,10 @@
     },
     {
       "name": "has-orphaned",
-      "params": [
-        "?t"
-      ],
+      "params": ["?t"],
       "alternatives": [
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "call",
@@ -9808,21 +8963,15 @@
           }
         }
       ],
-      "calls": [
-        "orphaned-record"
-      ],
+      "calls": ["orphaned-record"],
       "set": "rules"
     },
     {
       "name": "has-orphan-unknown",
-      "params": [
-        "?t"
-      ],
+      "params": ["?t"],
       "alternatives": [
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "call",
@@ -9843,21 +8992,15 @@
           }
         }
       ],
-      "calls": [
-        "orphan-unknown"
-      ],
+      "calls": ["orphan-unknown"],
       "set": "rules"
     },
     {
       "name": "orphan-source",
-      "params": [
-        "?t"
-      ],
+      "params": ["?t"],
       "alternatives": [
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "call",
@@ -9875,9 +9018,7 @@
           }
         },
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "call",
@@ -9895,22 +9036,15 @@
           }
         }
       ],
-      "calls": [
-        "has-orphaned",
-        "has-orphan-unknown"
-      ],
+      "calls": ["has-orphaned", "has-orphan-unknown"],
       "set": "rules"
     },
     {
       "name": "orphan-asks-viewer",
-      "params": [
-        "?t"
-      ],
+      "params": ["?t"],
       "alternatives": [
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "call",
@@ -9957,21 +9091,15 @@
           }
         }
       ],
-      "calls": [
-        "orphaned-record"
-      ],
+      "calls": ["orphaned-record"],
       "set": "rules"
     },
     {
       "name": "declared-review-coverage",
-      "params": [
-        "?t"
-      ],
+      "params": ["?t"],
       "alternatives": [
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "fact",
@@ -9993,9 +9121,7 @@
           }
         },
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "fact",
@@ -10022,14 +9148,10 @@
     },
     {
       "name": "optional-review-detail",
-      "params": [
-        "?t"
-      ],
+      "params": ["?t"],
       "alternatives": [
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "call",
@@ -10060,25 +9182,15 @@
           }
         }
       ],
-      "calls": [
-        "declared-review-coverage"
-      ],
+      "calls": ["declared-review-coverage"],
       "set": "rules"
     },
     {
       "name": "pr-specific-blocker",
-      "params": [
-        "?t",
-        "?code",
-        "?reason"
-      ],
+      "params": ["?t", "?code", "?reason"],
       "alternatives": [
         {
-          "params": [
-            "?t",
-            "?code",
-            "?reason"
-          ],
+          "params": ["?t", "?code", "?reason"],
           "clauses": [
             {
               "type": "bind",
@@ -10120,11 +9232,7 @@
           }
         },
         {
-          "params": [
-            "?t",
-            "?code",
-            "?reason"
-          ],
+          "params": ["?t", "?code", "?reason"],
           "clauses": [
             {
               "type": "call",
@@ -10148,11 +9256,7 @@
           }
         },
         {
-          "params": [
-            "?t",
-            "?code",
-            "?reason"
-          ],
+          "params": ["?t", "?code", "?reason"],
           "clauses": [
             {
               "type": "bind",
@@ -10251,11 +9355,7 @@
           }
         },
         {
-          "params": [
-            "?t",
-            "?code",
-            "?reason"
-          ],
+          "params": ["?t", "?code", "?reason"],
           "clauses": [
             {
               "type": "bind",
@@ -10342,11 +9442,7 @@
           }
         },
         {
-          "params": [
-            "?t",
-            "?code",
-            "?reason"
-          ],
+          "params": ["?t", "?code", "?reason"],
           "clauses": [
             {
               "type": "bind",
@@ -10433,11 +9529,7 @@
           }
         },
         {
-          "params": [
-            "?t",
-            "?code",
-            "?reason"
-          ],
+          "params": ["?t", "?code", "?reason"],
           "clauses": [
             {
               "type": "bind",
@@ -10494,11 +9586,7 @@
           }
         },
         {
-          "params": [
-            "?t",
-            "?code",
-            "?reason"
-          ],
+          "params": ["?t", "?code", "?reason"],
           "clauses": [
             {
               "type": "bind",
@@ -10540,11 +9628,7 @@
           }
         },
         {
-          "params": [
-            "?t",
-            "?code",
-            "?reason"
-          ],
+          "params": ["?t", "?code", "?reason"],
           "clauses": [
             {
               "type": "bind",
@@ -10586,11 +9670,7 @@
           }
         },
         {
-          "params": [
-            "?t",
-            "?code",
-            "?reason"
-          ],
+          "params": ["?t", "?code", "?reason"],
           "clauses": [
             {
               "type": "bind",
@@ -10651,11 +9731,7 @@
           }
         },
         {
-          "params": [
-            "?t",
-            "?code",
-            "?reason"
-          ],
+          "params": ["?t", "?code", "?reason"],
           "clauses": [
             {
               "type": "bind",
@@ -10761,11 +9837,7 @@
           }
         },
         {
-          "params": [
-            "?t",
-            "?code",
-            "?reason"
-          ],
+          "params": ["?t", "?code", "?reason"],
           "clauses": [
             {
               "type": "bind",
@@ -10807,11 +9879,7 @@
           }
         },
         {
-          "params": [
-            "?t",
-            "?code",
-            "?reason"
-          ],
+          "params": ["?t", "?code", "?reason"],
           "clauses": [
             {
               "type": "bind",
@@ -10853,11 +9921,7 @@
           }
         },
         {
-          "params": [
-            "?t",
-            "?code",
-            "?reason"
-          ],
+          "params": ["?t", "?code", "?reason"],
           "clauses": [
             {
               "type": "bind",
@@ -10914,11 +9978,7 @@
           }
         },
         {
-          "params": [
-            "?t",
-            "?code",
-            "?reason"
-          ],
+          "params": ["?t", "?code", "?reason"],
           "clauses": [
             {
               "type": "bind",
@@ -10994,11 +10054,7 @@
           }
         },
         {
-          "params": [
-            "?t",
-            "?code",
-            "?reason"
-          ],
+          "params": ["?t", "?code", "?reason"],
           "clauses": [
             {
               "type": "bind",
@@ -11055,11 +10111,7 @@
           }
         },
         {
-          "params": [
-            "?t",
-            "?code",
-            "?reason"
-          ],
+          "params": ["?t", "?code", "?reason"],
           "clauses": [
             {
               "type": "bind",
@@ -11142,11 +10194,7 @@
           }
         },
         {
-          "params": [
-            "?t",
-            "?code",
-            "?reason"
-          ],
+          "params": ["?t", "?code", "?reason"],
           "clauses": [
             {
               "type": "bind",
@@ -11233,11 +10281,7 @@
           }
         },
         {
-          "params": [
-            "?t",
-            "?code",
-            "?reason"
-          ],
+          "params": ["?t", "?code", "?reason"],
           "clauses": [
             {
               "type": "bind",
@@ -11339,11 +10383,7 @@
           }
         },
         {
-          "params": [
-            "?t",
-            "?code",
-            "?reason"
-          ],
+          "params": ["?t", "?code", "?reason"],
           "clauses": [
             {
               "type": "bind",
@@ -11404,11 +10444,7 @@
           }
         },
         {
-          "params": [
-            "?t",
-            "?code",
-            "?reason"
-          ],
+          "params": ["?t", "?code", "?reason"],
           "clauses": [
             {
               "type": "bind",
@@ -11465,11 +10501,7 @@
           }
         },
         {
-          "params": [
-            "?t",
-            "?code",
-            "?reason"
-          ],
+          "params": ["?t", "?code", "?reason"],
           "clauses": [
             {
               "type": "bind",
@@ -11556,11 +10588,7 @@
           }
         },
         {
-          "params": [
-            "?t",
-            "?code",
-            "?reason"
-          ],
+          "params": ["?t", "?code", "?reason"],
           "clauses": [
             {
               "type": "bind",
@@ -11652,14 +10680,10 @@
     },
     {
       "name": "pr-merge-state-exempt",
-      "params": [
-        "?t"
-      ],
+      "params": ["?t"],
       "alternatives": [
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "fact",
@@ -11694,9 +10718,7 @@
           }
         },
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "fact",
@@ -11731,9 +10753,7 @@
           }
         },
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "fact",
@@ -11773,14 +10793,10 @@
     },
     {
       "name": "has-pr-specific-blocker",
-      "params": [
-        "?t"
-      ],
+      "params": ["?t"],
       "alternatives": [
         {
-          "params": [
-            "?t"
-          ],
+          "params": ["?t"],
           "clauses": [
             {
               "type": "call",
@@ -11804,25 +10820,15 @@
           }
         }
       ],
-      "calls": [
-        "pr-specific-blocker"
-      ],
+      "calls": ["pr-specific-blocker"],
       "set": "rules"
     },
     {
       "name": "pr-blocker",
-      "params": [
-        "?t",
-        "?code",
-        "?reason"
-      ],
+      "params": ["?t", "?code", "?reason"],
       "alternatives": [
         {
-          "params": [
-            "?t",
-            "?code",
-            "?reason"
-          ],
+          "params": ["?t", "?code", "?reason"],
           "clauses": [
             {
               "type": "fact",
@@ -11886,11 +10892,7 @@
           }
         },
         {
-          "params": [
-            "?t",
-            "?code",
-            "?reason"
-          ],
+          "params": ["?t", "?code", "?reason"],
           "clauses": [
             {
               "type": "fact",
@@ -11927,11 +10929,7 @@
           }
         },
         {
-          "params": [
-            "?t",
-            "?code",
-            "?reason"
-          ],
+          "params": ["?t", "?code", "?reason"],
           "clauses": [
             {
               "type": "fact",
@@ -12001,24 +10999,15 @@
           }
         }
       ],
-      "calls": [
-        "pr-specific-blocker",
-        "has-pr-specific-blocker"
-      ],
+      "calls": ["pr-specific-blocker", "has-pr-specific-blocker"],
       "set": "rules"
     },
     {
       "name": "selected",
-      "params": [
-        "?t",
-        "?r"
-      ],
+      "params": ["?t", "?r"],
       "alternatives": [
         {
-          "params": [
-            "?t",
-            "?r"
-          ],
+          "params": ["?t", "?r"],
           "clauses": [
             {
               "type": "fact",
@@ -12064,18 +11053,10 @@
     },
     {
       "name": "age",
-      "params": [
-        "?t",
-        "?r",
-        "?created"
-      ],
+      "params": ["?t", "?r", "?created"],
       "alternatives": [
         {
-          "params": [
-            "?t",
-            "?r",
-            "?created"
-          ],
+          "params": ["?t", "?r", "?created"],
           "clauses": [
             {
               "type": "fact",
@@ -12123,11 +11104,7 @@
           }
         },
         {
-          "params": [
-            "?t",
-            "?r",
-            "?created"
-          ],
+          "params": ["?t", "?r", "?created"],
           "clauses": [
             {
               "type": "fact",
@@ -12193,32 +11170,10 @@
     },
     {
       "name": "keys",
-      "params": [
-        "?t",
-        "?r",
-        "?b",
-        "?g",
-        "?p",
-        "?u",
-        "?un",
-        "?own",
-        "?inc",
-        "?created"
-      ],
+      "params": ["?t", "?r", "?b", "?g", "?p", "?u", "?un", "?own", "?inc", "?created"],
       "alternatives": [
         {
-          "params": [
-            "?t",
-            "?r",
-            "?b",
-            "?g",
-            "?p",
-            "?u",
-            "?un",
-            "?own",
-            "?inc",
-            "?created"
-          ],
+          "params": ["?t", "?r", "?b", "?g", "?p", "?u", "?un", "?own", "?inc", "?created"],
           "clauses": [
             {
               "type": "call",
@@ -12350,18 +11305,7 @@
           }
         },
         {
-          "params": [
-            "?t",
-            "?r",
-            "?b",
-            "?g",
-            "?p",
-            "?u",
-            "?un",
-            "?own",
-            "?inc",
-            "?created"
-          ],
+          "params": ["?t", "?r", "?b", "?g", "?p", "?u", "?un", "?own", "?inc", "?created"],
           "clauses": [
             {
               "type": "call",
@@ -12500,18 +11444,7 @@
           }
         },
         {
-          "params": [
-            "?t",
-            "?r",
-            "?b",
-            "?g",
-            "?p",
-            "?u",
-            "?un",
-            "?own",
-            "?inc",
-            "?created"
-          ],
+          "params": ["?t", "?r", "?b", "?g", "?p", "?u", "?un", "?own", "?inc", "?created"],
           "clauses": [
             {
               "type": "call",
@@ -12664,11 +11597,7 @@
             },
             {
               "type": "or",
-              "join": [
-                "?t",
-                "?k",
-                "?un"
-              ],
+              "join": ["?t", "?k", "?un"],
               "alternatives": [
                 [
                   {
@@ -12754,31 +11683,15 @@
           }
         }
       ],
-      "calls": [
-        "selected",
-        "fixed-key",
-        "age"
-      ],
+      "calls": ["selected", "fixed-key", "age"],
       "set": "ordering"
     },
     {
       "name": "fixed-key",
-      "params": [
-        "?t",
-        "?r",
-        "?b",
-        "?g",
-        "?p"
-      ],
+      "params": ["?t", "?r", "?b", "?g", "?p"],
       "alternatives": [
         {
-          "params": [
-            "?t",
-            "?r",
-            "?b",
-            "?g",
-            "?p"
-          ],
+          "params": ["?t", "?r", "?b", "?g", "?p"],
           "clauses": [
             {
               "type": "fact",
@@ -12851,13 +11764,7 @@
           }
         },
         {
-          "params": [
-            "?t",
-            "?r",
-            "?b",
-            "?g",
-            "?p"
-          ],
+          "params": ["?t", "?r", "?b", "?g", "?p"],
           "clauses": [
             {
               "type": "fact",
@@ -12917,13 +11824,7 @@
           }
         },
         {
-          "params": [
-            "?t",
-            "?r",
-            "?b",
-            "?g",
-            "?p"
-          ],
+          "params": ["?t", "?r", "?b", "?g", "?p"],
           "clauses": [
             {
               "type": "fact",
@@ -12996,13 +11897,7 @@
           }
         },
         {
-          "params": [
-            "?t",
-            "?r",
-            "?b",
-            "?g",
-            "?p"
-          ],
+          "params": ["?t", "?r", "?b", "?g", "?p"],
           "clauses": [
             {
               "type": "fact",
@@ -13103,10 +11998,7 @@
           ]
         }
       ],
-      "calls": [
-        "issue",
-        "claimed"
-      ]
+      "calls": ["issue", "claimed"]
     },
     {
       "id": "D-DENY-PREREQUISITE",
@@ -13131,10 +12023,7 @@
           ]
         }
       ],
-      "calls": [
-        "issue",
-        "prerequisite"
-      ]
+      "calls": ["issue", "prerequisite"]
     },
     {
       "id": "D-DENY-OPEN-PR",
@@ -13159,10 +12048,7 @@
           ]
         }
       ],
-      "calls": [
-        "issue",
-        "has-closing"
-      ]
+      "calls": ["issue", "has-closing"]
     },
     {
       "id": "D-DENY-BLOCKER",
@@ -13187,10 +12073,7 @@
           ]
         }
       ],
-      "calls": [
-        "issue",
-        "blocked"
-      ]
+      "calls": ["issue", "blocked"]
     },
     {
       "id": "D-DENY-LABELS-UNKNOWN",
@@ -13219,9 +12102,7 @@
           "many": false
         }
       ],
-      "calls": [
-        "issue"
-      ]
+      "calls": ["issue"]
     },
     {
       "id": "D-DENY-NATIVE-UNKNOWN",
@@ -13250,9 +12131,7 @@
           "many": false
         }
       ],
-      "calls": [
-        "issue"
-      ]
+      "calls": ["issue"]
     },
     {
       "id": "D-DENY-CLOSING-UNKNOWN",
@@ -13283,10 +12162,7 @@
           ]
         }
       ],
-      "calls": [
-        "issue",
-        "closing-complete"
-      ]
+      "calls": ["issue", "closing-complete"]
     },
     {
       "id": "D-DENY-PLATFORM",
@@ -13317,10 +12193,7 @@
           ]
         }
       ],
-      "calls": [
-        "issue",
-        "platform-ok"
-      ]
+      "calls": ["issue", "platform-ok"]
     },
     {
       "id": "D-DENY-INVENTORY-UNKNOWN",
@@ -13382,12 +12255,7 @@
           "many": false
         }
       ],
-      "calls": [
-        "issue",
-        "open",
-        "available",
-        "claimed"
-      ]
+      "calls": ["issue", "open", "available", "claimed"]
     }
   ],
   "ordering": {
@@ -13425,10 +12293,7 @@
     "overrideQueries": [
       {
         "name": "q0",
-        "find": [
-          "?t",
-          "?r"
-        ],
+        "find": ["?t", "?r"],
         "inputs": [],
         "clauses": [
           {
@@ -13485,10 +12350,7 @@
           },
           {
             "type": "or",
-            "join": [
-              "?r",
-              "?o"
-            ],
+            "join": ["?r", "?o"],
             "alternatives": [
               [
                 {
@@ -13630,14 +12492,8 @@
       },
       {
         "name": "declared-overrides",
-        "find": [
-          "?t",
-          "?r"
-        ],
-        "inputs": [
-          "$",
-          "[[?winner ?loser]]"
-        ],
+        "find": ["?t", "?r"],
+        "inputs": ["$", "[[?winner ?loser]]"],
         "clauses": [
           {
             "type": "fact",
@@ -13739,10 +12595,7 @@
         "?target",
         "?kind"
       ],
-      "inputs": [
-        "$",
-        "%"
-      ],
+      "inputs": ["$", "%"],
       "clauses": [
         {
           "type": "call",
@@ -13820,22 +12673,14 @@
           "many": false
         }
       ],
-      "calls": [
-        "keys"
-      ],
+      "calls": ["keys"],
       "ruleSet": "ordering"
     },
     "keyQueries": [
       {
         "name": "own-key",
-        "find": [
-          "?t",
-          "?k"
-        ],
-        "inputs": [
-          "$",
-          "%"
-        ],
+        "find": ["?t", "?k"],
+        "inputs": ["$", "%"],
         "clauses": [
           {
             "type": "fact",
@@ -13852,10 +12697,7 @@
           },
           {
             "type": "or",
-            "join": [
-              "?t",
-              "?k"
-            ],
+            "join": ["?t", "?k"],
             "alternatives": [
               [
                 {
@@ -13914,21 +12756,13 @@
             ]
           }
         ],
-        "calls": [
-          "mine"
-        ],
+        "calls": ["mine"],
         "ruleSet": "rules"
       },
       {
         "name": "linked-key",
-        "find": [
-          "?t",
-          "?k"
-        ],
-        "inputs": [
-          "$",
-          "%"
-        ],
+        "find": ["?t", "?k"],
+        "inputs": ["$", "%"],
         "clauses": [
           {
             "type": "fact",
@@ -13945,10 +12779,7 @@
           },
           {
             "type": "or",
-            "join": [
-              "?t",
-              "?k"
-            ],
+            "join": ["?t", "?k"],
             "alternatives": [
               [
                 {
@@ -14007,17 +12838,12 @@
             ]
           }
         ],
-        "calls": [
-          "mine-linked"
-        ],
+        "calls": ["mine-linked"],
         "ruleSet": "rules"
       },
       {
         "name": "incomplete-key",
-        "find": [
-          "?t",
-          "?k"
-        ],
+        "find": ["?t", "?k"],
         "inputs": [],
         "clauses": [
           {
@@ -14035,10 +12861,7 @@
           },
           {
             "type": "or",
-            "join": [
-              "?t",
-              "?k"
-            ],
+            "join": ["?t", "?k"],
             "alternatives": [
               [
                 {
@@ -14110,10 +12933,7 @@
       },
       {
         "name": "urgency-key",
-        "find": [
-          "?t",
-          "?k"
-        ],
+        "find": ["?t", "?k"],
         "inputs": [],
         "clauses": [
           {
@@ -14131,10 +12951,7 @@
           },
           {
             "type": "or",
-            "join": [
-              "?t",
-              "?k"
-            ],
+            "join": ["?t", "?k"],
             "alternatives": [
               [
                 {
@@ -14335,13 +13152,8 @@
   "queries": [
     {
       "name": "check-ready",
-      "find": [
-        "?t"
-      ],
-      "inputs": [
-        "$",
-        "%"
-      ],
+      "find": ["?t"],
+      "inputs": ["$", "%"],
       "clauses": [
         {
           "type": "call",
@@ -14353,22 +13165,13 @@
           ]
         }
       ],
-      "calls": [
-        "requirements-satisfied"
-      ],
+      "calls": ["requirements-satisfied"],
       "ruleSet": "rules"
     },
     {
       "name": "check-blockers",
-      "find": [
-        "?t",
-        "?code",
-        "?reason"
-      ],
-      "inputs": [
-        "$",
-        "%"
-      ],
+      "find": ["?t", "?code", "?reason"],
+      "inputs": ["$", "%"],
       "clauses": [
         {
           "type": "call",
@@ -14386,22 +13189,13 @@
           ]
         }
       ],
-      "calls": [
-        "check-blocker"
-      ],
+      "calls": ["check-blocker"],
       "ruleSet": "rules"
     },
     {
       "name": "pr-blockers",
-      "find": [
-        "?t",
-        "?code",
-        "?reason"
-      ],
-      "inputs": [
-        "$",
-        "%"
-      ],
+      "find": ["?t", "?code", "?reason"],
+      "inputs": ["$", "%"],
       "clauses": [
         {
           "type": "call",
@@ -14419,21 +13213,13 @@
           ]
         }
       ],
-      "calls": [
-        "pr-blocker"
-      ],
+      "calls": ["pr-blocker"],
       "ruleSet": "rules"
     },
     {
       "name": "q1",
-      "find": [
-        "?t",
-        "?d"
-      ],
-      "inputs": [
-        "$",
-        "%"
-      ],
+      "find": ["?t", "?d"],
+      "inputs": ["$", "%"],
       "clauses": [
         {
           "type": "fact",
@@ -14506,18 +13292,12 @@
           ]
         }
       ],
-      "calls": [
-        "otherwise",
-        "open"
-      ],
+      "calls": ["otherwise", "open"],
       "ruleSet": "rules"
     },
     {
       "name": "q2",
-      "find": [
-        "?t",
-        "count of distinct ?d"
-      ],
+      "find": ["?t", "count of distinct ?d"],
       "inputs": [],
       "clauses": [
         {
@@ -14539,9 +13319,7 @@
     },
     {
       "name": "q3",
-      "find": [
-        "?t"
-      ],
+      "find": ["?t"],
       "inputs": [],
       "clauses": [
         {
@@ -14582,13 +13360,8 @@
     },
     {
       "name": "q5",
-      "find": [
-        "?id"
-      ],
-      "inputs": [
-        "$",
-        "?t"
-      ],
+      "find": ["?id"],
+      "inputs": ["$", "?t"],
       "clauses": [
         {
           "type": "fact",
@@ -14622,13 +13395,8 @@
     },
     {
       "name": "q6",
-      "find": [
-        "?n"
-      ],
-      "inputs": [
-        "$",
-        "?t"
-      ],
+      "find": ["?n"],
+      "inputs": ["$", "?t"],
       "clauses": [
         {
           "type": "fact",
@@ -14649,13 +13417,8 @@
     },
     {
       "name": "q7",
-      "find": [
-        "?reason"
-      ],
-      "inputs": [
-        "$",
-        "?t"
-      ],
+      "find": ["?reason"],
+      "inputs": ["$", "?t"],
       "clauses": [
         {
           "type": "fact",
@@ -14676,14 +13439,8 @@
     },
     {
       "name": "unknown-unlocks",
-      "find": [
-        "?t",
-        "?reason"
-      ],
-      "inputs": [
-        "$",
-        "%"
-      ],
+      "find": ["?t", "?reason"],
+      "inputs": ["$", "%"],
       "clauses": [
         {
           "type": "fact",
@@ -14700,10 +13457,7 @@
         },
         {
           "type": "or",
-          "join": [
-            "?t",
-            "?reason"
-          ],
+          "join": ["?t", "?reason"],
           "alternatives": [
             [
               {
@@ -14888,21 +13642,13 @@
           ]
         }
       ],
-      "calls": [
-        "uncertain"
-      ],
+      "calls": ["uncertain"],
       "ruleSet": "rules"
     },
     {
       "name": "active-dependents",
-      "find": [
-        "?t",
-        "?d"
-      ],
-      "inputs": [
-        "$",
-        "%"
-      ],
+      "find": ["?t", "?d"],
+      "inputs": ["$", "%"],
       "clauses": [
         {
           "type": "fact",
@@ -14928,9 +13674,7 @@
         },
         {
           "type": "or",
-          "join": [
-            "?d"
-          ],
+          "join": ["?d"],
           "alternatives": [
             [
               {
@@ -14957,23 +13701,13 @@
           ]
         }
       ],
-      "calls": [
-        "open",
-        "claimed",
-        "has-closing"
-      ],
+      "calls": ["open", "claimed", "has-closing"],
       "ruleSet": "rules"
     },
     {
       "name": "denials",
-      "find": [
-        "?t",
-        "?r"
-      ],
-      "inputs": [
-        "$",
-        "%"
-      ],
+      "find": ["?t", "?r"],
+      "inputs": ["$", "%"],
       "clauses": [
         {
           "type": "call",
@@ -14997,22 +13731,13 @@
           ]
         }
       ],
-      "calls": [
-        "implementation-permit",
-        "implementation-deny"
-      ],
+      "calls": ["implementation-permit", "implementation-deny"],
       "ruleSet": "rules"
     },
     {
       "name": "other-claims",
-      "find": [
-        "?t",
-        "?other"
-      ],
-      "inputs": [
-        "$",
-        "%"
-      ],
+      "find": ["?t", "?other"],
+      "inputs": ["$", "%"],
       "clauses": [
         {
           "type": "fact",
@@ -15068,17 +13793,12 @@
           ]
         }
       ],
-      "calls": [
-        "own-issue"
-      ],
+      "calls": ["own-issue"],
       "ruleSet": "rules"
     },
     {
       "name": "active-count",
-      "find": [
-        "?t",
-        "count of distinct ?d"
-      ],
+      "find": ["?t", "count of distinct ?d"],
       "inputs": [],
       "clauses": [
         {
@@ -15100,9 +13820,7 @@
     },
     {
       "name": "missing-active-count",
-      "find": [
-        "?t"
-      ],
+      "find": ["?t"],
       "inputs": [],
       "clauses": [
         {

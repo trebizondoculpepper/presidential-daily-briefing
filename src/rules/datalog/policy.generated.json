@@ -183,23 +183,10 @@
     }
   },
   "constants": {
-    "small": [
-      "XS",
-      "S"
-    ],
-    "large": [
-      "L",
-      "XL",
-      "XXL"
-    ],
-    "needs-assessment": [
-      "unassessed",
-      "stale"
-    ],
-    "bad-assessment": [
-      "invalid",
-      "conflict"
-    ],
+    "small": ["XS", "S"],
+    "large": ["L", "XL", "XXL"],
+    "needs-assessment": ["unassessed", "stale"],
+    "bad-assessment": ["invalid", "conflict"],
     "prerequisite": [
       "status:needs-design",
       "question",
@@ -207,10 +194,7 @@
       "status:blocked",
       "status:parked"
     ],
-    "design-label": [
-      "documentation",
-      "status:needs-design"
-    ],
+    "design-label": ["documentation", "status:needs-design"],
     "failure": [
       "FAILURE",
       "ERROR",
@@ -220,14 +204,7 @@
       "STARTUP_FAILURE",
       "STALE"
     ],
-    "pending": [
-      "PENDING",
-      "QUEUED",
-      "IN_PROGRESS",
-      "WAITING",
-      "REQUESTED",
-      "EXPECTED"
-    ],
+    "pending": ["PENDING", "QUEUED", "IN_PROGRESS", "WAITING", "REQUESTED", "EXPECTED"],
     "known-check": [
       "SUCCESS",
       "NEUTRAL",
@@ -246,26 +223,11 @@
       "REQUESTED",
       "EXPECTED"
     ],
-    "merge-state": [
-      "CLEAN",
-      "HAS_HOOKS",
-      "UNSTABLE"
-    ],
-    "refresh-state": [
-      "BEHIND",
-      "UNKNOWN"
-    ],
-    "unknown-mergeable": [
-      "UNKNOWN"
-    ],
-    "readiness": [
-      "status:ready",
-      "status:incomplete"
-    ],
-    "question-label": [
-      "question",
-      "design:decision-needed"
-    ]
+    "merge-state": ["CLEAN", "HAS_HOOKS", "UNSTABLE"],
+    "refresh-state": ["BEHIND", "UNKNOWN"],
+    "unknown-mergeable": ["UNKNOWN"],
+    "readiness": ["status:ready", "status:incomplete"],
+    "question-label": ["question", "design:decision-needed"]
   },
   "clauses": "[[(issue ?t) [?t \"kind\" \"issue\"]] [(pr ?t) [?t \"kind\" \"pr\"]] [(open ?t) [?t \"state\" \"OPEN\"]] [(claimed ?t) [?t \"owner\" ?a]] [(mine ?t) [1 \"agent\" ?a] [?t \"owner\" ?a]] [(mine-linked ?t) (mine ?t)] [(mine-linked ?t) [1 \"agent\" ?a] [?t \"responsible\" ?a]] [(mine-linked ?t) [?t \"closes\" ?i] (mine ?i)] [(addressed ?t) [1 \"agent\" ?a] [?t \"attention\" ?a]] [(parked ?t) [?t \"label\" \"status:parked\"]] [(foreground ?t) (open ?t) (not (parked ?t))] [(foreground ?t) [?t \"ownership-inventory\" true]] [(foreground ?t) (open ?t) (addressed ?t)] [(foreground ?t) (open ?t) [1 \"role\" \"human\"]] [(own-issue ?t) (issue ?t) (open ?t) (mine ?t) (not [?t \"claim-activity\" \"not-owned\"])] [(own-active ?t) (own-issue ?t) (not [?t \"claim-activity\" _])] [(own-active ?t) (own-issue ?t) [?t \"claim-activity\" \"active\"]] [(foreground ?t) [1 \"role\" \"human\"] (orphan-source ?t)] [(platform-ok ?t) [?t \"labels-complete\" true] (not [?t \"platform\" _])] [(platform-ok ?t) [1 \"platform\" ?p] [?t \"platform\" ?p]] [(platform-unknown ?t) [?t \"platform\" _] [1 \"platform\" \"\"]] [(available ?t) [?t \"label\" \"status:ready\"]] [(available ?t) [?t \"label\" \"status:incomplete\"]] [(prerequisite ?t) [?t \"label\" ?l] [1 \"prerequisite\" ?l]] [(has-closing ?t) [?t \"closing\" ?p]] [(has-closing ?t) [?p \"closes\" ?t] (open ?p)] [(closing-complete ?t) [?t \"reverse-complete\" true]] [(closing-complete ?t) [?t \"kind\" _] [1 \"forward-complete\" true]] [(otherwise ?t) (issue ?t) (open ?t) (available ?t) [?t \"labels-complete\" true] (platform-ok ?t) (closing-complete ?t) (not (claimed ?t)) (not (has-closing ?t)) (not (prerequisite ?t))] [(blocked ?t) [?t \"open-blockers\" ?n] [(> ?n 0)]] [(blocked ?t) [?t \"blocker\" ?i] [?i \"state\" \"OPEN\"]] [(implementation-permit ?t) (issue ?t) (open ?t) (available ?t)] [(implementation-deny ?t ?r) (issue ?t) (claimed ?t) [(str \"D-DENY-CLAIM\") ?r]] [(implementation-deny ?t ?r) (issue ?t) (prerequisite ?t) [(str \"D-DENY-PREREQUISITE\") ?r]] [(implementation-deny ?t ?r) (issue ?t) (has-closing ?t) [(str \"D-DENY-OPEN-PR\") ?r]] [(implementation-deny ?t ?r) (issue ?t) (blocked ?t) [(str \"D-DENY-BLOCKER\") ?r]] [(implementation-deny ?t ?r) (issue ?t) [?t \"labels-complete\" false] [(str \"D-DENY-LABELS-UNKNOWN\") ?r]] [(implementation-deny ?t ?r) (issue ?t) [?t \"native-complete\" false] [(str \"D-DENY-NATIVE-UNKNOWN\") ?r]] [(implementation-deny ?t ?r) (issue ?t) (not (closing-complete ?t)) [(str \"D-DENY-CLOSING-UNKNOWN\") ?r]] [(implementation-deny ?t ?r) (issue ?t) (not (platform-ok ?t)) [(str \"D-DENY-PLATFORM\") ?r]] [(implementation-deny ?t ?r) (issue ?t) (open ?t) (available ?t) (not (claimed ?t)) [1 \"owned-claims-complete\" false] [(str \"D-DENY-INVENTORY-UNKNOWN\") ?r]] [(implementation-denied ?t) (implementation-deny ?t ?r)] [(eligible ?t) (implementation-permit ?t) (not (implementation-denied ?t))] [(design-eligible ?t) (issue ?t) (open ?t) [?t \"label\" \"status:needs-design\"] [?t \"labels-complete\" true] (platform-ok ?t) (closing-complete ?t) (not (claimed ?t)) (not (has-closing ?t)) (not [?t \"label\" \"design:decision-needed\"])] [(possible ?t) (available ?t) (not (claimed ?t)) (not (prerequisite ?t)) (not (blocked ?t)) (not (has-closing ?t))] [(possible ?t) [1 \"role\" \"designer\"] [?t \"label\" \"status:needs-design\"] (not (claimed ?t)) (not (has-closing ?t))] [(uncertain ?t) [?t \"labels-complete\" false]] [(uncertain ?t) [?t \"native-complete\" false]] [(uncertain ?t) [?t \"kind\" _] (not (closing-complete ?t))] [(uncertain ?t) (platform-unknown ?t)] [(large-impact ?t) [?t \"impact-state\" \"current\"] [?t \"impact-size\" ?s] [1 \"large\" ?s]] [(small-complexity ?t) [?t \"complexity-state\" \"current\"] [?t \"complexity-size\" ?s] [1 \"small\" ?s]] [(easy ?t) (large-impact ?t) (small-complexity ?t)] [(unfavorable ?t) [?t \"impact-state\" \"current\"] [?t \"impact-size\" ?i] [1 \"small\" ?i] [?t \"complexity-state\" \"current\"] [?t \"complexity-size\" ?c] [1 \"large\" ?c]] [(needs-complexity ?t) [?t \"complexity-state\" ?s] [1 \"needs-assessment\" ?s]] [(needs-impact ?t) [?t \"impact-state\" ?s] [1 \"needs-assessment\" ?s]] [(bad-complexity ?t) [?t \"complexity-state\" ?s] [1 \"bad-assessment\" ?s]] [(bad-impact ?t) [?t \"impact-state\" ?s] [1 \"bad-assessment\" ?s]] [(design-pr ?t) (pr ?t) [?t \"label\" ?l] [1 \"design-label\" ?l]] [(design-pr ?t) (pr ?t) [?t \"closes\" ?i] [?i \"label\" ?l] [1 \"design-label\" ?l]] [(pr-failure ?t) [?t \"check\" ?c] [?c \"outcome\" ?o] [1 \"failure\" ?o]] [(pr-pending ?t) [?t \"check\" ?c] [?c \"outcome\" ?o] [1 \"pending\" ?o] (not [?c \"required\" \"advisory\"])] [(pr-pending ?t) [?t \"missing-required\" ?m]] [(pr-unknown ?t) [?t \"check\" ?c] [?c \"outcome\" ?o] (not [1 \"known-check\" ?o])] [(pr-review ?t) [?t \"review-decision\" \"CHANGES_REQUESTED\"]] [(pr-review ?t) [?t \"thread\" ?c] [?c \"resolved\" false]] [(pr-review ?t) (head-findings ?t)] [(required-unsatisfied ?t) [?t \"check\" ?c] [?c \"required\" \"required\"] [?c \"outcome\" ?o] [(not= ?o \"SUCCESS\")]] [(required-unknown ?t) [?t \"check\" ?c] [?c \"required\" \"unknown\"]] [(requirements-satisfied ?t) [?t \"required-evidence-complete\" true] (not (required-unsatisfied ?t)) (not (required-unknown ?t)) (not [?t \"missing-required\" _])] [(verified ?t) [?t \"native-checks-satisfied\" true]] [(check-blocker ?t ?code ?reason) [(str \"RC-COVERAGE\") ?code] [?t \"required-evidence-complete\" false] (not [?t \"required-evidence-gap\" _]) [(str \"Required-check evidence incomplete\") ?reason]] [(check-blocker ?t ?code ?reason) [(str \"RC-REQUIREDNESS\") ?code] [?t \"check\" ?c] [?c \"required\" \"unknown\"] [?c \"name\" ?name] [(str \"Requiredness unknown: \" ?name) ?reason]] [(check-blocker ?t ?code ?reason) [(str \"RC-GAP\") ?code] [?t \"required-evidence-gap\" ?gap] [(str \"Required-check evidence unknown: \" ?gap) ?reason]] [(check-blocker ?t ?code ?reason) [(str \"RC-MISSING\") ?code] [?t \"missing-required\" ?name] [(str \"Required check not yet reported: \" ?name) ?reason]] [(check-blocker ?t ?code ?reason) [(str \"RC-OUTCOME\") ?code] [?t \"check\" ?c] [?c \"required\" \"required\"] [?c \"name\" ?name] [?c \"outcome\" ?o] [(not= ?o \"SUCCESS\")] [(str \"Required check \" ?name \" is \" ?o) ?reason]] [(clean-pr ?t) (pr ?t) [?t \"pr-complete\" true] [?t \"draft\" false] [?t \"mergeable\" \"MERGEABLE\"] [?t \"merge-state\" ?m] [1 \"merge-state\" ?m] (verified ?t) (not (pr-failure ?t)) (not (pr-pending ?t)) (not (pr-unknown ?t)) (not (pr-review ?t))] [(legacy-coverage ?t) [?t \"head\" _] (not-join [?t] [1 \"review-coverage\" \"any\"]) (not-join [?t] [1 \"review-coverage\" \"unknown\"])] [(head-reviewed ?t) (legacy-coverage ?t) [?t \"head\" ?h] [?t \"review\" ?r] [?r \"review-state\" \"APPROVED\"] [?r \"review-commit\" ?h]] [(head-reviewed ?t) (legacy-coverage ?t) [?t \"head\" ?h] [?t \"receipt\" ?c] [?c \"receipt-commit\" ?h] [?c \"receipt-status\" \"completed\"] [?c \"receipt-findings\" false]] [(head-reviewed ?t) [1 \"review-coverage\" \"any\"] [?t \"head\" ?h] [?t \"provider-review\" ?p] [?p \"provider-state\" \"accepted\"] [?p \"provider-commit\" ?h]] [(head-findings ?t) (legacy-coverage ?t) [?t \"head\" ?h] [?t \"receipt\" ?c] [?c \"receipt-commit\" ?h] [?c \"receipt-findings\" true]] [(head-findings ?t) [?t \"head\" ?h] [?t \"provider-review\" ?p] [?p \"provider-state\" \"findings\"] [?p \"provider-commit\" ?h]] [(accepted-pr ?t) (head-reviewed ?t) (not (head-findings ?t)) [?t \"pr-complete\" true] [?t \"draft\" false] (verified ?t) (not (pr-failure ?t)) (not (pr-pending ?t)) (not (pr-unknown ?t)) (not (pr-review ?t)) (not [?t \"mergeable\" \"CONFLICTING\"])] [(refresh-needed ?t) [?t \"mergeable\" ?m] [1 \"unknown-mergeable\" ?m]] [(refresh-needed ?t) [?t \"merge-state\" ?m] [1 \"refresh-state\" ?m]] [(integrate-pr ?t) (accepted-pr ?t) (refresh-needed ?t)] [(follow-up ?t) (pr-failure ?t)] [(follow-up ?t) (pr-review ?t)] [(follow-up ?t) (pr ?t) [?t \"mergeable\" \"CONFLICTING\"]] [(follow-up ?t) (clean-pr ?t)] [(follow-up ?t) (integrate-pr ?t)] [(own-follow-up ?t) (mine-linked ?t) (follow-up ?t)] [(pr-action ?t) (pr ?t) [1 \"role\" \"implementer\"]] [(pr-action ?t) [1 \"role\" \"designer\"] (design-pr ?t) (mine-linked ?t)] [(question-labelled ?t) [?t \"label\" ?l] [1 \"question-label\" ?l]] [(trusted-record ?t ?r) [?t \"question-record\" ?r] [?r \"record-trust\" \"trusted\"]] [(unverified-record ?t) [?t \"question-record\" ?r] [?r \"record-trust\" \"unverified\"]] [(record-pending ?t ?r) [?r \"record-version\" 2]] [(record-pending ?t ?r) [?r \"record-version\" 1] (question-labelled ?t)] [(record-pending ?t ?r) [?t \"question-record\" ?r] (not [?r \"record-version\" _]) (question-labelled ?t)] [(asking-record ?t ?r) (trusted-record ?t ?r) (not (record-settled ?r)) (record-pending ?t ?r)] [(has-asking-record ?t) (asking-record ?t ?r)] [(open-question ?t) (issue ?t) (open ?t) (has-asking-record ?t)] [(open-unrecorded ?t) (issue ?t) (open ?t) (question-labelled ?t) (not (has-asking-record ?t))] [(asks-viewer ?t) (asking-record ?t ?r) [?r \"record-to\" ?a] [1 \"agent\" ?a]] [(closed ?t) [?t \"state\" \"CLOSED\"]] [(record-settled ?r) [?r \"record-outcome\" \"resolved\"]] [(record-settled ?r) [?r \"record-outcome\" \"withdrawn\"]] [(orphaned-record ?t ?r) (issue ?t) (closed ?t) (trusted-record ?t ?r) [?r \"record-outcome\" \"none\"] (record-pending ?t ?r)] [(orphan-unknown ?t ?r) (issue ?t) (closed ?t) (trusted-record ?t ?r) [?r \"record-outcome\" \"unknown\"] (record-pending ?t ?r)] [(orphan-unknown ?t ?r) (issue ?t) (closed ?t) (trusted-record ?t ?r) [?r \"record-version\" 1] (not (record-settled ?r)) [?t \"labels-complete\" false] (not (question-labelled ?t))] [(has-orphaned ?t) (orphaned-record ?t ?r)] [(has-orphan-unknown ?t) (orphan-unknown ?t ?r)] [(orphan-source ?t) (has-orphaned ?t)] [(orphan-source ?t) (has-orphan-unknown ?t)] [(orphan-asks-viewer ?t) (orphaned-record ?t ?r) [?r \"record-to\" ?a] [1 \"agent\" ?a]] [(declared-review-coverage ?t) [?t \"policy-effective\" \"codex-or-coderabbit\"]] [(declared-review-coverage ?t) [?t \"policy-effective\" \"codex-or-copilot\"]] [(optional-review-detail ?t) (declared-review-coverage ?t) [?t \"policy-head-reviewed\" true]] [(pr-specific-blocker ?t ?code ?reason) [(str \"PR-DRAFT\") ?code] [?t \"draft\" true] [(str \"draft\") ?reason]] [(pr-specific-blocker ?t ?code ?reason) (check-blocker ?t ?code ?reason)] [(pr-specific-blocker ?t ?code ?reason) [(str \"PR-CHECK-FAILED\") ?code] [?t \"check\" ?c] [?c \"name\" ?name] [?c \"outcome\" ?o] [1 \"failure\" ?o] [(not= ?o \"CANCELLED\")] [(str \"check \" ?name \" failed\") ?reason]] [(pr-specific-blocker ?t ?code ?reason) [(str \"PR-CHECK-CANCELLED\") ?code] [?t \"check\" ?c] [?c \"name\" ?name] [?c \"outcome\" \"CANCELLED\"] [?c \"no-run-time\" true] [(str \"check \" ?name \" cancelled without running (likely infrastructure, not a code defect): verification incomplete\") ?reason]] [(pr-specific-blocker ?t ?code ?reason) [(str \"PR-CHECK-CANCELLED\") ?code] [?t \"check\" ?c] [?c \"name\" ?name] [?c \"outcome\" \"CANCELLED\"] [?c \"no-run-time\" false] [(str \"check \" ?name \" cancelled: verification incomplete\") ?reason]] [(pr-specific-blocker ?t ?code ?reason) [(str \"PR-CHECK-PENDING\") ?code] [?t \"pending-count\" ?n] [(> ?n 0)] [(str ?n \" check(s) still pending: waiting\") ?reason]] [(pr-specific-blocker ?t ?code ?reason) [(str \"PR-CONFLICTS\") ?code] [?t \"mergeable\" \"CONFLICTING\"] [(str \"merge conflicts with the base branch\") ?reason]] [(pr-specific-blocker ?t ?code ?reason) [(str \"PR-MERGEABLE-UNKNOWN\") ?code] [?t \"mergeable\" \"UNKNOWN\"] [(str \"mergeability unknown (GitHub still computing)\") ?reason]] [(pr-specific-blocker ?t ?code ?reason) [(str \"PR-BEHIND\") ?code] [?t \"merge-state\" \"BEHIND\"] [?t \"base-ref\" ?base] [(str \"branch is behind \" ?base \": update it before merging\") ?reason]] [(pr-merge-state-exempt ?t) [?t \"merge-state\" \"DIRTY\"] [?t \"mergeable\" \"CONFLICTING\"]] [(pr-merge-state-exempt ?t) [?t \"merge-state\" \"DRAFT\"] [?t \"draft\" true]] [(pr-merge-state-exempt ?t) [?t \"merge-state\" \"UNKNOWN\"] [?t \"mergeable\" \"UNKNOWN\"]] [(pr-specific-blocker ?t ?code ?reason) [(str \"PR-MERGE-STATE\") ?code] [?t \"merge-state\" ?m] (not [1 \"merge-state\" ?m]) [(not= ?m \"BLOCKED\")] [(not= ?m \"BEHIND\")] (not (pr-merge-state-exempt ?t)) [(str \"merge state \" ?m \" is not current: merging is not possible yet\") ?reason]] [(pr-specific-blocker ?t ?code ?reason) [(str \"PR-CHANGES-REQUESTED\") ?code] [?t \"review-decision\" \"CHANGES_REQUESTED\"] [(str \"changes requested\") ?reason]] [(pr-specific-blocker ?t ?code ?reason) [(str \"PR-REVIEW-REQUIRED\") ?code] [?t \"review-decision\" \"REVIEW_REQUIRED\"] [(str \"a required approving review is missing\") ?reason]] [(pr-specific-blocker ?t ?code ?reason) [(str \"PR-UNRESOLVED-THREADS\") ?code] [?t \"unresolved-threads\" ?n] [(> ?n 0)] [(str ?n \" unresolved review thread(s)\") ?reason]] [(pr-specific-blocker ?t ?code ?reason) [(str \"PR-CODEX-FINDINGS\") ?code] (not (declared-review-coverage ?t)) (not [?t \"policy-effective\" \"unknown\"]) [?t \"codex-findings\" true] [(str \"Codex reports unresolved findings on the current head\") ?reason]] [(pr-specific-blocker ?t ?code ?reason) [(str \"PR-CODEX-STALE\") ?code] (not (optional-review-detail ?t)) [?t \"codex-stale\" true] [(str \"Codex's latest review is for an older commit; current head not yet covered\") ?reason]] [(pr-specific-blocker ?t ?code ?reason) [(str \"PR-PROVIDER-FINDINGS\") ?code] (declared-review-coverage ?t) [?t \"provider-finding\" ?f] [?f \"provider-label\" ?label] [?f \"finding-source\" ?src] [(str ?label \" reports unresolved findings on the current head \" ?src) ?reason]] [(pr-specific-blocker ?t ?code ?reason) [(str \"PR-PROVIDER-FINDINGS\") ?code] [?t \"policy-effective\" \"unknown\"] [?t \"provider-finding\" ?f] [?f \"provider-label\" ?label] [?f \"finding-source\" ?src] [(str ?label \" reports unresolved findings on the current head \" ?src) ?reason]] [(pr-specific-blocker ?t ?code ?reason) [(str \"PR-POLICY-UNSATISFIED\") ?code] (declared-review-coverage ?t) [?t \"policy-head-reviewed\" false] [?t \"policy-has-findings\" false] [?t \"policy-effective\" ?eff] [?t \"policy-summary\" ?sum] [(str \"review policy \" ?eff \": no configured provider has accepted the current head yet (\" ?sum \")\") ?reason]] [(pr-specific-blocker ?t ?code ?reason) [(str \"PR-POLICY-UNKNOWN\") ?code] [?t \"policy-effective\" \"unknown\"] [?t \"policy-unknown-reason\" ?why] [(str \"review policy unknown (\" ?why \"): review coverage cannot be established\") ?reason]] [(pr-specific-blocker ?t ?code ?reason) [(str \"PR-REVIEW-REQUEST-NONE\") ?code] (not (optional-review-detail ?t)) [?t \"review-request-status\" \"no reaction yet\"] [(str \"a review was requested and has had no reaction\") ?reason]] [(pr-specific-blocker ?t ?code ?reason) [(str \"PR-REVIEW-REQUEST-PENDING\") ?code] (not (optional-review-detail ?t)) [?t \"review-request-status\" ?st] [(not= ?st \"no reaction yet\")] [(not= ?st \"covered\")] [(str \"waiting for the requested review to finish (\" ?st \")\") ?reason]] [(pr-specific-blocker ?t ?code ?reason) [(str \"PR-CODEX-RUNNING\") ?code] (not (optional-review-detail ?t)) (not [?t \"review-request-status\" _]) [?t \"codex-running\" ?st] [(str \"waiting for Codex's review of the current head to finish (\" ?st \")\") ?reason]] [(has-pr-specific-blocker ?t) (pr-specific-blocker ?t ?c ?r)] [(pr-blocker ?t ?code ?reason) [?t \"closed-label\" ?l] (not [?t \"state\" \"OPEN\"]) [(str \"PR-CLOSED\") ?code] [(str \"pull request is \" ?l) ?reason]] [(pr-blocker ?t ?code ?reason) [?t \"state\" \"OPEN\"] (pr-specific-blocker ?t ?code ?reason)] [(pr-blocker ?t ?code ?reason) [?t \"state\" \"OPEN\"] [?t \"merge-state\" \"BLOCKED\"] (not (has-pr-specific-blocker ?t)) [(str \"PR-BLOCKED\") ?code] [(str \"GitHub reports merging is blocked (branch protection); inspect the rules\") ?reason]]]",
   "comparison": [
@@ -308,9 +270,7 @@
       "preference": 0,
       "clauses": "(open ?t) (addressed ?t)",
       "why": "Explicitly addressed to you; respond before clearing attention.",
-      "codes": [
-        "addressed"
-      ],
+      "codes": ["addressed"],
       "query": "[:find ?t :in $ % :where (foreground ?t) (open ?t) (addressed ?t)]",
       "witnesses": {
         "addressedAgent": "[:find ?value :in $ % ?t :where [1 \"agent\" ?value] [?t \"attention\" ?value]]"
@@ -323,10 +283,7 @@
       "preference": 0,
       "clauses": "(pr-action ?t) (pr-failure ?t)",
       "why": "PR checks failed at head {head}; inspect and repair before merge.",
-      "codes": [
-        "pr-follow-up",
-        "pr-failed-checks"
-      ],
+      "codes": ["pr-follow-up", "pr-failed-checks"],
       "query": "[:find ?t :in $ % :where (foreground ?t) (pr-action ?t) (pr-failure ?t)]",
       "witnesses": {
         "failedChecks": "[:find ?value :in $ % ?t :where [?t \"check\" ?c] [?c \"name\" ?name] [?c \"outcome\" ?o] [1 \"failure\" ?o] [(str ?name \":\" ?o) ?value]]"
@@ -339,10 +296,7 @@
       "preference": 0,
       "clauses": "(pr-action ?t) (pr-review ?t)",
       "why": "PR has unresolved review findings at head {head}.",
-      "codes": [
-        "pr-follow-up",
-        "pr-review-findings"
-      ],
+      "codes": ["pr-follow-up", "pr-review-findings"],
       "query": "[:find ?t :in $ % :where (foreground ?t) (pr-action ?t) (pr-review ?t)]",
       "witnesses": {
         "reviewDecision": "[:find ?value :in $ % ?t :where [?t \"review-decision\" ?value]]",
@@ -356,10 +310,7 @@
       "preference": 1,
       "clauses": "(pr-action ?t) [?t \"mergeable\" \"CONFLICTING\"]",
       "why": "PR has merge conflicts at head {head}.",
-      "codes": [
-        "pr-follow-up",
-        "pr-conflicts"
-      ],
+      "codes": ["pr-follow-up", "pr-conflicts"],
       "query": "[:find ?t :in $ % :where (foreground ?t) (pr-action ?t) [?t \"mergeable\" \"CONFLICTING\"]]",
       "witnesses": {
         "mergeable": "[:find ?value :in $ % ?t :where [?t \"mergeable\" ?value]]"
@@ -372,10 +323,7 @@
       "preference": 2,
       "clauses": "(pr-action ?t) (clean-pr ?t)",
       "why": "Current required checks are satisfied at head {head}; inspect the diff and review evidence, then consider merge.",
-      "codes": [
-        "pr-follow-up",
-        "pr-inspect-merge"
-      ],
+      "codes": ["pr-follow-up", "pr-inspect-merge"],
       "query": "[:find ?t :in $ % :where (foreground ?t) (pr-action ?t) (clean-pr ?t)]",
       "witnesses": {
         "requiredChecksComplete": "[:find ?value :in $ % ?t :where [?t \"required-evidence-complete\" ?value]]",
@@ -391,10 +339,7 @@
       "preference": 3,
       "clauses": "(pr-action ?t) (integrate-pr ?t)",
       "why": "Accepted at head {head} (required checks satisfied, head reviewed, no fetched findings) but merge state is {mergeState}, mergeable {mergeable}; refresh mergeability or update the branch, then recheck before considering merge.",
-      "codes": [
-        "pr-follow-up",
-        "pr-integrate"
-      ],
+      "codes": ["pr-follow-up", "pr-integrate"],
       "query": "[:find ?t :in $ % :where (foreground ?t) (pr-action ?t) (integrate-pr ?t)]",
       "witnesses": {
         "mergeable": "[:find ?value :in $ % ?t :where [?t \"mergeable\" ?value]]",
@@ -409,9 +354,7 @@
       "preference": 0,
       "clauses": "[1 \"role\" \"designer\"] [?t \"label\" \"design:decision-needed\"]",
       "why": "Resolve the recorded design decision before implementation proceeds.",
-      "codes": [
-        "designer-duty"
-      ],
+      "codes": ["designer-duty"],
       "query": "[:find ?t :in $ % :where (foreground ?t) [1 \"role\" \"designer\"] [?t \"label\" \"design:decision-needed\"]]",
       "witnesses": {
         "decisionLabel": "[:find ?value :in $ % ?t :where [?t \"label\" \"design:decision-needed\"] [(str \"design:decision-needed\") ?value]]"
@@ -424,9 +367,7 @@
       "preference": 1,
       "clauses": "[1 \"role\" \"designer\"] [?t \"label\" \"design:documentation-needed\"]",
       "why": "An agreed decision needs documentation before implementation.",
-      "codes": [
-        "designer-duty"
-      ],
+      "codes": ["designer-duty"],
       "query": "[:find ?t :in $ % :where (foreground ?t) [1 \"role\" \"designer\"] [?t \"label\" \"design:documentation-needed\"]]",
       "witnesses": {
         "documentationLabel": "[:find ?value :in $ % ?t :where [?t \"label\" \"design:documentation-needed\"] [(str \"design:documentation-needed\") ?value]]"
@@ -439,9 +380,7 @@
       "preference": 2,
       "clauses": "[1 \"role\" \"designer\"] (design-pr ?t) (not (own-follow-up ?t))",
       "why": "Review the design/documentation PR at head {head}.",
-      "codes": [
-        "designer-duty"
-      ],
+      "codes": ["designer-duty"],
       "query": "[:find ?t :in $ % :where (foreground ?t) [1 \"role\" \"designer\"] (design-pr ?t) (not (own-follow-up ?t))]",
       "witnesses": {
         "designEvidence": "[:find ?value :in $ % ?t :where (or-join [?t ?value] (and [?t \"label\" ?value] [1 \"design-label\" ?value]) (and [?t \"closes\" ?i] [?i \"label\" ?value] [1 \"design-label\" ?value]))]"
@@ -454,9 +393,7 @@
       "preference": 0,
       "clauses": "[1 \"role\" \"implementer\"] (eligible ?t) (easy ?t) [1 \"order\" \"impact\"]",
       "why": "Known easy win: impact {impact}, complexity {complexity}.",
-      "codes": [
-        "easy-win"
-      ],
+      "codes": ["easy-win"],
       "query": "[:find ?t :in $ % :where (foreground ?t) [1 \"role\" \"implementer\"] (eligible ?t) (easy ?t) [1 \"order\" \"impact\"]]",
       "witnesses": {}
     },
@@ -467,10 +404,7 @@
       "preference": 0,
       "clauses": "[1 \"role\" \"implementer\"] (own-active ?t) (easy ?t)",
       "why": "Continue your known easy win: impact {impact}, complexity {complexity}.",
-      "codes": [
-        "easy-win",
-        "own-claim"
-      ],
+      "codes": ["easy-win", "own-claim"],
       "query": "[:find ?t :in $ % :where (foreground ?t) [1 \"role\" \"implementer\"] (own-active ?t) (easy ?t)]",
       "witnesses": {}
     },
@@ -481,10 +415,7 @@
       "preference": 0,
       "clauses": "[1 \"role\" \"implementer\"] (issue ?t) (needs-complexity ?t) (large-impact ?t)",
       "why": "High impact {impact}, but effort is {complexityState}; estimate it to test implementation value.",
-      "codes": [
-        "assessment",
-        "cross-role-boost"
-      ],
+      "codes": ["assessment", "cross-role-boost"],
       "query": "[:find ?t :in $ % :where (foreground ?t) [1 \"role\" \"implementer\"] (issue ?t) (needs-complexity ?t) (large-impact ?t)]",
       "witnesses": {}
     },
@@ -495,9 +426,7 @@
       "preference": 1,
       "clauses": "[1 \"role\" \"implementer\"] (issue ?t) (needs-complexity ?t)",
       "why": "Effort is {complexityState}; sizing improves the evidence for choosing work.",
-      "codes": [
-        "assessment"
-      ],
+      "codes": ["assessment"],
       "query": "[:find ?t :in $ % :where (foreground ?t) [1 \"role\" \"implementer\"] (issue ?t) (needs-complexity ?t)]",
       "witnesses": {}
     },
@@ -508,10 +437,7 @@
       "preference": 0,
       "clauses": "[1 \"role\" \"designer\"] (issue ?t) (needs-impact ?t) (small-complexity ?t)",
       "why": "Complexity {complexity} is small, but benefit is {impactState}; assess impact to test for an easy win.",
-      "codes": [
-        "assessment",
-        "cross-role-boost"
-      ],
+      "codes": ["assessment", "cross-role-boost"],
       "query": "[:find ?t :in $ % :where (foreground ?t) [1 \"role\" \"designer\"] (issue ?t) (needs-impact ?t) (small-complexity ?t)]",
       "witnesses": {}
     },
@@ -522,9 +448,7 @@
       "preference": 1,
       "clauses": "[1 \"role\" \"designer\"] (issue ?t) (needs-impact ?t)",
       "why": "Benefit is {impactState}; assess it before comparing implementation value.",
-      "codes": [
-        "assessment"
-      ],
+      "codes": ["assessment"],
       "query": "[:find ?t :in $ % :where (foreground ?t) [1 \"role\" \"designer\"] (issue ?t) (needs-impact ?t)]",
       "witnesses": {}
     },
@@ -535,10 +459,7 @@
       "preference": 1,
       "clauses": "[1 \"role\" \"implementer\"] (issue ?t) (bad-complexity ?t)",
       "why": "Complexity evidence is {complexityState}; inspect and correct the labels or provenance.",
-      "codes": [
-        "assessment",
-        "inspection"
-      ],
+      "codes": ["assessment", "inspection"],
       "query": "[:find ?t :in $ % :where (foreground ?t) [1 \"role\" \"implementer\"] (issue ?t) (bad-complexity ?t)]",
       "witnesses": {}
     },
@@ -549,10 +470,7 @@
       "preference": 1,
       "clauses": "[1 \"role\" \"designer\"] (issue ?t) (bad-impact ?t)",
       "why": "Impact evidence is {impactState}; inspect and correct the labels or provenance.",
-      "codes": [
-        "assessment",
-        "inspection"
-      ],
+      "codes": ["assessment", "inspection"],
       "query": "[:find ?t :in $ % :where (foreground ?t) [1 \"role\" \"designer\"] (issue ?t) (bad-impact ?t)]",
       "witnesses": {}
     },
@@ -563,9 +481,7 @@
       "preference": 0,
       "clauses": "[1 \"role\" \"implementer\"] (eligible ?t)",
       "why": "Eligible implementation: impact {impact} ({impactState}), complexity {complexity} ({complexityState}).",
-      "codes": [
-        "ordinary"
-      ],
+      "codes": ["ordinary"],
       "query": "[:find ?t :in $ % :where (foreground ?t) [1 \"role\" \"implementer\"] (eligible ?t)]",
       "witnesses": {}
     },
@@ -576,10 +492,7 @@
       "preference": 0,
       "clauses": "[1 \"role\" \"implementer\"] (own-active ?t)",
       "why": "Continue your active claim; impact {impact}, complexity {complexity}.",
-      "codes": [
-        "ordinary",
-        "own-claim"
-      ],
+      "codes": ["ordinary", "own-claim"],
       "query": "[:find ?t :in $ % :where (foreground ?t) [1 \"role\" \"implementer\"] (own-active ?t)]",
       "witnesses": {}
     },
@@ -590,9 +503,7 @@
       "preference": 0,
       "clauses": "[1 \"role\" \"designer\"] (design-eligible ?t)",
       "why": "A design contract is missing. Impact {impact}, complexity {complexity}.",
-      "codes": [
-        "ordinary"
-      ],
+      "codes": ["ordinary"],
       "query": "[:find ?t :in $ % :where (foreground ?t) [1 \"role\" \"designer\"] (design-eligible ?t)]",
       "witnesses": {
         "designLabel": "[:find ?value :in $ % ?t :where [?t \"label\" \"status:needs-design\"] [(str \"status:needs-design\") ?value]]"
@@ -605,9 +516,7 @@
       "preference": 0,
       "clauses": "[1 \"role\" \"implementer\"] (eligible ?t) (unfavorable ?t) [1 \"order\" \"impact\"]",
       "why": "High effort for limited benefit: impact {impact}, complexity {complexity}; reconsider or split.",
-      "codes": [
-        "unfavorable"
-      ],
+      "codes": ["unfavorable"],
       "query": "[:find ?t :in $ % :where (foreground ?t) [1 \"role\" \"implementer\"] (eligible ?t) (unfavorable ?t) [1 \"order\" \"impact\"]]",
       "witnesses": {}
     },
@@ -618,10 +527,7 @@
       "preference": 0,
       "clauses": "[1 \"role\" \"implementer\"] (own-active ?t) (unfavorable ?t)",
       "why": "Your active work has impact {impact} and complexity {complexity}; reconsider or split before continuing.",
-      "codes": [
-        "unfavorable",
-        "own-claim"
-      ],
+      "codes": ["unfavorable", "own-claim"],
       "query": "[:find ?t :in $ % :where (foreground ?t) [1 \"role\" \"implementer\"] (own-active ?t) (unfavorable ?t)]",
       "witnesses": {}
     },
@@ -632,10 +538,7 @@
       "preference": 0,
       "clauses": "[1 \"role\" \"implementer\"] (own-issue ?t) [?t \"claim-activity\" \"resume-required\"]",
       "why": "What your claim waited on has cleared ({waitReason}); resume it explicitly before starting other work.",
-      "codes": [
-        "own-claim",
-        "resume-required"
-      ],
+      "codes": ["own-claim", "resume-required"],
       "query": "[:find ?t :in $ % :where (foreground ?t) [1 \"role\" \"implementer\"] (own-issue ?t) [?t \"claim-activity\" \"resume-required\"]]",
       "witnesses": {
         "waitReason": "[:find ?value :in $ % ?t :where [?t \"wait-reason\" ?value]]"
@@ -648,10 +551,7 @@
       "preference": 1,
       "clauses": "[1 \"role\" \"implementer\"] [1 \"owned-review-subject\" ?t] (own-issue ?t) [1 \"owned-claims\" ?n] [(> ?n 1)] [1 \"owned-claims-complete\" true]",
       "why": "You retain {ownedClaims} implementation claims; review which to finish, justify as waiting, release or reassign before starting more work.",
-      "codes": [
-        "own-claim",
-        "review-owned-work"
-      ],
+      "codes": ["own-claim", "review-owned-work"],
       "query": "[:find ?t :in $ % :where (foreground ?t) [1 \"role\" \"implementer\"] [1 \"owned-review-subject\" ?t] (own-issue ?t) [1 \"owned-claims\" ?n] [(> ?n 1)] [1 \"owned-claims-complete\" true]]",
       "witnesses": {
         "ownedClaims": "[:find ?value :in $ % ?t :where [1 \"owned-claims\" ?value]]"
@@ -664,11 +564,7 @@
       "preference": 1,
       "clauses": "[1 \"role\" \"implementer\"] [1 \"owned-review-subject\" ?t] (own-issue ?t) [1 \"owned-claims\" ?n] [(> ?n 1)] [1 \"owned-claims-complete\" false]",
       "why": "You retain at least {ownedClaims} implementation claims (the claim inventory is incomplete); review which to finish, justify as waiting, release or reassign before starting more work.",
-      "codes": [
-        "own-claim",
-        "review-owned-work",
-        "inspection"
-      ],
+      "codes": ["own-claim", "review-owned-work", "inspection"],
       "query": "[:find ?t :in $ % :where (foreground ?t) [1 \"role\" \"implementer\"] [1 \"owned-review-subject\" ?t] (own-issue ?t) [1 \"owned-claims\" ?n] [(> ?n 1)] [1 \"owned-claims-complete\" false]]",
       "witnesses": {
         "ownedClaims": "[:find ?value :in $ % ?t :where [1 \"owned-claims\" ?value]]"
@@ -681,10 +577,7 @@
       "preference": 3,
       "clauses": "[1 \"role\" \"implementer\"] [?t \"ownership-inventory\" true] [1 \"owned-claims\" 0] [1 \"owned-claims-complete\" false]",
       "why": "Your claim inventory is incomplete and no claim was observed; inspect your ownership before claiming more work.",
-      "codes": [
-        "inspection",
-        "inventory-unknown"
-      ],
+      "codes": ["inspection", "inventory-unknown"],
       "query": "[:find ?t :in $ % :where (foreground ?t) [1 \"role\" \"implementer\"] [?t \"ownership-inventory\" true] [1 \"owned-claims\" 0] [1 \"owned-claims-complete\" false]]",
       "witnesses": {}
     },
@@ -695,10 +588,7 @@
       "preference": 3,
       "clauses": "[1 \"role\" \"implementer\"] [1 \"owned-review-subject\" ?t] (own-issue ?t) [1 \"owned-claims\" 1] [1 \"owned-claims-complete\" false]",
       "why": "Your claim inventory is incomplete and only this claim was observed; inspect your ownership before claiming more work.",
-      "codes": [
-        "own-claim",
-        "inspection"
-      ],
+      "codes": ["own-claim", "inspection"],
       "query": "[:find ?t :in $ % :where (foreground ?t) [1 \"role\" \"implementer\"] [1 \"owned-review-subject\" ?t] (own-issue ?t) [1 \"owned-claims\" 1] [1 \"owned-claims-complete\" false]]",
       "witnesses": {}
     },
@@ -709,10 +599,7 @@
       "preference": 2,
       "clauses": "[1 \"role\" \"implementer\"] (own-issue ?t) [?t \"claim-activity\" \"unknown\"]",
       "why": "Your claim's activity is unknown ({waitReason}); inspect its wait evidence. Unknown is never waiting, so no other claim is admitted.",
-      "codes": [
-        "own-claim",
-        "inspection"
-      ],
+      "codes": ["own-claim", "inspection"],
       "query": "[:find ?t :in $ % :where (foreground ?t) [1 \"role\" \"implementer\"] (own-issue ?t) [?t \"claim-activity\" \"unknown\"]]",
       "witnesses": {
         "waitReason": "[:find ?value :in $ % ?t :where [?t \"wait-reason\" ?value]]"
@@ -725,10 +612,7 @@
       "preference": 0,
       "clauses": "[1 \"role\" \"implementer\"] (own-issue ?t) [?t \"claim-activity\" \"waiting\"]",
       "why": "Waiting: {waitReason}. You keep this claim; nothing to do on it until that clears.",
-      "codes": [
-        "own-claim",
-        "waiting"
-      ],
+      "codes": ["own-claim", "waiting"],
       "query": "[:find ?t :in $ % :where (foreground ?t) [1 \"role\" \"implementer\"] (own-issue ?t) [?t \"claim-activity\" \"waiting\"]]",
       "witnesses": {
         "waitReason": "[:find ?value :in $ % ?t :where [?t \"wait-reason\" ?value]]"
@@ -741,10 +625,7 @@
       "preference": 0,
       "clauses": "(issue ?t) (possible ?t) (uncertain ?t) [1 \"role\" ?role] [(not= ?role \"human\")]",
       "why": "Eligibility is unproven: inspect incomplete evidence or state the required platform.",
-      "codes": [
-        "ordinary",
-        "inspection"
-      ],
+      "codes": ["ordinary", "inspection"],
       "query": "[:find ?t :in $ % :where (foreground ?t) (issue ?t) (possible ?t) (uncertain ?t) [1 \"role\" ?role] [(not= ?role \"human\")]]",
       "witnesses": {
         "uncertainty": "[:find ?value :in $ % ?t :where (or-join [?t ?value] (and [?t \"labels-complete\" false] [(str \"labels incomplete\") ?value]) (and [?t \"native-complete\" false] [(str \"native dependencies incomplete\") ?value]) (and (not (closing-complete ?t)) [(str \"closing PR evidence incomplete\") ?value]) (and (platform-unknown ?t) [(str \"viewer platform unknown\") ?value]))]"
@@ -757,10 +638,7 @@
       "preference": 0,
       "clauses": "[1 \"role\" \"human\"] (open-question ?t) (asks-viewer ?t)",
       "why": "A trusted question record routed to you ({routedTo}) awaits answers on the ticket.",
-      "codes": [
-        "explicit",
-        "addressed"
-      ],
+      "codes": ["explicit", "addressed"],
       "query": "[:find ?t :in $ % :where (foreground ?t) [1 \"role\" \"human\"] (open-question ?t) (asks-viewer ?t)]",
       "witnesses": {
         "routedTo": "[:find ?value :in $ % ?t :where (asking-record ?t ?r) [?r \"record-to\" ?value]]"
@@ -773,9 +651,7 @@
       "preference": 0,
       "clauses": "[1 \"role\" \"human\"] (open-question ?t) (not (asks-viewer ?t))",
       "why": "A trusted question record routed to {routedTo} awaits answers on the ticket.",
-      "codes": [
-        "explicit"
-      ],
+      "codes": ["explicit"],
       "query": "[:find ?t :in $ % :where (foreground ?t) [1 \"role\" \"human\"] (open-question ?t) (not (asks-viewer ?t))]",
       "witnesses": {
         "routedTo": "[:find ?value :in $ % ?t :where (asking-record ?t ?r) [?r \"record-to\" ?value]]"
@@ -788,9 +664,7 @@
       "preference": 1,
       "clauses": "[1 \"role\" \"human\"] (open-unrecorded ?t) (unverified-record ?t)",
       "why": "Labelled {questionLabel}; a question record exists but its author's authority is unverified. Inferred: confirm the decision needed.",
-      "codes": [
-        "inferred"
-      ],
+      "codes": ["inferred"],
       "query": "[:find ?t :in $ % :where (foreground ?t) [1 \"role\" \"human\"] (open-unrecorded ?t) (unverified-record ?t)]",
       "witnesses": {
         "questionLabel": "[:find ?value :in $ % ?t :where [?t \"label\" ?value] [1 \"question-label\" ?value]]"
@@ -803,9 +677,7 @@
       "preference": 2,
       "clauses": "[1 \"role\" \"human\"] (open-unrecorded ?t)",
       "why": "Labelled {questionLabel} without a trusted question record. Inferred: a decision may be needed.",
-      "codes": [
-        "inferred"
-      ],
+      "codes": ["inferred"],
       "query": "[:find ?t :in $ % :where (foreground ?t) [1 \"role\" \"human\"] (open-unrecorded ?t)]",
       "witnesses": {
         "questionLabel": "[:find ?value :in $ % ?t :where [?t \"label\" ?value] [1 \"question-label\" ?value]]"
@@ -818,10 +690,7 @@
       "preference": 1,
       "clauses": "[1 \"role\" \"human\"] (orphan-asks-viewer ?t)",
       "why": "The ticket is closed but its trusted question routed to you ({routedTo}) has no recorded resolve or withdraw; closure is not an answer.",
-      "codes": [
-        "explicit",
-        "addressed"
-      ],
+      "codes": ["explicit", "addressed"],
       "query": "[:find ?t :in $ % :where (foreground ?t) [1 \"role\" \"human\"] (orphan-asks-viewer ?t)]",
       "witnesses": {
         "routedTo": "[:find ?value :in $ % ?t :where (orphaned-record ?t ?r) [?r \"record-to\" ?value]]"
@@ -834,9 +703,7 @@
       "preference": 0,
       "clauses": "[1 \"role\" \"human\"] (has-orphaned ?t) (not (orphan-asks-viewer ?t))",
       "why": "The ticket is closed but its trusted question routed to {routedTo} has no recorded resolve or withdraw; closure is not an answer.",
-      "codes": [
-        "explicit"
-      ],
+      "codes": ["explicit"],
       "query": "[:find ?t :in $ % :where (foreground ?t) [1 \"role\" \"human\"] (has-orphaned ?t) (not (orphan-asks-viewer ?t))]",
       "witnesses": {
         "routedTo": "[:find ?value :in $ % ?t :where (orphaned-record ?t ?r) [?r \"record-to\" ?value]]"
@@ -849,10 +716,7 @@
       "preference": 1,
       "clauses": "[1 \"role\" \"human\"] (has-orphan-unknown ?t)",
       "why": "The ticket is closed and whether its trusted question routed to {routedTo} was resolved could not be established; it is not read as answered.",
-      "codes": [
-        "explicit",
-        "resolution-unknown"
-      ],
+      "codes": ["explicit", "resolution-unknown"],
       "query": "[:find ?t :in $ % :where (foreground ?t) [1 \"role\" \"human\"] (has-orphan-unknown ?t)]",
       "witnesses": {
         "routedTo": "[:find ?value :in $ % ?t :where (orphan-unknown ?t ?r) [?r \"record-to\" ?value]]"
@@ -865,9 +729,7 @@
       "preference": 3,
       "clauses": "[1 \"role\" \"human\"] (open ?t) (accepted-pr ?t) (clean-pr ?t)",
       "why": "Accepted at head {head}: required checks satisfied, head reviewed, no findings. Inferred: merge sign-off candidate; nobody asked explicitly.",
-      "codes": [
-        "inferred"
-      ],
+      "codes": ["inferred"],
       "query": "[:find ?t :in $ % :where (foreground ?t) [1 \"role\" \"human\"] (open ?t) (accepted-pr ?t) (clean-pr ?t)]",
       "witnesses": {}
     }

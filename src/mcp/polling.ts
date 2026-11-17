@@ -305,7 +305,7 @@ export function observe(
     for (const [i, review] of pr.reviews.nodes.entries()) {
       const who = review.author?.login;
       const sha = review.commit?.oid;
-      if (!who || !sha) continue;
+      if (!who || !sha || review.state === "COMMENTED") continue;
       const k = `${who}\0${sha}`;
       const prev = latestReviewByAuthorCommit.get(k);
       const prevTime =
