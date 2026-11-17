@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join, posix, resolve } from "node:path";
 import { nodeSafeFs } from "../config/safejson.js";
 import {
   assertSafeInstallPath,
@@ -74,7 +74,7 @@ describe("installer ownership manifest & scope (#767)", () => {
     );
     expect(common).toBe(resolve("repo root with spaces", ".git/worktrees/wt1"));
     expect(defaultUserStateDir({ XDG_STATE_HOME: "/xdg/state" }, "/home/u", "linux")).toBe(
-      resolve("/xdg/state"),
+      posix.resolve("/xdg/state"),
     );
     expect(
       defaultUserStateDir(
@@ -247,10 +247,15 @@ describe("safe JSON entry edits (#767)", () => {
         runtime: { now: fixedNow },
       });
       expect(adopted).toMatchObject({
-        outcome: "applied",
-        action: "replace",
+        outcome: "adopted",
+        action: "kept",
         ownership: "foreign",
       });
+      // Adoption records the observed foreign entry without replacing it.
+      expect(adopted.manifestRecord?.canonicalText).toBe('{"command":"/edited/pdb-mcp"}');
+      expect(JSON.parse(await nodeSafeFs.readFile(mcpFile)).mcpServers.pdb.command).toBe(
+        "/edited/pdb-mcp",
+      );
 
       // 6. Owned-only uninstall removes pdb while keeping custom & other.
       const removed = await removeJsonEntry({
@@ -390,6 +395,35 @@ describe("safe TOML table edits (#767)", () => {
         runtime: { now: fixedNow },
       });
       expect(malformed).toMatchObject({ outcome: "refused", code: "MALFORMED_CONFIG" });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("adopts a foreign TOML table without changing the file", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "pdb-install-toml-adopt-"));
+    try {
+      const tomlFile = join(dir, ".codex", "config.toml");
+      await nodeSafeFs.mkdir(join(dir, ".codex"));
+      const foreign = `[mcp_servers.other]\ncommand = "other"\n\n[mcp_servers.pdb]\ncommand = "/custom/pdb-mcp"\nargs = ["--project", "/custom"]\n`;
+      await nodeSafeFs.createSynced(tomlFile, foreign);
+      const adopted = await editTomlTable({
+        file: tomlFile,
+        allowedRoot: dir,
+        tablePath: ["mcp_servers", "pdb"],
+        desiredBlock: '[mcp_servers.pdb]\ncommand = "/bin/pdb-mcp"\nargs = ["--project", "."]',
+        manifestRecord: undefined,
+        pdbVersion: "0.10.0",
+        adopt: true,
+        runtime: { now: fixedNow },
+      });
+      expect(adopted).toMatchObject({
+        outcome: "adopted",
+        action: "kept",
+        ownership: "foreign",
+      });
+      expect(adopted.manifestRecord?.canonicalText).toContain("/custom/pdb-mcp");
+      expect(await nodeSafeFs.readFile(tomlFile)).toBe(foreign);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

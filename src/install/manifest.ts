@@ -52,6 +52,7 @@ export type InstallEditErrorCode =
 export type InstallEditOutcome =
   | "applied"
   | "kept"
+  | "adopted"
   | "planned"
   | "refused"
   | "failed"
@@ -343,7 +344,9 @@ function outcomeFromWrite(
       diff,
       manifestRecord,
     };
-  const isConflict = writeOutcome.reason.startsWith("CONFLICT:");
+  const isConflict =
+    writeOutcome.reason.startsWith("CONFLICT:") ||
+    writeOutcome.reason.startsWith("the file changed while it was being updated");
   return {
     action,
     outcome: isConflict ? "refused" : "failed",
@@ -438,6 +441,29 @@ export async function editJsonEntry(params: {
   );
   const desired = params.adapter.desiredCanonicalText();
 
+  // Adopt a foreign entry without touching the native file: record the observed
+  // entry, so a later re-install can replace it (codex-installer.md "Ownership and replacement").
+  if (ownership === "foreign" && params.adopt) {
+    const record: ManifestRecord = {
+      file: safeFile,
+      kind: params.adapter.kind,
+      format: "json",
+      canonicalText: inspected.canonicalText ?? "",
+      sha256: sha256Hex(inspected.canonicalText ?? ""),
+      pdbVersion: params.pdbVersion,
+      recordedAt: now().toISOString(),
+    };
+    return {
+      action: "kept",
+      outcome: "adopted",
+      ownership,
+      code: null,
+      message: `Adopted existing foreign ${params.adapter.kind} entry in ${safeFile} without changing it.`,
+      diff: null,
+      manifestRecord: record,
+    };
+  }
+
   if (ownership === "edited") {
     return {
       action: "kept",
@@ -525,6 +551,7 @@ export async function editJsonEntry(params: {
       fs,
       now: () => now().getTime(),
       lockWaitMs: params.runtime?.lockWaitMs,
+      checkUnchanged: true,
     },
   );
   return outcomeFromWrite(writeOutcome, action, ownership, diff, record);
@@ -663,7 +690,12 @@ export async function removeJsonEntry(params: {
         return { refuse: `CONFLICT: ${safeFile} changed concurrently before removal.` };
       return { write: nextText };
     },
-    { fs, now: () => now().getTime(), lockWaitMs: params.runtime?.lockWaitMs },
+    {
+      fs,
+      now: () => now().getTime(),
+      lockWaitMs: params.runtime?.lockWaitMs,
+      checkUnchanged: true,
+    },
   );
   return outcomeFromWrite(writeOutcome, "remove", ownership, diff, null);
 }
@@ -814,6 +846,29 @@ export async function editTomlTable(params: {
     existingTableValue !== null || range !== null,
   );
 
+  // Adopt a foreign table without touching the native file: record the observed
+  // block, so a later re-install can replace it (codex-installer.md "Ownership and replacement").
+  if (ownership === "foreign" && params.adopt) {
+    const record: ManifestRecord = {
+      file: safeFile,
+      kind,
+      format: "toml",
+      canonicalText: observedBlock ?? "",
+      sha256: sha256Hex(observedBlock ?? ""),
+      pdbVersion: params.pdbVersion,
+      recordedAt: now().toISOString(),
+    };
+    return {
+      action: "kept",
+      outcome: "adopted",
+      ownership,
+      code: null,
+      message: `Adopted existing foreign [${tableHeader}] in ${safeFile} without changing it.`,
+      diff: null,
+      manifestRecord: record,
+    };
+  }
+
   if (ownership === "edited") {
     return {
       action: "kept",
@@ -928,7 +983,12 @@ export async function editTomlTable(params: {
         return { refuse: `CONFLICT: ${safeFile} changed concurrently before write.` };
       return { write: nextText };
     },
-    { fs, now: () => now().getTime(), lockWaitMs: params.runtime?.lockWaitMs },
+    {
+      fs,
+      now: () => now().getTime(),
+      lockWaitMs: params.runtime?.lockWaitMs,
+      checkUnchanged: true,
+    },
   );
   return outcomeFromWrite(writeOutcome, action, ownership, diff, record);
 }
@@ -1088,7 +1148,12 @@ export async function removeTomlTable(params: {
         return { refuse: `CONFLICT: ${safeFile} changed concurrently before removal.` };
       return { write: nextText };
     },
-    { fs, now: () => now().getTime(), lockWaitMs: params.runtime?.lockWaitMs },
+    {
+      fs,
+      now: () => now().getTime(),
+      lockWaitMs: params.runtime?.lockWaitMs,
+      checkUnchanged: true,
+    },
   );
   return outcomeFromWrite(writeOutcome, "remove", ownership, diff, null);
 }
