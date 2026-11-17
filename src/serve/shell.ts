@@ -233,7 +233,13 @@ export function renderToolbar(context: ShellContext): string {
           : !context.served.length
             ? "No projects are served"
             : "No project selected";
-  return `<header class="shell-toolbar"><a class="skip-link" href="#content">Skip to content</a><div class="shell-context"><a class="product" href="${htmlEscape(pageHref(pageById("work"), selection, page))}"${carryAttribute(pageById("work"))}>Presidential Daily Briefing</a><span>${htmlEscape(indicator)}</span></div><div class="shell-menus">${page.scope === "account" ? "" : `<details class="project-menu"><summary>Change project</summary><ul>${projects || "<li>No projects are served. Start pdb serve with --repo or --project.</li>"}</ul></details>`}<nav class="wide-pages" aria-label="Pages">${links}</nav><details class="narrow-pages"><summary>Pages: ${htmlEscape(pageById(active).label)}</summary><nav aria-label="Pages">${links}</nav></details></div></header>`;
+  // One consistent toolbar on every served page (#733): project/context selection on the top
+  // row (always visible, even on account-wide pages, clearly labelled as context), page
+  // navigation on the row below, then page content. Controls sit above the content they affect.
+  const projectMenu = `<details class="project-menu"><summary>${htmlEscape(
+    selection.repository ? selection.repository : "Change project",
+  )}</summary><ul>${projects || "<li>No projects are served. Start pdb serve with --repo or --project.</li>"}</ul></details>`;
+  return `<header class="shell-toolbar"><a class="skip-link" href="#content">Skip to content</a><div class="shell-context"><a class="product" href="${htmlEscape(pageHref(pageById("work"), selection, page))}"${carryAttribute(pageById("work"))}>Presidential Daily Briefing</a>${projectMenu}<span>${htmlEscape(indicator)}</span></div><div class="shell-menus"><nav class="wide-pages" aria-label="Pages">${links}</nav><details class="narrow-pages"><summary>Pages: ${htmlEscape(pageById(active).label)}</summary><nav aria-label="Pages">${links}</nav></details></div></header>`;
 }
 export function shellStart(context: ShellContext, title: string, script?: string): string {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${htmlEscape(title)}</title><link rel="stylesheet" href="/dashboard.css">${script ? `<script src="${htmlEscape(script)}" defer></script>` : ""}</head><body>${renderToolbar(context)}`;
@@ -261,9 +267,11 @@ html { scroll-padding-top: var(--toolbar-height); }
 .shell-toolbar { z-index: 10; position: sticky; top: 0; background: Canvas; padding: .5rem 0; border-bottom: 1px solid GrayText; }
 .shell-context { display: flex; flex-wrap: wrap; gap: .25rem 1rem; align-items: baseline; overflow-wrap: anywhere; }
 .product { font-weight: 700; }
+.project-menu { position: relative; }
+.project-menu summary { cursor: pointer; font-size: .85rem; border: 1px solid GrayText; border-radius: .25rem; padding: .15rem .5rem; }
 .shell-menus { display: flex; gap: .5rem 1rem; align-items: start; margin-top: .5rem; }
 .shell-menus nav a { display: inline-block; margin: 0 .6rem .2rem 0; }
-.shell-menus details { position: relative; }
+.narrow-pages { position: relative; }
 .project-menu ul, .narrow-pages nav { position: absolute; z-index: 11; background: Canvas; border: 1px solid GrayText; padding: .75rem; margin: .25rem 0 0; width: min(24rem, 75vw); max-height: 50vh; overflow: auto; overflow-wrap: anywhere; }
 .project-menu ul { list-style: none; }
 .project-menu li { margin: 0 0 .5rem; }
