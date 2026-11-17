@@ -1,3 +1,7 @@
+import { disabledEffectiveHuman } from "./config/effectiveidentity.js";
+import { humanContextEnabled } from "./config/humancontext.js";
+import { startLocalIdentity } from "./config/serveridentity.js";
+import { serverHumanContext } from "./config/humancontext.js";
 import { servedPages, shellContext, selectionErrorPage } from "./serve/shell.js";
 /**
  * `pdb serve`: a foreground local HTTP server (doc/design/serve.md, #373).
@@ -82,6 +86,9 @@ import { ghAuthContext } from "./github/ghauth.js";
 export { ghAuthContext };
 
 export const defaultServeRuntime = (): ServeRuntime => ({
+  ...(!process.env.PDB_NO_EFFECTIVE_IDENTITY
+    ? { identityRuntime: { env: process.env, git: nodeGit } }
+    : {}),
   cwd: process.cwd(),
   git: nodeGit,
   currentRepository,
@@ -229,6 +236,32 @@ export async function startServe(
     auth,
   };
 
+  facts.effectiveHuman = humanContextEnabled()
+    ? { context: serverHumanContext(auth, facts.startedAt), authenticationFailed: false }
+    : disabledEffectiveHuman(auth.host);
+  if (runtime.identityRuntime) {
+    const localProjects = served.filter((entry) => entry.project !== undefined);
+    const selected =
+      localProjects.length === 1 ? localProjects[0] : served.length === 1 ? served[0] : undefined;
+    facts.identitySession = await startLocalIdentity(
+      {
+        project: selected?.project,
+        repository: selected?.repository,
+        agent: options.agent,
+        entry: options.entry,
+        harness: options.harness,
+        role: options.role,
+      },
+      { ...runtime.identityRuntime, human: async () => facts.effectiveHuman! },
+    );
+    const startup = facts.identitySession.startup;
+    for (const notice of startup.setup.notices) runtime.stderr(`pdb serve startup: ${notice}\n`);
+    if (startup.diagnostic)
+      runtime.stderr(
+        `pdb serve startup: ${startup.diagnostic.message} ${startup.diagnostic.recovery}\n`,
+      );
+  }
+
   const dashboard = dashboardFiles();
   const statusDocument = () => ({
     schemaVersion: 1,
@@ -249,6 +282,11 @@ export async function startServe(
     }),
     ttlSeconds: options.ttlMs / 1000,
     auth: { host: facts.auth.host, login: facts.auth.login },
+    ...(facts.identitySession
+      ? {
+          identityStartup: { phase: "local-server-startup", result: facts.identitySession.startup },
+        }
+      : {}),
     cache: status.cache(),
     ...(status.diagnostics ? { diagnostics: status.diagnostics() } : {}),
   });

@@ -252,6 +252,8 @@ export interface ErrorInput {
   sourceCompleteness: BoundedEnvelope["sourceCompleteness"];
   code: string;
   message: string;
+  /** Known setup outcome when the original read fails. */
+  effectiveIdentity?: Record<string, unknown>;
   /** #346: a safe, structured cause (validated fields only). */
   cause?: SafeEngineCause | null;
 }
@@ -282,7 +284,7 @@ function errorShape(input: ErrorInput): ToolResult {
         truncatedFields: [],
         next: null,
       },
-      data: null,
+      data: input.effectiveIdentity ? { effectiveIdentity: input.effectiveIdentity } : null,
       error: {
         code: input.code,
         message: input.message,
@@ -332,6 +334,7 @@ export function boundedError(input: ErrorInput): ToolResult {
   // Fixed-size last resort: nothing caller-controlled except the verdict remains.
   return errorShape({
     ...counted,
+    effectiveIdentity: undefined,
     repository: null,
     selection: {
       repository: null,
@@ -341,7 +344,7 @@ export function boundedError(input: ErrorInput): ToolResult {
       triageRole: null,
       identityDiagnostic: null,
     },
-    message: `The ${input.code} error details exceed the ${budgetBytes}-byte response budget and were omitted. ${echoNotice}`,
+    message: `${input.effectiveIdentity ? "Effective identity details were omitted for size; inspect the local startup diagnostic. " : ""}The ${input.code} error details exceed the ${budgetBytes}-byte response budget and were omitted. ${echoNotice}`,
   });
 }
 
@@ -358,6 +361,9 @@ export function budgetExceeded(view: BoundedView, reason: string): ToolResult {
     sourceCompleteness: view.sourceCompleteness,
     code: budgetErrorCode,
     message,
+    ...(view.data.effectiveIdentity && typeof view.data.effectiveIdentity === "object"
+      ? { effectiveIdentity: view.data.effectiveIdentity as Record<string, unknown> }
+      : {}),
   });
 }
 

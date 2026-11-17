@@ -37,6 +37,18 @@ export interface EffectiveHuman {
   readonly authenticationFailed: boolean;
 }
 
+/** An explicit front-end opt-out does not consult a prior account or its cache. */
+export const disabledEffectiveHuman = (host = "github.com"): EffectiveHuman => ({
+  context: {
+    state: "unresolved",
+    host,
+    login: null,
+    source: "none",
+    reason: "Employing-human lookup is disabled for this invocation.",
+  },
+  authenticationFailed: false,
+});
+
 /** Reuse the one human resolver while preserving the factual credential-failure category. */
 export async function resolveEffectiveHuman(
   read: AuthContextReader | undefined,
@@ -89,6 +101,8 @@ export interface EffectiveIdentity {
 
 export interface EffectiveIdentityOptions {
   readonly project?: string;
+  /** Local services never borrow their launch directory when no startup project was selected. */
+  readonly requireProject?: boolean;
   readonly repository?: string;
   /** Trusted local per-call override; remote display arguments must not populate this. */
   readonly agent?: string;
@@ -216,6 +230,12 @@ export async function prepareEffectiveIdentity(
       );
     if (options.agent !== undefined)
       return { ...base(), state: "resolved", agent: options.agent, source: "explicit-agent" };
+
+    if (options.requireProject && !options.project)
+      throw selectionError(
+        "No local project is selected; the server launch directory was not consulted.",
+        "Select a local startup project with --project PATH, or use an explicit local --agent override.",
+      );
 
     target = await resolveRepositoryTarget(
       options.project ?? runtime.cwd ?? process.cwd(),
