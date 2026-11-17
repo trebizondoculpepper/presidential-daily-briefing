@@ -14,7 +14,11 @@
 
 import { ticketHistory } from "../workflow/claims.js";
 import type { Comment, GraphQuery } from "../workflow/claims.js";
-import { collectDeliveryFacts, evaluateDelivery } from "../workflow/completion.js";
+import {
+  collectDeliveryFacts,
+  deliveryMemberCap,
+  evaluateDelivery,
+} from "../workflow/completion.js";
 import { legacyRelease } from "../workflow/deliverables.js";
 import type { DeliverablesRuntime } from "../workflow/deliverables.js";
 import { classifyDeliveryRecords, foldDelivery } from "../workflow/delivery.js";
@@ -249,6 +253,11 @@ export async function readMetrics(
   const completeFrom = issueFrom === null || prFrom === null ? null : latest(issueFrom, prFrom);
   for (const number of linked) {
     if (walked.some((i) => i.number === number)) continue;
+    // Linked lookups share the ticket bound: beyond it they are unread, not fetched.
+    if (walked.length >= bounds.maxTickets) {
+      unreadLinked.push(member(number));
+      continue;
+    }
     let issue: WalkIssue | null | undefined;
     try {
       issue = prop(
@@ -296,7 +305,16 @@ export async function readMetrics(
     // never an empty, complete set.
     const required = first.requiredPullRequests;
     let prsComplete = required !== null;
-    for (const pr of required ?? []) {
+    // The same member cap as the completion collector: a huge deliverable set is read no
+    // further, and the PR source stays incomplete with a notice rather than costing a request
+    // per member.
+    if (required && required.length > deliveryMemberCap) {
+      prsComplete = false;
+      warnings.push(
+        `${member(issue.number)}: ${required.length} required pull requests exceed the cap of ${deliveryMemberCap}; their merges were not read`,
+      );
+    }
+    for (const pr of (required ?? []).slice(0, deliveryMemberCap)) {
       const [o, nm] = pr.repository.split("/") as [string, string];
       let node: { number: number; state: string; mergedAt: string | null } | null | undefined;
       try {
