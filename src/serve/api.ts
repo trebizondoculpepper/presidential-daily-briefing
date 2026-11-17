@@ -1,3 +1,9 @@
+import {
+  effectiveReadIdentity,
+  withDisplayRole,
+  type LocalIdentitySession,
+  type ServerEffectiveIdentity,
+} from "../config/serveridentity.js";
 import { cachedIssueFacts } from "./issue-facts.js";
 /**
  * The `pdb serve` JSON read API (doc/design/serve.md "Read API", #373).
@@ -181,10 +187,13 @@ export interface Selection {
   identityDiagnostic: string | null;
   /** Additive (#319): store category of a persisted name; never a path. */
   identityStore?: "pdb" | "legacy-not-imported";
+  /** Caller view default, distinct from the selected entry's persisted triageRole. */
+  effectiveRole?: string;
 }
 
 /** The `serve-read` envelope of every data route. */
 export interface ReadEnvelope {
+  effectiveIdentity?: ServerEffectiveIdentity;
   schemaVersion: 1;
   kind: "serve-read";
   view: View;
@@ -482,7 +491,9 @@ export function readApi(
   // The served set, known once listening.
   let servedSet: readonly ServedRepository[] = [];
   // #664: the one execution-human context of this process, known once listening.
-  let serverHuman: HumanContext | undefined;
+  let serverHuman: (() => Promise<HumanContext>) | undefined;
+  let identitySession: LocalIdentitySession | undefined;
+  const identityContexts = new WeakMap<Selection, ServerEffectiveIdentity>();
   const isServed = (repository: string): boolean =>
     servedSet.some((s) => s.repository.toLowerCase() === repository.toLowerCase());
   const {
@@ -494,11 +505,11 @@ export function readApi(
     guardedQueryWith,
     guardedRest,
   } = cachedBoundaries(runtime, cache, isServed);
-  const known = localPaths(...options.projects);
+  let known = localPaths(...options.projects);
   const redact = <T>(value: T): T => redactPaths(value, known);
 
   const readRuntime = (project: string | undefined, repository: string): ReadRuntime => ({
-    ...(serverHuman ? { humanContext: async () => serverHuman! } : {}),
+    ...(serverHuman ? { humanContext: () => serverHuman!() } : {}),
     collect: cachedCollect,
     collectShortlist: cachedShortlist,
     dependencyReport: cachedDependencies,
@@ -558,18 +569,28 @@ export function readApi(
     }
     // A request-level entry or harness replaces both startup selectors (contract precedence).
     const requested = entry !== undefined || harness !== undefined;
-    const resolved = await resolveReadIdentity({
-      toolAgent: agent,
-      startupAgent: options.agent,
-      project: served.project,
-      repository: served.repository,
-      entry: requested ? entry : options.entry,
-      harness: requested ? harness : options.harness,
-      env: runtime.env,
-      git: runtime.git,
-      fs: runtime.fs,
-    });
-    return {
+    const effective = identitySession
+      ? withDisplayRole(
+          await identitySession.read(served.project, served.repository),
+          values.get("role"),
+        )
+      : undefined;
+    // Request/local entry selectors remain read-only display focus, never execution authority.
+    const resolved =
+      effective && agent === undefined && !requested && options.entry === undefined
+        ? effectiveReadIdentity(effective)
+        : await resolveReadIdentity({
+            toolAgent: agent,
+            startupAgent: options.agent,
+            project: served.project,
+            repository: served.repository,
+            entry: requested ? entry : options.entry,
+            harness: requested ? harness : options.harness,
+            env: runtime.env,
+            git: runtime.git,
+            fs: runtime.fs,
+          });
+    const selection: Selection = {
       repository: served.repository,
       agent: resolved.agent,
       identitySource: resolved.source,
@@ -577,12 +598,36 @@ export function readApi(
       entry: resolved.entry,
       identityDiagnostic: resolved.diagnostic && redactLocalText(resolved.diagnostic),
       ...(resolved.store ? { identityStore: resolved.store } : {}),
+      ...(effective?.role ? { effectiveRole: effective.role } : {}),
     };
+    if (effective) identityContexts.set(selection, effective);
+    return selection;
   };
 
   return (facts) => {
     servedSet = facts.served;
-    if (humanContextEnabled()) serverHuman = serverHumanContext(facts.auth, facts.startedAt);
+    identitySession = facts.identitySession;
+    known = localPaths(
+      ...options.projects,
+      ...facts.served.flatMap((entry) => (entry.project ? [entry.project] : [])),
+    );
+    if (humanContextEnabled())
+      serverHuman = async () =>
+        facts.effectiveHuman?.context ?? serverHumanContext(facts.auth, facts.startedAt);
+    const effectiveContext = async (
+      served: ServedRepository | undefined,
+      selection: Selection,
+      role?: string,
+    ) => {
+      if (!served || !identitySession) return undefined;
+      const selected =
+        identityContexts.get(selection) ??
+        (await identitySession.read(served.project, served.repository));
+      const current = facts.effectiveHuman
+        ? { ...selected, human: facts.effectiveHuman.context }
+        : selected;
+      return redact(withDisplayRole(current, role));
+    };
     const respond = (
       context: RequestContext,
       httpStatus: number,
@@ -631,7 +676,18 @@ export function readApi(
             : []),
           ...(value.warnings ?? []),
         ];
+        const effectiveIdentity = await effectiveContext(served, selection, values.get("role"));
+        let result = redact(value.result);
+        if (
+          effectiveIdentity &&
+          result !== null &&
+          typeof result === "object" &&
+          !Array.isArray(result) &&
+          "employingHuman" in result
+        )
+          result = { ...result, employingHuman: effectiveIdentity.human };
         respond(context, 200, {
+          ...(effectiveIdentity ? { effectiveIdentity } : {}),
           schemaVersion: 1,
           kind: "serve-read",
           view,
@@ -639,7 +695,7 @@ export function readApi(
           selection,
           freshness: stale ?? primary,
           warnings,
-          result: redact(value.result),
+          result,
           error: null,
         });
       } catch (error) {
@@ -692,6 +748,9 @@ export function readApi(
           context,
           status,
           {
+            ...(identitySession && served
+              ? { effectiveIdentity: await effectiveContext(served, selection) }
+              : {}),
             schemaVersion: 1,
             kind: "serve-read",
             view,
@@ -716,7 +775,7 @@ export function readApi(
     ) => {
       const selection = await identity(values, served);
       setSelection(selection);
-      const role = values.get("role");
+      const role = values.get("role") ?? selection.effectiveRole;
       if (role !== undefined && !briefingRoleNames().includes(role))
         throw invalid(`role must be one of ${briefingRoleNames().join(", ")}.`);
       // #311: one registered section, validated exactly as CLI --section and the MCP input.

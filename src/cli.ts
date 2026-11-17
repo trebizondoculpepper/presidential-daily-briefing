@@ -1650,6 +1650,7 @@ async function run(
   if (args[0] === "serve") return runServe(args.slice(1), runtime.serve);
   if (args[0] === "rebrief")
     return runRebrief(args.slice(1), output, {
+      prepareIdentity: runtime.prepareIdentity,
       read: {
         collect: runtime.collect,
         dependencyReport: runtime.dependencyReport ?? dependencyReport,

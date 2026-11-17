@@ -166,6 +166,12 @@ export interface CacheOptions {
   maxConcurrent?: number;
   /** Told when the auth context changes (status reports the new one). */
   onAuthChange?: (auth: AuthContext) => void;
+  /** Safe source observations; a refused login never becomes a last-known account fallback. */
+  onAuthObservation?: (
+    observation:
+      | { state: "verified"; auth: AuthContext; observedAt: Date }
+      | { state: "refused" | "unavailable" },
+  ) => void;
 }
 
 /** Canonical JSON: sorted keys, absent (undefined) fields omitted. */
@@ -695,7 +701,15 @@ export class ServeCache {
           this.closedQuestions.reset(undefined, "the GitHub login changed");
           this.options.onAuthChange?.(auth);
         }
+        this.options.onAuthObservation?.({
+          state: "verified",
+          auth,
+          observedAt: new Date(this.authCheckedAt),
+        });
       } catch (error) {
+        this.options.onAuthObservation?.({
+          state: error instanceof AuthenticationError ? "refused" : "unavailable",
+        });
         // Only a real authentication failure is GITHUB_AUTH; an outage stays unavailable.
         if (error instanceof AuthenticationError)
           throw new CollectionError(

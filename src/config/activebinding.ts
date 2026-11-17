@@ -5,12 +5,13 @@
  */
 import { createHash } from "node:crypto";
 import { posix, win32 } from "node:path";
-import { detectHarness, type Environment, type HarnessId } from "./harness.js";
+import { detectHarness, HARNESS_DETECTORS, type Environment, type HarnessId } from "./harness.js";
 
 interface BindingProvider {
   readonly id: string;
   readonly harness: HarnessId;
   readonly signal: string;
+  readonly supportingSignals: readonly string[];
   readonly supported: (env: Environment) => boolean;
 }
 
@@ -20,6 +21,7 @@ export const ACTIVE_BINDING_PROVIDERS = [
     id: "codex-thread",
     harness: "codex",
     signal: "CODEX_THREAD_ID",
+    supportingSignals: ["CODEX_VERSION"],
     supported: (env: Environment): boolean => {
       const version = /^(\d+)\.(\d+)\.(\d+)(?:\+[A-Za-z0-9.-]+)?$/.exec(env.CODEX_VERSION ?? "");
       if (!version) return false;
@@ -73,4 +75,16 @@ export function activeBinding(options: {
     key: `${provider.id}_${digest}`,
     entry: `${provider.harness}.session_${digest}`,
   };
+}
+
+/** Snapshot only registered correlation inputs for a local server's fixed execution session. */
+export function captureBindingEnvironment(env: Environment): Environment {
+  const names = new Set([
+    ...HARNESS_DETECTORS.flatMap((provider) => provider.environment),
+    ...ACTIVE_BINDING_PROVIDERS.flatMap((provider) => [
+      provider.signal,
+      ...provider.supportingSignals,
+    ]),
+  ]);
+  return Object.fromEntries([...names].map((name) => [name, env[name]]));
 }
