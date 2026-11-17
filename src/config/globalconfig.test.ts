@@ -72,8 +72,8 @@ describe("global configuration service (#804, doc/design/configuration-service.m
     expect(typeof real).toBe("string");
   });
 
-  it("parses an explicit value and reports it as explicit", () => {
-    const config = parseGlobalConfig(
+  it("parses an explicit value and reports it as explicit", async () => {
+    const config = await parseGlobalConfig(
       `schemaVersion = 1\nserve.port = 4789\nserve.ttl = "7m"\n`,
       join(dir, GLOBAL_CONFIG_FILE),
     );
@@ -83,8 +83,8 @@ describe("global configuration service (#804, doc/design/configuration-service.m
     expect(config.settings.find((s) => s.key === "serve.port")?.value).toBe(4789);
   });
 
-  it("parses an ordered projects array with default host", () => {
-    const config = parseGlobalConfig(
+  it("parses an ordered projects array with default host", async () => {
+    const config = await parseGlobalConfig(
       `schemaVersion = 1
 [[serve.projects]]
 repository = "a/b"
@@ -109,6 +109,28 @@ repository = "c/d"
     expect(memory.writes).toEqual([]);
   });
 
+  it("refuses a structurally invalid parent table rather than treating it as absent (#849)", async () => {
+    const memory = memoryFs(`schemaVersion = 1\nserve = "broken"\n`);
+    await expect(loadGlobalConfig(dir, memory.fs)).rejects.toMatchObject({ code: "malformed" });
+    expect(memory.writes).toEqual([]);
+  });
+
+  it("refuses unknown top-level configuration keys (#849)", async () => {
+    const memory = memoryFs(`schemaVersion = 1\nother = 1\n`);
+    await expect(loadGlobalConfig(dir, memory.fs)).rejects.toMatchObject({ code: "malformed" });
+    expect(memory.writes).toEqual([]);
+  });
+
+  it("rejects a relative project localRoot through the verifier (#849)", async () => {
+    await expect(
+      validateGlobalValue("serve.projects", [{ repository: "a/b", localRoot: "../other" }]),
+    ).rejects.toMatchObject({ code: "invalid-value" });
+    // An absolute root passes the default verifier.
+    await expect(
+      validateGlobalValue("serve.projects", [{ repository: "a/b", localRoot: "/a/b" }]),
+    ).resolves.toEqual([{ host: "github.com", repository: "a/b", localRoot: "/a/b" }]);
+  });
+
   it("refuses a future schema version without writing", async () => {
     const memory = memoryFs(`schemaVersion = 99\n`);
     await expect(loadGlobalConfig(dir, memory.fs)).rejects.toMatchObject({
@@ -117,41 +139,45 @@ repository = "c/d"
     expect(memory.writes).toEqual([]);
   });
 
-  it("validates the port typed value", () => {
-    expect(validateGlobalValue("serve.port", 80)).toBe(80);
-    expect(() => validateGlobalValue("serve.port", 0)).toThrowError(GlobalConfigError);
-    expect(() => validateGlobalValue("serve.port", 70000)).toThrowError(GlobalConfigError);
-    expect(() => validateGlobalValue("serve.port", "80")).toThrowError(GlobalConfigError);
+  it("validates the port typed value", async () => {
+    await expect(validateGlobalValue("serve.port", 80)).resolves.toBe(80);
+    await expect(validateGlobalValue("serve.port", 0)).rejects.toBeInstanceOf(GlobalConfigError);
+    await expect(validateGlobalValue("serve.port", 70000)).rejects.toBeInstanceOf(
+      GlobalConfigError,
+    );
+    await expect(validateGlobalValue("serve.port", "80")).rejects.toBeInstanceOf(GlobalConfigError);
   });
 
-  it("validates the ttl typed value against the accepted range", () => {
-    expect(validateGlobalValue("serve.ttl", "5m")).toBe("5m");
-    expect(() => validateGlobalValue("serve.ttl", "1h")).toThrowError(GlobalConfigError);
-    expect(() => validateGlobalValue("serve.ttl", "30s")).toThrowError(GlobalConfigError);
-    expect(() => validateGlobalValue("serve.ttl", 5)).toThrowError(GlobalConfigError);
+  it("validates the ttl typed value against the accepted range", async () => {
+    await expect(validateGlobalValue("serve.ttl", "5m")).resolves.toBe("5m");
+    await expect(validateGlobalValue("serve.ttl", "1h")).rejects.toBeInstanceOf(GlobalConfigError);
+    await expect(validateGlobalValue("serve.ttl", "30s")).rejects.toBeInstanceOf(GlobalConfigError);
+    await expect(validateGlobalValue("serve.ttl", 5)).rejects.toBeInstanceOf(GlobalConfigError);
   });
 
-  it("validates a projects value", () => {
-    expect(
+  it("validates a projects value", async () => {
+    await expect(
       validateGlobalValue("serve.projects", [
         { repository: "a/b" },
         { repository: "c/d", host: "example.com" },
       ]),
-    ).toEqual([
+    ).resolves.toEqual([
       { host: "github.com", repository: "a/b" },
       { host: "example.com", repository: "c/d" },
     ]);
-    expect(() => validateGlobalValue("serve.projects", [{ repository: "bad" }])).toThrowError(
+    await expect(
+      validateGlobalValue("serve.projects", [{ repository: "bad" }]),
+    ).rejects.toBeInstanceOf(GlobalConfigError);
+    await expect(
+      validateGlobalValue("serve.projects", [{ repository: "a/b", extra: 1 }]),
+    ).rejects.toBeInstanceOf(GlobalConfigError);
+    await expect(validateGlobalValue("serve.projects", "nope")).rejects.toBeInstanceOf(
       GlobalConfigError,
     );
-    expect(() =>
-      validateGlobalValue("serve.projects", [{ repository: "a/b", extra: 1 }]),
-    ).toThrowError(GlobalConfigError);
-    expect(() => validateGlobalValue("serve.projects", "nope")).toThrowError(GlobalConfigError);
   });
 
-  it("refuses unknown keys", () => {
-    expect(() => validateGlobalValue("nope.value", 1)).toThrowError(GlobalConfigError);
+  it("refuses unknown keys", async () => {
+    await expect(validateGlobalValue("nope.value", 1)).rejects.toBeInstanceOf(GlobalConfigError);
   });
 
   it("writes a new file and can be read back", async () => {
@@ -199,10 +225,10 @@ repository = "c/d"
     expect(reverted).toEqual([]);
   });
 
-  it("serialises back to parseable TOML with a schema version", () => {
+  it("serialises back to parseable TOML with a schema version", async () => {
     const text = serializeGlobal(new Map<string, number>([["serve.port", 4800]]) as never);
     expect(text).toContain(`schemaVersion = ${GLOBAL_SCHEMA_VERSION}`);
-    const parsed = parseGlobalConfig(text, join(dir, GLOBAL_CONFIG_FILE));
+    const parsed = await parseGlobalConfig(text, join(dir, GLOBAL_CONFIG_FILE));
     expect(parsed.explicit.get("serve.port")).toBe(4800);
   });
 
