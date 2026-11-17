@@ -7,15 +7,20 @@
  * there is no presence source, so availability is always reported as unknown. Nothing here
  * releases a claim or infers abandonment.
  */
-import { owners, prChecks } from "../briefing/briefing.js";
+import { owners } from "../briefing/briefing.js";
 import { workflow } from "./definition.js";
 import type { PullRequest, Snapshot } from "../github/types.js";
+
+import type { DeclaredReviewPolicy } from "./reviewpolicy.js";
+import { snapshotPrReadiness } from "./prstatus.js";
 
 export interface LinkedPullRequest {
   number: number;
   url: string;
   draft: boolean;
-  verify: string;
+  requirements: "satisfied" | "unproven";
+  ready: boolean;
+  blockers: string[];
   reviewDecision: string | null;
   unresolvedThreads: number;
   mergeState: string;
@@ -92,15 +97,20 @@ export const latest = (events: ActivityEvent[]): { at: string; source: string } 
     .filter((e): e is { at: string; source: string } => !!e.at && Number.isFinite(Date.parse(e.at)))
     .sort((a, b) => b.at.localeCompare(a.at))[0] ?? null;
 
-/** A linked pull request's state, from the evidence the briefing already collects. */
-export function pullRequestState(pr: PullRequest): LinkedPullRequest {
-  const checks = prChecks(pr);
-  const verify = checks.find((c) => c.name === workflow.verify)?.outcome ?? "UNKNOWN";
+/** A linked pull request's state, from the shared native PR-readiness rules (#711). */
+export function pullRequestState(
+  pr: PullRequest,
+  warnings: readonly string[] = [],
+  reviewPolicy?: DeclaredReviewPolicy,
+): LinkedPullRequest {
+  const readiness = snapshotPrReadiness(pr, warnings, reviewPolicy);
   return {
     number: pr.number,
     url: pr.url,
     draft: !!pr.isDraft,
-    verify,
+    requirements: readiness.requirements,
+    ready: readiness.ready,
+    blockers: readiness.blockers,
     reviewDecision: pr.reviewDecision ?? null,
     unresolvedThreads: pr.reviewThreads.nodes.filter((t) => !t.isResolved).length,
     mergeState: pr.mergeStateStatus ?? "UNKNOWN",
@@ -134,7 +144,9 @@ export function teamView(
     // Two agents on one ticket is a definite ownership violation, not a candidate.
     if (holders.length > 1)
       conflicts.push({ number: issue.number, url: issue.url, agents: holders });
-    const prs = (linked.get(issue.url) ?? []).map(pullRequestState);
+    const prs = (linked.get(issue.url) ?? []).map((p) =>
+      pullRequestState(p, snapshot.warnings, snapshot.reviewPolicy),
+    );
     const activity = latest([
       { at: issue.updatedAt, source: "ticket updated" },
       ...issue.comments.nodes.map((c) => ({ at: c.createdAt, source: `comment ${c.url}` })),
@@ -270,7 +282,7 @@ export function teamText(view: TeamView): string {
       );
       for (const p of c.pullRequests)
         lines.push(
-          `    PR #${p.number}${p.draft ? " (draft)" : ""}: verify ${p.verify}, ${p.unresolvedThreads} unresolved threads, merge ${p.mergeState}${p.reviewDecision ? `, review ${p.reviewDecision}` : ""}`,
+          `    PR #${p.number}${p.draft ? " (draft)" : ""}: checks ${p.requirements}, ${p.ready ? "ready" : `blocked (${p.blockers.length})`}, ${p.unresolvedThreads} unresolved threads, merge ${p.mergeState}${p.reviewDecision ? `, review ${p.reviewDecision}` : ""}`,
         );
       if (c.coOwners.length)
         lines.push(
