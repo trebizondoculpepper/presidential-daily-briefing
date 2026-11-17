@@ -301,7 +301,27 @@ export function observe(
         });
       }
     }
-    for (const review of pr.reviews.nodes)
+    const latestReviewByAuthorCommit = new Map<string, number>();
+    for (const [i, review] of pr.reviews.nodes.entries()) {
+      const who = review.author?.login;
+      const sha = review.commit?.oid;
+      if (!who || !sha) continue;
+      const k = `${who}\0${sha}`;
+      const prev = latestReviewByAuthorCommit.get(k);
+      const prevTime =
+        prev === undefined
+          ? ""
+          : (pr.reviews.nodes[prev]?.submittedAt ?? pr.reviews.nodes[prev]?.createdAt ?? "");
+      const curTime = review.submittedAt ?? review.createdAt ?? "";
+      if (prev === undefined || curTime >= prevTime) latestReviewByAuthorCommit.set(k, i);
+    }
+    for (const [i, review] of pr.reviews.nodes.entries()) {
+      if (
+        review.author?.login &&
+        review.commit?.oid &&
+        latestReviewByAuthorCommit.get(`${review.author.login}\0${review.commit.oid}`) !== i
+      )
+        continue;
       if (workflow.changesRequested.includes(review.state) && review.url)
         put(subject, {
           key: `review/${review.url}`,
@@ -314,6 +334,7 @@ export function observe(
           destinations: routed,
           origin: null,
         });
+    }
     const contexts = pr.commits.nodes[0]?.commit.statusCheckRollup?.contexts.nodes ?? [];
     for (const [index, check] of prChecks(pr).entries()) {
       const problem = checkProblem(check.outcome);
@@ -792,6 +813,7 @@ export class Watcher {
     const resolved = this.runtime.responsible
       ? await this.runtime.responsible(snapshot, signal)
       : undefined;
+    if (this.stopped || signal?.aborted) return "cancelled";
     const responsible = resolved && "responsible" in resolved ? resolved.responsible : resolved;
     const unknownResponsibilityIssues =
       resolved && "unknown" in resolved && resolved.unknown.length

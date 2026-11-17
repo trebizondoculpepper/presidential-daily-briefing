@@ -311,6 +311,21 @@ function withStatus(
     : open
       ? classifyFollowUp(facts)
       : [null, null];
+  const legacyCodexFindings =
+    r.headFindings && !r.reviewPolicy.findings.length
+      ? (() => {
+          const matching = r.receipts.filter(
+            (x) =>
+              x.codexState?.code_review?.commit_sha === p.head &&
+              x.codexState.code_review.has_unresolved_findings === true,
+          );
+          const urls = matching.length ? matching.map((x) => x.url) : [p.url];
+          return urls.map((url) => ({
+            reason: "Codex reports unresolved findings on the current head",
+            url,
+          }));
+        })()
+      : [];
   const findings: { reason: string; url: string; outdated?: boolean }[] = [
     ...r.threads.unresolved.map((t) => ({
       reason: `Unresolved thread${t.path ? ` at ${t.path}${t.line ? `:${t.line}` : ""}` : ""}${t.outdated ? " (outdated)" : ""}`,
@@ -321,6 +336,7 @@ function withStatus(
       reason: `${reviewProviders[f.provider].label} reports unresolved findings on the current head`,
       url: f.source,
     })),
+    ...legacyCodexFindings,
   ];
   return {
     ...row,
