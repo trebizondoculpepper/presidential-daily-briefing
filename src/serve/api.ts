@@ -317,6 +317,24 @@ const liveNow = (cache: ServeCache, now: Date): Freshness => ({
   refreshError: null,
 });
 
+/**
+ * Whether a metrics read is a definitive answer (#573): history complete back to the window
+ * start, nothing unread, no warnings, and every ticket's own evidence complete (comments,
+ * timeline, delivery records, required PRs) with a known verdict and complexity group. Used both
+ * to label the response and to decide whether it may be cached.
+ */
+export function metricsReadComplete(read: MetricsRead, from: string): boolean {
+  if (read.coverage.completeFrom === null) return false;
+  if (Date.parse(read.coverage.completeFrom) > Date.parse(from)) return false;
+  if (read.historyNotRead.count > 0 || read.warnings.length > 0) return false;
+  return read.tickets.every(
+    (t) =>
+      Object.values(t.ledger.coverage).every((c) => c === "complete") &&
+      t.verdict !== "unknown" &&
+      t.complexity !== "unknown",
+  );
+}
+
 /** The CLI command that inspects the same read, for error guidance. */
 function cliCommand(view: View, repository: string, number?: number): string {
   const repo = `--repo ${repository}`;
@@ -932,7 +950,7 @@ export function readApi(
                 }),
               context.signal,
               // Partial results are answers for this request only, never stored (contract).
-              (r) => r.warnings.length === 0 && r.historyNotRead.count === 0,
+              (r) => metricsReadComplete(r, from),
             );
             const unread = read.historyNotRead.members;
             const result =
@@ -941,10 +959,7 @@ export function readApi(
                 : view === "daily"
                   ? dailyView(nowIso, span, read.tickets, read.coverage, unread, read.merges)
                   : timingView(nowIso, span, read.tickets, read.coverage);
-            const complete =
-              read.coverage.completeFrom !== null &&
-              Date.parse(read.coverage.completeFrom) <= Date.parse(from) &&
-              read.historyNotRead.count === 0;
+            const complete = metricsReadComplete(read, from);
             return {
               status: complete ? "complete" : "incomplete",
               result: {
