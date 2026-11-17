@@ -135,3 +135,34 @@ A ticket closing (by a merged PR, by hand, or as not planned) does not answer it
 ## Tests
 
 Unit tests over injected snapshots and trust, plus `rules:test` EDN scenarios: explicit attention and trusted questions; inferred decisions and sign-offs; resolved (labels removed) and superseded (older record) records; named routing versus unrouted; truncated comment history; unknown and untrusted permission; copied records; bounded output; CLI, MCP and API parity; and unchanged golden parity for the implementer and designer roles.
+
+## Human page grouping clarification (#643, #751)
+
+Keep the shipped membership meaning: items whose resolution is unknown appear in
+Waiting, below items requiring the selected human's input. Unknown outcome is not
+proof that somebody else is handling the item, that the question is answered, or
+that the project is healthy. Label the section/help so its uncertainty is clear.
+Do not automatically add other humans' tickets to this group; recipient selection
+continues through the shared human-briefing rules and completeness model.
+
+Under workflow-policy-boundary.md, the group is a shared native decision/projection,
+not an independent predicate in `human-page.ts`. Add an additive presentation
+field such as `attentionSection: "input" | "waiting"` with a matched native reason
+and evidence. The default rule maps the existing unknown-resolution fact to
+Waiting and the existing actionable human item to Input. No new state is inferred
+from issue closure, current labels, missing replies or absent history. The host
+only normalizes trusted question/outcome evidence; native policy owns membership.
+
+CLI, STDIO/HTTP MCP and the web Human view consume this same grouping when the
+field ships. Older consumers may ignore the additive field. The web renderer
+formats the supplied section without recomputing workflow policy. Keep explicit
+outcome-unknown notices and existing omission/source coverage even when grouping
+cannot be fully established; do not manufacture an empty healthy view.
+
+Implement #643 as a small native-rule/projection change plus renderer consumption,
+with cases for open unanswered, explicitly resolved/withdrawn, closed unanswered,
+untrusted or edited outcome and incomplete history. Verify the same item/reason
+across transports and preserve the existing ranked order within each section.
+This is not an expansion of ownership, a new notification service or a rule that
+silences unanswered questions. No further owner choice is needed to retain the
+current meaning while moving its decision to the canonical source.
