@@ -91,3 +91,19 @@ representative route integration rather than duplicating every full page snapsho
 A manual visual pass confirms footer wrapping, readable text and no content
 occlusion. Do not claim VoiceOver verification without running it; #719 remains
 separate. No new default-CI research/soak test is required.
+
+## Returning to a project
+
+The shared selector displays the selected repository once, in its control; do not
+repeat it in a separate Project label. Account-wide scope notices remain visible.
+An explicit URL selection always takes precedence and invalid explicit selections
+remain errors. With no repo parameter, restore the browser origin's last selected
+project if it is still registered; otherwise select the sole registered project.
+With multiple projects and no valid saved selection, ask the user to choose.
+Store only the repository name in one shared browser localStorage entry, never
+credentials or ticket data. Storage failures leave navigation usable. Canonicalize
+restored selections through the existing URL validation and carry page parameters.
+This supersedes the original missing-repo/no-default requirement. The server does
+not infer a browser's last selection or use its working directory as a default.
+Use one shared static navigation script, without generating domain content or
+introducing page-specific persistence. Quotas retains navigation context only.
