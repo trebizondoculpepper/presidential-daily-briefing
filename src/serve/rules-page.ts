@@ -3,10 +3,9 @@ import { pageById, shellContext, shellStart } from "./shell.js";
  * The read-only project rules page served at `/rules` (#392, doc/design/rules-english-command.md
  * and doc/design/serve-global-dashboard-roadmap.md).
  *
- * It renders the very document `pdb rules` prints: the same `rulesDocument` built from the same
- * packaged English model, projected by the same `rulesText`. The page only splits that text into
- * its `== Section ==` parts under HTML headings, so the CLI and the page cannot say different
- * things. Nothing here describes an individual rule or reads runtime why templates.
+ * It renders the same compiled rules document as the formal CLI. Authored rule purposes
+ * appear before native details controls; the shared formal formatter supplies conditions,
+ * ordering and evidence. Missing metadata remains a visible gap. No rule matching occurs here.
  *
  * Loading the page reads at most the selected served project's local settings file through the
  * verified checkout resolver. It makes no GitHub request, starts no background work and writes
@@ -20,6 +19,12 @@ import {
   resolveRepositoryTarget,
 } from "../config/config.js";
 import type { ConfigFileSystem, GitRunner } from "../config/config.js";
+import {
+  decisionFormalLines,
+  denialFormalLines,
+  denialQueryLines,
+  decisionGroups,
+} from "../rules/datalog/english-render.js";
 import type { EffectiveSettings, RulesDocument } from "../rules/datalog/rules-command.js";
 import { declaredRulesContext } from "../rules/declared-context.js";
 import { projectRulesContext } from "../rules/project-context.js";
@@ -146,9 +151,10 @@ export function rulesPageHtml(doc: RulesDocument, text: string, page: PageContex
         pageUrl(page.origin, "/rules", page.selected ? { repo: page.selected } : {}),
       )}">Show every rule</a>.</p>`,
     );
-  const identity = `<dl class="identity">
+  const identity = `<dl class="identity rules-identity">
 <dt>Policy version</dt><dd><code>${escapeHtml(doc.policy.policyVersion)}</code></dd>
 <dt>Default rulesHash</dt><dd><code>${escapeHtml(doc.policy.rulesHash)}</code></dd>
+<dt>Bundled purpose revision</dt><dd><code>${escapeHtml(doc.policy.narrationHash ?? "none: purposes not supplied")}</code></dd>
 <dt>Effective policy</dt><dd>${
     doc.effectivePolicy.state === "active"
       ? `default plus project preferences, <code>${escapeHtml(doc.effectivePolicy.effectiveRulesHash)}</code>`
@@ -158,6 +164,7 @@ export function rulesPageHtml(doc: RulesDocument, text: string, page: PageContex
           ? '<span class="error">error: project preferences are enabled but not in force</span>'
           : "unknown"
   }</dd>
+${doc.effectivePolicy.state === "active" ? `<dt>Project source format</dt><dd>${escapeHtml(doc.effectivePolicy.formatVersion)} (projection ${escapeHtml(doc.effectivePolicy.projectionVersion)})</dd><dt>Project source revision</dt><dd><code>${escapeHtml(doc.effectivePolicy.projectRulesHash)}</code></dd>` : ""}
 <dt>Sources</dt><dd>${doc.policy.sources.map((s) => `<code>${escapeHtml(s)}</code>`).join(", ")}</dd>
 <dt>English model</dt><dd><code>${escapeHtml(doc.policy.englishModelVersion)}</code></dd>
 <dt>Scope</dt><dd>${doc.scope.complete ? "complete" : "filtered subset"}</dd>
@@ -167,15 +174,51 @@ export function rulesPageHtml(doc: RulesDocument, text: string, page: PageContex
   const toc = sections
     .map((s, i) => `<li><a href="#section-${i}">${escapeHtml(s.title)}</a></li>`)
     .join("");
+  const formal = (lines: string[], label: string) =>
+    `<details class="rule-formal"><summary>${escapeHtml(label)}</summary><pre class="rules">${escapeHtml(lines.join("\n"))}</pre></details>`;
+  const card = (
+    rule: { id: string; purpose?: string },
+    lines?: string[],
+    level: 3 | 4 = 3,
+  ) => `<article class="rule-purpose" data-rule-id="${escapeHtml(rule.id)}"><h${level}><code>${escapeHtml(rule.id)}</code></h${level}>
+<p${rule.purpose === undefined ? ' class="warn"' : ""}>${escapeHtml(rule.purpose ?? "Purpose not supplied. Read the generated formal conditions below.")}</p>
+${lines ? formal(lines, `Formal conditions for ${rule.id}`) : ""}</article>`;
   const body = sections
-    .map(
-      (s, i) =>
-        `<section id="section-${i}"><h2>${escapeHtml(s.title)}</h2>\n<pre class="rules">${escapeHtml(s.lines.join("\n"))}</pre></section>`,
-    )
+    .map((s, i) => {
+      let content: string;
+      if (s.title.startsWith("Decision rules (")) {
+        content =
+          `<p class="formal-introduction">${escapeHtml(s.lines[0] ?? "")}</p>` +
+          decisionGroups(doc.decisions)
+            .map(
+              ({ band, decisions }) =>
+                `<h3 class="rule-band">Band ${band}</h3>` +
+                decisions.map((d) => card(d, decisionFormalLines(d), 4)).join("\n"),
+            )
+            .join("\n");
+      } else if (s.title.startsWith("Eligibility and denials (")) {
+        content =
+          (doc.eligibility.denialQuery
+            ? formal(denialQueryLines(doc.eligibility.denialQuery), "Formal denial query")
+            : "") + doc.eligibility.denials.map((d) => card(d, denialFormalLines(d))).join("\n");
+      } else if (s.title.startsWith("Project preferences (") && doc.project) {
+        content =
+          doc.project.preferences.map((p) => card(p)).join("\n") +
+          formal(s.lines, "Formal conditions for project preferences and helpers");
+      } else {
+        content = ["Policy", "Defaults", "Not formalized here"].includes(s.title)
+          ? `<pre class="rules">${escapeHtml(s.lines.join("\n"))}</pre>`
+          : formal(s.lines, `Formal ${s.title.toLowerCase()}`);
+      }
+      return `<section id="section-${i}"><h2>${escapeHtml(s.title)}</h2>\n${content}</section>`;
+    })
     .join("\n");
+  const narration = `<aside aria-label="Purpose coverage"><p>Authored purposes: ${doc.narration.supplied} of ${doc.narration.total} rules in this view. ${escapeHtml(doc.narration.scope)}</p>
+<p>${escapeHtml(doc.narration.note)}</p>${doc.narration.missing.length ? `<p class="warn">Purpose not supplied for: ${doc.narration.missing.map(escapeHtml).join(", ")}. Every generated rule remains available.</p>` : ""}
+<p>The rulesHash preserves policy compatibility. The bundled purpose revision tracks authored narration separately. Project source hashes also include project purposes.</p></aside>`;
   return `${navigation(page)}<main id="content" tabindex="-1"><h1>Project rules</h1>
 ${notices.join("\n")}
-${identity}<nav aria-label="Sections"><ol class="toc">${toc}</ol></nav>
+${identity}${narration}<nav aria-label="Sections"><ol class="toc">${toc}</ol></nav>
 ${body}
 </main>
 <footer>Read-only. Compiled from the packaged policy artifact and, when enabled, the project's <code>pdb.rules.edn</code>; the same document as <code>pdb rules${filters.map(([k, v]) => ` --${escapeHtml(k)} ${escapeHtml(v)}`).join("")}</code>. Loading this page makes no GitHub requests.</footer>

@@ -31,7 +31,7 @@ export interface EffectivePolicyManifest {
    * every other repository setting such a selection cannot read; `reason` names the remedy.
    */
   state: "disabled" | "active" | "error" | "unavailable";
-  formatVersion: 1 | null;
+  formatVersion: 1 | 2 | null;
   projectionVersion: 1 | null;
   basePolicyVersion: number | null;
   defaultRulesHash: string;

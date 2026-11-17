@@ -38,7 +38,7 @@ export interface BaseIdentity {
 /** Deliberately unvalidated clauses: never pass this envelope directly to the engine. */
 export interface ParsedProjectSource {
   phase: "parsed-source";
-  formatVersion: 1;
+  formatVersion: 1 | 2;
   projectionVersion: 1;
   basePolicyVersion: number;
   baseRulesHash: string;
@@ -148,7 +148,8 @@ export function parseProjectSource(text: string, base: BaseIdentity): ParsedProj
     fields.set(k.key, v);
   }
   if (keys.some((k) => !fields.has(k))) fail("missing-key", "A required source field is missing");
-  if (fields.get("format-version") !== 1 || fields.get("projection-version") !== 1)
+  const formatVersion = fields.get("format-version");
+  if ((formatVersion !== 1 && formatVersion !== 2) || fields.get("projection-version") !== 1)
     fail("source-version", "Unsupported format or projection version");
   if (
     !Number.isSafeInteger(base.policyVersion) ||
@@ -178,7 +179,7 @@ export function parseProjectSource(text: string, base: BaseIdentity): ParsedProj
   }
   return {
     phase: "parsed-source",
-    formatVersion: 1,
+    formatVersion,
     projectionVersion: 1,
     basePolicyVersion: base.policyVersion,
     baseRulesHash: base.rulesHash,

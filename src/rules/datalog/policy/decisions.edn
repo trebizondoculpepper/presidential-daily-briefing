@@ -4,6 +4,7 @@
 ;; :denials documents every denial rule ID that rules.edn derives through implementation-deny.
 {:decisions
  [{:id "D-ATTENTION"
+   :purpose "Bring work explicitly addressed to this agent to the front of its queue."
    :kind "addressed-response"
    :band 1
    :preference 0
@@ -13,6 +14,7 @@
    :witnesses {"addressedAgent" [[1 "agent" ?value] [?t "attention" ?value]]}}
 
   {:id "D-PR-FAIL"
+   :purpose "Prioritize repairing failed PR checks before the change can progress toward merge."
    :kind "pr-follow-up"
    :band 2
    :preference 0
@@ -22,6 +24,7 @@
    :witnesses {"failedChecks" [[?t "check" ?c] [?c "name" ?name] [?c "outcome" ?o] [1 "failure" ?o] [(str ?name ":" ?o) ?value]]}}
 
   {:id "D-PR-REVIEW"
+   :purpose "Prioritize resolving substantive PR review findings on the current change."
    :kind "pr-follow-up"
    :band 2
    :preference 0
@@ -32,6 +35,7 @@
                  "unresolvedThreads" [[?t "thread" ?c] [?c "resolved" false] [(str "unresolved") ?value]]}}
 
   {:id "D-PR-CONFLICT"
+   :purpose "Surface merge conflicts that need integration work."
    :kind "pr-follow-up"
    :band 2
    :preference 1
@@ -41,6 +45,7 @@
    :witnesses {"mergeable" [[?t "mergeable" ?value]]}}
 
   {:id "D-PR-MERGE"
+   :purpose "Offer a final merge-inspection step for PRs whose checks and review evidence are satisfied."
    :kind "pr-follow-up"
    :band 2
    :preference 2
@@ -53,6 +58,7 @@
                  "mergeState" [[?t "merge-state" ?value]]}}
 
   {:id "D-PR-INTEGRATE"
+   :purpose "Surface accepted PRs that still need mergeability refreshed or integration work."
    :kind "pr-follow-up"
    :band 2
    :preference 3
@@ -64,6 +70,7 @@
                  "requiredChecksComplete" [[?t "required-evidence-complete" ?value]]}}
 
   {:id "D-DECIDE"
+   :purpose "Bring recorded design decisions into the designer's queue before implementation proceeds."
    :kind "decide"
    :band 3
    :preference 0
@@ -73,6 +80,7 @@
    :witnesses {"decisionLabel" [[?t "label" "design:decision-needed"] [(str "design:decision-needed") ?value]]}}
 
   {:id "D-DOCUMENT"
+   :purpose "Make agreed decisions awaiting documentation visible to the designer."
    :kind "document"
    :band 3
    :preference 1
@@ -82,6 +90,7 @@
    :witnesses {"documentationLabel" [[?t "label" "design:documentation-needed"] [(str "design:documentation-needed") ?value]]}}
 
   {:id "D-DESIGN-REVIEW"
+   :purpose "Surface design and documentation PRs for a designer's review."
    :kind "design-review"
    :band 3
    :preference 2
@@ -91,6 +100,7 @@
    :witnesses {"designEvidence" [(or-join [?t ?value] (and [?t "label" ?value] [1 "design-label" ?value]) (and [?t "closes" ?i] [?i "label" ?value] [1 "design-label" ?value]))]}}
 
   {:id "D-EASY"
+   :purpose "Prefer known high-impact, low-effort opportunities when ordering work by impact."
    :kind "implement"
    :band 4
    :preference 0
@@ -99,6 +109,7 @@
    :codes ["easy-win"]}
 
   {:id "D-OWN-EASY"
+   :purpose "Highlight an active claim that is already known to have high impact and low effort."
    :kind "continue-implementation"
    :band 4
    :preference 0
@@ -107,6 +118,7 @@
    :codes ["easy-win" "own-claim"]}
 
   {:id "D-COMPLEXITY-BOOST"
+   :purpose "Prioritize estimating effort when known high impact could make the work valuable."
    :kind "estimate-complexity"
    :band 5
    :preference 0
@@ -115,6 +127,7 @@
    :codes ["assessment" "cross-role-boost"]}
 
   {:id "D-COMPLEXITY"
+   :purpose "Surface missing or stale effort estimates so implementation choices use better evidence."
    :kind "estimate-complexity"
    :band 5
    :preference 1
@@ -123,6 +136,7 @@
    :codes ["assessment"]}
 
   {:id "D-IMPACT-BOOST"
+   :purpose "Prioritize assessing benefit when known low effort could reveal an easy win."
    :kind "assess-impact"
    :band 5
    :preference 0
@@ -131,6 +145,7 @@
    :codes ["assessment" "cross-role-boost"]}
 
   {:id "D-IMPACT"
+   :purpose "Surface missing or stale benefit assessments for the designer to judge."
    :kind "assess-impact"
    :band 5
    :preference 1
@@ -139,6 +154,7 @@
    :codes ["assessment"]}
 
   {:id "D-BAD-COMPLEXITY"
+   :purpose "Surface unusable effort evidence for inspection and correction."
    :kind "inspect-assessment"
    :band 5
    :preference 1
@@ -147,6 +163,7 @@
    :codes ["assessment" "inspection"]}
 
   {:id "D-BAD-IMPACT"
+   :purpose "Surface unusable benefit evidence for inspection and correction."
    :kind "inspect-assessment"
    :band 5
    :preference 1
@@ -155,6 +172,7 @@
    :codes ["assessment" "inspection"]}
 
   {:id "D-ORDINARY"
+   :purpose "Offer eligible implementation work after the more specific priorities are considered."
    :kind "implement"
    :band 6
    :preference 0
@@ -163,6 +181,7 @@
    :codes ["ordinary"]}
 
   {:id "D-OWN"
+   :purpose "Keep an agent's active implementation claim visible as continuation work."
    :kind "continue-implementation"
    :band 6
    :preference 0
@@ -171,6 +190,7 @@
    :codes ["ordinary" "own-claim"]}
 
   {:id "D-DESIGN"
+   :purpose "Offer design work when a required design contract is missing."
    :kind "design"
    :band 6
    :preference 0
@@ -180,6 +200,7 @@
    :witnesses {"designLabel" [[?t "label" "status:needs-design"] [(str "status:needs-design") ?value]]}}
 
   {:id "D-UNFAVORABLE"
+   :purpose "Flag eligible work whose known effort is high relative to its benefit."
    :kind "implement"
    :band 7
    :preference 0
@@ -188,6 +209,7 @@
    :codes ["unfavorable"]}
 
   {:id "D-OWN-UNFAVORABLE"
+   :purpose "Prompt reconsideration of active work with high effort and limited known benefit."
    :kind "continue-implementation"
    :band 7
    :preference 0
@@ -199,6 +221,7 @@
   ;; claim's activity with the same verified reader as the claim guard; absent facts mean the
   ;; read was not made (offline), so the ordinary continuation rules above apply unchanged.
   {:id "D-OWN-RESUME"
+   :purpose "Surface retained claims whose recorded wait has cleared and need explicit resumption."
    :kind "resume-claim"
    :band 3
    :preference 0
@@ -208,6 +231,7 @@
    :witnesses {"waitReason" [[?t "wait-reason" ?value]]}}
 
   {:id "D-REVIEW-OWNED"
+   :purpose "Prompt a review of multiple retained implementation claims before starting more work."
    :kind "review-owned-work"
    :band 3
    :preference 1
@@ -217,6 +241,7 @@
    :witnesses {"ownedClaims" [[1 "owned-claims" ?value]]}}
 
   {:id "D-REVIEW-OWNED-PARTIAL"
+   :purpose "Prompt review of the observed retained claims while making incomplete ownership evidence explicit."
    :kind "review-owned-work"
    :band 3
    :preference 1
@@ -226,6 +251,7 @@
    :witnesses {"ownedClaims" [[1 "owned-claims" ?value]]}}
 
   {:id "D-INVENTORY-UNKNOWN"
+   :purpose "Surface an incomplete claim inventory even when no active claim was observed."
    :kind "inspect-ownership"
    :band 3
    :preference 3
@@ -234,6 +260,7 @@
    :codes ["inspection" "inventory-unknown"]}
 
   {:id "D-OWNED-INCOMPLETE"
+   :purpose "Keep an observed claim visible while asking the agent to verify its incomplete ownership inventory."
    :kind "inspect"
    :band 3
    :preference 3
@@ -242,6 +269,7 @@
    :codes ["own-claim" "inspection"]}
 
   {:id "D-OWN-UNKNOWN"
+   :purpose "Surface a retained claim whose activity or wait evidence cannot be established."
    :kind "inspect"
    :band 3
    :preference 2
@@ -251,6 +279,7 @@
    :witnesses {"waitReason" [[?t "wait-reason" ?value]]}}
 
   {:id "D-OWN-WAIT"
+   :purpose "Keep a verified waiting claim visible without suggesting immediate continuation."
    :kind "wait-claim"
    :band 8
    :preference 0
@@ -260,6 +289,7 @@
    :witnesses {"waitReason" [[?t "wait-reason" ?value]]}}
 
   {:id "D-INSPECT"
+   :purpose "Show work needing eligibility or platform evidence without declaring it ready for pickup."
    :kind "inspect"
    :band 6
    :preference 0
@@ -271,6 +301,7 @@
   ;; Human briefing (doc/design/human-briefing.md, #457): input a named human owes. Explicit
   ;; items come from trusted records or attention; inferred ones are candidates, never requests.
   {:id "D-HUMAN-ASK-YOU"
+   :purpose "Put trusted questions explicitly routed to the selected human ahead of general human attention."
    :kind "answer-questions"
    :band 1
    :preference 0
@@ -280,6 +311,7 @@
    :witnesses {"routedTo" [(asking-record ?t ?r) [?r "record-to" ?value]]}}
 
   {:id "D-HUMAN-ASK"
+   :purpose "Surface trusted questions routed to a human so their answers can be recorded on the ticket."
    :kind "answer-questions"
    :band 3
    :preference 0
@@ -289,6 +321,7 @@
    :witnesses {"routedTo" [(asking-record ?t ?r) [?r "record-to" ?value]]}}
 
   {:id "D-HUMAN-UNVERIFIED"
+   :purpose "Show question labels with unverified authorship as inferred attention needing confirmation."
    :kind "decide"
    :band 3
    :preference 1
@@ -298,6 +331,7 @@
    :witnesses {"questionLabel" [[?t "label" ?value] [1 "question-label" ?value]]}}
 
   {:id "D-HUMAN-DECIDE"
+   :purpose "Show decision labels without a trusted question record as inferred human attention."
    :kind "decide"
    :band 3
    :preference 2
@@ -308,6 +342,7 @@
 
   ;; #414: a question outlives its source's closure until explicitly resolved or withdrawn.
   {:id "D-HUMAN-ORPHANED-YOU"
+   :purpose "Keep unresolved trusted questions routed to the selected human visible after ticket closure."
    :kind "orphaned-question"
    :band 1
    :preference 1
@@ -317,6 +352,7 @@
    :witnesses {"routedTo" [(orphaned-record ?t ?r) [?r "record-to" ?value]]}}
 
   {:id "D-HUMAN-ORPHANED"
+   :purpose "Surface trusted questions left unresolved on closed tickets."
    :kind "orphaned-question"
    :band 3
    :preference 0
@@ -326,6 +362,7 @@
    :witnesses {"routedTo" [(orphaned-record ?t ?r) [?r "record-to" ?value]]}}
 
   {:id "D-HUMAN-ORPHANED-UNKNOWN"
+   :purpose "Make unknown question-resolution evidence explicit on closed tickets."
    :kind "orphaned-question"
    :band 3
    :preference 1
@@ -335,6 +372,7 @@
    :witnesses {"routedTo" [(orphan-unknown ?t ?r) [?r "record-to" ?value]]}}
 
   {:id "D-HUMAN-SIGNOFF"
+   :purpose "Surface accepted PRs as inferred human sign-off candidates, subject to ordinary merge authority."
    :kind "sign-off"
    :band 3
    :preference 3
@@ -350,4 +388,14 @@
   "D-DENY-NATIVE-UNKNOWN" "Native dependency evidence is incomplete."
   "D-DENY-CLOSING-UNKNOWN" "Closing pull request evidence is incomplete."
   "D-DENY-PLATFORM" "The ticket names a platform the viewer is not known to run on."
-  "D-DENY-INVENTORY-UNKNOWN" "The viewer's claim inventory is incomplete: unseen active claims cannot be ruled out."}}
+  "D-DENY-INVENTORY-UNKNOWN" "The viewer's claim inventory is incomplete: unseen active claims cannot be ruled out."}
+ :denial-purposes
+ {"D-DENY-CLAIM" "Keep already claimed tickets out of new implementation pickup."
+  "D-DENY-PREREQUISITE" "Keep work with design, question, blocked or parked prerequisites out of implementation pickup."
+  "D-DENY-OPEN-PR" "Avoid proposing a new implementation while an open PR already closes the ticket."
+  "D-DENY-BLOCKER" "Keep tickets with open native blockers out of implementation pickup."
+  "D-DENY-LABELS-UNKNOWN" "Withhold implementation pickup when label evidence is incomplete."
+  "D-DENY-NATIVE-UNKNOWN" "Withhold implementation pickup when native dependency evidence is incomplete."
+  "D-DENY-CLOSING-UNKNOWN" "Withhold implementation pickup when existing closing PRs cannot be ruled out."
+  "D-DENY-PLATFORM" "Keep platform-restricted work out of pickup without a matching viewer platform."
+  "D-DENY-INVENTORY-UNKNOWN" "Withhold new implementation pickup while the viewer's claim inventory is incomplete."}}

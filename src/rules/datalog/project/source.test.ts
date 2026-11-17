@@ -68,7 +68,7 @@ describe("project source boundary (#514, parsing stage only)", () => {
     );
   });
   it.each([
-    ["version", fixture.replace(":format-version 1", ":format-version 2"), "source-version"],
+    ["version", fixture.replace(":format-version 1", ":format-version 3"), "source-version"],
     [
       "projection",
       fixture.replace(":projection-version 1", ":projection-version 2"),
