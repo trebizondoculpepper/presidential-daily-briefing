@@ -99,7 +99,9 @@ describe("shared served-page shell (#605)", () => {
     expect(html).toContain("Ticket &lt;&amp;");
     expect(html.match(/<header/g)).toHaveLength(1);
     expect(html).not.toMatch(/<script|<style|\sstyle=|https?:\/\//);
-    expect(renderToolbar(context("quotas"))).not.toContain("Change project");
+    // #733: the project selector is always visible, including account-wide Quotas, which keeps
+    // its account-wide labelling.
+    expect(renderToolbar(context("quotas"))).toContain("Change project");
     expect(renderToolbar(context("quotas"))).toContain("Account-wide");
     for (const page of servedPages.filter((p) => p.shipped && !p.section))
       expect(html).toContain(page.label);
