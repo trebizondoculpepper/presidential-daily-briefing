@@ -67,8 +67,9 @@ export async function acquireFileLock(
   timing: LockTiming,
   now: () => number,
   sleep: (ms: number) => Promise<void>,
+  platform: NodeJS.Platform = process.platform,
 ): Promise<HeldLock | null> {
-  const result = await acquireFileLockResult(fs, lock, timing, now, sleep);
+  const result = await acquireFileLockResult(fs, lock, timing, now, sleep, platform);
   return result.status === "acquired" ? result.lock : null;
 }
 
@@ -79,6 +80,7 @@ export async function acquireFileLockResult(
   timing: LockTiming,
   now: () => number,
   sleep: (ms: number) => Promise<void>,
+  platform: NodeJS.Platform = process.platform,
 ): Promise<FileLockAcquisition> {
   const token = randomBytes(16).toString("hex");
   const deadline = now() + timing.waitMs;
@@ -111,32 +113,40 @@ export async function acquireFileLockResult(
         : { status: "failed", code: codeText(error) };
     }
   };
+  let previous: Exclude<FileLockAcquisition, { status: "acquired" }> | undefined;
   for (;;) {
+    // A refusal grants no ownership. Do not begin a retry at or after the existing deadline.
+    if (previous && now() >= deadline) return previous;
     try {
       await fs.writeFile(lock, JSON.stringify({ token, pid: process.pid, at: now() }), {
         flag: "wx",
       });
-      // Proceed only if the lock still holds our token.
-      try {
-        if ((await holder()) !== token) return { status: "replaced" };
-        // `owned` lets a writer recheck, just before its commit point, that the lock is still its.
-        const owned = async () => {
-          try {
-            return (await holder()) === token;
-          } catch {
-            return false;
-          }
-        };
-        return { status: "acquired", lock: Object.assign(release, { owned }) };
-      } catch (error) {
-        return { status: "failed", phase: "verify", code: codeText(error) };
-      }
     } catch (error) {
-      if (code(error) !== "EEXIST")
-        return { status: "failed", phase: "create", code: codeText(error) };
+      if (code(error) === "EEXIST") previous = { status: "busy" };
+      else if (platform === "win32" && code(error) === "EPERM") {
+        // Observed during Windows lock handoff (#729). Permanent denial stays an I/O failure;
+        // retry only exclusive creation, never verification, unlink or ownership transfer.
+        previous = { status: "failed", phase: "create", code: codeText(error) };
+      } else return { status: "failed", phase: "create", code: codeText(error) };
+      const remaining = deadline - now();
+      if (remaining <= 0) return previous;
+      await sleep(Math.min(timing.pollMs, remaining));
+      continue;
     }
-    if (now() >= deadline) return { status: "busy" };
-    await sleep(timing.pollMs);
+    // Proceed only if the successful exclusive creation still holds our token.
+    try {
+      if ((await holder()) !== token) return { status: "replaced" };
+      const owned = async () => {
+        try {
+          return (await holder()) === token;
+        } catch {
+          return false;
+        }
+      };
+      return { status: "acquired", lock: Object.assign(release, { owned }) };
+    } catch (error) {
+      return { status: "failed", phase: "verify", code: codeText(error) };
+    }
   }
 }
 

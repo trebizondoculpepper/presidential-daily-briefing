@@ -12,6 +12,7 @@
  */
 import { completeNative, nativeFields } from "./dependencies.js";
 import {
+  assigneesField,
   closedBy,
   comment,
   common,
@@ -130,13 +131,13 @@ const emptyPage = <T>(): Page<T> => ({
 });
 const labelsField = `labels(first:100){nodes{name} ${info}}`;
 /** Discovery fields: no body, comments, reviews, threads or checks. */
-export const discoveryIssueFields = `number title url state stateReason createdAt updatedAt ${labelsField} ${closedBy} ${nativeFields}`;
+export const discoveryIssueFields = `number title url state stateReason createdAt updatedAt ${labelsField} ${assigneesField} ${closedBy} ${nativeFields}`;
 /**
  * Issues whose comments mention a PR leave a cross-reference on it; delivery and responsibility
  * records about a PR live on such an issue even without a closing link (#368).
  */
 const crossReferences = `timelineItems(first:25,itemTypes:[CROSS_REFERENCED_EVENT]){nodes{... on CrossReferencedEvent{source{__typename ... on Issue{number url state}}}} ${info}}`;
-export const discoveryPullRequestFields = `number title url state createdAt updatedAt ${labelsField} headRefOid headRefName baseRefName isDraft closingIssuesReferences(first:100){nodes{number url} ${info}} ${crossReferences}`;
+export const discoveryPullRequestFields = `number title url state createdAt updatedAt ${labelsField} ${assigneesField} headRefOid headRefName baseRefName isDraft closingIssuesReferences(first:100){nodes{number url} ${info}} ${crossReferences}`;
 const hydratedIssueFields = `${common} stateReason ${closedBy} ${nativeFields}`;
 
 /**
