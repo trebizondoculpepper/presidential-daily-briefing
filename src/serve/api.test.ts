@@ -1936,6 +1936,27 @@ describe("pipeline metrics endpoint (#573 slice 5b)", () => {
   // Clock: 2026-11-12T10:00Z. One quiet issue and one standalone merged PR on the 11th.
   const metricsQuery = (counter: { n: number }) => () => async (q: string) => {
     counter.n++;
+    if (q.includes("states:[OPEN]"))
+      return {
+        repository: {
+          issues: {
+            nodes: [
+              {
+                number: 8,
+                createdAt: "2026-10-01T00:00:00Z",
+                updatedAt: "2026-10-02T00:00:00Z",
+                lastEditedAt: null,
+                state: "OPEN",
+                closedAt: null,
+                stateReason: null,
+                labels: { nodes: [], pageInfo: { hasNextPage: false } },
+                comments: { totalCount: 0, nodes: [] },
+              },
+            ],
+            pageInfo: { hasNextPage: false, endCursor: null },
+          },
+        },
+      };
     if (q.includes("issues(first:50"))
       return {
         repository: {
@@ -2008,6 +2029,8 @@ describe("pipeline metrics endpoint (#573 slice 5b)", () => {
         view: "timing",
         groupBasis: "latest-valid-complexity",
       });
+      // The quiet open ticket from the open inventory is part of the read, not missing.
+      expect(timing.json.result.historyNotRead).toMatchObject({ count: 0 });
       expect(counter.n).toBe(before);
     } finally {
       await s.close();
