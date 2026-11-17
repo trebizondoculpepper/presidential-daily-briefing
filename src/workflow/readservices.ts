@@ -306,6 +306,7 @@ export async function readWhoWith(
       meter,
       signal,
       ...(locate ? { locate } : {}),
+      ...(boundaries.live?.rest ? { rest: boundaries.live.rest } : {}),
       ...(options.nativeEdges ? { nativeEdges: true } : {}),
       ...(options.hydrationLimit !== undefined ? { hydrationLimit: options.hydrationLimit } : {}),
     },

@@ -1036,6 +1036,7 @@ export interface FocusOptions {
   /** Records requests and coverage; the caller reports `meter.collection()`. */
   meter: ReadMeter;
   locate?: (repository: string, number: number) => Promise<IssueDiagnosis>;
+  rest?: Rest;
   signal?: AbortSignal;
   /**
    * Also read the issue's direct native edges (`pdb ticket N`, #197): selected with the issue,
@@ -1063,10 +1064,11 @@ export async function collectIssueFocus(
   repository: string,
   number: number,
   options: FocusOptions,
-  base: Query = ghQueryWith(options.signal),
+  injected?: Query,
   now: () => Date = () => new Date(),
 ): Promise<Snapshot> {
   const { meter, signal } = options;
+  const base = injected ?? ghQueryWith(signal);
   const bounds = readProfiles["issue-detail-v1"].bounds;
   const startedAt = now().toISOString();
   const [owner, name] = repository.split("/");
@@ -1219,6 +1221,17 @@ export async function collectIssueFocus(
     { meter, signal, warnings, role: "linked" },
     base,
   );
+  const unmetered = options.rest ?? (injected ? undefined : ghRestWith(signal));
+  if (unmetered && pullRequests.length) {
+    const reqQuery = meter.query(base, "required-checks", repository);
+    const reqRest = meter.rest(unmetered, "required-checks", repository);
+    warnings.push(
+      ...(await hydrateRequiredChecks(repository, pullRequests, {
+        query: (q, v) => reqQuery(q, v),
+        rest: (path) => reqRest(path, { signal }),
+      })),
+    );
+  }
   const telemetry = meter.collection().telemetry;
   return {
     schemaVersion: 1,
