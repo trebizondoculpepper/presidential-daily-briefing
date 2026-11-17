@@ -198,6 +198,10 @@ async function servedSet(
       project: resolvedProject,
     });
   }
+  // Without a configuration boundary there is nothing else to serve (#805), so an empty set is
+  // still a usage error rather than a server with no repository.
+  if (!served.size)
+    throw new ServeStartupError(EXIT_USAGE, "pdb serve needs --repo owner/name or --project PATH");
   return [...served.values()];
 }
 

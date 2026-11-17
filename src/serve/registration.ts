@@ -174,10 +174,12 @@ export async function resolveServeProjects(
   const path = join(boundary.dir, GLOBAL_CONFIG_FILE);
   let stored: GlobalProject[];
   let initialized = false;
+  let baseline: string | null = null;
   try {
     const loaded = await loadGlobalConfig(boundary.dir, boundary.fs);
     initialized = loaded.raw === null;
     stored = [...((loaded.explicit.get("serve.projects") as GlobalProject[] | undefined) ?? [])];
+    baseline = loaded.raw;
   } catch (error) {
     throw new RegistrationError(
       EXIT_USAGE,
@@ -188,17 +190,55 @@ export async function resolveServeProjects(
   const diagnostics: string[] = [];
   const served = new ServedSet();
   const saved: GlobalProject[] = [];
-  // Saved registrations first, in their stored order. A root that has moved or gone is reported
-  // and the repository is still served; cwd is never substituted for another project's root.
+  // Saved registrations first, in their stored order. A root that has moved, gone, or now
+  // belongs to another repository is reported and the repository is still served; cwd is never
+  // substituted for another project's root. A root whose identity cannot be read right now (a
+  // transient gh failure) is kept: losing a registration to a network blip is worse than
+  // serving it unverified, and the next startup re-checks it.
   for (const entry of stored) {
     const root = entry.localRoot;
-    const usable = root !== undefined && (await runtime.currentRepository(root).catch(() => ""));
-    if (root !== undefined && !usable) {
-      diagnostics.push(
-        `saved project ${root} for ${entry.repository} is missing or no longer a Git checkout; serving ${entry.repository} without a local project. Re-register it with pdb config set serve.projects, or start the server with --project PATH.`,
-      );
+    const saved_without_root = (message: string): void => {
+      diagnostics.push(message);
       saved.push({ ...entry, localRoot: undefined });
       served.add(entry.repository, undefined, "the saved registration");
+    };
+    if (root === undefined) {
+      saved.push(entry);
+      served.add(entry.repository, undefined, "the saved registration");
+      continue;
+    }
+    let present = true;
+    if (runtime.git) {
+      try {
+        await runtime.git(["rev-parse", "--show-toplevel"], root);
+      } catch {
+        present = false;
+      }
+    }
+    if (!present) {
+      saved_without_root(
+        `saved project ${root} for ${entry.repository} is missing or no longer a Git checkout; serving ${entry.repository} without a local project. Re-register it with pdb config set serve.projects, or start the server with --project PATH.`,
+      );
+      continue;
+    }
+    let resolved: string | null = null;
+    try {
+      resolved = (await runtime.currentRepository(root)).trim();
+    } catch {
+      resolved = null;
+    }
+    if (resolved === null) {
+      diagnostics.push(
+        `saved project ${root} could not be identified as ${entry.repository} right now (gh or the network did not answer); serving it as saved. Check gh auth status if this persists.`,
+      );
+      saved.push(entry);
+      served.add(entry.repository, root, "the saved registration");
+      continue;
+    }
+    if (resolved.toLowerCase() !== entry.repository.toLowerCase()) {
+      saved_without_root(
+        `saved project ${root} is now ${resolved || "not a GitHub repository"}, not ${entry.repository}; serving ${entry.repository} without that local project. Update the registration with pdb config set serve.projects, or start the server with --project PATH.`,
+      );
       continue;
     }
     saved.push(entry);
@@ -207,12 +247,14 @@ export async function resolveServeProjects(
 
   // Explicit targets: a repo-only entry never erases a saved local root, and a verified root
   // refines a repo-only one.
+  const explicit: GlobalProject[] = [];
   for (const repository of options.repos) {
     if (!repositoryPattern.test(repository))
       throw new RegistrationError(EXIT_USAGE, "--repo must be owner/name.");
     served.add(repository, undefined, "this request");
+    explicit.push({ host: "github.com", repository });
   }
-  const verified: GlobalProject[] = [];
+  const verified: GlobalProject[] = [...explicit];
   for (const path of options.projects) {
     const project = await resolveProject(path, runtime);
     served.add(project.repository, project.root, "this request");
@@ -256,11 +298,12 @@ export async function resolveServeProjects(
     next.length !== stored.length || next.some((entry, i) => !sameRegistration(entry, stored[i]!));
   if (changed || initialized) {
     try {
-      await writeGlobalConfig(
-        boundary.dir,
-        new Map([["serve.projects", next]]),
-        boundary.fs ? { fs: boundary.fs } : {},
-      );
+      await writeGlobalConfig(boundary.dir, new Map([["serve.projects", next]]), {
+        ...(boundary.fs ? { fs: boundary.fs } : {}),
+        // Refuse rather than overwrite a registration another startup or `config set` wrote
+        // after we read it: a merge from a stale baseline would drop that change.
+        expectedRaw: baseline,
+      });
     } catch (error) {
       throw new RegistrationError(
         EXIT_USAGE,
