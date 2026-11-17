@@ -1,12 +1,12 @@
 /** Shared browser navigation state; domain facts come from the existing status API. */
 export async function restoreProjectSelection(): Promise<void> {
   const key = "pdb.selected-project";
-  const url = new URL(window.location.href);
   try {
     const response = await fetch("/api/v1/status");
     if (!response.ok) return;
     const status = (await response.json()) as { repositories: { repository: string }[] };
-    if (window.location.href !== url.href) return;
+    // Read current navigation after awaiting status: Work may normalize role/agent meanwhile.
+    const url = new URL(window.location.href);
     const projects = status.repositories.map((entry) => entry.repository);
     const canonical = (value: string | null) =>
       projects.find((project) => project.toLowerCase() === value?.toLowerCase());
