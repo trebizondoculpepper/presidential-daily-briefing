@@ -66,8 +66,8 @@ authenticated gh and Node 26+. Never changes GitHub. Stop it with Ctrl-C.
   --repo owner/name     Serve this repository (repeatable)
   --project PATH        Serve the repository of this local checkout (absolute or relative path),
                         and use its configuration and pdb.toml for identity (repeatable)
-                        At least one --repo or --project is required; the working directory is
-                        never used to choose a repository.
+                        Without one, the saved global registrations (serve.projects) and the
+                        working directory's verified Git repository are served too.
   --port N              Port to listen on, 0-65535 (default ${DEFAULT_PORT}; 0 picks a free port)
   --host ADDR           Literal IP address or localhost to listen on (default ${DEFAULT_HOST}).
                         Loopback addresses are always allowed; any other needs --allow-remote
@@ -172,8 +172,8 @@ export function serveArguments(
     if (!path.trim()) throw new ServeUsageError("--project must not be empty.");
     return resolve(cwd, path);
   });
-  if (!repos.length && !projects.length)
-    throw new ServeUsageError("pdb serve needs --repo owner/name or --project PATH");
+  // No served target is not a usage error on its own: saved global registrations and the
+  // working directory's repository may supply one (#805). Resolution reports "nothing to serve".
   if (values.agent !== undefined && !agentPattern.test(values.agent))
     throw new ServeUsageError("--agent must be an agent name such as kavya_sabbagh.");
   if (values.entry !== undefined && values.harness !== undefined)

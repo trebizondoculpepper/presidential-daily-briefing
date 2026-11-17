@@ -228,9 +228,13 @@ async function nativeStopSmoke(
  * cannot deliver a catchable SIGTERM from another process (see pdb serve --help).
  */
 async function serveSmoke(bin: string, env: NodeJS.ProcessEnv, cwd: string): Promise<string> {
+  // Isolation (#805): resolution also reads saved registrations and the checkout, so the smoke
+  // server gets a disposable working directory and its own configuration directory. Without
+  // this, a caller's real registration or checkout would add repositories to the served set.
+  const isolated = { ...env, PDB_CONFIG_DIR: join(cwd, "serve-config") };
   const child = spawn(bin, ["serve", "--repo", "example/parity", "--port", "0"], {
     cwd,
-    env,
+    env: isolated,
     stdio: ["ignore", "pipe", "pipe"],
   });
   let stdout = "";
@@ -1007,17 +1011,22 @@ try {
   const mcpCommand = windows
     ? { command: process.execPath, args: [join(packageDir, "dist", "mcp.mjs")] }
     : { command: mcpBin, args: [] };
-  // pdb serve (#373): argument handling of the installed bin, on every platform.
-  const serveUsage = await run(windows ? `"${bin}"` : bin, ["serve"], { shell: windows }).then(
+  // pdb serve (#373, #805): the installed bin exits 2 with guidance when nothing is servable.
+  // Resolution now also considers saved registrations and the checkout, so this runs from a
+  // disposable non-repository directory with an isolated PDB_CONFIG_DIR: otherwise a real user
+  // configuration or the caller's checkout would legitimately supply a repository to serve.
+  const serveEmpty = await mkdtemp(join(tmpdir(), "pdb-serve-empty-"));
+  const serveUsage = await run(windows ? `"${bin}"` : bin, ["serve"], {
+    shell: windows,
+    cwd: serveEmpty,
+    env: { ...process.env, PDB_CONFIG_DIR: join(serveEmpty, "config") },
+  }).then(
     () => null,
     (error: { code?: unknown; stderr?: unknown }) => error,
   );
-  if (
-    serveUsage?.code !== 2 ||
-    !String(serveUsage.stderr).includes("pdb serve needs --repo owner/name")
-  )
+  if (serveUsage?.code !== 2 || !String(serveUsage.stderr).includes("nothing to serve"))
     throw new Error(
-      `Installed pdb serve without a repository exited ${JSON.stringify(serveUsage?.code ?? 0)}, not 2.`,
+      `Installed pdb serve with nothing to serve exited ${JSON.stringify(serveUsage?.code ?? 0)}, not 2.`,
     );
   const serveHelpText = await run(windows ? `"${bin}"` : bin, ["serve", "--help"], {
     shell: windows,
@@ -1144,7 +1153,7 @@ try {
     };
     await nativeStopSmoke(join(packageDir, "dist", "cli.mjs"), work, env, true);
     console.log("ok   installed native Codex offer and duplicate guard with fake gh");
-    console.log(`ok   installed pdb serve: ${await serveSmoke(bin, env, checkout)}`);
+    console.log(`ok   installed pdb serve: ${await serveSmoke(bin, env, work)}`);
     for (const kind of ["serve", "mcp"] as const)
       console.log(
         `ok   installed ${kind} unhandled fault reports mapped public frames only: ${await packagedCrash(kind, packageDir, env, checkout, work)}`,
@@ -1197,7 +1206,7 @@ try {
           env: optOutEnv,
           cwd: work,
         });
-      await serveSmoke(bin, optOutEnv, checkout);
+      await serveSmoke(bin, optOutEnv, work);
       if (
         await readFile(marker, "utf8").then(
           () => true,

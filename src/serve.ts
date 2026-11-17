@@ -46,6 +46,8 @@ import {
   SHUTDOWN_GRACE_MS,
 } from "./serve/options.js";
 import type { ServeOptions } from "./serve/options.js";
+import { RegistrationError, resolveServeProjects } from "./serve/registration.js";
+import { globalConfigDirectory } from "./config/globalconfig.js";
 import type {
   AuthContext,
   RequestContext,
@@ -98,6 +100,7 @@ export const defaultServeRuntime = (): ServeRuntime => ({
     : {}),
   cwd: process.cwd(),
   git: nodeGit,
+  globalConfig: { dir: globalConfigDirectory() },
   currentRepository,
   authContext: ghAuthContext,
   clock: systemClock,
@@ -138,6 +141,20 @@ async function servedSet(
   options: ServeOptions,
   runtime: ServeRuntime,
 ): Promise<ServedRepository[]> {
+  // With a verified global configuration boundary, the served set is saved registrations,
+  // explicit targets and the working directory's repository (#805). Without one — every test
+  // that does not opt in — only the explicit targets are used, exactly as before.
+  if (runtime.globalConfig) {
+    try {
+      const resolution = await resolveServeProjects(options, runtime);
+      for (const line of resolution.diagnostics) runtime.stderr(`pdb serve: ${line}\n`);
+      return [...resolution.served];
+    } catch (error) {
+      if (error instanceof RegistrationError)
+        throw new ServeStartupError(error.exitCode, error.message);
+      throw error;
+    }
+  }
   const served = new Map<string, ServedRepository>();
   for (const repository of options.repos)
     if (!served.has(repository.toLowerCase())) served.set(repository.toLowerCase(), { repository });
@@ -182,6 +199,10 @@ async function servedSet(
       project: resolvedProject,
     });
   }
+  // Without a configuration boundary there is nothing else to serve (#805), so an empty set is
+  // still a usage error rather than a server with no repository.
+  if (!served.size)
+    throw new ServeStartupError(EXIT_USAGE, "pdb serve needs --repo owner/name or --project PATH");
   return [...served.values()];
 }
 
