@@ -54,3 +54,18 @@ Review-fix validation passed: check with zero errors/54 existing warnings, all
 148 files with 2,714 passing tests and one skip, build and installed-package
 validation. Four auxiliary refusal regressions now protect the shared cooldown;
 the ordinary-permission-denial control confirms no false cooldown.
+
+Windows CI passed check/tests/build but failed the first packaged native init
+assertion without reporting its returned reason. The fixture inherited default
+identity/human resolution despite being a credential-free native-adapter smoke.
+A controlled local gh shim delayed only the incidental account read: the unchanged
+10-second native deadline produced cancelled-or-deadline; explicit context opt-outs
+produced initialized and zero gh invocations. No real login/cache was changed.
+Made that smoke's context isolation explicit, separated its fake-GitHub read case
+from environment-object identity, and included the initialization reason in any
+future failure. No application deadline, assertion, retry or required CI is relaxed.
+
+The isolated native-smoke repair passed check, all 148 files/2,714 tests (one
+skip), build and the full installed-package validation. The fake-gh successful
+native offer/duplicate checks still run explicitly. The unchanged-deadline local
+reproduction is retained in /tmp/pdb786-native-init-repro-results.json.
