@@ -161,3 +161,40 @@ files on Linux, macOS and Windows in the maintained CI matrix:
 Do not turn a Windows skip into evidence of Windows durability. If the CI host
 cannot exercise an operation, record that explicit coverage gap and keep the claim
 bounded. No live cache/identity or operator lock is modified for acceptance.
+
+## Windows exclusive-create refusals (#729)
+
+The bounded Windows reproduction in [PR #744's first CI run](https://github.com/trebizondoculpepper/presidential-daily-briefing/actions/runs/43981494044/job/133698891188)
+observed immediate `create: EPERM` in one four-process JSON batch and three two-process
+cache-storage batches. The shared helper treated every creation error except EEXIST as
+terminal. The observed failure mode is an exclusive-create refusal, not exhaustion of a
+held-lock deadline. The log does not identify the Windows component that refused creation.
+
+Windows may refuse an open while deletion is pending ([CreateFileW](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew));
+libuv maps access denial to EPERM ([Windows error mapping](https://github.com/libuv/libuv/blob/v1.x/src/win/error.c)).
+That is a possible mechanism, not proof of this run's kernel-level cause. EPERM may also
+represent permanent denial. A bounded retry must preserve that distinction in its result.
+
+The shared helper may retry **Windows EPERM from exclusive lock creation only**, alongside
+its existing EEXIST contention retries, within the caller's existing total wait budget:
+
+- Every attempt still uses exclusive `wx` creation. No unlink, overwrite, lock stealing or
+  permission change is permitted. A refusal grants no ownership; successful creation still
+  requires the same token readback before work proceeds.
+- Do not reset or increase the deadline. Check it before each retry and cap sleep by the
+  remaining time. A zero budget permits the initial attempt only.
+- If EPERM persists through that budget, return the factual failed/create/EPERM outcome,
+  not busy, a timeout claim or advice to delete a held lock. Terminal EEXIST remains busy.
+- Other creation error codes and all token-verification failures retain immediate failure
+  behavior. This contract does not authorize generic retries, non-Windows EPERM retries or
+  readback retries after an unverified creation. Preserve replacements and unverified locks.
+- Keep the legacy held-lock/null wrapper compatible. Callers using richer evidence retain
+  safe phase/code diagnostics; failure text and private filesystem contents are not logged.
+
+Inject platform, filesystem and clocks to cover recovery after EPERM, permanent denial,
+zero/exhausted budgets, mixed contention/refusal, other codes, verification failure and
+non-Windows behavior. Verify that no unowned lock is removed and no retry begins after the
+budget. In Windows reproduction fixtures, count refused create attempts and successful
+subsequent updates so a passing run can demonstrate actual recovery, not merely the absence
+of another refusal. Preserve exact update/record totals and cleanup assertions. Temporary
+100-batch reproduction settings return to the normal ten-batch level before a repair merge.
