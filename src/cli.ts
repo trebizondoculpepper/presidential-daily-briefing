@@ -111,7 +111,13 @@ import {
   type HumanContext,
 } from "./config/humancontext.js";
 import { STALE_WINDOW_MS } from "./serve/options.js";
-import { nodeGit, resolveRepositoryTarget } from "./config/config.js";
+import {
+  ConfigError,
+  loadConfig,
+  nodeFileSystem,
+  nodeGit,
+  resolveRepositoryTarget,
+} from "./config/config.js";
 import {
   firstUseHint,
   firstUseHintOptOutEnv,
@@ -1440,6 +1446,7 @@ async function runIssue(args: string[], output: Output, runtime: Runtime): Promi
         body: { type: "string" },
         "body-file": { type: "string" },
         label: { type: "string", multiple: true },
+        assignee: { type: "string", multiple: true },
         repo: { type: "string" },
         agent: { type: "string" },
         "dry-run": { type: "boolean" },
@@ -1460,6 +1467,43 @@ async function runIssue(args: string[], output: Output, runtime: Runtime): Promi
     readFile: defaultReadFile,
     readStdin: readStdinBounded,
     stderr,
+    targetContext: async (repository) => {
+      const cwd = runtime.config?.cwd ?? runtime.guide?.cwd ?? process.cwd();
+      const git = runtime.config?.git ?? runtime.guide?.git ?? nodeGit;
+      const fs = runtime.config?.fs ?? runtime.guide?.fs ?? nodeFileSystem;
+      let target;
+      try {
+        target = await resolveRepositoryTarget(cwd, repository, git);
+      } catch (error) {
+        return {
+          verified: false,
+          reason:
+            error instanceof ConfigError
+              ? error.message
+              : `${repository} has no verified local checkout.`,
+        };
+      }
+      let loaded;
+      try {
+        loaded = await loadConfig(target.root, fs);
+      } catch (error) {
+        return {
+          verified: false,
+          reason:
+            error instanceof ConfigError
+              ? error.message
+              : `Cannot read repository policy in ${target.root}.`,
+        };
+      }
+      if (loaded.format === null) {
+        return {
+          verified: false,
+          reason: `No PDB policy configuration (.github/triage.toml) found in ${target.root}; ${repository} is not a PDB-managed checkout.`,
+        };
+      }
+      return { verified: true, repository: target.repository };
+    },
+    ...(runtime.briefingHuman ? { employingHuman: () => runtime.briefingHuman!(false) } : {}),
     ...runtime.issueCreate,
   };
   let result;
@@ -1470,6 +1514,7 @@ async function runIssue(args: string[], output: Output, runtime: Runtime): Promi
         ...(values.body !== undefined ? { body: values.body } : {}),
         ...(values["body-file"] !== undefined ? { bodyFile: values["body-file"] } : {}),
         labels: values.label ?? [],
+        ...(values.assignee !== undefined ? { assignees: values.assignee } : {}),
         ...(values.repo !== undefined ? { repo: values.repo } : {}),
         ...(values.agent !== undefined ? { agent: values.agent } : {}),
         dryRun: !!values["dry-run"],
