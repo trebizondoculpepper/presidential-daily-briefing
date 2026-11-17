@@ -55,7 +55,10 @@ interface WalkPr {
   number: number;
   updatedAt: string;
   mergedAt: string | null;
-  closingIssuesReferences?: { nodes: { number: number; repository: { nameWithOwner: string } }[] };
+  closingIssuesReferences?: {
+    nodes: { number: number; repository: { nameWithOwner: string } }[];
+    pageInfo?: { hasNextPage?: boolean };
+  };
 }
 
 interface WalkIssue {
@@ -77,7 +80,7 @@ const issueFields =
   commentFields +
   "}}";
 const walkQuery = `query($owner:String!,$name:String!,$cursor:String){repository(owner:$owner,name:$name){issues(first:50,after:$cursor,states:[OPEN,CLOSED],orderBy:{field:UPDATED_AT,direction:DESC}){nodes{${issueFields}} pageInfo{hasNextPage endCursor}}}}`;
-const prWalkQuery = `query($owner:String!,$name:String!,$cursor:String){repository(owner:$owner,name:$name){pullRequests(first:50,after:$cursor,states:[MERGED],orderBy:{field:UPDATED_AT,direction:DESC}){nodes{number updatedAt mergedAt closingIssuesReferences(first:10){nodes{number repository{nameWithOwner}}}} pageInfo{hasNextPage endCursor}}}}`;
+const prWalkQuery = `query($owner:String!,$name:String!,$cursor:String){repository(owner:$owner,name:$name){pullRequests(first:50,after:$cursor,states:[MERGED],orderBy:{field:UPDATED_AT,direction:DESC}){nodes{number updatedAt mergedAt closingIssuesReferences(first:50){nodes{number repository{nameWithOwner}} pageInfo{hasNextPage}}} pageInfo{hasNextPage endCursor}}}}`;
 const issueQuery = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){${issueFields}}}}`;
 const prQuery = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){number state mergedAt}}}`;
 
@@ -188,7 +191,10 @@ export async function readMetrics(
 
   // 1b. Merged pull requests by their own update time: a merge need not update its ticket, so
   // tickets closed by an in-window merge are added even when the issue walk did not reach them.
+  const member = (n: number) => `${repository}#${n}`;
   const linked = new Set<number>();
+  // Population the read knows about but could not ledger; passed on as unread.
+  const unreadLinked: string[] = [];
   let prCursor: string | null = null;
   let prReachedStart = false;
   let prOldest: string | null = null;
@@ -207,6 +213,12 @@ export async function readMetrics(
         prReachedStart = true;
         break;
       }
+      if (
+        pr.mergedAt &&
+        Date.parse(pr.mergedAt) >= fromMs &&
+        pr.closingIssuesReferences?.pageInfo?.hasNextPage
+      )
+        unreadLinked.push(`${repository} PR #${pr.number}: closing references beyond 50`);
       if (pr.mergedAt && Date.parse(pr.mergedAt) >= fromMs)
         for (const ref of pr.closingIssuesReferences?.nodes ?? [])
           if (ref.repository.nameWithOwner.toLowerCase() === repository.toLowerCase())
@@ -225,16 +237,24 @@ export async function readMetrics(
   const completeFrom = issueFrom === null || prFrom === null ? null : latest(issueFrom, prFrom);
   for (const number of linked) {
     if (walked.some((i) => i.number === number)) continue;
-    const issue = prop(
-      prop(await query(issueQuery, { owner, name, number }), "repository"),
-      "issue",
-    ) as WalkIssue | null | undefined;
+    let issue: WalkIssue | null | undefined;
+    try {
+      issue = prop(
+        prop(await query(issueQuery, { owner, name, number }), "repository"),
+        "issue",
+      ) as WalkIssue | null | undefined;
+    } catch (error) {
+      if (rt.signal?.aborted) throw error;
+      issue = null;
+    }
     if (issue) walked.push(issue);
-    else warnings.push(`issue #${number}, closed by an in-window merge, could not be read`);
+    else {
+      warnings.push(`issue #${number}, closed by an in-window merge, could not be read`);
+      unreadLinked.push(member(number));
+    }
   }
 
   // 2. Ledgers, verdicts and groups for the first `maxTickets` tickets.
-  const member = (n: number) => `${repository}#${n}`;
   const selected = walked.slice(0, bounds.maxTickets);
   const skippedIssues = walked.slice(bounds.maxTickets);
   const skipped = skippedIssues.map((i) => member(i.number));
@@ -328,7 +348,10 @@ export async function readMetrics(
         ? latest(skippedIssues[0]!.updatedAt, completeFrom)
         : completeFrom,
     },
-    historyNotRead: { count: skipped.length, members: skipped },
+    historyNotRead: {
+      count: skipped.length + unreadLinked.length,
+      members: [...skipped, ...unreadLinked],
+    },
     requests,
     warnings,
     limitations: [
