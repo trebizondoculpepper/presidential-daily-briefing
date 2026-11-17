@@ -90,7 +90,8 @@ describe("serve project resolution and registration (#805)", () => {
     );
     expect(result.served).toEqual([{ repository: "owner/one" }]);
     expect(calls).toBe(0);
-    expect(result.registered).toEqual([]);
+    // An explicit repo-only target is a registration too (#805 "register projects").
+    expect(result.registered).toEqual([{ host: "github.com", repository: "owner/one" }]);
   });
 
   it("serves saved registrations when no target is given, in stored order", async () => {
@@ -101,13 +102,76 @@ describe("serve project resolution and registration (#805)", () => {
     );
     const result = await resolveServeProjects(
       { repos: [], projects: [] },
-      runtime(memory.fs, "/not/a/checkout", {}),
+      runtime(memory.fs, "/not/a/checkout", { "/work/other": "/work/other" }),
     );
     expect(result.served).toEqual([
       { repository: "owner/saved" },
       { repository: "owner/other", project: "/work/other" },
     ]);
     expect(memory.writes).toEqual([]);
+  });
+
+  it("refuses to serve a saved root that is now another repository", async () => {
+    const memory = memoryFs(
+      config(`[serve]\nprojects = [{ repository = "owner/a", localRoot = "/work/reused" }]\n`),
+    );
+    const result = await resolveServeProjects(
+      { repos: [], projects: [] },
+      {
+        ...runtime(memory.fs, "/not/a/checkout", { "/work/reused": "/work/reused" }),
+        currentRepository: async () => "owner/b",
+      },
+    );
+    expect(result.served).toEqual([{ repository: "owner/a" }]);
+    expect(result.diagnostics.join("\n")).toMatch(/is now owner\/b, not owner\/a/);
+  });
+
+  it("keeps a saved root whose identity cannot be read right now", async () => {
+    const memory = memoryFs(
+      config(`[serve]\nprojects = [{ repository = "owner/a", localRoot = "/work/a" }]\n`),
+    );
+    const result = await resolveServeProjects(
+      { repos: [], projects: [] },
+      {
+        ...runtime(memory.fs, "/not/a/checkout", { "/work/a": "/work/a" }),
+        currentRepository: async () => {
+          throw new Error("gh: not authenticated");
+        },
+      },
+    );
+    // A transient failure must not silently drop a registration.
+    expect(result.served).toEqual([{ repository: "owner/a", project: "/work/a" }]);
+    expect(result.diagnostics.join("\n")).toMatch(/could not be identified/);
+  });
+
+  it("records explicit repo-only targets, and refuses a stale registration write", async () => {
+    const memory = memoryFs();
+    const first = await resolveServeProjects(
+      { repos: ["owner/one"], projects: [] },
+      runtime(memory.fs, "/not/a/checkout", {}),
+    );
+    expect(first.registered).toEqual([{ host: "github.com", repository: "owner/one" }]);
+    expect(memory.files.get(file)).toContain('repository = "owner/one"');
+
+    // A second startup whose baseline is replaced before its write must not overwrite it.
+    const stale = memoryFs(config(`[serve]\nprojects = [{ repository = "owner/a" }]\n`));
+    const reads = new Map<string, number>();
+    const racing: GlobalConfigFileSystem = {
+      ...stale.fs,
+      readText: async (path) => {
+        const count = (reads.get(path) ?? 0) + 1;
+        reads.set(path, count);
+        const text = await stale.fs.readText(path);
+        // The first read is the baseline; a concurrent writer changes the file afterwards.
+        return count === 1 ? text : `${text}# another startup\n`;
+      },
+    };
+    await expect(
+      resolveServeProjects(
+        { repos: ["owner/new"], projects: [] },
+        runtime(racing, "/not/a/checkout", {}),
+      ),
+    ).rejects.toThrow(/could not be updated/);
   });
 
   it("reports a saved root that moved and serves its repository without the local project", async () => {
@@ -131,7 +195,7 @@ describe("serve project resolution and registration (#805)", () => {
     );
     const keptResult = await resolveServeProjects(
       { repos: ["owner/other"], projects: [] },
-      runtime(kept.fs, "/not/a/checkout", {}),
+      runtime(kept.fs, "/not/a/checkout", { "/work/other": "/work/other" }),
     );
     expect(keptResult.served).toEqual([{ repository: "owner/other", project: "/work/other" }]);
 
