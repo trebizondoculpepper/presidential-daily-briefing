@@ -209,6 +209,9 @@ describe("dashboard page and script (#374)", () => {
     expect(page).toContain('<script src="/dashboard.js" defer></script>');
     expect(page).toContain('<link rel="stylesheet" href="/dashboard.css">');
     expect(page).toContain('<a href="/rules">Rules</a>');
+    // The Work page links to the human and Activity (Agents) read views (#458, #456).
+    expect(page).toContain('<a id="human-link" href="/human">Human attention</a>');
+    expect(page).toContain('<a id="activity-link" href="/activity">Activity</a>');
     expect(page).not.toMatch(/<script>|<style|\sstyle=|\son[a-z]+=|https?:\/\//);
     expect(dashboardCss).not.toMatch(/url\(|@import/);
     // Action-kind badge palette (#597) has light and dark variants with a neutral fallback.
