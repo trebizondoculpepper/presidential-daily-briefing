@@ -46,6 +46,11 @@ generic/read-only remote instructions; it must not select an arbitrary registere
 project or create files there. Explain how to run in a verified checkout. Do not
 fetch a full repository ticket inventory merely to generate guidance.
 
+## Shared Markdown prerequisite
+
+[Markdown rules](markdown-rules.md) (#1049) supplies the common renderer for #1027.
+Do not create a second formatter while that prerequisite is pending.
+
 ## Generated `rules.md`
 
 Render the effective current rules through the same transport-neutral document and
