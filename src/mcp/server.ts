@@ -579,11 +579,13 @@ export function createServer(
     // #808: re-validate the selected context after identity resolution. A live configuration
     // application may have changed or removed the repository while identity resolved; starting
     // a collection under the old project and identity must be refused (same guard as the JSON
-    // API), so obsolete facts are never returned as fresh.
+    // API), so obsolete facts are never returned as fresh. Revalidate the *resolved* repository:
+    // adding an unrelated registration must not disturb an in-flight read whose own context is
+    // unchanged (a default selection would otherwise become ambiguous after the addition).
     if (runtime.served) {
       let still: { repository: string; project?: string } | undefined;
       try {
-        still = runtime.served(args.repo);
+        still = runtime.served(repository);
       } catch {
         // Removed or unresolvable: treated as not served below.
       }
