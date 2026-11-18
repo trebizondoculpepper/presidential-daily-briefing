@@ -11,7 +11,9 @@
  * Construction performs no Git work and no remote lookup. One instance is safe for concurrent
  * calls because it holds no per-call state: every method takes its checkout explicitly.
  */
-import { githubRepositories, nodeGit, type GitRunner } from "../config/config.js";
+import { promisify } from "node:util";
+import { execFile } from "node:child_process";
+import { githubRepositories, type GitRunner } from "../config/config.js";
 
 /** Why a Git read failed. Absence is a result, never an error code. */
 export type GitErrorCode = "not-a-repository" | "not-a-checkout" | "cancelled" | "failed";
@@ -93,6 +95,46 @@ export interface GitServiceOptions {
   readonly git?: GitRunner;
 }
 
+/**
+ * Variables that relocate Git's idea of which repository it is reading. Inheriting them would
+ * let `GIT_DIR`/`GIT_WORK_TREE` make a call in checkout B read checkout A, which the explicit
+ * checkout contract forbids.
+ */
+export const GIT_REPOSITORY_ENVIRONMENT = [
+  "GIT_DIR",
+  "GIT_WORK_TREE",
+  "GIT_COMMON_DIR",
+  "GIT_INDEX_FILE",
+  "GIT_NAMESPACE",
+  "GIT_PREFIX",
+  "GIT_OBJECT_DIRECTORY",
+  "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+  "GIT_CEILING_DIRECTORIES",
+] as const;
+
+/** A copy of `env` with the repository-location variables removed. Never mutates the input. */
+export function sanitizedGitEnvironment(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const copy: NodeJS.ProcessEnv = { ...env };
+  for (const name of GIT_REPOSITORY_ENVIRONMENT) delete copy[name];
+  return copy;
+}
+
+const runGit = promisify(execFile);
+
+/**
+ * The default transport: the installed binary, an argument array, no shell, an explicit cwd and
+ * a sanitized environment. Each call gets its own copy, so concurrent calls cannot interfere.
+ */
+const isolatedNodeGit: GitRunner = async (args, cwd, signal) =>
+  (
+    await runGit("git", [...args], {
+      cwd,
+      signal,
+      windowsHide: true,
+      env: sanitizedGitEnvironment(),
+    })
+  ).stdout;
+
 const SCP = /^(?:[^@/\s]+@)?([^:/\s]+):(?!\/)(.+)$/;
 
 /** Host of a Git remote URL (`https`, `ssh`, `git+ssh` and SCP-style), or null. */
@@ -124,7 +166,11 @@ function classify(error: unknown, operation: string): GitError {
       operation,
       exited,
     );
-  if (/unknown revision|bad revision|ambiguous argument|Needed a single revision/i.test(stderr))
+  if (
+    /unknown revision|bad revision|ambiguous argument|Needed a single revision|Not a valid object name/i.test(
+      stderr,
+    )
+  )
     return new GitError(
       "not-a-checkout",
       `${operation}: the revision is unknown.`,
@@ -150,6 +196,40 @@ async function read(
   }
 }
 
+/**
+ * Read a filesystem path: Git terminates output with one newline, and everything before it is the
+ * path itself — trailing spaces are part of a real path and must survive.
+ */
+async function readPath(
+  git: GitRunner,
+  args: readonly string[],
+  context: GitContext,
+  operation: string,
+): Promise<string | null> {
+  try {
+    const output = (await git(args, context.cwd, context.signal)).replace(/\r?\n$/, "");
+    return output === "" ? null : output;
+  } catch (error) {
+    throw classify(error, operation);
+  }
+}
+
+/** A path read where a missing checkout is an absence rather than a failure. */
+async function maybePath(
+  git: GitRunner,
+  args: readonly string[],
+  context: GitContext,
+  operation: string,
+): Promise<string | null> {
+  try {
+    return await readPath(git, args, context, operation);
+  } catch (error) {
+    if (error instanceof GitError && error.code !== "failed" && error.code !== "cancelled")
+      return null;
+    throw error;
+  }
+}
+
 /** Whether a read that may legitimately find nothing answered at all. */
 async function maybe(
   git: GitRunner,
@@ -172,7 +252,7 @@ async function maybe(
  * contacted until a method is called with an explicit context.
  */
 export function createGitService(options: GitServiceOptions = {}): GitService {
-  const git = options.git ?? nodeGit;
+  const git = options.git ?? isolatedNodeGit;
 
   const remotes = async (context: GitContext): Promise<readonly GitRemote[]> => {
     const output = await maybe(git, ["remote", "-v"], context, "git remote");
@@ -195,16 +275,16 @@ export function createGitService(options: GitServiceOptions = {}): GitService {
 
   return {
     async workingTreeRoot(context) {
-      return maybe(git, ["rev-parse", "--show-toplevel"], context, "git rev-parse");
+      return maybePath(git, ["rev-parse", "--show-toplevel"], context, "git rev-parse");
     },
 
     async commonDirectory(context) {
-      return maybe(git, ["rev-parse", "--git-common-dir"], context, "git rev-parse");
+      return maybePath(git, ["rev-parse", "--git-common-dir"], context, "git rev-parse");
     },
 
     async gitPath(context, name) {
       if (!name.trim()) throw new GitError("failed", "git rev-parse needs a path name.");
-      return maybe(git, ["rev-parse", "--git-path", name], context, "git rev-parse");
+      return maybePath(git, ["rev-parse", "--git-path", name], context, "git rev-parse");
     },
 
     remotes,
@@ -220,8 +300,14 @@ export function createGitService(options: GitServiceOptions = {}): GitService {
     },
 
     async revision(context) {
-      // An unborn branch has no HEAD commit; that is absence, not a failure.
-      return maybe(git, ["rev-parse", "--verify", "-q", "HEAD"], context, "git rev-parse");
+      // An unborn branch has no HEAD commit. `-q` suppresses the diagnostic, so Git exits 1
+      // silently: that exit status is the absence signal, and everything else still fails.
+      try {
+        return await maybe(git, ["rev-parse", "--verify", "-q", "HEAD"], context, "git rev-parse");
+      } catch (error) {
+        if (error instanceof GitError && error.exitCode === 1) return null;
+        throw error;
+      }
     },
 
     async headRef(context) {
@@ -269,6 +355,8 @@ export function createGitService(options: GitServiceOptions = {}): GitService {
     async isIgnored(context, path) {
       if (!path.trim()) throw new GitError("failed", "An ignore check needs a path.");
       try {
+        // check-ignore rejects `--literal-pathspecs` ("pathspec magic not supported"), so its
+        // argument keeps Git's pathspec semantics; ls-files below can be made literal.
         await git(["check-ignore", "--quiet", "--", path], context.cwd, context.signal);
         return true;
       } catch (error) {
@@ -283,7 +371,11 @@ export function createGitService(options: GitServiceOptions = {}): GitService {
     async isTracked(context, path) {
       if (!path.trim()) throw new GitError("failed", "A tracked check needs a path.");
       try {
-        await git(["ls-files", "--error-unmatch", "--", path], context.cwd, context.signal);
+        await git(
+          ["--literal-pathspecs", "ls-files", "--error-unmatch", "--", path],
+          context.cwd,
+          context.signal,
+        );
         return true;
       } catch (error) {
         const classified = classify(error, "git ls-files");
