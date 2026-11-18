@@ -21,6 +21,7 @@ import type { MemberState, TicketDelivery } from "./completion.js";
 import type { Issue, PullRequest, Snapshot } from "../github/types.js";
 import { prChecks } from "../briefing/briefing.js";
 import { prEvidenceGaps } from "../github/previdence.js";
+import { deliveryIssue } from "../github/service/delivery.js";
 import { classifyChecks } from "../github/requiredchecks.js";
 import { workflow } from "./definition.js";
 import type { PrStatusReport } from "./prstatus.js";
@@ -476,26 +477,19 @@ export async function readIssuesDelivery(
   numbers: number[],
   rt: { query: Query; rest: Rest; trust: TrustDecision; signal?: AbortSignal },
 ): Promise<DeliveryRead & { closures: { number: number; closure: Closure }[] }> {
-  const [owner, name] = repository.split("/");
   const issues: Issue[] = [];
   const omissions: string[] = [];
   for (const number of numbers) {
     try {
-      const data = (await rt.query(
-        `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){number title url state stateReason closedByPullRequestsReferences(first:10,includeClosedPrs:false){nodes{number url state} pageInfo{hasNextPage}} comments(last:100){nodes{${deliveryCommentFields}} pageInfo{hasPreviousPage startCursor}}}}}`,
-        { owner, name, number },
-      )) as {
-        repository: {
-          issue:
-            | (Omit<Issue, "comments"> & {
-                comments: Parameters<typeof readDeliveryComments>[2];
-              })
-            | null;
-        } | null;
-      };
-      const node = data.repository?.issue;
+      // The typed delivery-issue read (#945): no GraphQL composed in this module.
+      const node = await deliveryIssue(rt.query, repository, number, deliveryCommentFields);
       if (!node) throw new Error("not readable");
-      const history = await readDeliveryComments(repository, number, node.comments, rt.query);
+      const history = await readDeliveryComments(
+        repository,
+        number,
+        node.comments as Parameters<typeof readDeliveryComments>[2],
+        rt.query,
+      );
       // A history cut at the page bound reaches deliveryRead's coverage omissions below.
       issues.push({
         ...node,
