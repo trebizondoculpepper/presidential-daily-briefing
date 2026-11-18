@@ -385,9 +385,9 @@ ${crashDisclosure()}
                         never reused; nothing is reserved remotely), then the --agent to use
   install codex [--global] [--transport stdio|http] [--url URL] [--role R]
                         Configure the PDB MCP connection for Codex (project default, explicit
-                        --global); current slice establishes the command surface only (install codex --help)
-  uninstall codex [--global]  Remove only PDB-managed Codex entries; identity and unrelated
-                        entries survive (uninstall codex --help)
+                        --global); current slice establishes the command surface only, no writes (install codex --help)
+  uninstall codex [--global]  Preview removal intent for PDB-managed Codex entries; this slice
+                        performs no writes and removes nothing (uninstall codex --help)
   onboard [--repo owner/name] [--role implementer|designer] [--server URL] [--install] [--json]
                         New here? How an agent starts with pdb: rules, identity, commands and
                         a prompt to give it; --install adds the pdb section to AGENTS.md

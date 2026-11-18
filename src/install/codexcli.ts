@@ -12,14 +12,20 @@
  */
 import { parseArgs } from "node:util";
 import { homedir } from "node:os";
-import { ConfigError } from "../config/config.js";
+import { join } from "node:path";
+import { ConfigError, nodeFileSystem } from "../config/config.js";
 import type { ConfigRuntime } from "../config/configcli.js";
-import { resolveIdentityTarget } from "../config/identity.js";
+import { readIdentity, resolveIdentityTarget } from "../config/identity.js";
+import { resolveEntry, type Environment } from "../config/harness.js";
+import { createGitService } from "../git/service.js";
 import { resolveProjectGitCommonDir } from "./manifest.js";
 import type { InstallItemKind } from "./manifest.js";
 
 /** A registered installer client; only Codex is implemented in this slice. */
 export type InstallClient = "codex";
+
+/** Result item kinds: manifest entries plus the read-only identity decision. */
+export type InstallResultItemKind = InstallItemKind | "identity";
 
 export type InstallErrorCode =
   | "NO_PROJECT"
@@ -48,7 +54,11 @@ export type InstallItemOutcome =
   | "not-attempted";
 
 export interface InstallItem {
-  kind: InstallItemKind;
+  kind: InstallResultItemKind;
+  /**
+   * Scope-relative file path (for example `.codex/config.toml`), never an absolute private path:
+   * installer output must not leak the user's home or checkout root (#844 finding).
+   */
   file: string | null;
   action: InstallItemAction;
   outcome: InstallItemOutcome;
@@ -58,12 +68,22 @@ export interface InstallItem {
   retry: string | null;
 }
 
+/** The redacted result scope: kind plus non-secret facts only (no absolute paths). */
+export type InstallResultScope =
+  | { kind: "project"; repository: string; targets: { config: string; hooks: string } }
+  | { kind: "global"; targets: { config: string; hooks: string } };
+
+/** Internal scope carries absolute paths for later write slices; never serialized. */
+export type InstallInternalScope =
+  | { kind: "project"; root: string; repository: string; gitCommonDir: string }
+  | { kind: "global"; home: string };
+
 export interface InstallResult {
   schemaVersion: 1;
   kind: "install-result";
   client: InstallClient;
   operation: "install" | "uninstall";
-  scope: { kind: "project"; root: string; repository: string } | { kind: "global"; home: string };
+  scope: InstallResultScope;
   dryRun: boolean;
   items: InstallItem[];
   status: {
@@ -91,6 +111,8 @@ export interface InstallArguments {
   help: boolean;
 }
 
+const HTTP_URL = /^https?:\/\/\S+$/i;
+
 /** The supported Codex installer flags (codex-installer.md "CLI contract"). */
 export function installArgumentsFor(
   args: string[],
@@ -113,15 +135,23 @@ export function installArgumentsFor(
       help: { type: "boolean" },
     },
   });
-  const client = (positionals[0] ?? "codex") as InstallClient;
+  // Execution requires exactly one client positional; zero defaults only behind --help.
+  if (values.help !== true && positionals.length !== 1)
+    throw new Error(
+      `pdb ${operation} requires exactly one client (codex); run "pdb ${operation} codex" or pass --help.`,
+    );
+  const client = positionals[0] as InstallClient | undefined;
   if (client !== "codex")
     throw new Error(`Unsupported installer client ${JSON.stringify(client)}; supported: codex.`);
   if (values.transport !== undefined && values.transport !== "stdio" && values.transport !== "http")
     throw new Error("--transport must be stdio or http.");
-  if (values.transport === "http" && operation === "uninstall")
+  if (operation === "uninstall" && values.transport !== undefined)
     throw new Error("--transport applies to install only; uninstall removes whatever is owned.");
-  if (values.url !== undefined && values.transport !== "http")
-    throw new Error("--url requires --transport http.");
+  if (values.url !== undefined) {
+    if (values.transport !== "http") throw new Error("--url requires --transport http.");
+    if (!HTTP_URL.test(values.url))
+      throw new Error(`--url must be an http(s) endpoint, got ${JSON.stringify(values.url)}.`);
+  }
   if (values.entry !== undefined && values.harness !== undefined)
     throw new Error("Give --entry or --harness, not both.");
   if (values.repo !== undefined && !/^[\w.-]+\/[\w.-]+$/.test(values.repo))
@@ -149,40 +179,57 @@ export const installHelp = (operation: "install" | "uninstall"): string =>
   operation === "install"
     ? `Usage: pdb install codex [--global] [--transport stdio|http] [--url URL] [--role implementer|designer]
                     [--entry KEY | --harness NAME] [--repo owner/name] [--dry-run] [--json] [--yes]
-Configure the PDB MCP connection for Codex (identity and hook follow in later slices). Default
-scope is the current repository; --global uses the user-wide Codex home. STDIO is the default;
---transport http with --url is explicit. --dry-run previews exact changes and writes nothing.`
+Configure the PDB MCP connection for Codex (identity decision and hook follow in later slices).
+Default scope is the current repository; --global uses the user-wide Codex home. STDIO is the
+default; --transport http with --url is explicit. --dry-run previews planned items and writes
+nothing. This slice performs no file writes: the exact per-transport diff is not shown.`
     : `Usage: pdb uninstall codex [--global] [--dry-run] [--json] [--yes]
-Remove only PDB-managed Codex entries in the selected scope; identity, project settings and
-unrelated entries survive. Already absent is a no-op. --global is required to touch user-wide
-entries.`;
+Preview/record removal intent for PDB-managed Codex entries in the selected scope. This slice
+performs no file writes: entries are not removed yet, and identity/project settings are never
+touched. Already absent is a no-op. --global is required to target user-wide entries.`;
 
-/** Resolve the installer scope: project root (default) or user-wide Codex home (--global). */
+/** The user-wide Codex home: $CODEX_HOME when set, else `~/.codex`. */
+function codexHome(env: Environment): string {
+  const homeDir = env.HOME?.trim() || homedir();
+  const explicit = env.CODEX_HOME?.trim();
+  return explicit ? resolveHome(explicit, homeDir) : join(homeDir, ".codex");
+}
+
+/** Resolve the installer scope internally; the serialized result uses a redacted projection. */
 export async function resolveInstallScope(
   args: InstallArguments,
   runtime: ConfigRuntime,
-): Promise<InstallResult["scope"]> {
-  if (args.global) {
-    const homeDir = process.env.HOME ?? homedir();
-    const codexHome = process.env.CODEX_HOME?.trim();
-    const home = codexHome ? resolveHome(codexHome, homeDir) : homeDir;
-    return { kind: "global", home };
-  }
+): Promise<InstallInternalScope> {
+  const env: Environment = runtime.env ?? process.env;
+  if (args.global) return { kind: "global", home: codexHome(env) };
   try {
-    const target = await resolveIdentityTarget(
-      runtime.cwd ?? process.cwd(),
-      args.repo ?? undefined,
-      runtime.git,
-    );
-    if (!target.root) throw new Error("NO_PROJECT: no Git working-tree root.");
-    const root = target.root;
-    const repository = target.repository ?? args.repo ?? "";
+    const cwd = runtime.cwd ?? process.cwd();
+    const svc = createGitService(runtime.git === undefined ? {} : { git: runtime.git });
+    let root: string | null = null;
+    try {
+      root = await svc.workingTreeRoot({ cwd });
+    } catch {
+      root = null;
+    }
+    if (!root) throw new Error("NO_PROJECT: no Git working-tree root.");
+    let repository: string | null = null;
+    if (args.repo !== null && args.repo !== undefined) {
+      try {
+        repository = (await resolveIdentityTarget(cwd, args.repo, runtime.git)).repository;
+      } catch (error) {
+        if (error instanceof ConfigError) throw new Error(`NO_PROJECT: ${error.message}`);
+        throw error;
+      }
+    } else {
+      const identity = await svc.checkout({ cwd: root });
+      repository = identity ? identity.repository : null;
+    }
     if (!repository)
       throw new Error(
-        "NO_PROJECT: the repository could not be resolved; run from the checkout or pass --repo owner/name.",
+        "NO_PROJECT: the repository could not be resolved; run from a checkout with a single GitHub remote or pass --repo owner/name.",
       );
-    await resolveProjectGitCommonDir(root, runtime.git);
-    return { kind: "project", root, repository };
+    const gitCommonDir = await resolveProjectGitCommonDir(root, runtime.git);
+    return { kind: "project", root, repository, gitCommonDir };
   } catch (error) {
     if (error instanceof ConfigError) throw new Error(`NO_PROJECT: ${error.message}`);
     throw error;
@@ -194,31 +241,107 @@ function resolveHome(path: string, homeDir: string): string {
   return path;
 }
 
+/** A read-only identity decision for a project install (never writes, never allocates). */
+async function identityDecision(
+  args: InstallArguments,
+  scope: InstallInternalScope,
+  runtime: ConfigRuntime,
+): Promise<InstallItem | null> {
+  if (args.operation !== "install" || scope.kind !== "project") return null;
+  const env: Environment = runtime.env ?? process.env;
+  const fs = runtime.fs ?? nodeFileSystem;
+  const resolution = await resolveEntry({
+    entry: args.entry ?? undefined,
+    harness: args.harness ?? undefined,
+    env,
+    root: scope.root,
+    fs,
+  });
+  if (resolution.status === "unresolved")
+    return {
+      kind: "identity",
+      file: null,
+      action: "kept",
+      outcome: "refused",
+      code: "IDENTITY_AMBIGUOUS",
+      message: resolution.message,
+      diff: null,
+      retry: `pdb setup identity --role implementer|designer --entry KEY${args.repo ? ` --repo ${args.repo}` : ""}`,
+    };
+  const entry = resolution.entry;
+  const record = await readIdentity(scope.root, entry, fs);
+  const ready = record.entryExists && record.name !== null && record.triageRole !== null;
+  if (ready)
+    return {
+      kind: "identity",
+      file: null,
+      action: "kept",
+      outcome: "applied",
+      code: null,
+      message: `Existing identity entry [agents.${entry}] is valid and will be preserved.`,
+      diff: null,
+      retry: null,
+    };
+  return {
+    kind: "identity",
+    file: null,
+    action: "kept",
+    outcome: "planned",
+    code: "IDENTITY_REQUIRED",
+    message: `Identity entry [agents.${entry}] needs setup; pass --role implementer|designer.`,
+    diff: null,
+    retry: `pdb install codex --role implementer|designer --entry ${entry}${args.repo ? ` --repo ${args.repo}` : ""}`,
+  };
+}
+
+function projectScope(
+  scope: Extract<InstallInternalScope, { kind: "project" }>,
+): InstallResultScope {
+  return {
+    kind: "project",
+    repository: scope.repository,
+    targets: { config: ".codex/config.toml", hooks: ".codex/hooks.json" },
+  };
+}
+
+function globalScope(): InstallResultScope {
+  return { kind: "global", targets: { config: "config.toml", hooks: "hooks.json" } };
+}
+
+const resultScope = (scope: InstallInternalScope): InstallResultScope =>
+  scope.kind === "project" ? projectScope(scope) : globalScope();
+
 /** Build a not-yet-implemented install result for slice 2a (no file writes). */
 export async function runCodexInstallSurface(
   args: InstallArguments,
   runtime: ConfigRuntime,
   output: (text: string) => Promise<void>,
 ): Promise<number> {
-  const scope = await resolveInstallScope(args, runtime);
+  const internal = await resolveInstallScope(args, runtime);
+  const redacted = resultScope(internal);
+  const identity = await identityDecision(args, internal, runtime);
+  const mcpMessage = args.dryRun
+    ? "MCP entry planned (slice 2b implements the write)."
+    : "MCP entry write not implemented in this slice (slice 2b).";
+  // Uninstall previews describe removal intent; install describes the planned entry. This slice
+  // performs no writes and cannot produce an exact transport-specific diff.
+  const mcpAction: InstallItemAction = args.operation === "uninstall" ? "remove" : "create";
+  const mcpOutcome: InstallItemOutcome = args.dryRun ? "planned" : "not-attempted";
   const items: InstallItem[] = [
+    ...(identity ? [identity] : []),
     {
       kind: "mcp",
-      file:
-        scope.kind === "project" ? `${scope.root}/.codex/config.toml` : `${scope.home}/config.toml`,
-      action: "create",
-      outcome: args.dryRun ? "planned" : "not-attempted",
-      code: args.dryRun ? null : "HOOK_NOT_AVAILABLE",
-      message: args.dryRun
-        ? "MCP entry planned (slice 2b implements the write)."
-        : "MCP entry write not implemented in this slice (slice 2b).",
-      diff: args.dryRun ? `[mcp_servers.pdb]\ncommand = "..."` : null,
+      file: redacted.targets.config,
+      action: mcpAction,
+      outcome: mcpOutcome,
+      code: null,
+      message: mcpMessage,
+      diff: null,
       retry: null,
     },
     {
       kind: "hook",
-      file:
-        scope.kind === "project" ? `${scope.root}/.codex/hooks.json` : `${scope.home}/hooks.json`,
+      file: redacted.targets.hooks,
       action: "skipped",
       outcome: "not-attempted",
       code: "HOOK_NOT_AVAILABLE",
@@ -232,7 +355,7 @@ export async function runCodexInstallSurface(
     kind: "install-result",
     client: args.client,
     operation: args.operation,
-    scope,
+    scope: redacted,
     dryRun: args.dryRun,
     items,
     status: {
@@ -243,20 +366,29 @@ export async function runCodexInstallSurface(
     },
     next: [
       "This slice only establishes the command surface; no Codex configuration was written.",
-      "Slice 2b implements the MCP entry; slice 2c the identity and next-step text.",
+      "Slice 2b implements the MCP entry; slice 2c the identity write and next-step text.",
       args.dryRun
         ? "Remove --dry-run when the write slices ship."
         : "Re-run once the write slices ship.",
     ],
   };
+  // Exit 2 (partial/unfulfilled) when an identity decision needs setup; 0 otherwise.
+  const exitCode =
+    items.some((i) => i.outcome === "refused") || items.some((i) => i.code === "IDENTITY_REQUIRED")
+      ? 2
+      : 0;
   if (args.json) {
     await output(JSON.stringify(result, null, 2) + "\n");
-    return 0;
+    return exitCode;
   }
+  const scopeLine =
+    redacted.kind === "project"
+      ? `project ${redacted.repository}`
+      : "global (user-wide Codex home)";
   await output(
-    `pdb install codex: command surface only (no configuration written).\nScope: ${scope.kind === "project" ? `project ${scope.repository} at ${scope.root}` : `global ${scope.home}`}\nItems:\n${result.items
+    `pdb ${args.operation} codex: command surface only (no configuration written).\nScope: ${scopeLine}\nItems:\n${result.items
       .map((i) => `  ${i.kind} (${i.outcome}${i.code ? `, ${i.code}` : ""}): ${i.message}`)
       .join("\n")}\nNext:\n${result.next.map((n) => `  - ${n}`).join("\n")}\n`,
   );
-  return 0;
+  return exitCode;
 }
