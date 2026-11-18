@@ -24,6 +24,7 @@ import type {
   Rest,
 } from "../github.js";
 import type { PullRequest, Snapshot } from "../types.js";
+import { collectShortlist, type ShortlistOptions } from "../shortlist.js";
 import { execFileTransport } from "./transport.js";
 import type { GhTransport } from "./transport.js";
 import { repositoryFromCheckout, throwIfCancelled } from "./repository.js";
@@ -138,6 +139,11 @@ export interface GhService {
       signal?: AbortSignal,
     ): Promise<unknown>;
     collect(repository: string, options?: CollectOptions, now?: () => Date): Promise<Snapshot>;
+    collectShortlist(
+      repository: string,
+      options: ShortlistOptions,
+      now?: () => Date,
+    ): Promise<Snapshot>;
     collectIssueFocus(
       repository: string,
       number: number,
@@ -299,6 +305,13 @@ export function createGhService(options: GhServiceOptions = {}): GhService {
             ...collectOptions,
           },
           queryForSignal(collectOptions.signal) as Query,
+          now ?? options.now,
+        ),
+      collectShortlist: (repository, shortlistOptions, now) =>
+        collectShortlist(
+          repository,
+          { rest, ...shortlistOptions },
+          queryForSignal(shortlistOptions.signal) as Query,
           now ?? options.now,
         ),
       collectIssueFocus: (repository, number, focusOptions, now) =>
