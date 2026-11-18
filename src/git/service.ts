@@ -86,7 +86,7 @@ export interface GitService {
   /** Commits unique to each side of `left...right`, or null when either revision is unknown. */
   divergence(context: GitContext, left: string, right: string): Promise<Divergence | null>;
   /** Whether Git's ignore rules would ignore `path` in this checkout. */
-  isIgnored(context: GitContext, path: string): Promise<boolean>;
+  isIgnored(context: GitContext, path: string, options?: { noIndex?: boolean }): Promise<boolean>;
   /** Whether `path` is tracked in the index. */
   isTracked(context: GitContext, path: string): Promise<boolean>;
 }
@@ -412,12 +412,16 @@ export function createGitService(options: GitServiceOptions = {}): GitService {
       return { left: counts[0]!, right: counts[1]! };
     },
 
-    async isIgnored(context, path) {
+    async isIgnored(context, path, options) {
       if (!path.trim()) throw new GitError("failed", "An ignore check needs a path.");
       try {
         // check-ignore rejects `--literal-pathspecs` ("pathspec magic not supported"), so its
         // argument keeps Git's pathspec semantics; ls-files below can be made literal.
-        await git(["check-ignore", "--quiet", "--", path], context.cwd, context.signal);
+        await git(
+          ["check-ignore", "--quiet", ...(options?.noIndex ? ["--no-index"] : []), "--", path],
+          context.cwd,
+          context.signal,
+        );
         return true;
       } catch (error) {
         const classified = classify(error, "git check-ignore");

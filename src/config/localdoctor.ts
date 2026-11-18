@@ -21,7 +21,7 @@ import {
   resolveRepositoryTarget,
 } from "./config.js";
 import type { ConfigFileSystem, GitRunner } from "./config.js";
-import { createGitService, GitError, type GitService } from "../git/service.js";
+import { createGitService, GitError, type GitContext, type GitService } from "../git/service.js";
 import type { GhDiagnostics } from "../github/service/diagnostics.js";
 import { createGhService, type GhService } from "../github/service/service.js";
 import { roleNames } from "../briefing/roles.js";
@@ -159,8 +159,11 @@ const gitRunner =
     const normalized =
       args[0] === "--literal-pathspecs"
         ? args.slice(1)
-        : args[0] === "check-ignore" && args[1] === "--quiet" && args[2] === "--"
-          ? ["check-ignore", "--quiet", "--no-index", ...args.slice(3)]
+        : args[0] === "check-ignore" &&
+            args[1] === "--quiet" &&
+            args[2] === "--no-index" &&
+            args[3] === "--"
+          ? ["check-ignore", "--quiet", "--no-index", ...args.slice(4)]
           : args;
     const result = await probe("git", normalized, cwd);
     if (result.code !== 0) {
@@ -184,9 +187,28 @@ export async function localDoctor(
     signal?.throwIfAborted();
     return result;
   };
-  const gitService =
+  const baseGit =
     runtime.git ??
     (runtime.probe ? createGitService({ git: gitRunner(probe) }) : createGitService());
+  const withSignal = (ctx: GitContext): GitContext => {
+    signal?.throwIfAborted();
+    if (!signal) return ctx;
+    return { ...ctx, signal: ctx.signal ? AbortSignal.any([signal, ctx.signal]) : signal };
+  };
+  const gitService: GitService = {
+    workingTreeRoot: (ctx) => baseGit.workingTreeRoot(withSignal(ctx)),
+    commonDirectory: (ctx) => baseGit.commonDirectory(withSignal(ctx)),
+    remotes: (ctx) => baseGit.remotes(withSignal(ctx)),
+    checkout: (ctx) => baseGit.checkout(withSignal(ctx)),
+    revision: (ctx) => baseGit.revision(withSignal(ctx)),
+    headRef: (ctx) => baseGit.headRef(withSignal(ctx)),
+    isAncestor: (ctx, ancestor, descendant) =>
+      baseGit.isAncestor(withSignal(ctx), ancestor, descendant),
+    divergence: (ctx, left, right) => baseGit.divergence(withSignal(ctx), left, right),
+    isIgnored: (ctx, path, opts) => baseGit.isIgnored(withSignal(ctx), path, opts),
+    isTracked: (ctx, path) => baseGit.isTracked(withSignal(ctx), path),
+    gitPath: (ctx, path) => baseGit.gitPath(withSignal(ctx), path),
+  };
   const ghDiag: GhDiagnostics =
     runtime.gh?.diagnostics ??
     (runtime.probe
@@ -425,7 +447,9 @@ export async function localDoctor(
     // --no-index asks whether a rule exists, independent of whether the file is tracked.
     let ignoredState: "ok" | "missing" | "unknown";
     try {
-      ignoredState = (await gitService.isIgnored({ cwd: root, signal }, IDENTITY_FILE))
+      ignoredState = (await gitService.isIgnored({ cwd: root, signal }, IDENTITY_FILE, {
+        noIndex: true,
+      }))
         ? "ok"
         : "missing";
     } catch (error) {
