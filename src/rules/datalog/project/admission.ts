@@ -288,7 +288,8 @@ export function applyProjectPreferences<A extends WithWhy>(
   const bands = new Map<string, number[]>();
   for (const [i, a] of out.entries())
     if (!protectedBands.has(a.band)) {
-      const group = `${(a as { [RANK_PARTITION]?: string })[RANK_PARTITION] ?? ""}|${a.band}`;
+      const partition = String((a as { [RANK_PARTITION]?: string })[RANK_PARTITION] ?? "");
+      const group = `${partition.split("/").slice(0, 3).join("/")}|${a.band}`;
       bands.set(group, [...(bands.get(group) ?? []), i]);
     }
   for (const slots of bands.values()) {

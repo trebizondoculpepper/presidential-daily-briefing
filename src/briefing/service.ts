@@ -4,6 +4,8 @@ import {
   resolveEngineSetting,
   defaultEngine,
 } from "../config/engine-setting.js";
+import { HYDRATION_POOL } from "./compact.js";
+import { RANK_PARTITION } from "../rules/datalog/engine.js";
 import type { EngineSetting, DecisionEngineMetadata } from "../config/engine-setting.js";
 import { resolveReviewPolicy } from "../config/review-setting.js";
 import { resolveProjectRulesSetting } from "../config/project-rules-setting.js";
@@ -909,7 +911,10 @@ export async function readBriefing(
     snapshot = await runtime.collectShortlist!(
       request.repository,
       {
-        select: async (candidates) => shownSubjects((await present(candidates, false)).report),
+        // #652: hydrate the role-neutral prefix of the one ranked pool, so implementer and
+        // designer views read the same subjects under the same budget.
+        select: async (candidates) =>
+          hydrationSubjects((await present(candidates, false)).report, request.limit),
         signal: request.signal,
         ...(runtime.rest ? { rest: runtime.rest } : {}),
         ...(meter ? { meter } : {}),
@@ -938,6 +943,47 @@ export function shortlistLine(snapshot: Snapshot, maxChars: number): string {
 }
 
 /** The URLs a presented briefing shows (its subjects), in order; the shortlist to hydrate. */
+/**
+ * The subjects a bounded read hydrates (#652): the union of what either agent role could show
+ * first. Each role's exact order is derived from the one ranked pool (ownership, attention, that
+ * role's affinity preference, declared band, then the engine's role-independent tail rank), so a
+ * role-only change hydrates exactly the same subjects and every row either role shows is read. A report without a pool (human, unranked) falls back
+ * to its shown subjects.
+ */
+export function hydrationSubjects(report: PresentedBriefing["report"], limit: number): string[] {
+  type Item = { target: string; band: number; [RANK_PARTITION]?: string };
+  const pool = (report as { [HYDRATION_POOL]?: Item[] })[HYDRATION_POOL];
+  if (!pool?.length) return shownSubjects(report);
+  const parts = (item: Item) => String(item[RANK_PARTITION] ?? "").split("/");
+  const subjects: string[] = [];
+  for (const role of ["implementer", "designer"]) {
+    const preferred = (item: Item) => {
+      const affinity = parts(item)[3];
+      return !affinity || affinity === "shared" || affinity === role ? 0 : 1;
+    };
+    const key = (item: Item) => {
+      const [ownership = "1", attention = "1", , , tail = "0"] = parts(item);
+      return [
+        Number(ownership) || 0,
+        Number(attention) || 0,
+        preferred(item),
+        item.band,
+        Number(tail) || 0,
+      ];
+    };
+    const compare = (x: number[], y: number[]) =>
+      x[0]! - y[0]! || x[1]! - y[1]! || x[2]! - y[2]! || x[3]! - y[3]! || x[4]! - y[4]!;
+    // This role's exact order: its leading keys, then the role-independent tail rank.
+    const ordered = [...pool].sort((a, b) => compare(key(a), key(b)));
+    for (const item of ordered.slice(0, Math.max(0, limit)))
+      if (!subjects.includes(item.target)) subjects.push(item.target);
+  }
+  // Every subject the report itself shows (legacy actions, sections) is read too: presentation
+  // never shows an unhydrated row.
+  for (const url of shownSubjects(report)) if (!subjects.includes(url)) subjects.push(url);
+  return subjects;
+}
+
 export function shownSubjects(report: PresentedBriefing["report"]): string[] {
   const subjects = (report as { subjects?: { url: string }[] }).subjects;
   return (subjects ?? []).map((subject) => subject.url);

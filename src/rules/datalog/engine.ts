@@ -286,6 +286,13 @@ export function evaluatePolicy(input: PolicyFacts, options: PolicyOptions = {}):
       : null;
   options.signal?.throwIfAborted();
   const witnessCache = new Map<string, Value[]>();
+  // Every key after band is role-independent (#652): a decision's rank by those keys alone lets
+  // a host derive either role's exact order from this one evaluation.
+  const tailRank = new Map(
+    [...rows]
+      .sort((a, b) => compareKeys(a.slice(6), b.slice(6)))
+      .map((row, i) => [row, i] as const),
+  );
   const decisions = rows
     .sort((a, b) => compareKeys(a.slice(2), b.slice(2)))
     .map((row): PolicyDecision => {
@@ -324,7 +331,9 @@ export function evaluatePolicy(input: PolicyFacts, options: PolicyOptions = {}):
       const ruleIds = [definition.id];
       const attentionSection = humanSections?.get(Number(t));
       return {
-        [RANK_PARTITION]: `${String(ownershipKey)}/${String(attentionKey)}/${String(affinityKey)}`,
+        // ownership/attention/affinity keys, then the rule's raw affinity (so a host can derive
+        // either role's order from one evaluation without re-running the policy).
+        [RANK_PARTITION]: `${String(ownershipKey)}/${String(attentionKey)}/${String(affinityKey)}/${definition.affinity}/${tailRank.get(row) ?? 0}`,
         subject: Number(t),
         ruleId: definition.id,
         kind: definition.kind,
