@@ -2,7 +2,6 @@
 import {
   ConfigError,
   nodeFileSystem,
-  nodeGit,
   resolveRepositoryTarget,
   type ConfigFileSystem,
   type GitRunner,
@@ -23,7 +22,9 @@ import {
   type IdentitySource,
   type IdentityWriteResult,
   type TriageRole,
+  gitServiceOf,
 } from "./identity.js";
+import type { GitService } from "../git/service.js";
 import {
   resolveHumanContext,
   type AuthContextReader,
@@ -118,7 +119,8 @@ export interface EffectiveIdentityRuntime {
   readonly cwd?: string;
   readonly env: Environment;
   readonly fs?: ConfigFileSystem;
-  readonly git?: GitRunner;
+  /** The shared typed Git service; a legacy runner is accepted as its transport. */
+  readonly git?: GitService | GitRunner;
   readonly random?: () => number;
   readonly platform?: NodeJS.Platform;
   readonly human: () => Promise<EffectiveHuman>;
@@ -167,7 +169,8 @@ export async function prepareEffectiveIdentity(
   let target: Awaited<ReturnType<typeof resolveRepositoryTarget>> | undefined;
   let attempted = false;
   const fs = runtime.fs ?? nodeFileSystem;
-  const git = runtime.git ?? nodeGit;
+  // One typed Git service for this preparation (#907): shared if injected, else built once.
+  const git = gitServiceOf(runtime.git);
   const base = (): EffectiveIdentity => ({
     schemaVersion: 1,
     state: "unresolved",
