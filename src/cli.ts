@@ -1775,6 +1775,7 @@ async function run(
       throw new Error("--repo must be owner/name.");
     if (values.entry !== undefined && values.harness !== undefined)
       throw new Error("Pass either --entry or --harness, not both.");
+    const services = runtime.localDoctor?.probe ? undefined : servicesOf(runtime);
     const report = await localDoctor(
       {
         repo: values.repo,
@@ -1783,7 +1784,10 @@ async function run(
         entry: values.entry,
         harness: values.harness,
       },
-      runtime.localDoctor,
+      {
+        ...(services ? { git: services.git, gh: services.gh } : {}),
+        ...runtime.localDoctor,
+      },
     );
     await output(values.json ? JSON.stringify(report, null, 2) + "\n" : localDoctorText(report));
     return localDoctorExitCode(report);

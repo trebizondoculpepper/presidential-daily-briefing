@@ -50,6 +50,13 @@ export const execFileTransport: GhTransport = (call) =>
       return;
     }
     try {
+      let outcome: GhOutcome = {
+        ok: false,
+        kind: "spawn",
+        exitCode: null,
+        stdout: "",
+        stderr: "",
+      };
       const child = execFile(
         "gh",
         [...call.args],
@@ -59,6 +66,7 @@ export const execFileTransport: GhTransport = (call) =>
           timeout: call.timeoutMs,
           maxBuffer: call.maxBufferBytes,
           signal: call.signal,
+          killSignal: "SIGKILL",
           windowsHide: true,
           shell: false,
         },
@@ -66,7 +74,7 @@ export const execFileTransport: GhTransport = (call) =>
           const out = text(stdout);
           const err = text(stderr).slice(0, STDERR_LIMIT);
           if (!error) {
-            resolve({ ok: true, stdout: out });
+            outcome = { ok: true, stdout: out };
             return;
           }
           const e = error as NodeJS.ErrnoException & { killed?: boolean; code?: unknown };
@@ -77,15 +85,17 @@ export const execFileTransport: GhTransport = (call) =>
           else if (typeof e.code === "string") kind = "spawn"; // ENOENT, EACCES: never started
           else if (e.killed) kind = "timeout";
           else kind = "exit";
-          resolve({
+          outcome = {
             ok: false,
             kind,
             exitCode: typeof e.code === "number" ? e.code : null,
             stdout: out,
             stderr: err,
-          });
+          };
         },
       );
+      // Wait for `close` so a timed-out or cancelled child is killed (SIGKILL) and reaped before settling.
+      child.once("close", () => resolve(outcome));
       if (call.stdin !== undefined && child.stdin) {
         child.stdin.on("error", () => {
           // EPIPE/ECONNRESET: gh exited without reading; the exit outcome decides refused vs unknown.

@@ -21,6 +21,9 @@ import {
   resolveRepositoryTarget,
 } from "./config.js";
 import type { ConfigFileSystem, GitRunner } from "./config.js";
+import { createGitService, GitError, type GitContext, type GitService } from "../git/service.js";
+import type { GhDiagnostics } from "../github/service/diagnostics.js";
+import { createGhService, type GhService } from "../github/service/service.js";
 import { roleNames } from "../briefing/roles.js";
 import { resolveEntry } from "./harness.js";
 import type { Environment } from "./harness.js";
@@ -114,6 +117,8 @@ export interface LocalDoctorProgress {
 export interface LocalDoctorRuntime {
   readonly cwd?: string;
   readonly fs?: ConfigFileSystem;
+  readonly git?: GitService;
+  readonly gh?: Pick<GhService, "diagnostics">;
   readonly probe?: Probe;
   /** Node version string such as "26.1.0"; defaults to the running process. */
   readonly nodeVersion?: string;
@@ -150,9 +155,28 @@ export interface LocalDoctorOptions {
 
 const gitRunner =
   (probe: Probe): GitRunner =>
-  async (args, cwd) => {
-    const result = await probe("git", args, cwd);
-    if (result.code !== 0) throw new Error(`git ${args[0]} failed`);
+  async (args, cwd, signal) => {
+    const normalized =
+      args[0] === "--literal-pathspecs"
+        ? args.slice(1)
+        : args[0] === "check-ignore" &&
+            args[1] === "--quiet" &&
+            args[2] === "--no-index" &&
+            args[3] === "--"
+          ? ["check-ignore", "--quiet", "--no-index", ...args.slice(4)]
+          : args;
+    const result = await probe("git", normalized, cwd, signal);
+    if (result.code !== 0) {
+      const error = new Error(`git ${normalized[0]} failed`) as Error & {
+        code?: number | null;
+        stderr?: string;
+      };
+      error.code = result.code;
+      if (result.code === 128 && normalized[0] === "rev-parse") {
+        error.stderr = "fatal: not a git repository";
+      }
+      throw error;
+    }
     return result.stdout;
   };
 
@@ -163,12 +187,72 @@ export async function localDoctor(
 ): Promise<LocalDoctorReport> {
   const signal = runtime.signal;
   signal?.throwIfAborted();
-  const probe: Probe = async (command, args, directory) => {
+  const probe: Probe = async (command, args, directory, opSignal = signal) => {
     signal?.throwIfAborted();
-    const result = await (runtime.probe ?? nodeProbe)(command, args, directory, signal);
+    const effective =
+      opSignal && signal && opSignal !== signal ? AbortSignal.any([signal, opSignal]) : opSignal;
+    const result = await (runtime.probe ?? nodeProbe)(command, args, directory, effective);
     signal?.throwIfAborted();
     return result;
   };
+  const baseGit =
+    runtime.git ??
+    (runtime.probe ? createGitService({ git: gitRunner(probe) }) : createGitService());
+  const runGit = async <T>(ctx: GitContext, fn: (timed: GitContext) => Promise<T>): Promise<T> => {
+    signal?.throwIfAborted();
+    const timeout = AbortSignal.timeout(15_000);
+    const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
+    const timed = {
+      ...ctx,
+      signal: ctx.signal ? AbortSignal.any([combined, ctx.signal]) : combined,
+    };
+    try {
+      return await fn(timed);
+    } catch (error) {
+      // Distinguish internal probe deadlines from caller cancellation so one slow check
+      // reports unavailable evidence instead of aborting the whole Doctor run.
+      if (timeout.aborted && !signal?.aborted && !ctx.signal?.aborted) {
+        throw new GitError("failed", "git command timed out");
+      }
+      throw error;
+    }
+  };
+  let workingTreeFailed = false;
+  const gitService: GitService = {
+    workingTreeRoot: (ctx) =>
+      runGit(ctx, (timed) => baseGit.workingTreeRoot(timed)).catch((error) => {
+        if (!(signal?.aborted || (error instanceof GitError && error.code === "cancelled"))) {
+          workingTreeFailed = true;
+        }
+        throw error;
+      }),
+    commonDirectory: (ctx) => runGit(ctx, (timed) => baseGit.commonDirectory(timed)),
+    remotes: (ctx) => runGit(ctx, (timed) => baseGit.remotes(timed)),
+    checkout: (ctx) => runGit(ctx, (timed) => baseGit.checkout(timed)),
+    revision: (ctx) => runGit(ctx, (timed) => baseGit.revision(timed)),
+    headRef: (ctx) => runGit(ctx, (timed) => baseGit.headRef(timed)),
+    isAncestor: (ctx, ancestor, descendant) =>
+      runGit(ctx, (timed) => baseGit.isAncestor(timed, ancestor, descendant)),
+    divergence: (ctx, left, right) =>
+      runGit(ctx, (timed) => baseGit.divergence(timed, left, right)),
+    isIgnored: (ctx, path, opts) => runGit(ctx, (timed) => baseGit.isIgnored(timed, path, opts)),
+    isTracked: (ctx, path) => runGit(ctx, (timed) => baseGit.isTracked(timed, path)),
+    gitPath: (ctx, path) => runGit(ctx, (timed) => baseGit.gitPath(timed, path)),
+  };
+  const ghDiag: GhDiagnostics =
+    runtime.gh?.diagnostics ??
+    (runtime.probe
+      ? {
+          version: async (dir) => ({
+            exitCode: (await probe("gh", ["--version"], dir ?? "")).code,
+          }),
+          authStatus: async (host, dir) => ({
+            exitCode: (
+              await probe("gh", ["auth", "status", "--active", "--hostname", host], dir ?? "")
+            ).code,
+          }),
+        }
+      : createGhService().diagnostics);
   const step = (
     group: LocalDoctorProgress["step"],
     state: LocalDoctorProgress["state"],
@@ -241,8 +325,23 @@ export async function localDoctor(
   step("dependencies", "done");
   step("gh", "running");
   // gh.available and gh.auth: exit codes only; gh output may contain account details.
-  const ghVersion = await probe("gh", ["--version"], cwd);
-  if (ghVersion.code === null) {
+  const ghVersion = await ghDiag.version(cwd, signal);
+  if (ghVersion.timedOut) {
+    add({
+      id: "gh.available",
+      status: "unknown",
+      source: "gh --version timed out",
+      detail: "gh --version timed out before reporting a version.",
+      next: ["gh --version"],
+    });
+    add({
+      id: "gh.auth",
+      status: "unknown",
+      source: "gh unavailable",
+      detail: "Authentication cannot be checked without gh.",
+      next: ["gh auth status"],
+    });
+  } else if (ghVersion.exitCode === null) {
     add({
       id: "gh.available",
       status: "missing",
@@ -259,7 +358,7 @@ export async function localDoctor(
     });
   } else {
     add(
-      ghVersion.code === 0
+      ghVersion.exitCode === 0
         ? {
             id: "gh.available",
             status: "ok",
@@ -270,14 +369,14 @@ export async function localDoctor(
         : {
             id: "gh.available",
             status: "unknown",
-            source: `gh --version exit ${ghVersion.code}`,
+            source: `gh --version exit ${ghVersion.exitCode}`,
             detail: "gh started but did not report a version.",
             next: ["gh --version"],
           },
     );
-    const auth = await probe("gh", ["auth", "status", "--active", "--hostname", "github.com"], cwd);
+    const auth = await ghDiag.authStatus("github.com", cwd, signal);
     add(
-      auth.code === 0
+      auth.exitCode === 0
         ? {
             id: "gh.auth",
             status: "ok",
@@ -287,13 +386,14 @@ export async function localDoctor(
           }
         : {
             id: "gh.auth",
-            status: auth.code === 1 ? "access" : "unknown",
-            source:
-              auth.code === null
+            status: auth.exitCode === 1 ? "access" : "unknown",
+            source: auth.timedOut
+              ? "gh auth status timed out"
+              : auth.exitCode === null
                 ? "gh auth status could not start"
-                : `gh auth status exit ${auth.code}`,
+                : `gh auth status exit ${auth.exitCode}`,
             detail:
-              auth.code === 1
+              auth.exitCode === 1
                 ? "gh is not authenticated to github.com, or its token is invalid."
                 : "gh authentication state could not be determined.",
             next: ["gh auth status", "gh auth login --hostname github.com"],
@@ -312,7 +412,7 @@ export async function localDoctor(
   // project.checkout
   let root: string | null = null;
   try {
-    const target = await resolveRepositoryTarget(cwd, options.repo, gitRunner(probe));
+    const target = await resolveRepositoryTarget(cwd, options.repo, gitService);
     root = target.root;
     report.repository = target.repository;
     add({
@@ -326,19 +426,23 @@ export async function localDoctor(
     });
   } catch (caught) {
     if (!(caught instanceof ConfigError)) throw caught;
-    const notRepo = caught.code === "not-a-repository";
+    const notRepo = caught.code === "not-a-repository" && !workingTreeFailed;
     add({
       id: "project.checkout",
       status: notRepo ? "missing" : "unknown",
-      source: notRepo ? "git rev-parse --show-toplevel" : "git remote -v",
-      detail: notRepo
-        ? "The working directory is not inside a Git checkout, so local configuration cannot be located."
-        : options.repo
-          ? `This checkout has no GitHub remote for ${options.repo}.`
-          : "This checkout does not have exactly one GitHub remote; the intended project is ambiguous.",
-      next: notRepo
-        ? ["cd <CHECKOUT_OF_INTENDED_REPOSITORY> && pdb doctor"]
-        : ["git remote -v", "pdb doctor --repo <OWNER/NAME>"],
+      source: notRepo || workingTreeFailed ? "git rev-parse --show-toplevel" : "git remote -v",
+      detail: workingTreeFailed
+        ? "Git checkout status could not be checked."
+        : notRepo
+          ? "The working directory is not inside a Git checkout, so local configuration cannot be located."
+          : options.repo
+            ? `This checkout has no GitHub remote for ${options.repo}.`
+            : "This checkout does not have exactly one GitHub remote; the intended project is ambiguous.",
+      next: workingTreeFailed
+        ? ["git rev-parse --show-toplevel"]
+        : notRepo
+          ? ["cd <CHECKOUT_OF_INTENDED_REPOSITORY> && pdb doctor"]
+          : ["git remote -v", "pdb doctor --repo <OWNER/NAME>"],
     });
   }
 
@@ -391,13 +495,19 @@ export async function localDoctor(
       });
     }
     // --no-index asks whether a rule exists, independent of whether the file is tracked.
-    const ignored = await probe(
-      "git",
-      ["check-ignore", "--quiet", "--no-index", IDENTITY_FILE],
-      root,
-    );
+    let ignoredState: "ok" | "missing" | "unknown";
+    try {
+      ignoredState = (await gitService.isIgnored({ cwd: root, signal }, IDENTITY_FILE, {
+        noIndex: true,
+      }))
+        ? "ok"
+        : "missing";
+    } catch (error) {
+      if (signal?.aborted || (error instanceof GitError && error.code === "cancelled")) throw error;
+      ignoredState = "unknown";
+    }
     add(
-      ignored.code === 0
+      ignoredState === "ok"
         ? {
             id: "identity.git-ignored",
             status: "ok",
@@ -405,7 +515,7 @@ export async function localDoctor(
             detail: `An ignore rule covers ${IDENTITY_FILE}.`,
             next: [],
           }
-        : ignored.code === 1
+        : ignoredState === "missing"
           ? {
               id: "identity.git-ignored",
               status: "missing",
@@ -421,9 +531,17 @@ export async function localDoctor(
               next: [`git check-ignore -v --no-index ${IDENTITY_FILE}`],
             },
     );
-    const tracked = await probe("git", ["ls-files", "--error-unmatch", "--", IDENTITY_FILE], root);
+    let trackedState: "invalid" | "ok" | "unknown";
+    try {
+      trackedState = (await gitService.isTracked({ cwd: root, signal }, IDENTITY_FILE))
+        ? "invalid"
+        : "ok";
+    } catch (error) {
+      if (signal?.aborted || (error instanceof GitError && error.code === "cancelled")) throw error;
+      trackedState = "unknown";
+    }
     add(
-      tracked.code === 0
+      trackedState === "invalid"
         ? {
             id: "identity.git-tracked",
             status: "invalid",
@@ -431,7 +549,7 @@ export async function localDoctor(
             detail: `${IDENTITY_FILE} is tracked by Git. An ignore rule does not untrack it; removing it from the index is a separate, deliberate change.`,
             next: [`git rm --cached -- ":/${IDENTITY_FILE}"`],
           }
-        : tracked.code === 1
+        : trackedState === "ok"
           ? {
               id: "identity.git-tracked",
               status: "ok",
