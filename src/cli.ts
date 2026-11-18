@@ -127,7 +127,6 @@ import {
   ConfigError,
   loadConfig,
   nodeFileSystem,
-  nodeGit,
   resolveRepositoryTarget,
 } from "./config/config.js";
 import {
@@ -184,8 +183,11 @@ import {
   repositoryImpactText,
 } from "./briefing/dependencyimpact.js";
 import { readTicketStatus, ticketLimits, ticketStatusText } from "./workflow/ticketstatus.js";
-import { ghAuthContext, runServe } from "./serve.js";
+import { runServe } from "./serve.js";
 import { createGhService } from "./github/service/service.js";
+import { createAppServices } from "./composition.js";
+import type { AppServices } from "./composition.js";
+import { gitServiceOf } from "./config/identity.js";
 import { runQuotas } from "./github/quotascli.js";
 import type { QuotasRuntime } from "./github/quotascli.js";
 import { ghPost } from "./github/service/issues.js";
@@ -245,7 +247,19 @@ export type DepsArguments = (
 ) & { entry?: string; harness?: string; role?: string };
 
 /** Injected services for `main`; tests replace the GitHub-facing ones. */
+/** The process's one shared composition, built lazily on first use (#903, #870). */
+let processComposition: AppServices | undefined;
+const processServices = (): AppServices => (processComposition ??= createAppServices());
+/** A runtime's shared services: injected, else the process composition. */
+const servicesOf = (runtime: { services?: AppServices }): AppServices =>
+  runtime.services ?? processServices();
+
 export interface Runtime {
+  /**
+   * The shared typed Git and GH services (#903, #870). Production builds one per process; when
+   * absent the process default is used, so injected tests keep working unchanged.
+   */
+  services?: AppServices;
   /** Normal CLI identity preparation; tests inject every local/session/human boundary. */
   prepareIdentity?: PrepareCommandIdentity;
   collect: typeof collect;
@@ -1250,14 +1264,22 @@ export async function main(
           prepareIdentity: (options) =>
             prepareCommandIdentity(options, {
               env: process.env,
-              auth: humanContextEnabled() ? ghAuthContext : undefined,
+              auth: humanContextEnabled()
+                ? (signal) => processServices().gh.account.current(signal)
+                : undefined,
             }),
         }
       : {}),
     ...(humanContextEnabled()
-      ? { briefingHuman: (offline: boolean) => resolveHumanContext(ghAuthContext, { offline }) }
+      ? {
+          briefingHuman: (offline: boolean) =>
+            resolveHumanContext((signal) => processServices().gh.account.current(signal), {
+              offline,
+            }),
+        }
       : {}),
-    currentRepository,
+    services: processServices(),
+    currentRepository: (cwd, signal) => processServices().gh.repos.fromCheckout(cwd, signal),
     dependencyReport,
     rest: ghRest,
     query: ghQuery,
@@ -1372,12 +1394,11 @@ async function showFirstUseHint(args: string[], runtime: Runtime): Promise<boole
   const at = args.indexOf("--repo");
   let project = at >= 0 ? args[at + 1] : undefined;
   if (!project) {
-    const runGit = runtime.config?.git ?? nodeGit;
-    const top = await runGit(
-      ["rev-parse", "--show-toplevel"],
-      runtime.config?.cwd ?? process.cwd(),
+    // The typed Git service (#903): the checkout root, or none outside a checkout.
+    const git = gitServiceOf(
+      runtime.config?.gitService ?? runtime.config?.git ?? servicesOf(runtime).git,
     );
-    project = top.trim();
+    project = (await git.workingTreeRoot({ cwd: runtime.config?.cwd ?? process.cwd() })) ?? "";
   }
   if (!project) return false;
   const version = (await installedVersion()).version ?? "unknown";
@@ -1421,7 +1442,11 @@ async function runRules(args: string[], output: Output, runtime: Runtime): Promi
   let repository: string | null = null;
   try {
     repository = (
-      await resolveRepositoryTarget(guide.cwd ?? process.cwd(), undefined, guide.git ?? nodeGit)
+      await resolveRepositoryTarget(
+        guide.cwd ?? process.cwd(),
+        undefined,
+        guide.gitService ?? guide.git ?? servicesOf(runtime).git,
+      )
     ).repository;
   } catch {
     repository = null;
@@ -1476,7 +1501,11 @@ async function runRulesInit(
   let root: string;
   try {
     root = (
-      await resolveRepositoryTarget(guide.cwd ?? process.cwd(), undefined, guide.git ?? nodeGit)
+      await resolveRepositoryTarget(
+        guide.cwd ?? process.cwd(),
+        undefined,
+        guide.gitService ?? guide.git ?? servicesOf(runtime).git,
+      )
     ).root;
   } catch {
     stderr(
@@ -1575,7 +1604,12 @@ async function runIssue(
     stderr,
     targetContext: async (repository) => {
       const cwd = runtime.config?.cwd ?? runtime.guide?.cwd ?? process.cwd();
-      const git = runtime.config?.git ?? runtime.guide?.git ?? nodeGit;
+      const git =
+        runtime.config?.gitService ??
+        runtime.config?.git ??
+        runtime.guide?.gitService ??
+        runtime.guide?.git ??
+        servicesOf(runtime).git;
       const fs = runtime.config?.fs ?? runtime.guide?.fs ?? nodeFileSystem;
       let target;
       try {
