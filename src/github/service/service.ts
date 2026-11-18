@@ -13,6 +13,8 @@ import type { GhTransport } from "./transport.js";
 import { repositoryFromCheckout, throwIfCancelled } from "./repository.js";
 import { historyReads } from "./history.js";
 import { checkReads } from "./checks.js";
+import { readRateLimits } from "./ratelimits.js";
+import type { RateLimitAnswer } from "./ratelimits.js";
 import type { CheckReads } from "./checks.js";
 import type { HistoryReads } from "./history.js";
 import type { GraphQuery } from "../../workflow/claims.js";
@@ -26,6 +28,11 @@ export interface GhService {
   account: {
     /** The authenticated gh account (host and login only, never a token): `GET /user`. */
     current(signal?: AbortSignal): Promise<GhAccount>;
+    /**
+     * The account's rate-limit buckets: `GET /rate_limit` with this response's status and
+     * failure evidence, normalised (#547, #923). A thrown read (abort, deadline) propagates.
+     */
+    rateLimits(signal?: AbortSignal): Promise<RateLimitAnswer>;
   };
   repos: {
     /**
@@ -53,6 +60,8 @@ export interface GhServiceOptions {
   rest?: Rest;
   /** The GraphQL executor behind query capabilities; by default one over this transport and env. */
   query?: GraphQuery;
+  /** Clock for observation times. */
+  now?: () => Date;
 }
 
 const LOGIN = /^[\w.-]+$/;
@@ -96,6 +105,13 @@ export function createGhService(options: GhServiceOptions = {}): GhService {
         // GH_HOST selects the host gh talks to; without it gh uses github.com.
         const host = env.GH_HOST?.trim() || "github.com";
         return { host, login };
+      },
+      rateLimits(signal) {
+        return readRateLimits(
+          rest,
+          () => (options.now ?? (() => new Date()))().toISOString(),
+          signal,
+        );
       },
     },
     repos: {
