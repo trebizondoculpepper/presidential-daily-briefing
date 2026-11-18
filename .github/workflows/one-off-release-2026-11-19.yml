@@ -21,7 +21,6 @@ jobs:
       actions: write # existing explicit Publish dispatch and self-disable
       checks: read # verify status for the selected immutable source
     env:
-      GH_TOKEN: ${{ github.token }}
       SENTRY_DISABLED: "1"
       EXPECTED_DATE: "2026-11-19"
       CUTOFF: "2026-11-19T05:00:00Z"
@@ -42,8 +41,7 @@ jobs:
         if: steps.date.outputs.eligible == 'true'
         with:
           fetch-depth: 0
-          # The normal release helper needs authenticated, non-forced git push.
-          persist-credentials: true
+          persist-credentials: false
       - name: Select the fixed main cutoff
         if: steps.date.outputs.eligible == 'true'
         id: source
@@ -60,6 +58,7 @@ jobs:
       - name: Require only the selected source verify check
         if: steps.date.outputs.eligible == 'true'
         env:
+          GH_TOKEN: ${{ github.token }}
           SELECTED_SHA: ${{ steps.source.outputs.sha }}
         shell: bash
         run: |
@@ -84,8 +83,16 @@ jobs:
       - name: Request the canonical verified release
         if: steps.date.outputs.eligible == 'true'
         env:
+          GH_TOKEN: ${{ github.token }}
           SELECTED_SHA: ${{ steps.source.outputs.sha }}
-        run: npm run release -- --sha "$SELECTED_SHA"
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Authenticate only the trusted release helper, after dependency installation.
+          gh auth setup-git
+          npm run release -- --sha "$SELECTED_SHA"
       - name: Disable this one-off controller
         if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: gh workflow disable one-off-release-2026-11-19.yml --repo "$GITHUB_REPOSITORY"
