@@ -1,0 +1,17 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+reviews:
+  path_instructions:
+    - path: "**"
+      instructions: |
+        Architectural consistency is the primary review target. Read
+        doc/architecture.md and .github/review-guidelines.md, plus the relevant
+        feature contract. Cite changed code, the violated principle and a
+        concrete consequence. Respect documented exceptions and distinguish
+        existing migration debt from new drift. Also report material correctness,
+        security, data-loss and compatibility regressions; avoid style-only noise.
+knowledge_base:
+  code_guidelines:
+    enabled: true
+    filePatterns:
+      - "doc/architecture.md"
+      - ".github/review-guidelines.md"
