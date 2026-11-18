@@ -12,3 +12,8 @@ passed with one skip, build passed, and the canonical release helper's help ran
 without dispatch. Mocked actual workflow shell blocks covered six date/time
 cases, fixed first-parent cutoff, invalid SHA and four CI gate outcomes. No
 release request was sent during validation.
+
+Review correction: wait only for the selected source's required verify check,
+not the whole CI run, so the optional FreeBSD trial cannot become a publication
+gate or consume the controller timeout. Focused probes include pending-then-pass,
+failed required verification, API failure and bounded missing-evidence timeout.
