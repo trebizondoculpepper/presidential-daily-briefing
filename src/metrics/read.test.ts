@@ -486,4 +486,48 @@ describe("bounded metrics read (#573 slice 5b)", () => {
     expect(calls).toContain("open");
     expect(r.tickets.map((t) => t.member)).toEqual([`${repo}#1`, `${repo}#7`]);
   });
+  it("marks an assessed unclaimed unblocked status:ready issue as ready via native policy", async () => {
+    const { rt } = fake([], 50, {}, [], [], []);
+    const typedRt = rt as import("./read.js").MetricsReadRuntime;
+    const baseQuery = typedRt.query;
+    const readyRt: import("./read.js").MetricsReadRuntime = {
+      ...typedRt,
+      query: async (q, v) => {
+        if (q.includes("states:[OPEN]")) {
+          return {
+            repository: {
+              issues: {
+                nodes: [
+                  {
+                    number: 11,
+                    createdAt: "2026-11-10T00:00:00Z",
+                    updatedAt: "2026-11-16T00:00:00Z",
+                    lastEditedAt: null,
+                    state: "OPEN",
+                    closedAt: null,
+                    stateReason: null,
+                    issueDependenciesSummary: { blockedBy: 0 },
+                    closedByPullRequestsReferences: { nodes: [], pageInfo: { hasNextPage: false } },
+                    labels: {
+                      nodes: [
+                        { name: "status:ready" },
+                        { name: "impact:M" },
+                        { name: "complexity:M" },
+                      ],
+                      pageInfo: { hasNextPage: false },
+                    },
+                    comments: { totalCount: 0, nodes: [] },
+                  },
+                ],
+                pageInfo: { hasNextPage: false, endCursor: null },
+              },
+            },
+          };
+        }
+        return baseQuery(q, v);
+      },
+    };
+    const r = await readMetrics(repo, FROM, NOW, readyRt);
+    expect(r.tickets[0]!.inventory?.stage).toBe("ready");
+  });
 });

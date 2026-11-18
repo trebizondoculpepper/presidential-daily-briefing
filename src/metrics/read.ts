@@ -21,7 +21,7 @@ import {
   type ActivityComment,
 } from "../workflow/claimactivity.js";
 import { workflow } from "../workflow/definition.js";
-import { evaluatePolicy } from "../rules/datalog/engine.js";
+import { evaluateDatalog } from "../rules/datalog/adapter.js";
 import {
   collectDeliveryFacts,
   deliveryMemberCap,
@@ -330,34 +330,51 @@ export async function readMetrics(
         } else if (blocked === true) {
           stage = "blocked";
         } else {
-          // Delegate readiness to the native Datalog policy rather than checking labels alone.
-          const id = 100;
-          const datoms: [number, string, string | number | boolean][] = [
-            [1, "owned-claims-complete", true],
-            [id, "kind", "issue"],
-            [id, "state", "OPEN"],
-            [id, "labels-complete", labelsComplete],
-            [
-              id,
-              "native-complete",
-              issue.openBlockers !== null && issue.openBlockers !== undefined,
-            ],
-            [id, "open-blockers", issue.openBlockers ?? -1],
-            [
-              id,
-              "reverse-complete",
-              issue.openClosingPrs !== null && issue.openClosingPrs !== undefined,
-            ],
-            ...[...labelNames].map((name): [number, string, string] => [id, "label", name]),
-          ];
-          const policy = evaluatePolicy(
+          // Delegate readiness to the canonical native Datalog evaluator rather than checking labels alone.
+          type DatalogSnapshot = Parameters<typeof evaluateDatalog>[0];
+          const url = `https://github.com/${repository}/issues/${issue.number}`;
+          const datalog = evaluateDatalog(
             {
-              viewer: { role: "implementer", agent: "", platform: "", order: "impact" },
-              datoms,
+              schemaVersion: 1,
+              repository,
+              fetchedAt: now,
+              issues: [
+                {
+                  number: issue.number,
+                  title: `#${issue.number}`,
+                  url,
+                  state: "OPEN",
+                  createdAt: issue.createdAt,
+                  updatedAt: issue.updatedAt,
+                  labels: issue.labels,
+                  assignees: { nodes: [] },
+                  issueDependenciesSummary:
+                    issue.openBlockers === 0
+                      ? { blockedBy: 0, totalBlockedBy: 0, blocking: 0, totalBlocking: 0 }
+                      : null,
+                  blockedBy:
+                    issue.openBlockers === 0
+                      ? { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } }
+                      : undefined,
+                  closedByPullRequestsReferences:
+                    issue.openClosingPrs === 0
+                      ? { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } }
+                      : undefined,
+                  comments: { totalCount: issue.comments.totalCount, nodes: [] },
+                } as unknown as DatalogSnapshot["issues"][number],
+              ],
+              pullRequests: [],
+              findings: [],
+            } as unknown as DatalogSnapshot,
+            new Map(),
+            {
+              role: "implementer",
+              limit: 50,
+              ownedClaims: { urls: [], complete: true },
+              signal: rt.signal,
             },
-            { signal: rt.signal },
           );
-          if (policy.decisions.some((d) => d.kind === "implement")) {
+          if (datalog.items.some((a) => a.kind === "implement" && a.target === url)) {
             stage = "ready";
           }
         }
