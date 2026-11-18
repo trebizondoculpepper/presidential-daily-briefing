@@ -185,6 +185,7 @@ import {
 import { readTicketStatus, ticketLimits, ticketStatusText } from "./workflow/ticketstatus.js";
 import { runServe } from "./serve.js";
 import { createGhService } from "./github/service/service.js";
+import type { GhService } from "./github/service/service.js";
 import { createAppServices } from "./composition.js";
 import type { AppServices } from "./composition.js";
 import { gitServiceOf } from "./config/identity.js";
@@ -253,6 +254,42 @@ const processServices = (): AppServices => (processComposition ??= createAppServ
 /** A runtime's shared services: injected, else the process composition. */
 const servicesOf = (runtime: { services?: AppServices }): AppServices =>
   runtime.services ?? processServices();
+
+/**
+ * The GH executors this run uses (#903): the runtime's injected boundaries, else the
+ * composition's defaults (bound to the shared transport, #911). The one place they are chosen.
+ */
+const executorsOf = (
+  runtime: Pick<Runtime, "query" | "rest" | "ghRun">,
+): { query: Query; rest: Rest; run: GhRun } => ({
+  query: runtime.query ?? ghQuery,
+  rest: runtime.rest ?? ghRest,
+  run: runtime.ghRun ?? ghRun,
+});
+
+/** One typed GH facade per runtime (#903), over its injected boundaries; never one per command. */
+const runtimeFacades = new WeakMap<object, GhService>();
+function ghOf(runtime: Runtime): GhService {
+  let gh = runtimeFacades.get(runtime);
+  if (!gh) {
+    gh =
+      // The production defaults are not overrides: an ordinary run shares the composition's
+      // facade; only a genuinely injected boundary gets its own.
+      (runtime.rest ?? ghRest) === ghRest &&
+      (runtime.query ?? ghQuery) === ghQuery &&
+      (runtime.ghRun ?? ghRun) === ghRun &&
+      !runtime.now
+        ? servicesOf(runtime).gh
+        : createGhService({
+            rest: executorsOf(runtime).rest,
+            ...(runtime.query ? { query: runtime.query } : {}),
+            ...(runtime.ghRun ? { run: runtime.ghRun } : {}),
+            ...(runtime.now ? { now: runtime.now } : {}),
+          });
+    runtimeFacades.set(runtime, gh);
+  }
+  return gh;
+}
 
 export interface Runtime {
   /**
@@ -1594,7 +1631,7 @@ async function runIssue(
     runtime.issueCreate?.post !== undefined;
   const rt: IssueCreateRuntime = {
     ...(hasLegacyOverrides
-      ? { rest: runtime.rest ?? ghRest, post: ghPost }
+      ? { rest: executorsOf(runtime).rest, post: ghPost }
       : { issues: ghService.issues }),
     currentRepository: () => runtime.currentRepository(),
     now: runtime.now ?? (() => new Date()),
@@ -1723,7 +1760,7 @@ async function run(
   if (args[0] === "issue") return runIssue(args.slice(1), output, runtime, identity);
   if (args[0] === "quotas")
     return runQuotas(args.slice(1), output, {
-      account: createGhService({ rest: runtime.rest ?? ghRest, now: runtime.now }).account,
+      account: ghOf(runtime).account,
       host: () => process.env.GH_HOST?.trim() || "github.com",
       now: runtime.now,
       ...runtime.quotas,
@@ -1855,7 +1892,7 @@ async function run(
       },
       {
         trust: rest ? markerTrust(permissionLookup(snapshot.repository, rest)) : undefined,
-        live: rest ? { query: runtime.query ?? ghQuery, rest } : undefined,
+        live: rest ? { query: executorsOf(runtime).query, rest } : undefined,
       },
     );
     await output(values.json ? JSON.stringify(read.report, null, 2) + "\n" : read.text);
@@ -1880,13 +1917,11 @@ async function run(
     };
     const repository = repo ?? (await runtime.currentRepository());
     // Per run: a permission learned now is never reused by a later invocation.
-    const permission = createGhService({ rest: runtime.rest ?? ghRest }).repos.permissionOf(
-      repository,
-    );
+    const permission = ghOf(runtime).repos.permissionOf(repository);
     const rt = {
-      query: runtime.query ?? ghQuery,
-      run: runtime.ghRun ?? ghRun,
-      rest: runtime.rest ?? ghRest,
+      query: executorsOf(runtime).query,
+      run: executorsOf(runtime).run,
+      rest: executorsOf(runtime).rest,
       trust: markerTrust(permission),
       now: runtime.now ?? (() => new Date()),
     };
@@ -1915,17 +1950,13 @@ async function run(
       agent: await commandActor({ ...parsed, agent: parsed.request.agent }, identity, completeHelp),
     };
     const repository = repo ?? (await runtime.currentRepository());
-    const gh = createGhService({
-      rest: runtime.rest ?? ghRest,
-      query: runtime.query,
-      run: runtime.ghRun,
-    });
+    const gh = ghOf(runtime);
     // Per run: a permission learned now is never reused by a later invocation.
     const permission = gh.repos.permissionOf(repository);
     const rt = {
-      query: runtime.query ?? ghQuery,
-      run: runtime.ghRun ?? ghRun,
-      rest: runtime.rest ?? ghRest,
+      query: executorsOf(runtime).query,
+      run: executorsOf(runtime).run,
+      rest: executorsOf(runtime).rest,
       trust: markerTrust(permission),
       now: runtime.now ?? (() => new Date()),
       completion: gh.completion,
@@ -1951,16 +1982,14 @@ async function run(
     if (identity) parsed.repo ??= await runtime.currentRepository();
     const values = { ...parsed, agent: await commandActor(parsed, identity, questionUsage) };
     const repository = values.repo ?? (await runtime.currentRepository());
-    const query = runtime.query ?? ghQuery;
-    const permission = createGhService({ rest: runtime.rest ?? ghRest }).repos.permissionOf(
-      repository,
-    );
+    const query = executorsOf(runtime).query;
+    const permission = ghOf(runtime).repos.permissionOf(repository);
     // Read live immediately before writing; never act on a cached snapshot.
     const plan = await planQuestionResolution(repository, values, query, permission);
     const result =
       values.dryRun || !plan.ok || plan.noop
         ? { ...plan, exitCode: plan.ok ? 0 : 1 }
-        : await applyPlan(repository, plan, { run: runtime.ghRun ?? ghRun, query });
+        : await applyPlan(repository, plan, { run: executorsOf(runtime).run, query });
     await output(
       values.json
         ? JSON.stringify({ schemaVersion: 1, ...result }, null, 2) + "\n"
@@ -1973,10 +2002,8 @@ async function run(
     if (identity) parsed.repo ??= await runtime.currentRepository();
     const values = { ...parsed, agent: await commandActor(parsed, identity, claimWaitUsage) };
     const repository = values.repo ?? (await runtime.currentRepository());
-    const query = runtime.query ?? ghQuery;
-    const permission = createGhService({ rest: runtime.rest ?? ghRest }).repos.permissionOf(
-      repository,
-    );
+    const query = executorsOf(runtime).query;
+    const permission = ghOf(runtime).repos.permissionOf(repository);
     // Read live immediately before writing; never act on a cached snapshot.
     const plan =
       "why" in values
@@ -1991,7 +2018,7 @@ async function run(
     let result =
       values.dryRun || !plan.ok || plan.noop
         ? { ...plan, exitCode: plan.ok ? 0 : 1 }
-        : await applyPlan(repository, plan, { run: runtime.ghRun ?? ghRun, query });
+        : await applyPlan(repository, plan, { run: executorsOf(runtime).run, query });
     // A written record is not a transition until the fold accepts it.
     if (result.ok && result.exitCode === 0 && !values.dryRun && plan.ok && plan.activityOpId) {
       const conflict = await verifyTransition(
@@ -2023,15 +2050,13 @@ async function run(
       ),
     };
     const repository = values.repo ?? (await runtime.currentRepository());
-    const query = runtime.query ?? ghQuery;
+    const query = executorsOf(runtime).query;
     // Per run: a permission learned now is never reused by a later invocation.
-    const permission = createGhService({ rest: runtime.rest ?? ghRest }).repos.permissionOf(
-      repository,
-    );
+    const permission = ghOf(runtime).repos.permissionOf(repository);
     const rt = {
       query,
-      run: runtime.ghRun ?? ghRun,
-      rest: runtime.rest ?? ghRest,
+      run: executorsOf(runtime).run,
+      rest: executorsOf(runtime).rest,
       trust: markerTrust(permission),
       now: runtime.now ?? (() => new Date()),
     };
@@ -2056,7 +2081,7 @@ async function run(
     // it, then labels, so the wait never precedes a durable question and labels never claim
     // a wait that was not recorded.
     if ("questions" in values && plan.ok && plan.retainsClaim && !values.dryRun) {
-      const run = runtime.ghRun ?? ghRun;
+      const run = executorsOf(runtime).run;
       const asked = await applyPlan(
         repository,
         { ...plan, changes: plan.changes.filter((c) => c.step === "comment"), recheck: undefined },
@@ -2133,7 +2158,7 @@ async function run(
       values.dryRun || !plan.ok
         ? { ...plan, exitCode: plan.ok ? 0 : 1 }
         : await applyPlan(repository, plan, {
-            run: runtime.ghRun ?? ghRun,
+            run: executorsOf(runtime).run,
             query,
             stillWaiting,
           });
@@ -2231,7 +2256,7 @@ async function run(
           ...(values.platform ? { platform: values.platform } : {}),
         },
         await deliveryBoundaries(runtime, repository, false),
-        runtime.query ?? ghQuery,
+        executorsOf(runtime).query,
         runtime.now,
         runtime.collectIssueFocus,
       );
@@ -2289,7 +2314,7 @@ async function run(
         number,
         { staleHours, now: runtime.now?.() ?? new Date() },
         await deliveryBoundaries(runtime, repository, false),
-        runtime.query ?? ghQuery,
+        executorsOf(runtime).query,
         runtime.now,
         runtime.collectIssueFocus,
       );
@@ -2345,10 +2370,7 @@ async function run(
     return runEstimate(rest, output, {
       now: runtime.now,
       // #245/#269: provenance authority for both metrics, the #212 rule over a per-run permission cache.
-      trust: (repository) =>
-        markerTrust(
-          createGhService({ rest: runtime.rest ?? ghRest }).repos.permissionOf(repository),
-        ),
+      trust: (repository) => markerTrust(ghOf(runtime).repos.permissionOf(repository)),
       ...runtime.estimate,
       ...(identity
         ? {
@@ -2384,7 +2406,7 @@ async function run(
     if (identity) values.repo ??= await runtime.currentRepository();
     await commandViewer(values, identity);
     const repository = values.repo ?? (await runtime.currentRepository());
-    const query = runtime.query ?? ghQuery;
+    const query = executorsOf(runtime).query;
     const { report, text } = values.history
       ? await readReviewHistory(repository, Number(positionals[0]), query)
       : await readPullRequest(
@@ -2447,7 +2469,7 @@ async function run(
             dryRun: true,
             exitCode: plannedExit(plan.changes),
           }
-        : await applyDependencyChange(plan, runtime.ghRun ?? ghRun);
+        : await applyDependencyChange(plan, executorsOf(runtime).run);
       await output(
         values.json ? JSON.stringify(result, null, 2) + "\n" : dependencyChangeText(result),
       );
@@ -2548,8 +2570,8 @@ async function run(
           repository,
           options.label,
           meter
-            ? meter.query(runtime.query ?? ghQuery, "labels", repository)
-            : (runtime.query ?? ghQuery),
+            ? meter.query(executorsOf(runtime).query, "labels", repository)
+            : executorsOf(runtime).query,
         )
       : undefined;
     const presentOptions = {
@@ -2752,7 +2774,7 @@ async function run(
       labels = await resolveLabelFilter(
         snapshot.repository,
         options.label,
-        runtime.query ?? ghQuery,
+        executorsOf(runtime).query,
       );
     const rawCheckpointText = options.checkpoint
       ? `Checkpoint: ${!snapshot.since ? "establishing current baseline" : `previous window ${snapshot.since}`}; Advance only after complete successful live output; offline/incomplete results never advance.\n`
