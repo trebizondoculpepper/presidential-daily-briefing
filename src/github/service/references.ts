@@ -33,7 +33,19 @@ const int = (v: unknown): v is number => typeof v === "number" && Number.isSafeI
 
 const referenceQuery = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issueOrPullRequest(number:$number){__typename ... on Issue{number url state stateReason} ... on PullRequest{number url state merged closingIssuesReferences(first:100){nodes{number url state repository{nameWithOwner}} pageInfo{hasNextPage}}}}}}`;
 
-/** Resolve `number` in `repository`; null when absent, unseen or malformed (never guessed). */
+class MalformedReference extends Error {
+  constructor(repository: string, number: number) {
+    super(
+      `GitHub returned a malformed answer for ${repository}#${number}; no migration plan was built from it.`,
+    );
+  }
+}
+
+/**
+ * Resolve `number` in `repository`: null only when GitHub reports no such issue or pull request.
+ * A present but malformed answer (including any unreadable closing reference or missing paging
+ * evidence) is rejected, never filtered into a seemingly complete result.
+ */
 export async function resolveReference(
   query: Query,
   repository: string,
@@ -43,7 +55,9 @@ export async function resolveReference(
   const data = await query(referenceQuery, { owner: owner!, name: name!, number });
   const repo = isRecord(data) ? data.repository : null;
   const node = isRecord(repo) ? repo.issueOrPullRequest : null;
-  if (!isRecord(node) || !int(node.number) || !str(node.url) || !str(node.state)) return null;
+  if (node === null || node === undefined) return null;
+  if (!isRecord(node) || !int(node.number) || !str(node.url) || !str(node.state))
+    throw new MalformedReference(repository, number);
   if (node.__typename === "Issue")
     return {
       __typename: "Issue",
@@ -52,37 +66,51 @@ export async function resolveReference(
       state: node.state,
       stateReason: str(node.stateReason) ? node.stateReason : null,
     };
-  if (node.__typename !== "PullRequest" || typeof node.merged !== "boolean") return null;
-  const refs = isRecord(node.closingIssuesReferences) ? node.closingIssuesReferences : null;
+  if (node.__typename !== "PullRequest" || typeof node.merged !== "boolean")
+    throw new MalformedReference(repository, number);
+  const refs = node.closingIssuesReferences;
+  if (refs !== null && refs !== undefined) {
+    const nodes = isRecord(refs) && Array.isArray(refs.nodes) ? refs.nodes : null;
+    const paged =
+      isRecord(refs) && isRecord(refs.pageInfo) && typeof refs.pageInfo.hasNextPage === "boolean";
+    const valid = (n: unknown) =>
+      isRecord(n) &&
+      int(n.number) &&
+      str(n.url) &&
+      str(n.state) &&
+      isRecord(n.repository) &&
+      str(n.repository.nameWithOwner);
+    if (!nodes || !paged || !nodes.every(valid)) throw new MalformedReference(repository, number);
+  }
   return {
     __typename: "PullRequest",
     number: node.number,
     url: node.url,
     state: node.state,
     merged: node.merged,
-    closingIssuesReferences: refs
-      ? {
-          nodes: (Array.isArray(refs.nodes) ? refs.nodes : []).flatMap((n) =>
-            isRecord(n) &&
-            int(n.number) &&
-            str(n.url) &&
-            str(n.state) &&
-            isRecord(n.repository) &&
-            str(n.repository.nameWithOwner)
-              ? [
-                  {
-                    number: n.number,
-                    url: n.url,
-                    state: n.state,
-                    repository: { nameWithOwner: n.repository.nameWithOwner },
-                  },
-                ]
-              : [],
-          ),
-          ...(isRecord(refs.pageInfo) && typeof refs.pageInfo.hasNextPage === "boolean"
-            ? { pageInfo: { hasNextPage: refs.pageInfo.hasNextPage } }
-            : {}),
-        }
-      : null,
+    closingIssuesReferences:
+      refs === null || refs === undefined
+        ? null
+        : (() => {
+            // Validated above: every node and the paging evidence are present and well-formed.
+            const r = refs as {
+              nodes: {
+                number: number;
+                url: string;
+                state: string;
+                repository: { nameWithOwner: string };
+              }[];
+              pageInfo: { hasNextPage: boolean };
+            };
+            return {
+              nodes: r.nodes.map((n) => ({
+                number: n.number,
+                url: n.url,
+                state: n.state,
+                repository: { nameWithOwner: n.repository.nameWithOwner },
+              })),
+              pageInfo: { hasNextPage: r.pageInfo.hasNextPage },
+            };
+          })(),
   };
 }
