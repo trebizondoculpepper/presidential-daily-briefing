@@ -591,7 +591,26 @@ describe("Doctor run cancellation and observed progress (#585)", () => {
       expect(pid).not.toBeNull();
       controller.abort();
       expect(await outcome).toMatchObject({ name: "AbortError" });
-      expect(() => process.kill(pid!, 0)).toThrow();
+      // The abort's rejection can land while the OS is still reaping the child (a zombie still
+      // answers kill(pid,0) without error, and the close event may race the exit). Poll until
+      // the child is observably gone within a bounded deadline instead of asserting on the
+      // first attempt, so the test cannot race the child's exit.
+      let reaped = false;
+      for (let n = 0; n < 100; n++) {
+        let alive = false;
+        try {
+          process.kill(pid!, 0);
+          alive = true;
+        } catch {
+          alive = false;
+        }
+        if (!alive) {
+          reaped = true;
+          break;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      expect(reaped).toBe(true);
     } finally {
       controller.abort();
       await outcome;
