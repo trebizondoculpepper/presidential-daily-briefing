@@ -1,12 +1,14 @@
 /** Per-issue cache membership with batched missing reads; no query/page cache. */
-import type { Query } from "../github/github.js";
 import type { IssueFactReader, IssueFacts } from "../github/shortlist.js";
 import { readProfiles } from "../github/readplan.js";
 import { CollectionError } from "./cache.js";
 import type { ServeCache } from "./cache.js";
 
 type Request = Parameters<IssueFactReader>[0];
-type Produce = Parameters<IssueFactReader>[1];
+export type IssueFactBatchReader = (
+  numbers: readonly number[],
+  signal: AbortSignal,
+) => Promise<IssueFacts>;
 interface Pending {
   number: number;
   signal: AbortSignal;
@@ -42,9 +44,8 @@ const slice = (facts: IssueFacts, request: Request, number: number): IssueFacts 
 
 export async function cachedIssueFacts(
   cache: ServeCache,
-  queryWith: ((signal?: AbortSignal) => Query) | undefined,
   request: Request,
-  produce: Produce,
+  readBatch: IssueFactBatchReader | undefined,
   signal?: AbortSignal,
 ): Promise<IssueFacts> {
   let pending: Pending[] = [];
@@ -77,12 +78,11 @@ export async function cachedIssueFacts(
     abort();
     try {
       controller.signal.throwIfAborted();
-      if (!queryWith)
+      if (!readBatch)
         throw new CollectionError("GITHUB_UNAVAILABLE", "No GitHub reader is configured.");
-      const facts = await produce(
-        queryWith(controller.signal),
-        controller.signal,
+      const facts = await readBatch(
         batch.map((task) => task.number),
+        controller.signal,
       );
       if (facts.quota) cache.noteQuotaRefusal(facts.quota);
       for (const task of batch) task.resolve(slice(facts, request, task.number));

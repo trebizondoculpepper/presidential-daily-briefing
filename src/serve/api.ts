@@ -411,7 +411,15 @@ export function cachedBoundaries(
           {
             ...options,
             issueFacts: (request, produce, signal) =>
-              cachedIssueFacts(cache, guardedQueryWith, request, produce, signal),
+              cachedIssueFacts(
+                cache,
+                request,
+                guardedQueryWith
+                  ? (numbers, activeSignal) =>
+                      produce(guardedQueryWith(activeSignal), activeSignal, numbers)
+                  : undefined,
+                signal,
+              ),
             discovery: (request, produce, signal) =>
               cache.read(
                 {
