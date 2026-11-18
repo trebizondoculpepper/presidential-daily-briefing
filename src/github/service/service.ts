@@ -34,6 +34,8 @@ import { checkReads } from "./checks.js";
 import { readRateLimits } from "./ratelimits.js";
 import { resolveLabels } from "./labels.js";
 import { ticketReads } from "./tickets.js";
+import { referenceReads } from "./references.js";
+import type { ReferenceReads } from "./references.js";
 import type { TicketReads } from "./tickets.js";
 import { deliveryIssue } from "./delivery.js";
 import type { DeliveryIssue } from "./delivery.js";
@@ -110,6 +112,8 @@ export interface GhService {
   };
   /** Claim-workflow guard and pull-request state reads (#942). */
   tickets: TicketReads;
+  /** Issue reference reads (#951). */
+  references: ReferenceReads;
   /** Repository label resolution (#921). */
   labels: {
     /** Resolve normalized names to canonical labels; unresolved on any failed or partial read. */
@@ -260,6 +264,7 @@ export function createGhService(options: GhServiceOptions = {}): GhService {
     },
     history: historyReads(query),
     tickets: ticketReads(query),
+    references: referenceReads(query as Query),
     estimation: estimationCapabilities(graphqlApiOverTransport(transport, env)),
     delivery: {
       issue: (repository, number) => deliveryIssue(query as Query, repository, number),
