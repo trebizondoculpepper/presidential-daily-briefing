@@ -11,6 +11,7 @@ import {
   validServerOrigin,
 } from "./onboarding.js";
 import { firstUseHint, hintFileName, runOnboard } from "./onboardcli.js";
+import { createGitService } from "../git/service.js";
 import { installCoordinationSection, withCoordinationSection } from "../config/agentsguide.js";
 import { nodeSafeFs } from "../config/safejson.js";
 import { main } from "../cli.js";
@@ -267,6 +268,15 @@ describe("pdb onboard (#351)", () => {
       expect(doc).toEqual(onboardingDocument({ repository: repo, role: "designer" }));
       expect(io.err).toEqual([]);
       expect(await readdir(dir)).toEqual([]);
+    });
+  });
+
+  it("accepts a typed GitService in OnboardRuntime (#900)", async () => {
+    await withDir(async (dir) => {
+      const io = capture();
+      const gitService = createGitService({ git: checkoutGit(dir) });
+      expect(await runOnboard(["--json"], io.output, { cwd: dir, gitService }, io.stderr)).toBe(0);
+      expect(JSON.parse(io.out.join("")).repository).toBe(repo);
     });
   });
 
