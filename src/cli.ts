@@ -1663,8 +1663,7 @@ async function run(
   if (args[0] === "issue") return runIssue(args.slice(1), output, runtime, identity);
   if (args[0] === "quotas")
     return runQuotas(args.slice(1), output, {
-      rest: runtime.rest ?? ghRest,
-      authContext: ghAuthContext,
+      account: createGhService({ rest: runtime.rest ?? ghRest, now: runtime.now }).account,
       host: () => process.env.GH_HOST?.trim() || "github.com",
       now: runtime.now,
       ...runtime.quotas,

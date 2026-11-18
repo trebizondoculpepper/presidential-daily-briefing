@@ -5,10 +5,10 @@
  */
 import { parseArgs } from "node:util";
 import { quotaExitCode, QuotaService } from "./quotas.js";
+import type { GhService } from "./service/service.js";
 import type {
   QuotaContext,
   QuotaNotice,
-  QuotaRest,
   QuotaRow,
   QuotaTelemetrySnapshot,
   QuotaView,
@@ -32,9 +32,8 @@ evidence; 1 invalid arguments.
 `;
 
 export interface QuotasRuntime {
-  rest: QuotaRest;
-  /** The established gh host/login resolver (one bounded `gh api user`). */
-  authContext: (signal?: AbortSignal) => Promise<{ host: string; login: string }>;
+  /** The typed GH account capabilities (#924): the gh login and the rate-limit read. */
+  account: Pick<GhService["account"], "current" | "rateLimits">;
   /** The host gh selects (GH_HOST, else github.com), used when the login cannot be read. */
   host: () => string;
   now?: () => Date;
@@ -72,7 +71,7 @@ export async function runQuotas(
   if (values.refresh && values.offline)
     throw new QuotasUsageError(`--refresh and --offline are mutually exclusive. ${quotasUsage}`);
   const service = new QuotaService({
-    rest: runtime.rest,
+    rateLimits: (signal) => runtime.account.rateLimits(signal),
     now: runtime.now,
     telemetry: runtime.telemetry ?? (() => processTelemetry(runtime.now)),
   });
@@ -82,7 +81,7 @@ export async function runQuotas(
   else {
     contextRequests = 1;
     try {
-      context = await runtime.authContext();
+      context = await runtime.account.current();
     } catch {
       // Unverified: the gh-selected context is still read once, but nothing is reused and no
       // other login is guessed. The failure detail is never echoed.

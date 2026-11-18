@@ -18,6 +18,7 @@ import type {
   QuotaReading,
   QuotaRow,
   QuotaRowState,
+  RateLimitAnswer,
 } from "./service/ratelimits.js";
 export { QUOTA_MAX_ROWS, normalizeRateLimit } from "./service/ratelimits.js";
 export type {
@@ -453,8 +454,10 @@ interface ContextState {
 }
 
 export interface QuotaServiceOptions {
-  /** The existing gh REST boundary; called with `rate_limit` only. */
-  rest: QuotaRest;
+  /** The typed rate-limit capability (#923, #924); preferred over `rest` when given. */
+  rateLimits?: (signal: AbortSignal) => Promise<RateLimitAnswer>;
+  /** The gh REST boundary, called with `rate_limit` only; kept for callers not yet migrated. */
+  rest?: QuotaRest;
   now?: () => Date;
   /** Retained sanitized telemetry for the context; absent means none (a fresh CLI process). */
   telemetry?: (context: QuotaContext) => QuotaTelemetrySnapshot | null;
@@ -686,7 +689,9 @@ export class QuotaService {
     // The typed rate-limit capability (#923): status, evidence and the normalised reading.
     let answer: Awaited<ReturnType<typeof readRateLimits>>;
     try {
-      answer = await readRateLimits(this.options.rest, () => this.now().toISOString(), combined);
+      answer = this.options.rateLimits
+        ? await this.options.rateLimits(combined)
+        : await readRateLimits(this.options.rest!, () => this.now().toISOString(), combined);
     } catch {
       if (signal.aborted) return fail("cancelled");
       if (deadline.aborted) return fail("timeout");
