@@ -13,7 +13,7 @@
  */
 import { promisify } from "node:util";
 import { execFile } from "node:child_process";
-import { githubRepositories, type GitRunner } from "../config/config.js";
+import { githubRepositories, type GitRunner } from "./remotes.js";
 
 /** Why a Git read failed. Absence is a result, never an error code. */
 export type GitErrorCode = "not-a-repository" | "not-a-checkout" | "cancelled" | "failed";

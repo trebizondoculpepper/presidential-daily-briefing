@@ -14,7 +14,6 @@
  * Nothing here stores credentials, agent identity or caches, and nothing commits to Git.
  */
 
-import { execFile } from "node:child_process";
 import {
   appendFile,
   chmod,
@@ -27,8 +26,10 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { promisify } from "node:util";
 import { parse as parseToml, stringify as stringifyToml, TomlError } from "smol-toml";
+import { createGitService, GitError } from "../git/service.js";
+import type { GitService } from "../git/service.js";
+import type { GitRunner } from "../git/remotes.js";
 
 /** Repository-relative location of the shared TOML settings file (#160). */
 export const TOML_CONFIG_PATH = ".github/triage.toml";
@@ -664,57 +665,8 @@ export interface RepositoryTarget {
   readonly repository: string;
 }
 
-/** Git boundary: runs `git` with arguments in a directory and returns stdout. */
-export type GitRunner = (
-  args: readonly string[],
-  cwd: string,
-  signal?: AbortSignal,
-) => Promise<string>;
-
-const run = promisify(execFile);
-export const nodeGit: GitRunner = async (args, cwd, signal) =>
-  (await run("git", [...args], { cwd, signal, windowsHide: true })).stdout;
-
-/** Parse one remote URL; returns `owner/name` only when the host is exactly github.com. */
-export function githubRepositoryFromUrl(url: string): string | null {
-  let host: string;
-  let path: string;
-  const scp = /^(?:[^@/\s]+@)?([^:/\s]+):(?!\/)(.+)$/.exec(url);
-  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(url)) {
-    let parsed: URL;
-    try {
-      parsed = new URL(url);
-    } catch {
-      return null;
-    }
-    if (!["https:", "http:", "ssh:", "git:", "git+ssh:", "ssh+git:"].includes(parsed.protocol)) {
-      return null;
-    }
-    host = parsed.hostname;
-    path = parsed.pathname;
-  } else if (scp && !/^[a-z]$/i.test(scp[1]!)) {
-    // SCP-style `git@github.com:owner/name.git`; a single letter is a Windows drive.
-    host = scp[1]!;
-    path = scp[2]!;
-  } else {
-    return null;
-  }
-  if (host.toLowerCase() !== "github.com") return null;
-  const match = /^\/?([\w.-]+)\/([\w.-]+?)(?:\.git)?\/?$/.exec(path);
-  return match ? `${match[1]}/${match[2]}`.toLowerCase() : null;
-}
-
-/** Extract `owner/name` from `git remote -v` output (https, ssh and scp-like forms). */
-export function githubRepositories(remotes: string): string[] {
-  const found = new Set<string>();
-  for (const line of remotes.split(/\r?\n/)) {
-    const fields = line.trim().split(/\s+/);
-    const url = fields.length >= 2 ? fields[1]! : fields[0]!;
-    const repository = url ? githubRepositoryFromUrl(url) : null;
-    if (repository) found.add(repository);
-  }
-  return [...found];
-}
+export { githubRepositories, githubRepositoryFromUrl, nodeGit } from "../git/remotes.js";
+export type { GitRunner } from "../git/remotes.js";
 
 /**
  * Resolve the checkout containing `cwd` and verify it is `repository` (when given) before any
@@ -723,12 +675,19 @@ export function githubRepositories(remotes: string): string[] {
 export async function resolveRepositoryTarget(
   cwd: string,
   repository: string | undefined,
-  git: GitRunner = nodeGit,
+  git?: GitService | GitRunner,
 ): Promise<RepositoryTarget> {
+  // The typed Git service (#904): the checkout root and its remotes, parsed behind the facade.
+  // Composition injects its shared service; a legacy runner is adapted as a transport, and only
+  // then (or with nothing injected) is a service built here.
+  const service =
+    typeof git === "object" ? git : createGitService(typeof git === "function" ? { git } : {});
+  const context = { cwd };
   let root: string;
   try {
-    root = (await git(["rev-parse", "--show-toplevel"], cwd)).trim();
-  } catch {
+    root = (await service.workingTreeRoot(context)) ?? "";
+  } catch (error) {
+    if (error instanceof GitError && error.code === "cancelled") throw error;
     root = "";
   }
   if (!root) {
@@ -738,13 +697,16 @@ export async function resolveRepositoryTarget(
       "Run the command from inside the repository's local checkout.",
     );
   }
-  let remotes = "";
+  let repositories: string[] = [];
   try {
-    remotes = await git(["remote", "-v"], root);
-  } catch {
-    remotes = "";
+    const found = await service.remotes({ cwd: root });
+    repositories = [
+      ...new Set(found.flatMap((r) => (r.repository ? [r.repository.toLowerCase()] : []))),
+    ];
+  } catch (error) {
+    if (error instanceof GitError && error.code === "cancelled") throw error;
+    repositories = [];
   }
-  const repositories = githubRepositories(remotes);
   const wanted = repository?.toLowerCase();
   if (wanted ? !repositories.includes(wanted) : repositories.length !== 1) {
     throw new ConfigError(
