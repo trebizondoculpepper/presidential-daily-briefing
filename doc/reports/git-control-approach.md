@@ -7,7 +7,9 @@ library, or the existing injected `GitRunner` behind a typed Git service?
 **Recommendation: keep executing the Git binary, behind the existing injected boundary, and
 give that boundary a typed service surface.** Adopt no library now. If a library is wanted
 later, `simple-git` is the lower-risk option because it still runs the real binary; an
-implementation library (`isomorphic-git`) would change Git semantics the project depends on.
+implementation library (`isomorphic-git`) would change Git semantics the project depends on —
+including the release script's `fetch`/`push`, where credentials and the credential helper are
+the binary's own.
 
 This document records evidence only. It changes no dependency and no behaviour.
 
@@ -27,12 +29,23 @@ boundary: `GitRunner` (`src/config/config.ts`), whose production implementation 
 | Tracked-file checks                                                                  | `ls-files --error-unmatch`                                  |
 | Repositories whose files this checkout owns (worktrees, submodules where configured) | `rev-parse --git-common-dir`                                |
 
-There are **no Git writes**: no `fetch`, `checkout`, `pull`, `merge`, `commit`, `reset`,
-`clean`, `push`, `branch`, `tag`, `stash`, worktree or submodule mutation anywhere in `src/`
-or `scripts/`. The one module that reads remote state (`src/updates/checkout.ts`, the npm
-update check) also only reads: `symbolic-ref`, `show-ref`, `rev-list`, `rev-parse`, `remote`.
+Application code writes nothing: no `fetch`, `checkout`, `pull`, `merge`, `commit`, `reset`,
+`clean`, `push`, `branch`, `tag`, `stash`, worktree or submodule mutation anywhere in `src/`.
+The module that reads remote state (`src/updates/checkout.ts`, the npm update check) also only
+reads: `symbolic-ref`, `show-ref`, `rev-list`, `rev-parse`, `remote`.
 
-Two properties follow, and both matter more than the choice of library:
+**Maintained release scripts are the exception, and they do write.** `scripts/dispatch.ts`
+runs `git fetch --no-tags origin main` and `git fetch --no-tags origin release` to resolve
+what to ship, `git ls-remote` to see whether a release branch exists, `git merge-base
+--is-ancestor` to refuse rewriting history, and finally `git push origin <sha>:refs/heads/release`
+to fast-forward it (never forced). Those are operator-invoked, safety-checked writes with
+their own runner (`run("git", args)`), outside the `GitRunner` boundary, and they publish
+nothing by themselves — the Publish workflow still has to run. Any conclusion about "how PDB
+controls Git" has to hold for this path too, and it is the strongest argument for executing the
+real binary: credentials, credential helpers, push negotiation and pre-push hooks are exactly
+where an implementation library diverges.
+
+Two further properties matter more than the choice of library:
 
 1. **The boundary is why tests exist.** Every module takes `GitRunner` (or a `runtime.git`),
    so the suite fakes Git without a checkout — `src/serve/registration.test.ts` is a current
@@ -95,7 +108,11 @@ error taxonomy would have to be mapped back onto the project's structured refusa
    `status`, `log` parsing, progress reporting) — and then behind the same service, with the
    runner still the only place that spawns Git.
 4. **Do not adopt `isomorphic-git`** while the project depends on binary Git semantics for
-   identity, ignore rules and worktree ownership.
+   identity, ignore rules, worktree ownership and the release script's authenticated
+   `fetch`/`push`.
+5. **Leave `scripts/dispatch.ts` as it is.** Its writes are deliberate, ancestry-checked and
+   never forced; a typed read service should not absorb them, and a library must not replace
+   them without the same checks and credential behaviour.
 
 ## Bounds of this research
 
