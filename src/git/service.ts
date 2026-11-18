@@ -148,8 +148,15 @@ const runIsolatedGit = (
         killSignal: "SIGKILL",
         env,
       },
-      (error, stdout) => {
-        outcome = error ? { ok: false, error } : { ok: true, stdout: String(stdout ?? "") };
+      (error, stdout, stderr) => {
+        if (error) {
+          outcome = {
+            ok: false,
+            error: Object.assign(error, { stderr: String(stderr ?? "") }),
+          };
+        } else {
+          outcome = { ok: true, stdout: String(stdout ?? "") };
+        }
       },
     );
     // Wait for `close` so an aborted/timed-out child is killed (SIGKILL) and reaped before settling.
