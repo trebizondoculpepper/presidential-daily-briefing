@@ -28,7 +28,7 @@ export async function resolveReviewPolicy(
       runtime.cwd ?? process.cwd(),
       repository,
       // The runtime's runner, or none: the typed Git service's isolated default (#904).
-      runtime.git,
+      runtime.gitService ?? runtime.git,
     );
   } catch (error) {
     if (
