@@ -19,7 +19,7 @@ import {
   writeGlobalConfig,
   type GlobalProject,
 } from "../config/globalconfig.js";
-import type { GitRunner } from "../config/config.js";
+import { githubRepositories, type GitRunner } from "../config/config.js";
 import type { ServedRepository, GlobalConfigBoundary } from "./types.js";
 import { EXIT_USAGE } from "./options.js";
 
@@ -95,6 +95,31 @@ class ServedSet {
   }
 }
 
+/**
+ * A checkout's GitHub repository, preferring its own remotes over `gh repo view` (#805 review):
+ * `gh repo view` honours `GH_REPO`, so a stale environment variable would otherwise label one
+ * checkout with another repository and save the wrong root against it. Exactly one GitHub remote
+ * is authoritative; anything else falls back to the resolver the command already trusts.
+ */
+async function checkoutRepository(
+  root: string,
+  runtime: RegistrationRuntime,
+): Promise<string | null> {
+  if (runtime.git) {
+    try {
+      const found = githubRepositories(await runtime.git(["remote", "-v"], root));
+      if (found.length === 1) return found[0]!;
+    } catch {
+      // No readable remotes: fall back to the resolver below.
+    }
+  }
+  try {
+    return (await runtime.currentRepository(root)).trim() || null;
+  } catch {
+    return null;
+  }
+}
+
 /** Resolve one `--project` path to its verified Git root and repository. */
 async function resolveProject(
   path: string,
@@ -111,15 +136,13 @@ async function resolveProject(
       );
     }
   }
-  let repository: string;
-  try {
-    repository = (await runtime.currentRepository(root)).trim();
-  } catch {
+  const resolved = await checkoutRepository(root, runtime);
+  if (resolved === null)
     throw new RegistrationError(
       EXIT_USAGE,
       `--project ${root} does not resolve to a GitHub repository; check the path and gh authentication.`,
     );
-  }
+  const repository = resolved;
   if (!repositoryPattern.test(repository))
     throw new RegistrationError(
       EXIT_USAGE,
@@ -143,15 +166,16 @@ async function cwdRepository(
     return null;
   }
   if (!root) return null;
-  try {
-    const repository = (await runtime.currentRepository(root)).trim();
-    return repositoryPattern.test(repository) ? { root, repository } : null;
-  } catch {
-    return null;
-  }
+  const repository = await checkoutRepository(root, runtime);
+  return repository !== null && repositoryPattern.test(repository) ? { root, repository } : null;
 }
 
+/** A host as it is compared: an absent host means github.com. */
+const canonicalHost = (host: string | undefined): string => (host ?? "github.com").toLowerCase();
+
+/** Registrations are the same only when host, repository and local root all match. */
 const sameRegistration = (left: GlobalProject, right: GlobalProject): boolean =>
+  canonicalHost(left.host) === canonicalHost(right.host) &&
   canonical(left.repository) === canonical(right.repository) &&
   (left.localRoot ?? null) === (right.localRoot ?? null);
 
@@ -230,12 +254,7 @@ export async function resolveServeProjects(
       );
       continue;
     }
-    let resolved: string | null = null;
-    try {
-      resolved = (await runtime.currentRepository(root)).trim();
-    } catch {
-      resolved = null;
-    }
+    const resolved = await checkoutRepository(root, runtime);
     if (resolved === null) {
       diagnostics.push(
         `saved project ${root} could not be identified as ${entry.repository} right now (gh or the network did not answer); serving it as saved. Check gh auth status if this persists.`,
@@ -285,8 +304,12 @@ export async function resolveServeProjects(
   // Two different roots for one repository were already refused by ServedSet.add above.
   const next: GlobalProject[] = saved.map((entry) => ({ ...entry }));
   for (const entry of verified) {
+    // Match the host too: a github.com target must not refine an enterprise registration that
+    // happens to name the same owner/name, and must not be lost behind it.
     const index = next.findIndex(
-      (existing) => canonical(existing.repository) === canonical(entry.repository),
+      (existing) =>
+        canonicalHost(existing.host) === canonicalHost(entry.host) &&
+        canonical(existing.repository) === canonical(entry.repository),
     );
     if (index === -1) next.push(entry);
     else if (!next[index]!.localRoot) next[index] = { ...next[index]!, localRoot: entry.localRoot };

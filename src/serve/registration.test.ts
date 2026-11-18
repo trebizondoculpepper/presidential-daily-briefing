@@ -111,6 +111,43 @@ describe("serve project resolution and registration (#805)", () => {
     expect(memory.writes).toEqual([]);
   });
 
+  it("identifies a checkout from its own remotes, not from GH_REPO (#805 review)", async () => {
+    const memory = memoryFs();
+    const result = await resolveServeProjects(
+      { repos: [], projects: [] },
+      {
+        cwd: "/work/project",
+        // `gh repo view` honours GH_REPO and would name another repository here.
+        git: async (args: readonly string[], cwd: string) => {
+          if (args[0] === "rev-parse") return `${cwd}\n`;
+          if (args[0] === "remote") return "origin\tgit@github.com:owner/actual.git (fetch)\n";
+          throw new Error(`unexpected git ${args.join(" ")}`);
+        },
+        currentRepository: async () => "owner/from-gh-repo-env",
+        globalConfig: { dir, fs: memory.fs },
+      },
+    );
+    expect(result.served).toEqual([{ repository: "owner/actual", project: "/work/project" }]);
+    expect(memory.files.get(file)).toContain('repository = "owner/actual"');
+  });
+
+  it("keeps an enterprise registration independent from the same github.com repository", async () => {
+    const memory = memoryFs(
+      config(`[serve]\nprojects = [{ host = "ghe.example.com", repository = "owner/one" }]\n`),
+    );
+    const result = await resolveServeProjects(
+      { repos: ["owner/one"], projects: [] },
+      runtime(memory.fs, "/not/a/checkout", {}),
+    );
+    // The github.com target is served and appended, never merged into the enterprise entry.
+    expect(result.served).toEqual([{ repository: "owner/one" }]);
+    expect(result.saved).toEqual([
+      { host: "ghe.example.com", repository: "owner/one" },
+      { host: "github.com", repository: "owner/one" },
+    ]);
+    expect(result.registered).toEqual([{ host: "github.com", repository: "owner/one" }]);
+  });
+
   it("refuses to serve a saved registration for another GitHub host", async () => {
     const memory = memoryFs(
       config(`[serve]\nprojects = [{ host = "ghe.example.com", repository = "owner/a" }]\n`),
