@@ -61,6 +61,7 @@ import { markerTrust } from "../workflow/delivery.js";
 import { ledgerTrust } from "../metrics/ledger.js";
 import { readMetrics, type MetricsRead } from "../metrics/read.js";
 import {
+  assessmentQueueView,
   dailyView,
   DEFAULT_STALLED_HOURS,
   inventoryView,
@@ -948,8 +949,14 @@ export function readApi(
           undefined,
           async (values, served) => {
             const view = values.get("view") ?? "daily";
-            if (view !== "news" && view !== "daily" && view !== "timing" && view !== "inventory")
-              throw invalid("view must be news, daily, timing or inventory.");
+            if (
+              view !== "news" &&
+              view !== "daily" &&
+              view !== "timing" &&
+              view !== "inventory" &&
+              view !== "assessment-queue"
+            )
+              throw invalid("view must be news, daily, timing, inventory or assessment-queue.");
             const nowIso = runtime.now().toISOString();
             let from: string;
             let span: number;
@@ -957,7 +964,8 @@ export function readApi(
             if (view === "news") {
               span = Number(values.get("hours") ?? 6);
               if (span !== 1 && span !== 6) throw invalid("hours must be 1 or 6.");
-              if (values.has("days")) throw invalid("days applies to daily and timing views only.");
+              if (values.has("days"))
+                throw invalid("days applies to daily, timing and assessment-queue views only.");
               if (values.has("stalledHours"))
                 throw invalid("stalledHours applies to the inventory view only.");
               from = new Date(Date.parse(nowIso) - span * 3_600_000).toISOString();
@@ -1008,7 +1016,9 @@ export function readApi(
                   ? dailyView(nowIso, span, read.tickets, read.coverage, unread, read.merges)
                   : view === "inventory"
                     ? inventoryView(nowIso, read.tickets, read.coverage, { stalledHours })
-                    : timingView(nowIso, span, read.tickets, read.coverage);
+                    : view === "assessment-queue"
+                      ? assessmentQueueView(nowIso, span, read.tickets, read.coverage, unread)
+                      : timingView(nowIso, span, read.tickets, read.coverage);
             const complete = metricsReadComplete(read, from);
             return {
               status: complete ? "complete" : "incomplete",
