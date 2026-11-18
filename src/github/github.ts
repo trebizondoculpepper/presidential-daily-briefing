@@ -1,10 +1,8 @@
 /** Read-only, paginated gh GraphQL collector. Never invokes a mutation or shell. */
 import { completeNative, isRateLimit, nativeFields, RateLimitError } from "./dependencies.js";
-import { execFile } from "node:child_process";
 import { repositoryFromCheckout } from "./service/repository.js";
 import { execFileTransport } from "./service/transport.js";
 import type { GhTransport } from "./service/transport.js";
-import { promisify } from "node:util";
 import {
   CHANGE_EVIDENCE_SCHEMA_VERSION,
   CHANGE_SCOPE,
@@ -41,8 +39,6 @@ import type {
   OperationId,
   QuotaObservation,
 } from "./evidence.js";
-
-const execute = promisify(execFile);
 
 /** An untrusted JSON object (GitHub responses, cached files). */
 export type JsonObject = { [key: string]: unknown };
@@ -474,9 +470,10 @@ export async function locateIssue(
   repository: string,
   number: number,
   rest: Rest = ghRest,
+  signal?: AbortSignal,
 ): Promise<IssueDiagnosis> {
   const url = `https://github.com/${repository}/issues/${number}`;
-  const { status, body } = await rest(`repos/${repository}/issues/${number}`);
+  const { status, body } = await rest(`repos/${repository}/issues/${number}`, { signal });
   const base = { repository, number, url };
   const inspect = `gh api repos/${repository}/issues/${number}`;
   const repositoryUrl = prop(body, "repository_url");
@@ -1449,39 +1446,50 @@ export interface GraphqlApi {
   mutate(query: string, variables: Record<string, string>): Promise<GraphqlAnswer>;
 }
 
-async function ghGraphql(
-  query: string,
-  variables: Record<string, string>,
-  include = false,
-): Promise<GraphqlAnswer> {
-  const args = ["api", "graphql", ...(include ? ["--include"] : []), "-f", `query=${query}`];
-  for (const [key, value] of Object.entries(variables)) args.push("-f", `${key}=${value}`);
-  let stdout: unknown;
-  try {
-    ({ stdout } = await execute("gh", args, { maxBuffer: 8 * 1024 * 1024, timeout: 60_000 }));
-  } catch (error) {
+/** Build a GraphQL API boundary over an injected GH transport and environment (#920). */
+export function graphqlApiOverTransport(
+  transport: GhTransport = execFileTransport,
+  env?: NodeJS.ProcessEnv,
+): GraphqlApi {
+  const run = async (
+    query: string,
+    variables: Record<string, string>,
+    include = false,
+  ): Promise<GraphqlAnswer> => {
+    const args = ["api", "graphql", ...(include ? ["--include"] : []), "-f", `query=${query}`];
+    for (const [key, value] of Object.entries(variables)) args.push("-f", `${key}=${value}`);
+    const outcome = await transport({
+      args,
+      ...(env ? { env } : {}),
+      timeoutMs: 60_000,
+      maxBufferBytes: 8 * 1024 * 1024,
+    });
     // gh exits non-zero on GraphQL errors but still prints the response body.
-    stdout = prop(error, "stdout");
-  }
-  let parsed: unknown;
-  let meta: MutationResponseMeta | undefined;
-  try {
-    let body = typeof stdout === "string" ? stdout : "";
-    if (include) {
-      const response = parseGhResponse(body);
-      body = response.body;
-      meta = mutationMeta(response);
+    let stdout = outcome.stdout;
+    let parsed: unknown;
+    let meta: MutationResponseMeta | undefined;
+    try {
+      if (include) {
+        const response = parseGhResponse(stdout);
+        stdout = response.body;
+        meta = mutationMeta(response);
+      }
+      parsed = JSON.parse(stdout);
+    } catch {
+      // Never echo arguments, stderr or response bodies.
+      throw new Error("GitHub query failed. Check gh auth status, network and API rate limits.");
     }
-    parsed = JSON.parse(body);
-  } catch {
-    // Never echo arguments, stderr or response bodies.
-    throw new Error("GitHub query failed. Check gh auth status, network and API rate limits.");
-  }
-  const errors = prop(parsed, "errors");
+    const errors = prop(parsed, "errors");
+    return {
+      data: prop(parsed, "data"),
+      errors: Array.isArray(errors) ? errors.filter(isRecord) : [],
+      ...(meta ? { response: meta } : {}),
+    };
+  };
   return {
-    data: prop(parsed, "data"),
-    errors: Array.isArray(errors) ? errors.filter(isRecord) : [],
-    ...(meta ? { response: meta } : {}),
+    query: (query, variables) => run(query, variables),
+    // Mutations keep the same response's status and retry headers for write recovery (#345).
+    mutate: (query, variables) => run(query, variables, true),
   };
 }
 
@@ -1499,11 +1507,7 @@ export function mutationMeta(response: GhResponse): MutationResponseMeta {
 }
 
 /** Production GraphQL boundary through the existing authenticated `gh` (no shell). */
-export const ghGraphqlApi: GraphqlApi = {
-  query: (query, variables) => ghGraphql(query, variables),
-  // Mutations keep the same response's status and retry headers for write recovery (#345).
-  mutate: (query, variables) => ghGraphql(query, variables, true),
-};
+export const ghGraphqlApi: GraphqlApi = graphqlApiOverTransport();
 
 /**
  * A user's current permission on a repository (#212), as GitHub's REST collaborator-permission
