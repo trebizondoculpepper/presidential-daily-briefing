@@ -19,7 +19,9 @@ import {
   writeGlobalConfig,
   type GlobalProject,
 } from "../config/globalconfig.js";
-import { githubRepositories, type GitRunner } from "../config/config.js";
+import type { GitRunner } from "../config/config.js";
+import { gitServiceOf } from "../config/identity.js";
+import type { GitService } from "../git/service.js";
 import type { ServedRepository, GlobalConfigBoundary } from "./types.js";
 import { EXIT_USAGE } from "./options.js";
 
@@ -39,8 +41,11 @@ export class RegistrationError extends Error {
 export interface RegistrationRuntime {
   /** Invoking working directory. */
   readonly cwd?: string;
-  /** Git runner used to resolve a subdirectory to its real working-tree root. */
-  readonly git?: GitRunner;
+  /**
+   * Git boundary used to resolve a subdirectory to its real working-tree root and read its
+   * remotes: the shared typed service, or a legacy runner as its transport (#937).
+   */
+  readonly git?: GitService | GitRunner;
   /** Resolve a local checkout to `owner/name`. */
   readonly currentRepository: (cwd?: string, signal?: AbortSignal) => Promise<string>;
   /** Absent when the caller has no verified global configuration boundary. */
@@ -101,13 +106,43 @@ class ServedSet {
  * checkout with another repository and save the wrong root against it. Exactly one GitHub remote
  * is authoritative; anything else falls back to the resolver the command already trusts.
  */
+/** One typed Git service per injected boundary: a shared service is reused as is. */
+const services = new WeakMap<GitService | GitRunner, GitService>();
+
+/** The typed Git service for this runtime, or null when Git checks are not configured. */
+function typedGit(runtime: RegistrationRuntime): GitService | null {
+  if (!runtime.git) return null;
+  let service = services.get(runtime.git);
+  if (!service) {
+    service = gitServiceOf(runtime.git);
+    services.set(runtime.git, service);
+  }
+  return service;
+}
+
+/** The checkout root containing `path` through the typed service; null outside a checkout. */
+async function workingRoot(git: GitService, path: string): Promise<string | null> {
+  try {
+    return await git.workingTreeRoot({ cwd: path });
+  } catch {
+    return null;
+  }
+}
+
 async function checkoutRepository(
   root: string,
   runtime: RegistrationRuntime,
 ): Promise<string | null> {
-  if (runtime.git) {
+  const git = typedGit(runtime);
+  if (git) {
     try {
-      const found = githubRepositories(await runtime.git(["remote", "-v"], root));
+      const found = [
+        ...new Set(
+          (await git.remotes({ cwd: root })).flatMap((r) =>
+            r.repository ? [r.repository.toLowerCase()] : [],
+          ),
+        ),
+      ];
       if (found.length === 1) return found[0]!;
     } catch {
       // No readable remotes: fall back to the resolver below.
@@ -126,15 +161,16 @@ async function resolveProject(
   runtime: RegistrationRuntime,
 ): Promise<{ root: string; repository: string }> {
   let root = path;
-  if (runtime.git) {
-    try {
-      root = (await runtime.git(["rev-parse", "--show-toplevel"], path)).trim() || path;
-    } catch {
+  const git = typedGit(runtime);
+  if (git) {
+    const found = await workingRoot(git, path);
+    if (found === null) {
       throw new RegistrationError(
         EXIT_USAGE,
         `${path} is not inside a Git checkout. Run from or pass --project pointing to a local Git checkout.`,
       );
     }
+    root = found;
   }
   const resolved = await checkoutRepository(root, runtime);
   if (resolved === null)
@@ -158,13 +194,9 @@ async function resolveProject(
 async function cwdRepository(
   runtime: RegistrationRuntime,
 ): Promise<{ root: string; repository: string } | null> {
-  if (!runtime.cwd || !runtime.git) return null;
-  let root = "";
-  try {
-    root = (await runtime.git(["rev-parse", "--show-toplevel"], runtime.cwd)).trim();
-  } catch {
-    return null;
-  }
+  const git = typedGit(runtime);
+  if (!runtime.cwd || !git) return null;
+  const root = await workingRoot(git, runtime.cwd);
   if (!root) return null;
   const repository = await checkoutRepository(root, runtime);
   return repository !== null && repositoryPattern.test(repository) ? { root, repository } : null;
@@ -241,13 +273,8 @@ export async function resolveServeProjects(
       continue;
     }
     let present = true;
-    if (runtime.git) {
-      try {
-        await runtime.git(["rev-parse", "--show-toplevel"], root);
-      } catch {
-        present = false;
-      }
-    }
+    const git = typedGit(runtime);
+    if (git) present = (await workingRoot(git, root)) !== null;
     if (!present) {
       saved_without_root(
         `saved project ${root} for ${entry.repository} is missing or no longer a Git checkout; serving ${entry.repository} without a local project. Re-register it with pdb config set serve.projects, or start the server with --project PATH.`,
