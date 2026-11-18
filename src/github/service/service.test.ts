@@ -167,3 +167,57 @@ describe("GH transport (#869)", () => {
     },
   );
 });
+
+describe("typed GH service: repository permission (#878)", () => {
+  it("reads the collaborator permission through the injected REST reader, cached per login", async () => {
+    const paths: string[] = [];
+    const svc = createGhService({
+      env: {},
+      rest: async (path) => {
+        paths.push(path);
+        return { status: 200, body: { user: { login: "Octo" }, role_name: "write" } };
+      },
+    });
+    const lookup = svc.repos.permissionOf("o/r");
+    expect(await lookup("octo")).toBe("write");
+    expect(await lookup("OCTO")).toBe("write");
+    expect(paths).toEqual(["repos/o/r/collaborators/octo/permission"]);
+  });
+
+  it("is unknown, never guessed, for refusals, other users and malformed logins", async () => {
+    const answers = [
+      { status: 404, body: {} },
+      { status: 200, body: { user: { login: "someone-else" }, role_name: "admin" } },
+    ];
+    for (const answer of answers) {
+      const svc = createGhService({ env: {}, rest: async () => answer });
+      expect(await svc.repos.permissionOf("o/r")("octo")).toBe("unknown");
+    }
+    let asked = false;
+    const svc = createGhService({
+      env: {},
+      rest: async () => {
+        asked = true;
+        return { status: 200, body: {} };
+      },
+    });
+    expect(await svc.repos.permissionOf("o/r")("bot[bot]")).toBe("unknown");
+    expect(asked).toBe(false);
+  });
+});
+
+describe("typed GH service: one execution context (#878)", () => {
+  it("runs the default REST reader over the service's own transport and environment", async () => {
+    const t = fake(() =>
+      ok(
+        'HTTP/2.0 200 OK\r\nContent-Type: application/json\r\n\r\n{"user":{"login":"octo"},"role_name":"read"}',
+      ),
+    );
+    const svc = createGhService({ transport: t.transport, env: { GH_HOST: "ghe.example" } });
+    expect(await svc.repos.permissionOf("o/r")("octo")).toBe("read");
+    expect(t.calls[0]).toMatchObject({
+      args: ["api", "--include", "repos/o/r/collaborators/octo/permission"],
+      env: { GH_HOST: "ghe.example" },
+    });
+  });
+});
