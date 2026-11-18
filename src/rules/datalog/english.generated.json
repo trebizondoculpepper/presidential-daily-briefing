@@ -1,8 +1,8 @@
 {
   "modelVersion": 2,
   "policyVersion": 1,
-  "rulesHash": "ec5452c6abfab7d92ea66fdbb06c385afed05bfa12bd1b2c32da5b387ad6e74f",
-  "narrationHash": "199a99dd8184a40af3b9ca219f7962332764a06ca5e0df70866346361961c255",
+  "rulesHash": "9e5bcb275f0d9d278d953b824d189288a9d8833f23553b4b19903469fae5a979",
+  "narrationHash": "35382a0a97699c4d54e9bd1f258a41d453ded6392b4cbf4729e2559faf358056",
   "sources": [
     "policy/schema.edn",
     "policy/rules.edn",
@@ -1768,6 +1768,85 @@
       }
     },
     {
+      "id": "D-BAD-ASSESSMENTS",
+      "purpose": "Inspect both unusable assessments together, so neither metric's repair is dropped (#651).",
+      "kind": "inspect-assessment",
+      "band": 5,
+      "preference": 1,
+      "codes": ["assessment", "inspection"],
+      "roles": null,
+      "clauses": [
+        {
+          "type": "call",
+          "predicate": "foreground",
+          "args": [
+            {
+              "var": "?t"
+            }
+          ]
+        },
+        {
+          "type": "fact",
+          "scope": "viewer",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "role",
+          "value": {
+            "var": "?role"
+          },
+          "phrase": "role",
+          "many": false
+        },
+        {
+          "type": "compare",
+          "op": "not=",
+          "args": [
+            {
+              "var": "?role"
+            },
+            {
+              "lit": "human"
+            }
+          ]
+        },
+        {
+          "type": "call",
+          "predicate": "issue",
+          "args": [
+            {
+              "var": "?t"
+            }
+          ]
+        },
+        {
+          "type": "call",
+          "predicate": "bad-complexity",
+          "args": [
+            {
+              "var": "?t"
+            }
+          ]
+        },
+        {
+          "type": "call",
+          "predicate": "bad-impact",
+          "args": [
+            {
+              "var": "?t"
+            }
+          ]
+        }
+      ],
+      "templateClauses": 1,
+      "calls": ["foreground", "issue", "bad-complexity", "bad-impact"],
+      "evidence": [],
+      "source": {
+        "file": "policy/decisions.edn",
+        "index": 15
+      }
+    },
+    {
       "id": "D-BAD-COMPLEXITY",
       "purpose": "Surface unusable effort evidence for inspection and correction.",
       "kind": "inspect-assessment",
@@ -1834,7 +1913,7 @@
       "evidence": [],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 15
+        "index": 16
       }
     },
     {
@@ -1904,7 +1983,7 @@
       "evidence": [],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 16
+        "index": 17
       }
     },
     {
@@ -1965,7 +2044,7 @@
       "evidence": [],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 17
+        "index": 18
       }
     },
     {
@@ -2026,7 +2105,7 @@
       "evidence": [],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 18
+        "index": 19
       }
     },
     {
@@ -2117,7 +2196,7 @@
       ],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 19
+        "index": 20
       }
     },
     {
@@ -2200,7 +2279,7 @@
       "evidence": [],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 20
+        "index": 21
       }
     },
     {
@@ -2270,7 +2349,7 @@
       "evidence": [],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 21
+        "index": 22
       }
     },
     {
@@ -2364,7 +2443,7 @@
       ],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 22
+        "index": 23
       }
     },
     {
@@ -2496,7 +2575,7 @@
       ],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 23
+        "index": 24
       }
     },
     {
@@ -2628,7 +2707,7 @@
       ],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 24
+        "index": 25
       }
     },
     {
@@ -2719,7 +2798,7 @@
       "evidence": [],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 25
+        "index": 26
       }
     },
     {
@@ -2819,7 +2898,7 @@
       "evidence": [],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 26
+        "index": 27
       }
     },
     {
@@ -2913,7 +2992,7 @@
       ],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 27
+        "index": 28
       }
     },
     {
@@ -3007,7 +3086,7 @@
       ],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 28
+        "index": 29
       }
     },
     {
@@ -3197,7 +3276,7 @@
       ],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 29
+        "index": 30
       }
     },
     {
@@ -3287,7 +3366,7 @@
       ],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 30
+        "index": 31
       }
     },
     {
@@ -3383,7 +3462,7 @@
       ],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 31
+        "index": 32
       }
     },
     {
@@ -3474,7 +3553,7 @@
       ],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 32
+        "index": 33
       }
     },
     {
@@ -3556,7 +3635,7 @@
       ],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 33
+        "index": 34
       }
     },
     {
@@ -3637,7 +3716,7 @@
       ],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 34
+        "index": 35
       }
     },
     {
@@ -3733,7 +3812,7 @@
       ],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 35
+        "index": 36
       }
     },
     {
@@ -3814,7 +3893,7 @@
       ],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 36
+        "index": 37
       }
     },
     {
@@ -3881,7 +3960,7 @@
       "evidence": [],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 37
+        "index": 38
       }
     }
   ],
@@ -12496,7 +12575,7 @@
               },
               "attribute": "kind",
               "value": {
-                "lit": "decide"
+                "lit": "addressed-response"
               },
               "phrase": "kind",
               "many": false
@@ -12531,7 +12610,7 @@
               },
               "attribute": "kind",
               "value": {
-                "lit": "document"
+                "lit": "decide"
               },
               "phrase": "kind",
               "many": false
@@ -12566,7 +12645,7 @@
               },
               "attribute": "kind",
               "value": {
-                "lit": "design"
+                "lit": "document"
               },
               "phrase": "kind",
               "many": false
@@ -12601,7 +12680,7 @@
               },
               "attribute": "kind",
               "value": {
-                "lit": "design-review"
+                "lit": "design"
               },
               "phrase": "kind",
               "many": false
@@ -12623,6 +12702,41 @@
           "source": {
             "file": "policy/ordering.edn :rules",
             "index": 15
+          }
+        },
+        {
+          "params": ["?t", "?r"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?r"
+              },
+              "attribute": "kind",
+              "value": {
+                "lit": "design-review"
+              },
+              "phrase": "kind",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "linked-key",
+              "value": {
+                "lit": -1
+              },
+              "phrase": "linked-to-viewer sort key",
+              "many": false
+            }
+          ],
+          "source": {
+            "file": "policy/ordering.edn :rules",
+            "index": 16
           }
         }
       ],
@@ -12678,7 +12792,7 @@
           ],
           "source": {
             "file": "policy/ordering.edn :rules",
-            "index": 16
+            "index": 17
           }
         },
         {
@@ -12737,7 +12851,7 @@
           ],
           "source": {
             "file": "policy/ordering.edn :rules",
-            "index": 17
+            "index": 18
           }
         },
         {
@@ -12815,7 +12929,7 @@
           ],
           "source": {
             "file": "policy/ordering.edn :rules",
-            "index": 18
+            "index": 19
           }
         }
       ],
@@ -12871,7 +12985,7 @@
           ],
           "source": {
             "file": "policy/ordering.edn :rules",
-            "index": 19
+            "index": 20
           }
         },
         {
@@ -12931,7 +13045,7 @@
           ],
           "source": {
             "file": "policy/ordering.edn :rules",
-            "index": 20
+            "index": 21
           }
         },
         {
@@ -13003,7 +13117,7 @@
           ],
           "source": {
             "file": "policy/ordering.edn :rules",
-            "index": 21
+            "index": 22
           }
         }
       ],
@@ -13071,7 +13185,7 @@
           ],
           "source": {
             "file": "policy/ordering.edn :rules",
-            "index": 22
+            "index": 23
           }
         },
         {
@@ -13106,7 +13220,7 @@
           ],
           "source": {
             "file": "policy/ordering.edn :rules",
-            "index": 23
+            "index": 24
           }
         },
         {
@@ -13178,7 +13292,7 @@
           ],
           "source": {
             "file": "policy/ordering.edn :rules",
-            "index": 24
+            "index": 25
           }
         }
       ],
@@ -13298,7 +13412,7 @@
           ],
           "source": {
             "file": "policy/ordering.edn :rules",
-            "index": 25
+            "index": 26
           }
         }
       ],
@@ -15244,9 +15358,9 @@
     }
   ],
   "coverage": {
-    "decisions": 38,
+    "decisions": 39,
     "predicates": 88,
-    "alternatives": 177,
+    "alternatives": 178,
     "denials": 9,
     "queries": 19,
     "keyQueries": 4,
@@ -15254,6 +15368,6 @@
     "overrides": 4,
     "constants": 14,
     "attributes": 96,
-    "clauses": 918
+    "clauses": 926
   }
 }

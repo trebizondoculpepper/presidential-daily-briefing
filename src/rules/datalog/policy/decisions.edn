@@ -185,6 +185,17 @@
    :why "Benefit is {impactState}; assess it before comparing implementation value."
    :codes ["assessment"]}
 
+  {:id "D-BAD-ASSESSMENTS"
+   :purpose "Inspect both unusable assessments together, so neither metric's repair is dropped (#651)."
+   :kind "inspect-assessment"
+   :band 5
+   :preference 1
+   :affinity "shared"
+   :owned false
+   :when [[1 "role" ?role] [(not= ?role "human")] (issue ?t) (bad-complexity ?t) (bad-impact ?t)]
+   :why "Complexity evidence is {complexityState} and impact evidence is {impactState}; inspect and correct both."
+   :codes ["assessment" "inspection"]}
+
   {:id "D-BAD-COMPLEXITY"
    :purpose "Surface unusable effort evidence for inspection and correction."
    :kind "inspect-assessment"
