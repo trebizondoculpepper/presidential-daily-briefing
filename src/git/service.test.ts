@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import type { GitRunner } from "../config/config.js";
-import { createGitService, GitError, remoteHost } from "./service.js";
+import { createGitService, GitError, remoteHost, sanitizedGitEnvironment } from "./service.js";
 
 /**
  * Typed Git service (#897, doc/design/github-service-composition.md). A focused fake proves the
@@ -137,11 +137,14 @@ describe("typed Git service (#897)", () => {
     const { git } = fakeGit(
       {
         "check-ignore --quiet -- .env": "",
-        "ls-files --error-unmatch -- tracked.txt": "tracked.txt\n",
+        "--literal-pathspecs ls-files --error-unmatch -- tracked.txt": "tracked.txt\n",
       },
       {
         "check-ignore --quiet -- tracked.txt": Object.assign(new Error("exit 1"), { code: 1 }),
-        "ls-files --error-unmatch -- other.txt": Object.assign(new Error("exit 1"), { code: 1 }),
+        "--literal-pathspecs ls-files --error-unmatch -- other.txt": Object.assign(
+          new Error("exit 1"),
+          { code: 1 },
+        ),
       },
     );
     const service = createGitService({ git });
@@ -150,6 +153,27 @@ describe("typed Git service (#897)", () => {
     expect(await service.isIgnored(context, "tracked.txt")).toBe(false);
     expect(await service.isTracked(context, "tracked.txt")).toBe(true);
     expect(await service.isTracked(context, "other.txt")).toBe(false);
+  });
+
+  it("keeps trailing spaces in a returned path and answers unknown revisions as absence", async () => {
+    const { git } = fakeGit(
+      {
+        "rev-parse --show-toplevel": "/tmp/project \n",
+        "rev-parse --git-path info/exclude": "/tmp/project /.git/info/exclude\n",
+      },
+      {
+        "merge-base --is-ancestor missing HEAD": Object.assign(new Error("exit 128"), {
+          code: 128,
+          stderr: "fatal: Not a valid object name missing",
+        }),
+      },
+    );
+    const service = createGitService({ git });
+    const context = { cwd: "/tmp/project" };
+    // A real directory may end in a space; trimming would name a different path.
+    expect(await service.workingTreeRoot(context)).toBe("/tmp/project ");
+    expect(await service.gitPath(context, "info/exclude")).toBe("/tmp/project /.git/info/exclude");
+    expect(await service.isAncestor(context, "missing", "HEAD")).toBe(false);
   });
 
   it("parses the hosts of the remote URL forms Git accepts", () => {
@@ -163,9 +187,12 @@ describe("typed Git service (#897)", () => {
   // One disposable checkout: the same operations against the installed Git executable.
   it("reads a real disposable checkout", async () => {
     const root = await mkdtemp(join(tmpdir(), "pdb-git-service-"));
-    const run = promisify(execFile);
+    // Sanitized like the service's own transport: a parent GIT_DIR must not redirect these.
+    const env = sanitizedGitEnvironment();
+    const run = (file: string, args: readonly string[], options: { cwd: string }) =>
+      promisify(execFile)(file, [...args], { ...options, env });
     const git = async (args: readonly string[], cwd: string) =>
-      (await run("git", [...args], { cwd })).stdout;
+      (await run("git", args, { cwd })).stdout;
     try {
       await run("git", ["init", "-q"], { cwd: root });
       await run("git", ["remote", "add", "origin", "https://github.com/owner/real.git"], {
@@ -179,7 +206,9 @@ describe("typed Git service (#897)", () => {
       const service = createGitService({ git });
       const context = { cwd: root };
       const { realpath } = await import("node:fs/promises");
-      expect(await service.workingTreeRoot(context)).toBe(await realpath(root));
+      // Git reports forward slashes on Windows; realpath normalises both spellings.
+      const reported = await service.workingTreeRoot(context);
+      expect(await realpath(reported!)).toBe(await realpath(root));
       expect(await service.checkout(context)).toEqual({
         host: "github.com",
         repository: "owner/real",
