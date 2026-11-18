@@ -1301,7 +1301,17 @@ export async function applyComplete(
     const step: PlanStep = { ...next, status: "pending" };
     steps.push(step);
     try {
-      await capabilities.executeStep(repository, request.number, step.command);
+      if (step.step === "record") {
+        await capabilities.recordCompletion(
+          repository,
+          request.number,
+          completionBody(request.agent, plan.record!),
+        );
+      } else if (step.step === "close") {
+        await capabilities.closeIssue(repository, request.number);
+      } else if (step.step === "labels") {
+        await capabilities.removeLabel(repository, request.number, claimPolicy.awaitingReview);
+      }
       step.status = "done";
       if (step.step === "record") opId = plan.record?.opId ?? plan.opId;
       if (step.step === "close") closedByRun = true;

@@ -24,7 +24,6 @@ import type { CheckReads } from "./checks.js";
 import type { HistoryReads } from "./history.js";
 import { completionCapabilities, runOverTransport } from "./completion.js";
 import type { CompletionCapabilities } from "./completion.js";
-import { ghRun } from "../dependencies.js";
 import type { GhRun, GraphQuery } from "../../workflow/claims.js";
 
 export interface GhAccount {
@@ -113,7 +112,7 @@ export function createGhService(options: GhServiceOptions = {}): GhService {
   // capability honours the same execution context (host, account, injected transport).
   const rest = options.rest ?? restOverTransport(transport, env);
   const query: GraphQuery = options.query ?? ghQueryWith(undefined, {}, { transport, env });
-  const run: GhRun = options.run ?? (options.transport ? runOverTransport(transport, env) : ghRun);
+  const run: GhRun = options.run ?? runOverTransport(transport, query as Query, env);
   return {
     account: {
       async current(signal) {

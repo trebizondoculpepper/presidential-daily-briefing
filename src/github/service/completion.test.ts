@@ -4,13 +4,11 @@ import type { Rest } from "../github.js";
 import type { GraphQuery } from "../../workflow/claims.js";
 
 describe("typed GH service: completion (#889)", () => {
-  it("reads issues, delivery comments, PRs, default branches, containment, and executes guarded steps", async () => {
-    const queries: string[] = [];
+  it("reads issues, delivery comments, PRs, default branches, containment, and executes typed completion writes", async () => {
     const restCalls: string[] = [];
-    const runs: string[][] = [];
+    const runs: { args: string[]; guarded: boolean }[] = [];
 
     const query: GraphQuery = async (gql, vars) => {
-      queries.push(gql);
       if (gql.includes("issueOrPullRequest")) {
         return {
           viewer: { __typename: "User", login: "alice" },
@@ -64,7 +62,7 @@ describe("typed GH service: completion (#889)", () => {
       rest,
       run: async (args, call) => {
         if (call?.guard) await call.guard();
-        runs.push(args);
+        runs.push({ args, guarded: Boolean(call?.guard) });
       },
     });
 
@@ -92,16 +90,57 @@ describe("typed GH service: completion (#889)", () => {
     expect(count).toBe(4);
     expect(restCalls).toEqual(["repos/o/r/compare/main...abc1234567890"]);
 
-    await gh.completion.executeStep("o/r", 42, ["issue", "close", "42"]);
-    expect(runs).toEqual([["issue", "close", "42"]]);
+    await gh.completion.recordCompletion("o/r", 42, "Completion body");
+    await gh.completion.closeIssue("o/r", 42);
+    await gh.completion.removeLabel("o/r", 42, "status:awaiting-review");
+    expect(runs).toEqual([
+      {
+        args: ["issue", "comment", "42", "--repo", "o/r", "--body", "Completion body"],
+        guarded: true,
+      },
+      {
+        args: ["issue", "close", "42", "--repo", "o/r", "--reason", "completed"],
+        guarded: true,
+      },
+      {
+        args: ["issue", "edit", "42", "--repo", "o/r", "--remove-label", "status:awaiting-review"],
+        guarded: true,
+      },
+    ]);
   });
 
-  it("routes completion.executeStep through the injected transport when provided", async () => {
-    const calls: readonly string[][] = [];
-    const transportCalls: (readonly string[])[] = [];
+  it("routes typed writes through transport and env while preserving comment recovery", async () => {
+    const transportCalls: { args: readonly string[]; env?: NodeJS.ProcessEnv }[] = [];
+    const customEnv = { GH_HOST: "ghe.example.com" };
+    let postedBody = "";
     const gh = createGhService({
+      env: customEnv,
       transport: async (call) => {
-        transportCalls.push(call.args);
+        transportCalls.push({ args: call.args, env: call.env });
+        if (call.args.includes("graphql") && call.args.some((a) => a.includes("viewerDidAuthor"))) {
+          return {
+            ok: true,
+            stdout: JSON.stringify({
+              data: {
+                repository: {
+                  issue: {
+                    comments: {
+                      pageInfo: { hasPreviousPage: false },
+                      nodes: [
+                        {
+                          url: "https://ghe.example.com/o/r/issues/7#issuecomment-1",
+                          body: postedBody,
+                          viewerDidAuthor: true,
+                          createdAt: new Date().toISOString(),
+                        },
+                      ],
+                    },
+                  },
+                },
+              },
+            }),
+          };
+        }
         if (call.args.includes("graphql")) {
           return {
             ok: true,
@@ -110,12 +149,27 @@ describe("typed GH service: completion (#889)", () => {
             }),
           };
         }
+        if (call.args.includes("repos/o/r/issues/7/comments")) {
+          const bodyArg = call.args.find((a) => a.startsWith("body="));
+          if (bodyArg) postedBody = bodyArg.slice("body=".length);
+          // Simulate a timeout after dispatch: withCommentRecovery recovers via receipt read-back.
+          return {
+            ok: false,
+            kind: "timeout",
+            exitCode: null,
+            stdout: "",
+            stderr: "",
+          };
+        }
         return { ok: true, stdout: "" };
       },
     });
 
-    await gh.completion.executeStep("o/r", 7, ["issue", "close", "7"]);
-    expect(calls).toHaveLength(0);
-    expect(transportCalls.some((args) => args.includes("close"))).toBe(true);
+    await gh.completion.recordCompletion("o/r", 7, "Completion body");
+    await gh.completion.closeIssue("o/r", 7);
+
+    expect(transportCalls.every((c) => c.env === customEnv)).toBe(true);
+    expect(transportCalls.some((c) => c.args.includes("repos/o/r/issues/7/comments"))).toBe(true);
+    expect(transportCalls.some((c) => c.args.includes("close"))).toBe(true);
   });
 });

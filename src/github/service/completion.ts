@@ -2,11 +2,15 @@
  * Typed GitHub completion capabilities (#889, doc/design/github-service-composition.md).
  *
  * Encapsulates issue-completion GraphQL reads (issue + viewer + delivery comments), PR/branch/
- * containment checks, and guarded write-step execution so `workflow/completion.ts` does not
- * compose GraphQL queries or spawn `gh` directly.
+ * containment checks, and guarded typed completion writes (`recordCompletion`, `closeIssue`,
+ * `removeLabel`) so `workflow/completion.ts` does not compose GraphQL queries or spawn `gh`.
  */
-import { isRateLimit, RateLimitError } from "../dependencies.js";
-import type { Rest } from "../github.js";
+import { classifyCommentResponse, commentCommand, withCommentRecovery } from "../commentwrite.js";
+import { ghCommentReceipt, isRateLimit, RateLimitError } from "../dependencies.js";
+import { parseGhResponse } from "../evidence.js";
+import type { GhResponse } from "../evidence.js";
+import { prop } from "../github.js";
+import type { Query, Rest } from "../github.js";
 import type { GhTransport } from "./transport.js";
 import { ticketGuard } from "../../workflow/claims.js";
 import type { GhRun, GraphQuery } from "../../workflow/claims.js";
@@ -59,16 +63,74 @@ export interface CompletionCapabilities {
     sha: string,
     branchOf: (repository: string) => Promise<string | null>,
   ): Promise<Containment>;
-  /** Execute one planned `gh` write step under the live ticket guard. */
-  executeStep(repository: string, issueNumber: number, command: string[]): Promise<void>;
+  /** Post a completion record comment under the live ticket guard and bounded comment recovery. */
+  recordCompletion(repository: string, issueNumber: number, body: string): Promise<void>;
+  /** Close the issue as completed under the live ticket guard. */
+  closeIssue(repository: string, issueNumber: number): Promise<void>;
+  /** Remove a workflow label under the live ticket guard. */
+  removeLabel(repository: string, issueNumber: number, label: string): Promise<void>;
   /** Return a view of these capabilities that invokes `onRequest` per underlying GH call. */
   counted(onRequest: () => void): CompletionCapabilities;
 }
 
-/** Build a `GhRun` over an injected `GhTransport` so service-level transport isolation holds. */
-export const runOverTransport =
-  (transport: GhTransport, env?: NodeJS.ProcessEnv): GhRun =>
-  async (args) => {
+function commentRunOverTransport(transport: GhTransport, query: Query, env?: NodeJS.ProcessEnv) {
+  return withCommentRecovery({
+    dispatch: async (args) => {
+      const target = commentCommand(args)!;
+      const outcome = await transport({
+        args: [
+          "api",
+          "--include",
+          "--method",
+          "POST",
+          `repos/${target.repository}/issues/${target.number}/comments`,
+          "-f",
+          `body=${target.body}`,
+        ],
+        ...(env ? { env } : {}),
+        timeoutMs: 60_000,
+        maxBufferBytes: 1024 * 1024,
+      });
+      if (!outcome.ok) {
+        let response: GhResponse | null = null;
+        try {
+          response = outcome.stdout ? parseGhResponse(outcome.stdout) : null;
+        } catch {
+          response = null;
+        }
+        throw Object.assign(new Error("gh issue comment failed."), {
+          commentAttempt: classifyCommentResponse(response, {
+            exitCode: outcome.exitCode,
+            timedOut: outcome.kind === "timeout",
+          }),
+        });
+      }
+      try {
+        const url = prop(JSON.parse(parseGhResponse(outcome.stdout).body), "html_url");
+        return { url: typeof url === "string" ? url : null };
+      } catch {
+        return { url: null };
+      }
+    },
+    readBack: (target, since) => ghCommentReceipt(target, since, query),
+  });
+}
+
+/**
+ * Build a `GhRun` over an injected `GhTransport`, `Query`, and `env` so service-level
+ * transport/environment isolation and bounded comment recovery both hold.
+ */
+export const runOverTransport = (
+  transport: GhTransport,
+  query: Query,
+  env?: NodeJS.ProcessEnv,
+): GhRun => {
+  const commentRun = commentRunOverTransport(transport, query, env);
+  return async (args, call) => {
+    if (commentCommand(args)) {
+      await commentRun(args, call);
+      return;
+    }
     const outcome = await transport({
       args,
       ...(env ? { env } : {}),
@@ -76,11 +138,12 @@ export const runOverTransport =
       maxBufferBytes: 1024 * 1024,
     });
     if (outcome.ok) return;
-    if (!outcome.ok && isRateLimit(`${outcome.stderr}\n${outcome.stdout}`)) {
+    if (isRateLimit(`${outcome.stderr}\n${outcome.stdout}`)) {
       throw new RateLimitError(`gh ${args[0]} ${args[1]} was rate limited by GitHub.`);
     }
     throw new Error(`gh ${args[0]} ${args[1]} failed. Check gh auth status and rate limits.`);
   };
+};
 
 /** Build typed completion capabilities over GraphQL, REST, and guarded command execution. */
 export function completionCapabilities(
@@ -115,8 +178,22 @@ export function completionCapabilities(
     targetContainment(target, sha, branchOf) {
       return readTargetContainment(target, sha, { query: q, rest: r }, branchOf);
     },
-    async executeStep(repository, issueNumber, command) {
-      await run(command, { guard: ticketGuard(repository, issueNumber, q) });
+    async recordCompletion(repository, issueNumber, body) {
+      await run(["issue", "comment", String(issueNumber), "--repo", repository, "--body", body], {
+        guard: ticketGuard(repository, issueNumber, q),
+      });
+    },
+    async closeIssue(repository, issueNumber) {
+      await run(
+        ["issue", "close", String(issueNumber), "--repo", repository, "--reason", "completed"],
+        { guard: ticketGuard(repository, issueNumber, q) },
+      );
+    },
+    async removeLabel(repository, issueNumber, label) {
+      await run(
+        ["issue", "edit", String(issueNumber), "--repo", repository, "--remove-label", label],
+        { guard: ticketGuard(repository, issueNumber, q) },
+      );
     },
     counted(onRequest) {
       return build(
