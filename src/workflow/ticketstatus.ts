@@ -12,7 +12,7 @@
  * unread delivery record or a quota stop leaves the document incomplete (exit 2), never "no PR",
  * "no blocker" or "done". Read-only: next steps name supported commands, never run them.
  */
-import { createGhService } from "../github/service/service.js";
+import { referenceReads } from "../github/service/references.js";
 import { SubjectUnavailable } from "../github/github.js";
 import type { FocusOptions, Query } from "../github/github.js";
 import { collectIssueFocus, ghQueryWith } from "../github/github.js";
@@ -203,6 +203,9 @@ async function closingReferences(
   const bounds = readProfiles["ticket-status-v1"].bounds;
   const subject = `${repository}#${number}`;
   const q = meter.query(base, "linked-pull-requests", `${subject} (closed included)`);
+  // The typed reference capability (#951), built once for this read over its metered executor:
+  // the same factory as the facade's `references` group, so metering and coverage stay here.
+  const references = referenceReads(q as Query);
   const refs: { number: number; url: string; state: string }[] = [];
   let cursor: string | null = null;
   let more = true;
@@ -216,8 +219,7 @@ async function closingReferences(
         quotaStopped = true;
         break;
       }
-      // The typed, validated page read over this read's metered executor (#951).
-      const page = await createGhService({ query: q }).references.closingPage(
+      const page = await references.closingPage(
         repository,
         number,
         bounds.linkedPullRequestsPerPage,
