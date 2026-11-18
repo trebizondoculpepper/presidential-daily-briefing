@@ -20,6 +20,8 @@ import { ghQuery, permissionLookup, writePermissions } from "../github/github.js
 import type { PermissionLookup } from "../github/github.js";
 import { ghRun } from "../github/dependencies.js";
 import { ticketReads } from "../github/service/tickets.js";
+import { issueWrites, WRITE, writeCommand } from "../github/service/issuewrites.js";
+import type { IssueWrite } from "../github/service/issuewrites.js";
 import type { TicketReads } from "../github/service/tickets.js";
 import { CommentWriteError } from "../github/commentwrite.js";
 import type { CommentCallOptions, CommentRecovery } from "../github/commentwrite.js";
@@ -57,12 +59,22 @@ export const claimPolicy = {
 
 export interface PlanStep {
   step: string;
+  /** Display form of the write (dry runs, JSON, recovery); generated from the typed write. */
   command: string[];
+  /** The typed write this step performs (#942): not serialized. */
+  [WRITE]?: IssueWrite;
   status?: string;
   reason?: string;
   /** A comment write that did not end posted: its bounded recovery details (#345). */
   recovery?: CommentRecovery;
 }
+
+/** A plan step for one typed write: its display command is generated from the same value. */
+export const writeStep = (step: string, op: IssueWrite): PlanStep => ({
+  step,
+  command: writeCommand(op),
+  [WRITE]: op,
+});
 
 /** Record a failed write on its step, keeping a comment write's recovery details (#345). */
 export function failStep(step: PlanStep, error: unknown): void {
@@ -499,31 +511,16 @@ function labelSteps(
 ): PlanStep[] {
   const changes: PlanStep[] = add
     .filter((l) => !repoLabels.has(l))
-    .map((name) => ({
-      step: "create-label",
-      command: [
-        "label",
-        "create",
+    .map((name) =>
+      writeStep("create-label", {
+        kind: "label-create",
+        repository,
         name,
-        "--repo",
-        repository,
-        "--color",
-        claimPolicy.labelColours[name] ?? "ededed",
-      ],
-    }));
+        color: claimPolicy.labelColours[name] ?? "ededed",
+      }),
+    );
   if (add.length || remove.length)
-    changes.push({
-      step: "labels",
-      command: [
-        "issue",
-        "edit",
-        String(number),
-        "--repo",
-        repository,
-        ...add.flatMap((l) => ["--add-label", l]),
-        ...remove.flatMap((l) => ["--remove-label", l]),
-      ],
-    });
+    changes.push(writeStep("labels", { kind: "labels-edit", repository, number, add, remove }));
   return changes;
 }
 
@@ -896,18 +893,13 @@ async function planClaimFor(
       ],
     );
   const op = marker("claim", [repository, number, agent]);
-  const claimComment = (): PlanStep => ({
-    step: "comment",
-    command: [
-      "issue",
-      "comment",
-      String(number),
-      "--repo",
+  const claimComment = (): PlanStep =>
+    writeStep("comment", {
+      kind: "comment",
       repository,
-      "--body",
-      `Claimed by \`${agent}\`${branch ? ` on branch \`${branch}\`` : ""} with \`pdb claim\`.\n\n${op}`,
-    ],
-  });
+      number,
+      body: `Claimed by \`${agent}\`${branch ? ` on branch \`${branch}\`` : ""} with \`pdb claim\`.\n\n${op}`,
+    });
   if (label(item, mine)) {
     // Complete only when the explanatory comment exists too: a run whose comment failed is
     // repaired by retrying just that step.
@@ -1132,46 +1124,27 @@ async function planClaimFor(
   // handled above, where the label is already present.
   const changes: PlanStep[] = [];
   if (!repoLabels.has(mine))
-    changes.push({
-      step: "create-label",
-      command: [
-        "label",
-        "create",
-        mine,
-        "--repo",
+    changes.push(
+      writeStep("create-label", {
+        kind: "label-create",
         repository,
-        "--color",
-        claimPolicy.labelColours.agent,
-        "--description",
-        `Claimed by agent ${agent}`,
-      ],
-    });
-  changes.push({
-    step: "labels",
-    command: [
-      "issue",
-      "edit",
-      String(number),
-      "--repo",
-      repository,
-      "--add-label",
-      mine,
-      ...remove.flatMap((l) => ["--remove-label", l]),
-    ],
-  });
+        name: mine,
+        color: claimPolicy.labelColours.agent,
+        description: `Claimed by agent ${agent}`,
+      }),
+    );
+  changes.push(
+    writeStep("labels", { kind: "labels-edit", repository, number, add: [mine], remove }),
+  );
   // Always post the claim comment for a new acquisition.
-  changes.push({
-    step: "comment",
-    command: [
-      "issue",
-      "comment",
-      String(number),
-      "--repo",
+  changes.push(
+    writeStep("comment", {
+      kind: "comment",
       repository,
-      "--body",
-      `Claimed by \`${agent}\`${branch ? ` on branch \`${branch}\`` : ""} with \`pdb claim\`${rework ? " for review rework" : ""}. Removed: ${remove.map((l) => `\`${l}\``).join(", ")}.\n\n${op}`,
-    ],
-  });
+      number,
+      body: `Claimed by \`${agent}\`${branch ? ` on branch \`${branch}\`` : ""} with \`pdb claim\`${rework ? " for review rework" : ""}. Removed: ${remove.map((l) => `\`${l}\``).join(", ")}.\n\n${op}`,
+    }),
+  );
   return {
     ok: true,
     noop: false,
@@ -1358,44 +1331,25 @@ export async function planNeedsHuman(
     );
   const changes: PlanStep[] = [];
   if (!already)
-    changes.push({
-      step: "comment",
-      command: [
-        "issue",
-        "comment",
-        String(number),
-        "--repo",
+    changes.push(
+      writeStep("comment", {
+        kind: "comment",
         repository,
-        "--body",
-        questionRecordBody({ designer, agent, why, questions }, op),
-      ],
-    });
+        number,
+        body: questionRecordBody({ designer, agent, why, questions }, op),
+      }),
+    );
   for (const name of add.filter((l) => !repoLabels.has(l)))
-    changes.push({
-      step: "create-label",
-      command: [
-        "label",
-        "create",
+    changes.push(
+      writeStep("create-label", {
+        kind: "label-create",
+        repository,
         name,
-        "--repo",
-        repository,
-        "--color",
-        claimPolicy.labelColours[name] ?? "ededed",
-      ],
-    });
+        color: claimPolicy.labelColours[name] ?? "ededed",
+      }),
+    );
   if (add.length || remove.length)
-    changes.push({
-      step: "labels",
-      command: [
-        "issue",
-        "edit",
-        String(number),
-        "--repo",
-        repository,
-        ...add.flatMap((l) => ["--add-label", l]),
-        ...remove.flatMap((l) => ["--remove-label", l]),
-      ],
-    });
+    changes.push(writeStep("labels", { kind: "labels-edit", repository, number, add, remove }));
   return {
     ok: true,
     noop: !changes.length,
@@ -1658,12 +1612,7 @@ export async function planQuestionResolution(
     ok: true,
     facts,
     noop: false,
-    changes: [
-      {
-        step: "comment",
-        command: ["issue", "comment", String(number), "--repo", repository, "--body", body],
-      },
-    ],
+    changes: [writeStep("comment", { kind: "comment", repository, number, body })],
     retry,
   };
 }
@@ -1921,16 +1870,12 @@ export async function planRelease(
         ? `incomplete (parked; \`${target}\`)`
         : `${outcome} (\`${target}\`)`;
   const changes: PlanStep[] = [];
-  changes.push({
-    step: "comment",
-    command: [
-      "issue",
-      "comment",
-      String(number),
-      "--repo",
+  changes.push(
+    writeStep("comment", {
+      kind: "comment",
       repository,
-      "--body",
-      [
+      number,
+      body: [
         `Handoff by \`${agent}\` with \`pdb release\`: **${describe}**. Releasing the claim.`,
         "",
         ...(pr
@@ -1942,8 +1887,8 @@ export async function planRelease(
         "",
         releaseMarker(op, plan),
       ].join("\n"),
-    ],
-  });
+    }),
+  );
   changes.push(...labelSteps(repository, number, add, remove, repoLabels));
   return {
     ok: true,
@@ -1984,7 +1929,12 @@ export async function applyPlan(
       continue;
     }
     try {
-      await run(step.command, { guard: ticketGuard(repository, plan.facts.number, query) });
+      // The typed write (#942) through the shared gh write boundary; a step without one (a
+      // caller-built legacy plan) still dispatches its command.
+      const call = { guard: ticketGuard(repository, plan.facts.number, query) };
+      const op = step[WRITE];
+      if (op) await issueWrites(run).apply(op, call);
+      else await run(step.command, call);
       step.status = "done";
     } catch (error) {
       failStep(step, error);
