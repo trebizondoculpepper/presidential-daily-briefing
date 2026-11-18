@@ -134,12 +134,14 @@ export function installArgumentsFor(
       help: { type: "boolean" },
     },
   });
-  // Execution requires exactly one client positional; zero defaults only behind --help.
+  // Execution requires exactly one client positional; client-free help is allowed.
   if (values.help !== true && positionals.length !== 1)
     throw new Error(
       `pdb ${operation} requires exactly one client (codex); run "pdb ${operation} codex" or pass --help.`,
     );
-  const client = positionals[0] as InstallClient | undefined;
+  const client = (positionals[0] ?? (values.help === true ? "codex" : undefined)) as
+    | InstallClient
+    | undefined;
   if (client !== "codex")
     throw new Error(`Unsupported installer client ${JSON.stringify(client)}; supported: codex.`);
   if (values.transport !== undefined && values.transport !== "stdio" && values.transport !== "http")
@@ -220,15 +222,18 @@ export async function resolveInstallScope(
     let repository: string | null = null;
     if (args.repo !== null && args.repo !== undefined) {
       const remotes = await svc.remotes({ cwd: root });
+      // githubRepositories lowercases names; normalize the argument so install/uninstall accept
+      // the repository's original capitalization (#844 finding).
+      const requested = args.repo.toLowerCase();
       const repositories = [
         ...new Set(remotes.map((r) => r.repository).filter((r): r is string => r !== null)),
       ];
-      if (!repositories.includes(args.repo)) {
+      if (!repositories.includes(requested)) {
         throw new Error(
           `NO_PROJECT: the checkout is not ${args.repo} (GitHub remotes: ${repositories.join(", ") || "none"}).`,
         );
       }
-      repository = args.repo;
+      repository = requested;
     } else {
       const identity = await svc.checkout({ cwd: root });
       repository = identity ? identity.repository : null;

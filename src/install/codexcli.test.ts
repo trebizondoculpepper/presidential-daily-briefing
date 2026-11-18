@@ -95,6 +95,22 @@ describe("install codex argument surface (#768 slice 2a)", () => {
       /requires exactly one client/,
     );
     expect(installArgumentsFor(["codex", "--help"], "install").help).toBe(true);
+    // Client-free help is allowed.
+    expect(installArgumentsFor(["--help"], "install").help).toBe(true);
+  });
+
+  it("accepts an uppercase --repo by normalizing it before remote comparison (#844)", async () => {
+    const git: GitRunner = async (args, _cwd) => {
+      if (args[0] === "rev-parse" && args[1] === "--show-toplevel") return SYNTHETIC_ROOT + "\n";
+      if (args[0] === "remote") return "origin\thttps://github.com/example/project.git (fetch)\n";
+      if (args[0] === "rev-parse" && args[1] === "--git-common-dir") return ".git\n";
+      throw new Error(`unexpected git ${args.join(" ")}`);
+    };
+    const scope = await resolveInstallScope(
+      installArgumentsFor(["codex", "--repo", "Example/Project"], "install"),
+      runtime(git),
+    );
+    expect(scope).toMatchObject({ kind: "project", repository: "example/project" });
   });
 
   it("help text describes the surface and uninstall limits", () => {
