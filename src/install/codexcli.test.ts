@@ -269,9 +269,11 @@ describe("runCodexInstallSurface (#768 slice 2a)", () => {
       items: { kind: string; action: string; outcome: string }[];
     };
     expect(result.operation).toBe("uninstall");
-    // Uninstall previews describe removal intent; identity is not reported for uninstall.
+    // Uninstall previews describe removal intent; identity is not reported for uninstall. With
+    // no owned entry recorded, the dry-run removal reports the entry as absent/kept (nothing
+    // written), which is the honest preview for this state.
     expect(result.items.map((i) => i.kind)).toEqual(["mcp", "hook"]);
-    expect(result.items[0]).toMatchObject({ kind: "mcp", action: "remove", outcome: "planned" });
+    expect(result.items[0]).toMatchObject({ kind: "mcp", action: "absent", outcome: "kept" });
   });
 
   it("exits 1 when a non-preview request applies nothing (#844 finding)", async () => {
