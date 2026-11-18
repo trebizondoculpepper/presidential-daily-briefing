@@ -648,3 +648,13 @@ describe("rebrief CLI/private state", () => {
     expect(text).not.toContain("SECRET");
   });
 });
+
+describe("rebrief default Git boundary (#933)", () => {
+  it("never falls back to a raw runner when no Git boundary is injected", async () => {
+    const source = await import("node:fs/promises").then((fs) =>
+      fs.readFile(new URL("./transports.ts", import.meta.url), "utf8"),
+    );
+    expect(source).not.toMatch(/\bnodeGit\b/);
+    expect(source).toMatch(/createGitService\(\)/);
+  });
+});
