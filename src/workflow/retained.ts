@@ -28,6 +28,7 @@ import {
   viewerAuthority,
 } from "./claims.js";
 import type { Admission, ClaimPlan, Comment, GraphQuery, TicketIssue } from "./claims.js";
+import { writeStep } from "./claims.js";
 import type { PermissionLookup } from "../github/github.js";
 
 /** Where a retained claim stands, decided from fresh, complete evidence only. */
@@ -538,12 +539,7 @@ export async function planClaimWait(
     noop: false,
     reason: `${agent} keeps #${number}, waiting on ${describeBlocker(blocker)}.`,
     activityOpId: record.opId,
-    changes: [
-      {
-        step: "comment",
-        command: ["issue", "comment", String(number), "--repo", repository, "--body", comment.body],
-      },
-    ],
+    changes: [writeStep("comment", { kind: "comment", repository, number, body: comment.body })],
   };
 }
 
@@ -709,12 +705,7 @@ export async function planClaimResume(
     noop: false,
     reason: `${agent} resumes #${number}: ${activity.cleared}.`,
     activityOpId: record.opId,
-    changes: [
-      {
-        step: "comment",
-        command: ["issue", "comment", String(number), "--repo", repository, "--body", comment.body],
-      },
-    ],
+    changes: [writeStep("comment", { kind: "comment", repository, number, body: comment.body })],
   };
 }
 
