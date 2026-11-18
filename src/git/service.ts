@@ -167,7 +167,7 @@ function classify(error: unknown, operation: string): GitError {
       exited,
     );
   if (
-    /unknown revision|bad revision|ambiguous argument|Needed a single revision|Not a valid object name|Invalid symmetric difference expression/i.test(
+    /unknown revision|bad revision|ambiguous argument|Needed a single revision|Not a valid object name|Invalid symmetric difference expression|must be run in a work tree/i.test(
       stderr,
     )
   )
@@ -260,9 +260,11 @@ export function createGitService(options: GitServiceOptions = {}): GitService {
     const seen = new Set<string>();
     const found: GitRemote[] = [];
     for (const line of output.split(/\r?\n/)) {
-      const fields = line.trim().split(/\s+/);
-      if (fields.length < 2) continue;
-      const [name, url] = fields as [string, string];
+      // `git remote -v` prints "<name>\t<url> (fetch|push)". Split on the first separator and
+      // keep the rest verbatim: a local-path URL may itself contain spaces.
+      const parsed = /^(\S+)\s+(.*?)\s+\((?:fetch|push)\)$/.exec(line.trim());
+      if (!parsed) continue;
+      const [, name, url] = parsed as unknown as [string, string, string];
       // A remote may fetch from one repository and push to another; both URLs are facts, so
       // deduplicate identical name/URL pairs rather than every entry sharing a name.
       const identity = `${name}\u0000${url}`;
