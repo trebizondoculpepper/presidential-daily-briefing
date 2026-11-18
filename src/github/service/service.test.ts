@@ -205,3 +205,19 @@ describe("typed GH service: repository permission (#878)", () => {
     expect(asked).toBe(false);
   });
 });
+
+describe("typed GH service: one execution context (#878)", () => {
+  it("runs the default REST reader over the service's own transport and environment", async () => {
+    const t = fake(() =>
+      ok(
+        'HTTP/2.0 200 OK\r\nContent-Type: application/json\r\n\r\n{"user":{"login":"octo"},"role_name":"read"}',
+      ),
+    );
+    const svc = createGhService({ transport: t.transport, env: { GH_HOST: "ghe.example" } });
+    expect(await svc.repos.permissionOf("o/r")("octo")).toBe("read");
+    expect(t.calls[0]).toMatchObject({
+      args: ["api", "--include", "repos/o/r/collaborators/octo/permission"],
+      env: { GH_HOST: "ghe.example" },
+    });
+  });
+});
