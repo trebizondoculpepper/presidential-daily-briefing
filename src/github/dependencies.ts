@@ -761,13 +761,21 @@ export const commentPostOver =
       });
     }
     const stdout = outcome.stdout;
+    let url: unknown = null;
     try {
-      const url = prop(JSON.parse(parseGhResponse(stdout).body), "html_url");
-      return { url: typeof url === "string" ? url : null };
+      url = prop(JSON.parse(parseGhResponse(stdout).body), "html_url");
     } catch {
-      // gh exited 0, so GitHub answered 2xx: posted, URL unknown.
-      return { url: null };
+      url = null;
     }
+    if (typeof url === "string") return { url };
+    // A 2xx without a readable comment identity is acceptance-unknown, not confirmed: recovery
+    // must read back the receipt and must not re-post (doc/design/comment-write-recovery.md).
+    throw Object.assign(new Error("gh issue comment answered without a readable comment."), {
+      commentAttempt: {
+        kind: "unknown",
+        message: "GitHub answered without a readable comment URL; acceptance is unknown.",
+      },
+    });
   };
 const ghCommentPost = commentPostOver(execFileTransport);
 
@@ -782,10 +790,11 @@ export async function ghCommentReceipt(
 ): Promise<CommentReceipt> {
   const [owner, name] = target.repository.split("/");
   const data = await query(
-    `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){comments(last:100){pageInfo{hasPreviousPage} nodes{url body viewerDidAuthor createdAt}}}}}`,
+    `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issueOrPullRequest(number:$number){... on Issue{comments(last:100){pageInfo{hasPreviousPage} nodes{url body viewerDidAuthor createdAt}}} ... on PullRequest{comments(last:100){pageInfo{hasPreviousPage} nodes{url body viewerDidAuthor createdAt}}}}}}`,
     { owner: owner ?? "", name: name ?? "", number: target.number },
   );
-  const comments = prop(data, "repository", "issue", "comments");
+  // Issues and pull requests share the comment list; either kind of target is read.
+  const comments = prop(data, "repository", "issueOrPullRequest", "comments");
   const nodes = prop(comments, "nodes");
   if (!Array.isArray(nodes)) return { status: "unreadable" };
   const matches = nodes.filter(

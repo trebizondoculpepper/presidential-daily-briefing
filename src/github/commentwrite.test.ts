@@ -696,7 +696,7 @@ describe("the shared gh write boundary (#345)", () => {
       const comments = [{ body: claimBody, createdAt: new Date(T0 - 3_600_000).toISOString() }];
       const query = async () => ({
         repository: {
-          issue: {
+          issueOrPullRequest: {
             comments: {
               pageInfo: { hasPreviousPage: false },
               nodes: comments.map((c, i) => ({

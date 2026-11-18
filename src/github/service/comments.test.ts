@@ -30,7 +30,9 @@ function service(answers: GhOutcome[]) {
     },
     // No receipt is ever found: the comment list is empty and complete.
     query: async () => ({
-      repository: { issue: { comments: { pageInfo: { hasPreviousPage: false }, nodes: [] } } },
+      repository: {
+        issueOrPullRequest: { comments: { pageInfo: { hasPreviousPage: false }, nodes: [] } },
+      },
     }),
     commentRecovery: { sleep: async () => undefined, nonce: () => "nonce-1" },
   });
@@ -79,5 +81,81 @@ describe("typed comment writes (#918)", () => {
     const result = await svc.comments.create(target, { guard: async () => "same" });
     expect(result).toMatchObject({ status: "posted", attempts: 2 });
     expect(calls).toHaveLength(2);
+  });
+  it("treats a 2xx without a readable comment as unknown and reads back instead of re-posting", async () => {
+    const { svc, calls } = service([
+      { ok: true, stdout: http("201 Created", ["Content-Type: application/json"], {}) },
+    ]);
+    await expect(svc.comments.create(target)).rejects.toBeInstanceOf(CommentWriteError);
+    expect(calls).toHaveLength(1);
+  });
+
+  it("never allows more than one retry, whatever policy is supplied", async () => {
+    const limited = refused("403 Forbidden", ["Content-Type: application/json", "Retry-After: 1"], {
+      message: "You have exceeded a secondary rate limit.",
+    });
+    const calls: GhCall[] = [];
+    const svc = createGhService({
+      env: {},
+      transport: async (call) => {
+        calls.push(call);
+        return limited;
+      },
+      query: async () => ({
+        repository: {
+          issueOrPullRequest: { comments: { pageInfo: { hasPreviousPage: false }, nodes: [] } },
+        },
+      }),
+      commentRecovery: {
+        sleep: async () => undefined,
+        nonce: () => "n",
+        policy: { maxAttempts: 5 },
+      },
+    });
+    await expect(svc.comments.create(target, { guard: async () => "same" })).rejects.toBeInstanceOf(
+      CommentWriteError,
+    );
+    expect(calls).toHaveLength(2);
+  });
+
+  it("reads receipts on pull requests as well as issues", async () => {
+    let asked = "";
+    const svc = createGhService({
+      env: {},
+      transport: async () => ({
+        ok: false,
+        kind: "timeout",
+        exitCode: null,
+        stdout: "",
+        stderr: "",
+      }),
+      query: async (q: string) => {
+        asked = q;
+        return {
+          repository: {
+            issueOrPullRequest: {
+              comments: {
+                pageInfo: { hasPreviousPage: false },
+                nodes: [
+                  {
+                    url: "https://example.test/pr-c",
+                    body: "hello\n\n<!-- github-triage:write:nonce-pr -->",
+                    viewerDidAuthor: true,
+                    createdAt: new Date(Date.now() + 1000).toISOString(),
+                  },
+                ],
+              },
+            },
+          },
+        };
+      },
+      commentRecovery: { sleep: async () => undefined, nonce: () => "nonce-pr" },
+    });
+    // The POST's reply was lost (timeout), but the read-back finds this write on the PR.
+    expect(await svc.comments.create(target)).toMatchObject({
+      status: "posted",
+      url: "https://example.test/pr-c",
+    });
+    expect(asked).toContain("... on PullRequest");
   });
 });
