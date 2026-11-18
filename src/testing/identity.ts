@@ -27,7 +27,7 @@ export async function createIdentityFixture() {
     if (args[0] === "rev-parse" && args[1] === "--show-toplevel") return `${root}\n`;
     if (args[0] === "rev-parse" && args[1] === "--git-path") return `${excluded}\n`;
     if (args[0] === "remote") return `origin\thttps://github.com/${repository}.git (fetch)\n`;
-    if (args[0] === "ls-files") throw Object.assign(new Error("untracked"), { code: 1 });
+    if (args.includes("ls-files")) throw Object.assign(new Error("untracked"), { code: 1 });
     if (args[0] === "check-ignore") {
       const name = args.at(-1)!;
       const rule = name.endsWith(".tmp") ? "/pdb.toml.*.tmp" : `/${name}`;

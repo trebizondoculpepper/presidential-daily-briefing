@@ -23,7 +23,7 @@ describe("configcli typed GitService (#905)", () => {
             return `${dir}/.git/${args[2]}\n`;
           if (args[0] === "check-ignore")
             throw Object.assign(new Error("not ignored"), { code: 1 });
-          if (args[0] === "ls-files") throw Object.assign(new Error("not tracked"), { code: 1 });
+          if (args.includes("ls-files")) throw Object.assign(new Error("not tracked"), { code: 1 });
           throw new Error(`Unexpected git args: ${args.join(" ")}`);
         },
       });
