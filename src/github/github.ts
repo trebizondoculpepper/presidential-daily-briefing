@@ -1,6 +1,8 @@
 /** Read-only, paginated gh GraphQL collector. Never invokes a mutation or shell. */
 import { completeNative, isRateLimit, nativeFields, RateLimitError } from "./dependencies.js";
 import { execFile } from "node:child_process";
+import { repositoryFromCheckout } from "./service/repository.js";
+import { execFileTransport } from "./service/transport.js";
 import { promisify } from "node:util";
 import {
   CHANGE_EVIDENCE_SCHEMA_VERSION,
@@ -510,21 +512,12 @@ export class IssueUnavailable extends Error {
   }
 }
 
-/** Resolve the gh repository of the working directory (or of `cwd`, e.g. an MCP project). */
-export async function currentRepository(cwd?: string, signal?: AbortSignal): Promise<string> {
-  try {
-    const { stdout } = await execute(
-      "gh",
-      ["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"],
-      { timeout: 30_000, cwd, signal },
-    );
-    return stdout.trim();
-  } catch {
-    signal?.throwIfAborted();
-    throw new Error(
-      "Cannot resolve repository. Supply --repo owner/name and check gh authentication.",
-    );
-  }
+/**
+ * Resolve the gh repository of the working directory (or of `cwd`, e.g. an MCP project). Since
+ * #869 it uses the same implementation as the typed GH service's `repos.fromCheckout`.
+ */
+export function currentRepository(cwd?: string, signal?: AbortSignal): Promise<string> {
+  return repositoryFromCheckout(execFileTransport, cwd, signal);
 }
 export const info = "pageInfo{hasNextPage endCursor}";
 // Author type and edit history (#247) let the provenance reader apply the #212 trust rule; all
