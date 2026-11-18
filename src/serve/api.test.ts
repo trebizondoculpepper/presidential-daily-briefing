@@ -981,13 +981,18 @@ describe("pdb serve cache (#373)", () => {
     const dropped = cache.refresh("o/r", ["deps"]);
     expect(dropped).toBe(1);
     // The briefing entry survives its cache row; the deps row is gone and re-collected; and the
-    // closed-question scan state is preserved (an unrelated dependency invalidation never
-    // discards scan progress of an unchanged context).
+    // closed-question scan state is preserved (dependency-only invalidation never discards scan
+    // progress of an unchanged context).
     expect(await cache.read(briefing, produce("briefing"))).toBe("briefing#1");
     expect(await cache.read(deps, produce("deps"))).toBe("deps#2");
     expect(counts).toEqual({ briefing: 1, deps: 2 });
     expect(scan.lost).toBeNull();
-    // A repository-wide refresh does discard the scan (restart/revalidate #414).
+    // An explicit briefing-scope refresh revalidates the scans (#414, human-briefing.md).
+    const scoped = cache.closedQuestions.slot("p3", "o/r");
+    (scoped as { state: unknown }).state = { overwritten: false } as never;
+    cache.refresh("o/r", ["collect", "discovery", "issue-facts"]);
+    expect(scoped.lost).not.toBeNull();
+    // A repository-wide refresh also discards the scan.
     const scan2 = cache.closedQuestions.slot("p2", "o/r");
     (scan2 as { state: unknown }).state = { overwritten: false } as never;
     cache.refresh("o/r");

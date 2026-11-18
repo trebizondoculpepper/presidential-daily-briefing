@@ -559,11 +559,14 @@ export class ServeCache {
    * many were dropped. Collections already running when this is called never insert.
    */
   refresh(repository?: string, collectors?: readonly string[]): number {
-    // A manual, repository-wide refresh restarts and revalidates closed-ticket scans (#414).
-    // A collector-scoped refresh (e.g. conservative cross-repository dependency invalidation
-    // of exactly `deps`) must not discard unrelated scan state: an unchanged context keeps its
-    // closed-question inventory, comment cursors and watermark.
-    if (!collectors || collectors.length === 0)
+    // A manual refresh restarts and revalidates closed-ticket scans (#414,
+    // doc/design/human-briefing.md). The conservative cross-repository dependency invalidation
+    // of exactly `deps` must not discard unrelated scan state: an unchanged context keeps its
+    // closed-question inventory, comment cursors and watermark. Any other collector set (or a
+    // repository-wide refresh) still resets the scans as documented.
+    const depsOnly =
+      collectors !== undefined && collectors.length === 1 && collectors[0] === "deps";
+    if (!depsOnly)
       this.closedQuestions.reset(repository, "a manual refresh discarded the previous scan");
     let dropped = 0;
     for (const [key, entry] of this.entries)
