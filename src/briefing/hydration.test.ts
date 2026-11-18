@@ -68,3 +68,22 @@ describe("role-neutral shortlist hydration (#652)", () => {
     expect(a.length).toBeLessThanOrEqual(2 * limit);
   });
 });
+
+describe("bounded project-preference hydration (#652 review)", () => {
+  it("hydrates at most `limit` preferred activities, highest priority first", async () => {
+    const { hydrationSubjects } = await import("./service.js");
+    const { HYDRATION_POOL } = await import("./compact.js");
+    const { RANK_PARTITION } = await import("../rules/datalog/engine.js");
+    const pool = Array.from({ length: 80 }, (_, i) => ({
+      [RANK_PARTITION]: `1/1/0/implementer/${i}/${i}`,
+      id: String(i),
+      target: `https://github.com/o/r/issues/${i}`,
+      band: 6,
+      why: { project: [{ priority: i === 70 ? 50 : 10 }] },
+    }));
+    const report = { [HYDRATION_POOL]: pool, subjects: [] } as never;
+    const subjects = hydrationSubjects(report, 3);
+    // Both role prefixes (0-2) plus three preferred activities: #70 (priority 50), then 0 and 1.
+    expect(subjects).toEqual([0, 1, 2, 70].map((n) => `https://github.com/o/r/issues/${n}`));
+  });
+});

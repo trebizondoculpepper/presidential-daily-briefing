@@ -946,7 +946,7 @@ export function shortlistLine(snapshot: Snapshot, maxChars: number): string {
 /**
  * The subjects a bounded read hydrates (#652): the union of both agent roles' first `limit`
  * activities, by the exact per-role ranks the native engine computed in its one evaluation, plus
- * any activity a project preference matched and every subject the report itself shows. Nothing is
+ * the first `limit` project-preferred activities and every subject the report itself shows. Nothing is
  * re-ranked here, so a role-only change reads the same subjects and no shown row is unread. A
  * report without a pool (human, unranked) falls back to its shown subjects.
  */
@@ -966,7 +966,18 @@ export function hydrationSubjects(report: PresentedBriefing["report"], limit: nu
       .sort((a, b) => rank(a, field) - rank(b, field))
       .slice(0, Math.max(0, limit)))
       add(item.target);
-  for (const item of pool) if (item.why?.project?.length) add(item.target);
+  // Project-preferred activities, bounded like a prefix: highest project priority first, then a
+  // role-independent native rank, so a broad preference cannot exhaust the hydration budget.
+  const priority = (item: Item) =>
+    Math.max(
+      0,
+      ...(item.why?.project ?? []).map((r) => Number((r as { priority?: unknown }).priority) || 0),
+    );
+  for (const item of pool
+    .filter((i) => i.why?.project?.length)
+    .sort((a, b) => priority(b) - priority(a) || rank(a, 4) - rank(b, 4))
+    .slice(0, Math.max(0, limit)))
+    add(item.target);
   for (const url of shownSubjects(report)) add(url);
   return subjects;
 }
