@@ -58,6 +58,7 @@ import {
   type DependencyChangeResult,
   type DependencyPlan,
 } from "../dependencies.js";
+import { ghDiagnostics, type GhDiagnostics } from "./diagnostics.js";
 import { withCommentRecovery } from "../commentwrite.js";
 import type {
   CommentCallOptions,
@@ -209,6 +210,8 @@ export interface GhService {
     ): ReturnType<typeof planDependencyChange>;
     applyChange(plan: DependencyPlan): Promise<DependencyChangeResult>;
   };
+  /** Typed GH CLI diagnostics (#891). */
+  diagnostics: GhDiagnostics;
 }
 
 export interface GhServiceOptions {
@@ -333,6 +336,7 @@ export function createGhService(options: GhServiceOptions = {}): GhService {
             : ghRunOver(transport, env, query as Query),
         ),
     },
+    diagnostics: ghDiagnostics(transport, env),
     delivery: deliveryReads(query as Query),
     comments: {
       async create(target, call) {

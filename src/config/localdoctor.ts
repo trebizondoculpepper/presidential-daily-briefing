@@ -21,6 +21,9 @@ import {
   resolveRepositoryTarget,
 } from "./config.js";
 import type { ConfigFileSystem, GitRunner } from "./config.js";
+import { createGitService, GitError, type GitService } from "../git/service.js";
+import type { GhDiagnostics } from "../github/service/diagnostics.js";
+import { createGhService, type GhService } from "../github/service/service.js";
 import { roleNames } from "../briefing/roles.js";
 import { resolveEntry } from "./harness.js";
 import type { Environment } from "./harness.js";
@@ -114,6 +117,8 @@ export interface LocalDoctorProgress {
 export interface LocalDoctorRuntime {
   readonly cwd?: string;
   readonly fs?: ConfigFileSystem;
+  readonly git?: GitService;
+  readonly gh?: Pick<GhService, "diagnostics">;
   readonly probe?: Probe;
   /** Node version string such as "26.1.0"; defaults to the running process. */
   readonly nodeVersion?: string;
@@ -151,8 +156,18 @@ export interface LocalDoctorOptions {
 const gitRunner =
   (probe: Probe): GitRunner =>
   async (args, cwd) => {
-    const result = await probe("git", args, cwd);
-    if (result.code !== 0) throw new Error(`git ${args[0]} failed`);
+    const normalized =
+      args[0] === "--literal-pathspecs"
+        ? args.slice(1)
+        : args[0] === "check-ignore" && args[1] === "--quiet" && args[2] === "--"
+          ? ["check-ignore", "--quiet", "--no-index", ...args.slice(3)]
+          : args;
+    const result = await probe("git", normalized, cwd);
+    if (result.code !== 0) {
+      const error = new Error(`git ${normalized[0]} failed`) as Error & { code?: number | null };
+      error.code = result.code;
+      throw error;
+    }
     return result.stdout;
   };
 
@@ -169,6 +184,23 @@ export async function localDoctor(
     signal?.throwIfAborted();
     return result;
   };
+  const gitService =
+    runtime.git ??
+    (runtime.probe ? createGitService({ git: gitRunner(probe) }) : createGitService());
+  const ghDiag: GhDiagnostics =
+    runtime.gh?.diagnostics ??
+    (runtime.probe
+      ? {
+          version: async (dir) => ({
+            exitCode: (await probe("gh", ["--version"], dir ?? "")).code,
+          }),
+          authStatus: async (host, dir) => ({
+            exitCode: (
+              await probe("gh", ["auth", "status", "--active", "--hostname", host], dir ?? "")
+            ).code,
+          }),
+        }
+      : createGhService().diagnostics);
   const step = (
     group: LocalDoctorProgress["step"],
     state: LocalDoctorProgress["state"],
@@ -241,8 +273,8 @@ export async function localDoctor(
   step("dependencies", "done");
   step("gh", "running");
   // gh.available and gh.auth: exit codes only; gh output may contain account details.
-  const ghVersion = await probe("gh", ["--version"], cwd);
-  if (ghVersion.code === null) {
+  const ghVersion = await ghDiag.version(cwd, signal);
+  if (ghVersion.exitCode === null) {
     add({
       id: "gh.available",
       status: "missing",
@@ -259,7 +291,7 @@ export async function localDoctor(
     });
   } else {
     add(
-      ghVersion.code === 0
+      ghVersion.exitCode === 0
         ? {
             id: "gh.available",
             status: "ok",
@@ -270,14 +302,14 @@ export async function localDoctor(
         : {
             id: "gh.available",
             status: "unknown",
-            source: `gh --version exit ${ghVersion.code}`,
+            source: `gh --version exit ${ghVersion.exitCode}`,
             detail: "gh started but did not report a version.",
             next: ["gh --version"],
           },
     );
-    const auth = await probe("gh", ["auth", "status", "--active", "--hostname", "github.com"], cwd);
+    const auth = await ghDiag.authStatus("github.com", cwd, signal);
     add(
-      auth.code === 0
+      auth.exitCode === 0
         ? {
             id: "gh.auth",
             status: "ok",
@@ -287,13 +319,13 @@ export async function localDoctor(
           }
         : {
             id: "gh.auth",
-            status: auth.code === 1 ? "access" : "unknown",
+            status: auth.exitCode === 1 ? "access" : "unknown",
             source:
-              auth.code === null
+              auth.exitCode === null
                 ? "gh auth status could not start"
-                : `gh auth status exit ${auth.code}`,
+                : `gh auth status exit ${auth.exitCode}`,
             detail:
-              auth.code === 1
+              auth.exitCode === 1
                 ? "gh is not authenticated to github.com, or its token is invalid."
                 : "gh authentication state could not be determined.",
             next: ["gh auth status", "gh auth login --hostname github.com"],
@@ -312,7 +344,7 @@ export async function localDoctor(
   // project.checkout
   let root: string | null = null;
   try {
-    const target = await resolveRepositoryTarget(cwd, options.repo, gitRunner(probe));
+    const target = await resolveRepositoryTarget(cwd, options.repo, gitService);
     root = target.root;
     report.repository = target.repository;
     add({
@@ -391,13 +423,17 @@ export async function localDoctor(
       });
     }
     // --no-index asks whether a rule exists, independent of whether the file is tracked.
-    const ignored = await probe(
-      "git",
-      ["check-ignore", "--quiet", "--no-index", IDENTITY_FILE],
-      root,
-    );
+    let ignoredState: "ok" | "missing" | "unknown";
+    try {
+      ignoredState = (await gitService.isIgnored({ cwd: root, signal }, IDENTITY_FILE))
+        ? "ok"
+        : "missing";
+    } catch (error) {
+      if (error instanceof GitError && error.code === "cancelled") throw error;
+      ignoredState = "unknown";
+    }
     add(
-      ignored.code === 0
+      ignoredState === "ok"
         ? {
             id: "identity.git-ignored",
             status: "ok",
@@ -405,7 +441,7 @@ export async function localDoctor(
             detail: `An ignore rule covers ${IDENTITY_FILE}.`,
             next: [],
           }
-        : ignored.code === 1
+        : ignoredState === "missing"
           ? {
               id: "identity.git-ignored",
               status: "missing",
@@ -421,9 +457,17 @@ export async function localDoctor(
               next: [`git check-ignore -v --no-index ${IDENTITY_FILE}`],
             },
     );
-    const tracked = await probe("git", ["ls-files", "--error-unmatch", "--", IDENTITY_FILE], root);
+    let trackedState: "invalid" | "ok" | "unknown";
+    try {
+      trackedState = (await gitService.isTracked({ cwd: root, signal }, IDENTITY_FILE))
+        ? "invalid"
+        : "ok";
+    } catch (error) {
+      if (error instanceof GitError && error.code === "cancelled") throw error;
+      trackedState = "unknown";
+    }
     add(
-      tracked.code === 0
+      trackedState === "invalid"
         ? {
             id: "identity.git-tracked",
             status: "invalid",
@@ -431,7 +475,7 @@ export async function localDoctor(
             detail: `${IDENTITY_FILE} is tracked by Git. An ignore rule does not untrack it; removing it from the index is a separate, deliberate change.`,
             next: [`git rm --cached -- ":/${IDENTITY_FILE}"`],
           }
-        : tracked.code === 1
+        : trackedState === "ok"
           ? {
               id: "identity.git-tracked",
               status: "ok",
