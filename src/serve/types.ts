@@ -11,6 +11,7 @@ import type { LocalIdentitySession } from "../config/serveridentity.js";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { ReadRuntime } from "../briefing/service.js";
 import type { ConfigFileSystem, GitRunner } from "../config/config.js";
+import type { GitService } from "../git/service.js";
 import type { GlobalConfigFileSystem } from "../config/globalconfig.js";
 import type { Environment } from "../config/harness.js";
 import type { dependencyReport as DependencyReportFn } from "../github/dependencies.js";
@@ -70,8 +71,11 @@ export interface ServeRuntime {
   identityRuntime?: Omit<EffectiveIdentityRuntime, "human">;
   /** Invoking working directory for resolving relative `--project` paths (#569). */
   cwd?: string;
-  /** Git runner for resolving nested `--project` paths and worktrees to their root (#569). */
-  git?: GitRunner;
+  /**
+   * Git boundary for resolving nested `--project` paths and worktrees to their root (#569): the
+   * composition's shared typed service, or a legacy runner as its transport (#870).
+   */
+  git?: GitService | GitRunner;
   /**
    * Verified global configuration boundary (#805). When present, `serve` resolves saved
    * registrations and the working directory's repository, and records new ones; when absent it
