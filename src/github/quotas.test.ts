@@ -1,3 +1,4 @@
+import { readRateLimits } from "./service/ratelimits.js";
 import { join } from "node:path";
 import { describe, expect, it } from "vite-plus/test";
 import type { RestAnswer } from "./github.js";
@@ -619,10 +620,12 @@ describe("pdb quotas", () => {
   const run = async (args: string[], rest: QuotaRest, login = true) => {
     let out = "";
     const code = await runQuotas(args, async (t) => void (out += t), {
-      rest,
-      authContext: async () => {
-        if (!login) throw new Error(`gh failed reading ${join("home", "user", ".config", "gh")}`);
-        return { host: "github.com", login: "fixture" };
+      account: {
+        current: async () => {
+          if (!login) throw new Error(`gh failed reading ${join("home", "user", ".config", "gh")}`);
+          return { host: "github.com", login: "fixture" };
+        },
+        rateLimits: (signal) => readRateLimits(rest, () => new Date(T0).toISOString(), signal),
       },
       host: () => "github.com",
       now: () => new Date(T0),
