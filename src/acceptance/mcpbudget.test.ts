@@ -168,7 +168,11 @@ const call = async (client: Client, name: string, args: Record<string, unknown>)
   return { raw, bytes, structured, text };
 };
 
-describe("bounded MCP results (#266)", () => {
+// Each case runs full live-shaped briefings through the native engine. Since #652 every agent
+// decision is evaluated for either role (one activity pool), so a case costs about 1.5x what it
+// did and the slowest exceeded the 20 s default on CI runners (as for #603 and #625). The
+// assertions are unchanged; only the time allowed per case is.
+describe("bounded MCP results (#266)", { timeout: 60_000 }, () => {
   const defaults: [string, string, Record<string, unknown>][] = [
     ["default briefing", "triage_briefing", {}],
     ["designer role briefing", "triage_briefing", { role: "designer", limit: 100 }],

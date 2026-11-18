@@ -1,8 +1,8 @@
 {
   "modelVersion": 2,
   "policyVersion": 1,
-  "rulesHash": "9e5bcb275f0d9d278d953b824d189288a9d8833f23553b4b19903469fae5a979",
-  "narrationHash": "35382a0a97699c4d54e9bd1f258a41d453ded6392b4cbf4729e2559faf358056",
+  "rulesHash": "30798736fce6e35cfcba22d149e2d79a3e5d34eeabf1dd5128bca1b883337e7e",
+  "narrationHash": "dc1aff3f8ac7622be401dc7713aaff5c3a21319a63693c38d588d0d12f162475",
   "sources": [
     "policy/schema.edn",
     "policy/rules.edn",
@@ -12504,246 +12504,6 @@
       "set": "ordering"
     },
     {
-      "name": "owned",
-      "params": ["?t", "?r"],
-      "alternatives": [
-        {
-          "params": ["?t", "?r"],
-          "clauses": [
-            {
-              "type": "fact",
-              "scope": "entity",
-              "entity": {
-                "var": "?r"
-              },
-              "attribute": "owned",
-              "value": {
-                "lit": true
-              },
-              "phrase": "whether the duty is an owned obligation",
-              "many": false
-            }
-          ],
-          "source": {
-            "file": "policy/ordering.edn :rules",
-            "index": 10
-          }
-        },
-        {
-          "params": ["?t", "?r"],
-          "clauses": [
-            {
-              "type": "fact",
-              "scope": "entity",
-              "entity": {
-                "var": "?r"
-              },
-              "attribute": "kind",
-              "value": {
-                "lit": "pr-follow-up"
-              },
-              "phrase": "kind",
-              "many": false
-            },
-            {
-              "type": "fact",
-              "scope": "entity",
-              "entity": {
-                "var": "?t"
-              },
-              "attribute": "linked-key",
-              "value": {
-                "lit": -1
-              },
-              "phrase": "linked-to-viewer sort key",
-              "many": false
-            }
-          ],
-          "source": {
-            "file": "policy/ordering.edn :rules",
-            "index": 11
-          }
-        },
-        {
-          "params": ["?t", "?r"],
-          "clauses": [
-            {
-              "type": "fact",
-              "scope": "entity",
-              "entity": {
-                "var": "?r"
-              },
-              "attribute": "kind",
-              "value": {
-                "lit": "addressed-response"
-              },
-              "phrase": "kind",
-              "many": false
-            },
-            {
-              "type": "fact",
-              "scope": "entity",
-              "entity": {
-                "var": "?t"
-              },
-              "attribute": "linked-key",
-              "value": {
-                "lit": -1
-              },
-              "phrase": "linked-to-viewer sort key",
-              "many": false
-            }
-          ],
-          "source": {
-            "file": "policy/ordering.edn :rules",
-            "index": 12
-          }
-        },
-        {
-          "params": ["?t", "?r"],
-          "clauses": [
-            {
-              "type": "fact",
-              "scope": "entity",
-              "entity": {
-                "var": "?r"
-              },
-              "attribute": "kind",
-              "value": {
-                "lit": "decide"
-              },
-              "phrase": "kind",
-              "many": false
-            },
-            {
-              "type": "fact",
-              "scope": "entity",
-              "entity": {
-                "var": "?t"
-              },
-              "attribute": "linked-key",
-              "value": {
-                "lit": -1
-              },
-              "phrase": "linked-to-viewer sort key",
-              "many": false
-            }
-          ],
-          "source": {
-            "file": "policy/ordering.edn :rules",
-            "index": 13
-          }
-        },
-        {
-          "params": ["?t", "?r"],
-          "clauses": [
-            {
-              "type": "fact",
-              "scope": "entity",
-              "entity": {
-                "var": "?r"
-              },
-              "attribute": "kind",
-              "value": {
-                "lit": "document"
-              },
-              "phrase": "kind",
-              "many": false
-            },
-            {
-              "type": "fact",
-              "scope": "entity",
-              "entity": {
-                "var": "?t"
-              },
-              "attribute": "linked-key",
-              "value": {
-                "lit": -1
-              },
-              "phrase": "linked-to-viewer sort key",
-              "many": false
-            }
-          ],
-          "source": {
-            "file": "policy/ordering.edn :rules",
-            "index": 14
-          }
-        },
-        {
-          "params": ["?t", "?r"],
-          "clauses": [
-            {
-              "type": "fact",
-              "scope": "entity",
-              "entity": {
-                "var": "?r"
-              },
-              "attribute": "kind",
-              "value": {
-                "lit": "design"
-              },
-              "phrase": "kind",
-              "many": false
-            },
-            {
-              "type": "fact",
-              "scope": "entity",
-              "entity": {
-                "var": "?t"
-              },
-              "attribute": "linked-key",
-              "value": {
-                "lit": -1
-              },
-              "phrase": "linked-to-viewer sort key",
-              "many": false
-            }
-          ],
-          "source": {
-            "file": "policy/ordering.edn :rules",
-            "index": 15
-          }
-        },
-        {
-          "params": ["?t", "?r"],
-          "clauses": [
-            {
-              "type": "fact",
-              "scope": "entity",
-              "entity": {
-                "var": "?r"
-              },
-              "attribute": "kind",
-              "value": {
-                "lit": "design-review"
-              },
-              "phrase": "kind",
-              "many": false
-            },
-            {
-              "type": "fact",
-              "scope": "entity",
-              "entity": {
-                "var": "?t"
-              },
-              "attribute": "linked-key",
-              "value": {
-                "lit": -1
-              },
-              "phrase": "linked-to-viewer sort key",
-              "many": false
-            }
-          ],
-          "source": {
-            "file": "policy/ordering.edn :rules",
-            "index": 16
-          }
-        }
-      ],
-      "calls": [],
-      "set": "ordering"
-    },
-    {
       "name": "ownership-key",
       "params": ["?t", "?r", "?o"],
       "alternatives": [
@@ -12792,6 +12552,582 @@
           ],
           "source": {
             "file": "policy/ordering.edn :rules",
+            "index": 10
+          }
+        },
+        {
+          "params": ["?t", "?r", "?o"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "viewer",
+              "entity": {
+                "lit": 1
+              },
+              "attribute": "role",
+              "value": {
+                "var": "?vr"
+              },
+              "phrase": "role",
+              "many": false
+            },
+            {
+              "type": "compare",
+              "op": "not=",
+              "args": [
+                {
+                  "var": "?vr"
+                },
+                {
+                  "lit": "human"
+                }
+              ]
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?r"
+              },
+              "attribute": "owned",
+              "value": {
+                "lit": true
+              },
+              "phrase": "whether the duty is an owned obligation",
+              "many": false
+            },
+            {
+              "type": "bind",
+              "fn": "+",
+              "args": [
+                {
+                  "lit": 0
+                },
+                {
+                  "lit": 0
+                }
+              ],
+              "result": "?o"
+            }
+          ],
+          "source": {
+            "file": "policy/ordering.edn :rules",
+            "index": 11
+          }
+        },
+        {
+          "params": ["?t", "?r", "?o"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "viewer",
+              "entity": {
+                "lit": 1
+              },
+              "attribute": "role",
+              "value": {
+                "var": "?vr"
+              },
+              "phrase": "role",
+              "many": false
+            },
+            {
+              "type": "compare",
+              "op": "not=",
+              "args": [
+                {
+                  "var": "?vr"
+                },
+                {
+                  "lit": "human"
+                }
+              ]
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?r"
+              },
+              "attribute": "owned",
+              "value": {
+                "lit": false
+              },
+              "phrase": "whether the duty is an owned obligation",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?r"
+              },
+              "attribute": "kind",
+              "value": {
+                "lit": "pr-follow-up"
+              },
+              "phrase": "kind",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "linked-key",
+              "value": {
+                "lit": -1
+              },
+              "phrase": "linked-to-viewer sort key",
+              "many": false
+            },
+            {
+              "type": "bind",
+              "fn": "+",
+              "args": [
+                {
+                  "lit": 0
+                },
+                {
+                  "lit": 0
+                }
+              ],
+              "result": "?o"
+            }
+          ],
+          "source": {
+            "file": "policy/ordering.edn :rules",
+            "index": 12
+          }
+        },
+        {
+          "params": ["?t", "?r", "?o"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "viewer",
+              "entity": {
+                "lit": 1
+              },
+              "attribute": "role",
+              "value": {
+                "var": "?vr"
+              },
+              "phrase": "role",
+              "many": false
+            },
+            {
+              "type": "compare",
+              "op": "not=",
+              "args": [
+                {
+                  "var": "?vr"
+                },
+                {
+                  "lit": "human"
+                }
+              ]
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?r"
+              },
+              "attribute": "owned",
+              "value": {
+                "lit": false
+              },
+              "phrase": "whether the duty is an owned obligation",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?r"
+              },
+              "attribute": "kind",
+              "value": {
+                "lit": "pr-follow-up"
+              },
+              "phrase": "kind",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "linked-key",
+              "value": {
+                "lit": 0
+              },
+              "phrase": "linked-to-viewer sort key",
+              "many": false
+            },
+            {
+              "type": "bind",
+              "fn": "+",
+              "args": [
+                {
+                  "lit": 0
+                },
+                {
+                  "lit": 1
+                }
+              ],
+              "result": "?o"
+            }
+          ],
+          "source": {
+            "file": "policy/ordering.edn :rules",
+            "index": 13
+          }
+        },
+        {
+          "params": ["?t", "?r", "?o"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "viewer",
+              "entity": {
+                "lit": 1
+              },
+              "attribute": "role",
+              "value": {
+                "var": "?vr"
+              },
+              "phrase": "role",
+              "many": false
+            },
+            {
+              "type": "compare",
+              "op": "not=",
+              "args": [
+                {
+                  "var": "?vr"
+                },
+                {
+                  "lit": "human"
+                }
+              ]
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?r"
+              },
+              "attribute": "owned",
+              "value": {
+                "lit": false
+              },
+              "phrase": "whether the duty is an owned obligation",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?r"
+              },
+              "attribute": "kind",
+              "value": {
+                "lit": "addressed-response"
+              },
+              "phrase": "kind",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "linked-key",
+              "value": {
+                "lit": -1
+              },
+              "phrase": "linked-to-viewer sort key",
+              "many": false
+            },
+            {
+              "type": "bind",
+              "fn": "+",
+              "args": [
+                {
+                  "lit": 0
+                },
+                {
+                  "lit": 0
+                }
+              ],
+              "result": "?o"
+            }
+          ],
+          "source": {
+            "file": "policy/ordering.edn :rules",
+            "index": 14
+          }
+        },
+        {
+          "params": ["?t", "?r", "?o"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "viewer",
+              "entity": {
+                "lit": 1
+              },
+              "attribute": "role",
+              "value": {
+                "var": "?vr"
+              },
+              "phrase": "role",
+              "many": false
+            },
+            {
+              "type": "compare",
+              "op": "not=",
+              "args": [
+                {
+                  "var": "?vr"
+                },
+                {
+                  "lit": "human"
+                }
+              ]
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?r"
+              },
+              "attribute": "owned",
+              "value": {
+                "lit": false
+              },
+              "phrase": "whether the duty is an owned obligation",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?r"
+              },
+              "attribute": "kind",
+              "value": {
+                "lit": "addressed-response"
+              },
+              "phrase": "kind",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "linked-key",
+              "value": {
+                "lit": 0
+              },
+              "phrase": "linked-to-viewer sort key",
+              "many": false
+            },
+            {
+              "type": "bind",
+              "fn": "+",
+              "args": [
+                {
+                  "lit": 0
+                },
+                {
+                  "lit": 1
+                }
+              ],
+              "result": "?o"
+            }
+          ],
+          "source": {
+            "file": "policy/ordering.edn :rules",
+            "index": 15
+          }
+        },
+        {
+          "params": ["?t", "?r", "?o"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "viewer",
+              "entity": {
+                "lit": 1
+              },
+              "attribute": "role",
+              "value": {
+                "var": "?vr"
+              },
+              "phrase": "role",
+              "many": false
+            },
+            {
+              "type": "compare",
+              "op": "not=",
+              "args": [
+                {
+                  "var": "?vr"
+                },
+                {
+                  "lit": "human"
+                }
+              ]
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?r"
+              },
+              "attribute": "owned",
+              "value": {
+                "lit": false
+              },
+              "phrase": "whether the duty is an owned obligation",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?r"
+              },
+              "attribute": "kind",
+              "value": {
+                "lit": "decide"
+              },
+              "phrase": "kind",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "linked-key",
+              "value": {
+                "lit": -1
+              },
+              "phrase": "linked-to-viewer sort key",
+              "many": false
+            },
+            {
+              "type": "bind",
+              "fn": "+",
+              "args": [
+                {
+                  "lit": 0
+                },
+                {
+                  "lit": 0
+                }
+              ],
+              "result": "?o"
+            }
+          ],
+          "source": {
+            "file": "policy/ordering.edn :rules",
+            "index": 16
+          }
+        },
+        {
+          "params": ["?t", "?r", "?o"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "viewer",
+              "entity": {
+                "lit": 1
+              },
+              "attribute": "role",
+              "value": {
+                "var": "?vr"
+              },
+              "phrase": "role",
+              "many": false
+            },
+            {
+              "type": "compare",
+              "op": "not=",
+              "args": [
+                {
+                  "var": "?vr"
+                },
+                {
+                  "lit": "human"
+                }
+              ]
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?r"
+              },
+              "attribute": "owned",
+              "value": {
+                "lit": false
+              },
+              "phrase": "whether the duty is an owned obligation",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?r"
+              },
+              "attribute": "kind",
+              "value": {
+                "lit": "decide"
+              },
+              "phrase": "kind",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "linked-key",
+              "value": {
+                "lit": 0
+              },
+              "phrase": "linked-to-viewer sort key",
+              "many": false
+            },
+            {
+              "type": "bind",
+              "fn": "+",
+              "args": [
+                {
+                  "lit": 0
+                },
+                {
+                  "lit": 1
+                }
+              ],
+              "result": "?o"
+            }
+          ],
+          "source": {
+            "file": "policy/ordering.edn :rules",
             "index": 17
           }
         },
@@ -12824,16 +13160,43 @@
               ]
             },
             {
-              "type": "call",
-              "predicate": "owned",
-              "args": [
-                {
-                  "var": "?t"
-                },
-                {
-                  "var": "?r"
-                }
-              ]
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?r"
+              },
+              "attribute": "owned",
+              "value": {
+                "lit": false
+              },
+              "phrase": "whether the duty is an owned obligation",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?r"
+              },
+              "attribute": "kind",
+              "value": {
+                "lit": "document"
+              },
+              "phrase": "kind",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "linked-key",
+              "value": {
+                "lit": -1
+              },
+              "phrase": "linked-to-viewer sort key",
+              "many": false
             },
             {
               "type": "bind",
@@ -12888,30 +13251,38 @@
               "entity": {
                 "var": "?r"
               },
-              "attribute": "rule",
+              "attribute": "owned",
               "value": {
-                "wild": true
+                "lit": false
               },
-              "phrase": "rule ID",
+              "phrase": "whether the duty is an owned obligation",
               "many": false
             },
             {
-              "type": "not",
-              "join": null,
-              "body": [
-                {
-                  "type": "call",
-                  "predicate": "owned",
-                  "args": [
-                    {
-                      "var": "?t"
-                    },
-                    {
-                      "var": "?r"
-                    }
-                  ]
-                }
-              ]
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?r"
+              },
+              "attribute": "kind",
+              "value": {
+                "lit": "document"
+              },
+              "phrase": "kind",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "linked-key",
+              "value": {
+                "lit": 0
+              },
+              "phrase": "linked-to-viewer sort key",
+              "many": false
             },
             {
               "type": "bind",
@@ -12931,9 +13302,498 @@
             "file": "policy/ordering.edn :rules",
             "index": 19
           }
+        },
+        {
+          "params": ["?t", "?r", "?o"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "viewer",
+              "entity": {
+                "lit": 1
+              },
+              "attribute": "role",
+              "value": {
+                "var": "?vr"
+              },
+              "phrase": "role",
+              "many": false
+            },
+            {
+              "type": "compare",
+              "op": "not=",
+              "args": [
+                {
+                  "var": "?vr"
+                },
+                {
+                  "lit": "human"
+                }
+              ]
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?r"
+              },
+              "attribute": "owned",
+              "value": {
+                "lit": false
+              },
+              "phrase": "whether the duty is an owned obligation",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?r"
+              },
+              "attribute": "kind",
+              "value": {
+                "lit": "design"
+              },
+              "phrase": "kind",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "linked-key",
+              "value": {
+                "lit": -1
+              },
+              "phrase": "linked-to-viewer sort key",
+              "many": false
+            },
+            {
+              "type": "bind",
+              "fn": "+",
+              "args": [
+                {
+                  "lit": 0
+                },
+                {
+                  "lit": 0
+                }
+              ],
+              "result": "?o"
+            }
+          ],
+          "source": {
+            "file": "policy/ordering.edn :rules",
+            "index": 20
+          }
+        },
+        {
+          "params": ["?t", "?r", "?o"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "viewer",
+              "entity": {
+                "lit": 1
+              },
+              "attribute": "role",
+              "value": {
+                "var": "?vr"
+              },
+              "phrase": "role",
+              "many": false
+            },
+            {
+              "type": "compare",
+              "op": "not=",
+              "args": [
+                {
+                  "var": "?vr"
+                },
+                {
+                  "lit": "human"
+                }
+              ]
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?r"
+              },
+              "attribute": "owned",
+              "value": {
+                "lit": false
+              },
+              "phrase": "whether the duty is an owned obligation",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?r"
+              },
+              "attribute": "kind",
+              "value": {
+                "lit": "design"
+              },
+              "phrase": "kind",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "linked-key",
+              "value": {
+                "lit": 0
+              },
+              "phrase": "linked-to-viewer sort key",
+              "many": false
+            },
+            {
+              "type": "bind",
+              "fn": "+",
+              "args": [
+                {
+                  "lit": 0
+                },
+                {
+                  "lit": 1
+                }
+              ],
+              "result": "?o"
+            }
+          ],
+          "source": {
+            "file": "policy/ordering.edn :rules",
+            "index": 21
+          }
+        },
+        {
+          "params": ["?t", "?r", "?o"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "viewer",
+              "entity": {
+                "lit": 1
+              },
+              "attribute": "role",
+              "value": {
+                "var": "?vr"
+              },
+              "phrase": "role",
+              "many": false
+            },
+            {
+              "type": "compare",
+              "op": "not=",
+              "args": [
+                {
+                  "var": "?vr"
+                },
+                {
+                  "lit": "human"
+                }
+              ]
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?r"
+              },
+              "attribute": "owned",
+              "value": {
+                "lit": false
+              },
+              "phrase": "whether the duty is an owned obligation",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?r"
+              },
+              "attribute": "kind",
+              "value": {
+                "lit": "design-review"
+              },
+              "phrase": "kind",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "linked-key",
+              "value": {
+                "lit": -1
+              },
+              "phrase": "linked-to-viewer sort key",
+              "many": false
+            },
+            {
+              "type": "bind",
+              "fn": "+",
+              "args": [
+                {
+                  "lit": 0
+                },
+                {
+                  "lit": 0
+                }
+              ],
+              "result": "?o"
+            }
+          ],
+          "source": {
+            "file": "policy/ordering.edn :rules",
+            "index": 22
+          }
+        },
+        {
+          "params": ["?t", "?r", "?o"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "viewer",
+              "entity": {
+                "lit": 1
+              },
+              "attribute": "role",
+              "value": {
+                "var": "?vr"
+              },
+              "phrase": "role",
+              "many": false
+            },
+            {
+              "type": "compare",
+              "op": "not=",
+              "args": [
+                {
+                  "var": "?vr"
+                },
+                {
+                  "lit": "human"
+                }
+              ]
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?r"
+              },
+              "attribute": "owned",
+              "value": {
+                "lit": false
+              },
+              "phrase": "whether the duty is an owned obligation",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?r"
+              },
+              "attribute": "kind",
+              "value": {
+                "lit": "design-review"
+              },
+              "phrase": "kind",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "linked-key",
+              "value": {
+                "lit": 0
+              },
+              "phrase": "linked-to-viewer sort key",
+              "many": false
+            },
+            {
+              "type": "bind",
+              "fn": "+",
+              "args": [
+                {
+                  "lit": 0
+                },
+                {
+                  "lit": 1
+                }
+              ],
+              "result": "?o"
+            }
+          ],
+          "source": {
+            "file": "policy/ordering.edn :rules",
+            "index": 23
+          }
+        },
+        {
+          "params": ["?t", "?r", "?o"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "viewer",
+              "entity": {
+                "lit": 1
+              },
+              "attribute": "role",
+              "value": {
+                "var": "?vr"
+              },
+              "phrase": "role",
+              "many": false
+            },
+            {
+              "type": "compare",
+              "op": "not=",
+              "args": [
+                {
+                  "var": "?vr"
+                },
+                {
+                  "lit": "human"
+                }
+              ]
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?r"
+              },
+              "attribute": "owned",
+              "value": {
+                "lit": false
+              },
+              "phrase": "whether the duty is an owned obligation",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?r"
+              },
+              "attribute": "kind",
+              "value": {
+                "var": "?k"
+              },
+              "phrase": "kind",
+              "many": false
+            },
+            {
+              "type": "compare",
+              "op": "not=",
+              "args": [
+                {
+                  "var": "?k"
+                },
+                {
+                  "lit": "pr-follow-up"
+                }
+              ]
+            },
+            {
+              "type": "compare",
+              "op": "not=",
+              "args": [
+                {
+                  "var": "?k"
+                },
+                {
+                  "lit": "addressed-response"
+                }
+              ]
+            },
+            {
+              "type": "compare",
+              "op": "not=",
+              "args": [
+                {
+                  "var": "?k"
+                },
+                {
+                  "lit": "decide"
+                }
+              ]
+            },
+            {
+              "type": "compare",
+              "op": "not=",
+              "args": [
+                {
+                  "var": "?k"
+                },
+                {
+                  "lit": "document"
+                }
+              ]
+            },
+            {
+              "type": "compare",
+              "op": "not=",
+              "args": [
+                {
+                  "var": "?k"
+                },
+                {
+                  "lit": "design"
+                }
+              ]
+            },
+            {
+              "type": "compare",
+              "op": "not=",
+              "args": [
+                {
+                  "var": "?k"
+                },
+                {
+                  "lit": "design-review"
+                }
+              ]
+            },
+            {
+              "type": "bind",
+              "fn": "+",
+              "args": [
+                {
+                  "lit": 0
+                },
+                {
+                  "lit": 1
+                }
+              ],
+              "result": "?o"
+            }
+          ],
+          "source": {
+            "file": "policy/ordering.edn :rules",
+            "index": 24
+          }
         }
       ],
-      "calls": ["owned"],
+      "calls": [],
       "set": "ordering"
     },
     {
@@ -12985,7 +13845,7 @@
           ],
           "source": {
             "file": "policy/ordering.edn :rules",
-            "index": 20
+            "index": 25
           }
         },
         {
@@ -13045,7 +13905,7 @@
           ],
           "source": {
             "file": "policy/ordering.edn :rules",
-            "index": 21
+            "index": 26
           }
         },
         {
@@ -13117,7 +13977,7 @@
           ],
           "source": {
             "file": "policy/ordering.edn :rules",
-            "index": 22
+            "index": 27
           }
         }
       ],
@@ -13185,7 +14045,7 @@
           ],
           "source": {
             "file": "policy/ordering.edn :rules",
-            "index": 23
+            "index": 28
           }
         },
         {
@@ -13220,7 +14080,7 @@
           ],
           "source": {
             "file": "policy/ordering.edn :rules",
-            "index": 24
+            "index": 29
           }
         },
         {
@@ -13292,7 +14152,7 @@
           ],
           "source": {
             "file": "policy/ordering.edn :rules",
-            "index": 25
+            "index": 30
           }
         }
       ],
@@ -13412,7 +14272,7 @@
           ],
           "source": {
             "file": "policy/ordering.edn :rules",
-            "index": 26
+            "index": 31
           }
         }
       ],
@@ -15359,8 +16219,8 @@
   ],
   "coverage": {
     "decisions": 39,
-    "predicates": 88,
-    "alternatives": 178,
+    "predicates": 87,
+    "alternatives": 183,
     "denials": 9,
     "queries": 19,
     "keyQueries": 4,
@@ -15368,6 +16228,6 @@
     "overrides": 4,
     "constants": 14,
     "attributes": 96,
-    "clauses": 926
+    "clauses": 990
   }
 }
