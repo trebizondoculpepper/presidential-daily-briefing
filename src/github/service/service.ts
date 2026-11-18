@@ -33,6 +33,7 @@ import { historyReads } from "./history.js";
 import { checkReads } from "./checks.js";
 import { readRateLimits } from "./ratelimits.js";
 import { resolveLabels } from "./labels.js";
+import { pullStateByUrl, ticketGuardState } from "./tickets.js";
 import { deliveryIssue } from "./delivery.js";
 import type { DeliveryIssue } from "./delivery.js";
 import { estimationCapabilities, type EstimationCapabilities } from "./estimation.js";
@@ -105,6 +106,13 @@ export interface GhService {
   delivery: {
     /** One issue's state, closing PRs and validated newest comments; null only when absent. */
     issue(repository: string, number: number): Promise<DeliveryIssue | null>;
+  };
+  /** Claim-workflow guard and pull-request state reads (#942). */
+  tickets: {
+    /** A fingerprint of the ticket's guarded state; throws when it cannot be read whole. */
+    guardState(repository: string, number: number): Promise<string>;
+    /** A pull request's live state by URL, or null when it is not a readable pull request. */
+    pullStateByUrl(url: string): Promise<string | null>;
   };
   /** Repository label resolution (#921). */
   labels: {
@@ -255,6 +263,10 @@ export function createGhService(options: GhServiceOptions = {}): GhService {
       },
     },
     history: historyReads(query),
+    tickets: {
+      guardState: (repository, number) => ticketGuardState(query, repository, number),
+      pullStateByUrl: (url) => pullStateByUrl(query, url),
+    },
     estimation: estimationCapabilities(graphqlApiOverTransport(transport, env)),
     delivery: {
       issue: (repository, number) => deliveryIssue(query as Query, repository, number),
