@@ -2,7 +2,7 @@
 import { readBriefing } from "../briefing/service.js";
 import type { ReadRuntime } from "../briefing/service.js";
 import type { Transport } from "./core.js";
-import { nodeGit } from "../config/config.js";
+import { createGitService } from "../git/service.js";
 import type { GitRunner } from "../config/config.js";
 import type { GitContext, GitService } from "../git/service.js";
 
@@ -35,14 +35,24 @@ export function serviceTransport(runtime: ReadRuntime): Transport {
         readers: T | undefined,
       ): T | undefined => {
         if (!readers) return readers;
+        // A reader's own typed service (the guide's gitService) gets this read's signal too.
+        const own = (readers as { gitService?: GitService }).gitService;
+        const typed = own ? { gitService: bindGitServiceSignal(own, signal) } : {};
         if (typeof readers.git === "object")
-          return { ...readers, git: bindGitServiceSignal(readers.git, signal) };
-        const runner = readers.git ?? nodeGit;
+          return { ...readers, ...typed, git: bindGitServiceSignal(readers.git, signal) };
+        // Nothing injected: the typed Git service's isolated default, never the raw runner (#933).
+        if (readers.git === undefined)
+          return {
+            ...readers,
+            ...typed,
+            git: bindGitServiceSignal(own ?? createGitService(), signal),
+          };
+        const runner = readers.git;
         const git: GitRunner = (args, cwd) => {
           signal.throwIfAborted();
           return runner(args, cwd, signal);
         };
-        return { ...readers, git };
+        return { ...readers, ...typed, git };
       };
       const result = await readBriefing(
         { ...runtime, guide: bind(runtime.guide), estimation: bind(runtime.estimation) },
