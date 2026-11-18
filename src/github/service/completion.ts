@@ -15,13 +15,16 @@ import type { GhTransport } from "./transport.js";
 import { ticketGuard } from "../../workflow/claims.js";
 import type { GhRun, GraphQuery } from "../../workflow/claims.js";
 import {
-  defaultBranch as readDefaultBranch,
   deliveryCommentFields,
   readDeliveryComments as readDeliveryHistory,
   readPr as readLivePr,
-  targetContainment as readTargetContainment,
 } from "../../workflow/deliverables.js";
-import type { Containment, LivePr } from "../../workflow/deliverables.js";
+import type { LivePr } from "../../workflow/deliverables.js";
+import {
+  defaultBranch as readDefaultBranch,
+  targetContainment as readTargetContainment,
+} from "./containment.js";
+import type { Containment } from "./containment.js";
 import type { DeliveryComment, DeliveryTarget } from "../../workflow/delivery.js";
 
 export interface CompleteIssue {
