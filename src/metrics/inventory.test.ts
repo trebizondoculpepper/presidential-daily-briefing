@@ -101,12 +101,19 @@ describe("inventoryView (#883)", () => {
       ),
       // In-review ticket 1h old.
       ticket(7, "open", { stage: "in-review", createdAt: "2026-11-12T09:00:00.000Z" }),
+      // Blocked ticket aged from lastObservedChangeAt (3h ago), not createdAt (11 days ago).
+      ticket(8, "open", {
+        stage: "blocked",
+        createdAt: "2026-11-01T00:00:00.000Z",
+        lastObservedChangeAt: "2026-11-12T07:00:00.000Z",
+        blocked: true,
+      }),
     ];
 
     const view = inventoryView(now, tickets, coverage);
     expect(view.view).toBe("inventory");
     expect(view.cohort).toBe("current-open-inventory");
-    expect(view.totalOpen).toBe(5);
+    expect(view.totalOpen).toBe(6);
     expect(view.stateUnknown).toEqual({ count: 1, members: ["o/r#2"] });
     expect(view.stages.ready).toEqual({
       count: 2,
@@ -131,6 +138,7 @@ describe("inventoryView (#883)", () => {
       },
     });
     expect(view.stages.claimed.age.medianMs).toBe(10 * 3_600_000);
+    expect(view.stages.blocked.age.medianMs).toBe(3 * 3_600_000);
     expect(view.stages["in-review"].members).toEqual(["o/r#7"]);
   });
 
@@ -189,6 +197,20 @@ describe("inventoryView (#883)", () => {
           },
         },
       ),
+      // Partial PR coverage -> unknownActivity, never guessed as noRecordedProgress.
+      ticket(
+        15,
+        "open",
+        { stage: "claimed", claimedAt: "2026-11-10T00:00:00.000Z", waiting: false, blocked: false },
+        {
+          coverage: {
+            comments: "complete",
+            timeline: "complete",
+            deliveryRecords: "complete",
+            prs: "partial",
+          },
+        },
+      ),
     ];
 
     const view = inventoryView(now, tickets, coverage, { stalledHours: 24 });
@@ -198,6 +220,6 @@ describe("inventoryView (#883)", () => {
     expect(view.stalled.knownWait).toEqual({ count: 1, members: ["o/r#11"] });
     expect(view.stalled.blocked).toEqual({ count: 1, members: ["o/r#12"] });
     expect(view.stalled.noRecordedProgress).toEqual({ count: 1, members: ["o/r#13"] });
-    expect(view.stalled.unknownActivity).toEqual({ count: 1, members: ["o/r#14"] });
+    expect(view.stalled.unknownActivity).toEqual({ count: 2, members: ["o/r#14", "o/r#15"] });
   });
 });

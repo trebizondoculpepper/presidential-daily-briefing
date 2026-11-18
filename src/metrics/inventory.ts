@@ -27,8 +27,10 @@ export type InventoryStage = (typeof INVENTORY_STAGES)[number];
 export interface InventoryFacts {
   /** Native workflow stage; `"unknown"` when completeness or prerequisites cannot be established. */
   stage: InventoryStage;
-  /** Ticket creation time (ISO UTC) for non-claimed stage ages; null/undefined is unknown age. */
+  /** Ticket creation time (ISO UTC) for non-claimed/non-blocked stage ages; null/undefined is unknown age. */
   createdAt?: string | null;
+  /** Last observed change (ISO UTC) for blocked stage age; null/undefined falls back to latest ledger event. */
+  lastObservedChangeAt?: string | null;
   /** Current claim start (ISO UTC) for claimed stage age; falls back to ledger pickup. */
   claimedAt?: string | null;
   /** Native dependency blocker status; null/undefined means unknown. */
@@ -111,9 +113,20 @@ function createdIsoOf(t: MetricTicket): string | null {
   return created?.at ?? null;
 }
 
+function latestEventIsoOf(t: MetricTicket): string | null {
+  const times = t.ledger.events
+    .map((e) => ({ at: e.at, ms: parseMs(e.at) }))
+    .filter((x): x is { at: string; ms: number } => x.ms !== null)
+    .sort((a, b) => a.ms - b.ms);
+  return times.at(-1)?.at ?? null;
+}
+
 function stageAgeStartMs(t: MetricTicket, stage: InventoryStage): number | null {
   if (stage === "claimed") {
     return parseMs(t.inventory?.claimedAt ?? earliestPickupIso(t));
+  }
+  if (stage === "blocked") {
+    return parseMs(t.inventory?.lastObservedChangeAt ?? latestEventIsoOf(t));
   }
   return parseMs(createdIsoOf(t));
 }
@@ -128,7 +141,12 @@ function emptyStage(): StageInventory {
 
 function hasCompleteActivityEvidence(t: MetricTicket): boolean {
   const c = t.ledger.coverage;
-  return c.timeline === "complete" && c.comments === "complete";
+  return (
+    c.timeline === "complete" &&
+    c.comments === "complete" &&
+    c.deliveryRecords === "complete" &&
+    c.prs === "complete"
+  );
 }
 
 /**

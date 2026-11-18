@@ -355,7 +355,13 @@ export async function readMetrics(
       ) {
         waiting = false;
       }
-      inventory = { stage, createdAt: issue.createdAt, blocked, waiting };
+      inventory = {
+        stage,
+        createdAt: issue.createdAt,
+        lastObservedChangeAt: issue.updatedAt,
+        blocked,
+        waiting,
+      };
     }
     tickets.push({
       member: member(issue.number),
