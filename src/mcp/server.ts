@@ -778,7 +778,12 @@ export function createServer(
                 if (error instanceof WindowRefusal) throw new Failure("invalid-window");
                 throw error;
               }
-              const built = catchUp(snapshot, {
+              // #301/#796: attach the declared review policy so the shared readiness evaluator
+              // sees the same context over MCP as over the CLI (never undeclared legacy policy).
+              const declared =
+                rt.reviewPolicy ?? (await resolveReviewPolicy(selection.repository, rt.guide));
+              const withPolicy = declared ? { ...snapshot, reviewPolicy: declared } : snapshot;
+              const built = catchUp(withPolicy, {
                 agent: selection.agent ?? undefined,
                 limit: args.limit ?? (args.mode === "briefing" ? catchUpLimits.limit.default : 10),
                 now,

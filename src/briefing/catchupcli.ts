@@ -20,6 +20,7 @@ import type { ComparisonWindow, WindowRequest } from "../github/changes.js";
 import { historyComplete } from "../github/github.js";
 import type { collect } from "../github/github.js";
 import type { Snapshot } from "../github/types.js";
+import type { DeclaredReviewPolicy } from "../workflow/reviewpolicy.js";
 
 /** A checkpoint path for text output: long paths keep their start and end; --json has it whole. */
 export const checkpointLabel = (path: string): string =>
@@ -126,6 +127,8 @@ export async function collectBriefing(
 }
 
 export interface BriefingRuntime {
+  /** Resolve the verified target's policy for live reads; offline uses the saved context. */
+  reviewPolicy?: (repository: string) => Promise<DeclaredReviewPolicy>;
   prepareViewer?: (options: BriefingArguments) => Promise<string | undefined>;
   collect: typeof collect;
   currentRepository: () => Promise<string>;
@@ -382,6 +385,8 @@ async function deliver(
       { last: options.last, since: options.since, checkpoint },
       now,
     ));
+    if (runtime.reviewPolicy)
+      snapshot = { ...snapshot, reviewPolicy: await runtime.reviewPolicy(repository) };
     if (options.cache && !historyComplete(snapshot))
       // An incomplete history read never replaces the last successful explicit snapshot.
       snapshot = {

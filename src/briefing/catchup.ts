@@ -9,8 +9,10 @@
  * attribution stays separate from the GitHub account actor; waiting is not failure; incomplete
  * or unavailable history is never presented as "no changes".
  */
-import { analysisRules, excerpt, owners, prChecks } from "./briefing.js";
+import { analysisRules, excerpt, owners } from "./briefing.js";
 import { workflow } from "../workflow/definition.js";
+import { snapshotPrReadiness } from "../workflow/prstatus.js";
+import { requiredCheckEvidence, type Requiredness } from "../github/requiredchecks.js";
 import type { Bounded } from "./briefing.js";
 import { inWindow, parseOperationMarker, snapshotChangeEvidence } from "../github/changes.js";
 import type {
@@ -202,12 +204,34 @@ export function catchUp(snapshot: Snapshot, options: CatchUpOptions) {
   const repository = snapshot.repository;
   const detail = (kind: SubjectRef["kind"], number: number) =>
     kind === "pull-request"
-      ? `gh pr view ${number} --repo ${repository}`
+      ? `pdb pr ${number} --repo ${repository} --json`
       : `pdb --repo ${repository} --issue ${number} --json`;
   const rowId = (kind: SubjectRef["kind"], number: number, event: string) =>
     `${repository}#${kind}#${number}#${event}`;
   const items: Issue[] = [...snapshot.issues, ...snapshot.pullRequests];
   const byUrl = new Map(items.map((item) => [item.url, item]));
+
+  // Evaluate each collected PR once through the same native seam as PR inspection/Doctor.
+  // This presenter neither chooses a worst blocker nor reconstructs a next-action policy.
+  const prReadiness = new Map<PullRequest, ReturnType<typeof snapshotPrReadiness>>();
+  const nativePr = (pr: PullRequest) => {
+    let result = prReadiness.get(pr);
+    if (!result) {
+      result = snapshotPrReadiness(pr, snapshot.warnings, snapshot.reviewPolicy);
+      prReadiness.set(pr, result);
+    }
+    return result;
+  };
+  const prStatus = (pr: PullRequest) => {
+    const result = nativePr(pr);
+    return result.ready
+      ? "required checks passing; no blocker found (not approval)"
+      : result.blockers.join("; ");
+  };
+  const prNext = (pr: PullRequest) => {
+    const result = nativePr(pr);
+    return result.ready ? result.verdict : "Blocked: address every listed blocker.";
+  };
 
   const retained = snapshotChangeEvidence(snapshot);
   const evidence: ChangeEvidence | null = retained.available ? retained.evidence : null;
@@ -618,6 +642,7 @@ export function catchUp(snapshot: Snapshot, options: CatchUpOptions) {
     });
   for (const pr of snapshot.pullRequests) {
     if (!workflow.openStates.includes(pr.state)) continue;
+    const decision = nativePr(pr);
     const { failed, cancelled, pending } = classifyChecks(pr);
     if (failed.length)
       blocker(
@@ -625,7 +650,7 @@ export function catchUp(snapshot: Snapshot, options: CatchUpOptions) {
         "checks-failed",
         "failed-checks",
         `Failed checks: ${failed.map((c) => c.name).join(", ")}.`,
-        "Inspect the failing logs and fix the head.",
+        decision.verdict,
         failed.map((c) => c.url),
       );
     if (cancelled.length)
@@ -634,7 +659,7 @@ export function catchUp(snapshot: Snapshot, options: CatchUpOptions) {
         "checks-cancelled",
         "cancelled-checks",
         `Cancelled checks (verification incomplete, not a code defect): ${cancelled.map((c) => c.name).join(", ")}.`,
-        "Re-run the cancelled checks.",
+        decision.verdict,
         cancelled.map((c) => c.url),
       );
     if (pending.length)
@@ -643,7 +668,7 @@ export function catchUp(snapshot: Snapshot, options: CatchUpOptions) {
         "checks-pending",
         "waiting",
         `Waiting on checks (not a failure): ${pending.map((c) => c.name).join(", ")}.`,
-        "Wait for the checks to finish.",
+        decision.verdict,
         pending.map((c) => c.url),
       );
     const { unknown, complete } = classifyChecks(pr);
@@ -660,7 +685,7 @@ export function catchUp(snapshot: Snapshot, options: CatchUpOptions) {
         ]
           .filter(Boolean)
           .join("; ")}.`,
-        "Inspect current head checks. Do not infer approval.",
+        decision.verdict,
         unknown.length ? unknown.map((c) => c.url) : [pr.url],
         "unknown",
       );
@@ -670,7 +695,7 @@ export function catchUp(snapshot: Snapshot, options: CatchUpOptions) {
         "conflicts",
         "conflicts",
         "Merge conflicts with the base branch.",
-        "Rebase or merge the base branch.",
+        decision.verdict,
         [pr.url],
       );
     const unresolved = pr.reviewThreads.nodes.filter((t) => !t.isResolved);
@@ -683,7 +708,7 @@ export function catchUp(snapshot: Snapshot, options: CatchUpOptions) {
         "review",
         "unresolved-review",
         `${unresolved.length} unresolved review thread(s)${pr.reviewDecision ? `; review decision ${pr.reviewDecision}` : ""}.`,
-        "Address the review findings.",
+        decision.verdict,
         unresolved.map((t) => t.comments.nodes[0]?.url ?? pr.url),
       );
   }
@@ -720,23 +745,30 @@ export function catchUp(snapshot: Snapshot, options: CatchUpOptions) {
         finding.uncertainty,
       );
   }
-  // Verification risk comes from the registered pull-requests rule, so the required-check
-  // contract (workflow.verify / verifySuccess) is not re-implemented here. Only reported when no
-  // more specific check row (failed, cancelled, pending, unknown) already explains the gap.
-  for (const finding of rule("pull-requests")) {
-    if (finding.rule !== "pr-verification-needed") continue;
-    const item = byUrl.get(finding.target);
-    if (!item || !workflow.openStates.includes(item.state)) continue;
-    const pr = snapshot.pullRequests.find((p) => p.url === item.url);
-    if (pr && verificationWord(pr) !== NOT_PROVEN_WORD) continue;
+  // Show native check-policy gaps not already explained by an observed check row.
+  // The other check rows report raw outcomes; they never prove readiness.
+  for (const pr of snapshot.pullRequests) {
+    if (!workflow.openStates.includes(pr.state)) continue;
+    const native = nativePr(pr);
+    const checks = classifyChecks(pr);
+    if (
+      native.requirements !== "unproven" ||
+      checks.failed.length ||
+      checks.cancelled.length ||
+      checks.pending.length ||
+      checks.unknown.length ||
+      !checks.complete
+    )
+      continue;
+    const reasons = native.reasons.filter((r) => r.ruleId.startsWith("RC-"));
     blocker(
-      item,
-      finding.rule,
+      pr,
+      "native-check-policy",
       "verification-not-proven",
-      finding.reason,
-      `Run or wait for the required verify check on PR #${item.number}.`,
-      finding.evidence,
-      finding.uncertainty,
+      reasons.map((r) => r.text).join("; "),
+      native.verdict,
+      [pr.url],
+      "unknown",
     );
   }
   for (const stale of rule("stale-claim")) {
@@ -797,7 +829,7 @@ export function catchUp(snapshot: Snapshot, options: CatchUpOptions) {
         .filter((l) => l.startsWith("status:"))
         .map((l) => (i === issue ? l : `#${i.number} ${l}`)),
     );
-    const prState = prs.map((pr) => `PR #${pr.number} ${prStatusWord(pr)}`);
+    const prState = prs.map((pr) => `PR #${pr.number} ${prStatus(pr)}`);
     const startedAt = issue.createdAt ?? null;
     activityRows.push({
       id: rowId("issue", issue.number, "activity"),
@@ -827,7 +859,7 @@ export function catchUp(snapshot: Snapshot, options: CatchUpOptions) {
         ),
       ],
       evidence: [...issues.map((i) => i.url), ...prs.map((pr) => pr.url)],
-      next: prs.length ? nextFor(prs[0]!) : "Implementation in progress; no linked PR observed.",
+      next: prs.length ? prNext(prs[0]!) : "Implementation in progress; no linked PR observed.",
       uncertainty: "reported",
       // Each issue's and linked PR's own owner labels stay in the contribution, sourced to them.
       attribution: [
@@ -865,7 +897,7 @@ export function catchUp(snapshot: Snapshot, options: CatchUpOptions) {
       at: snapshot.fetchedAt,
       timing: "observation",
       startedAt: pr.createdAt ?? null,
-      description: `${pr.title} — ${startedOrOngoing(pr.createdAt ?? null)}; ${prStatusWord(pr)}.`,
+      description: `${pr.title} — ${startedOrOngoing(pr.createdAt ?? null)}; ${prStatus(pr)}.`,
       reasons: [
         "Open PR",
         ...(pr.closingIssuesReferences.pageInfo.hasNextPage
@@ -873,7 +905,7 @@ export function catchUp(snapshot: Snapshot, options: CatchUpOptions) {
           : []),
       ],
       evidence: [pr.url, ...linked.map((l) => l.url)],
-      next: nextFor(pr),
+      next: prNext(pr),
       uncertainty: owners(pr).length ? "reported" : "unknown",
       attribution: orUnknown(labelAttribution(pr).filter((a) => a.relation === "current-owner")),
       detailCommand: detail("pull-request", pr.number),
@@ -1014,67 +1046,47 @@ export type CatchUpReport = ReturnType<typeof catchUp>;
 
 /**
  * The one check classification shared by the blocker rows and current activity, so the two can
- * never disagree: a cancelled check is incomplete verification, not a failure.
+ * never disagree: a cancelled check is incomplete verification, not a failure. Requiredness is
+ * matched by run identity (name + databaseId), never by name alone, so two same-named runs from
+ * different apps cannot transfer requiredness between them.
  */
 function classifyChecks(pr: PullRequest) {
-  const checks = prChecks(pr);
+  const contexts = pr.commits?.nodes?.[0]?.commit.statusCheckRollup?.contexts.nodes ?? [];
+  const evidence = requiredCheckEvidence(pr);
+  const keyOf = (c: (typeof contexts)[number]) => {
+    const name = c.name ?? c.context ?? "unnamed";
+    return c.databaseId != null ? `${name}\u0000${c.databaseId}` : name;
+  };
+  const requiredByIdentity = new Map<string, Requiredness>();
+  for (const run of evidence.checks) {
+    const key = run.databaseId != null ? `${run.name}\u0000${run.databaseId}` : run.name;
+    // A name with several database IDs is ambiguous; only store unambiguous single entries.
+    if (!requiredByIdentity.has(key)) requiredByIdentity.set(key, run.required);
+    else if (requiredByIdentity.get(key) !== run.required) requiredByIdentity.set(key, "unknown");
+  }
+  const checks = contexts.map((check) => ({
+    name: check.name ?? check.context ?? "unnamed",
+    outcome: check.conclusion ?? check.state ?? check.status ?? "UNKNOWN",
+    url: check.detailsUrl ?? check.targetUrl ?? pr.url,
+    required: requiredByIdentity.get(keyOf(check)) ?? "unknown",
+  }));
   return {
     checks,
     failed: checks.filter((c) => workflow.failure.includes(c.outcome) && c.outcome !== "CANCELLED"),
     cancelled: checks.filter((c) => c.outcome === "CANCELLED"),
-    pending: checks.filter((c) => workflow.unfinished.includes(c.outcome)),
+    pending: checks.filter(
+      (c) => workflow.unfinished.includes(c.outcome) && c.required !== "advisory",
+    ),
     /** Outcomes that are neither a supported pass, failure nor unfinished state. */
     unknown: checks.filter(
-      (c) => ![...workflow.pass, ...workflow.failure, ...workflow.unfinished].includes(c.outcome),
+      (c) =>
+        c.required !== "advisory" &&
+        ![...workflow.pass, ...workflow.failure, ...workflow.unfinished].includes(c.outcome),
     ),
     /** False when the check connection was truncated: more outcomes exist than were seen. */
     complete: !pr.commits.nodes[0]?.commit.statusCheckRollup?.contexts.pageInfo?.hasNextPage,
-    /** The registered required check (workflow.verify) completed with a registered success. */
-    verified: checks.some(
-      (c) => c.name === workflow.verify && workflow.verifySuccess.includes(c.outcome),
-    ),
   };
 }
-const NOT_PROVEN_WORD = "verification not proven";
-/** Check-only status, shared by activity wording and the verification-risk blocker filter. */
-function verificationWord(pr: PullRequest): string {
-  const { failed, cancelled, pending, unknown, complete, verified } = classifyChecks(pr);
-  if (failed.length) return "checks failing";
-  if (cancelled.length) return CANCELLED_WORD;
-  if (pending.length) return "checks pending";
-  if (unknown.length) return "checks unknown";
-  if (!complete) return "checks incomplete";
-  // Passing requires the registered required check, not merely any successful check.
-  if (!verified) return NOT_PROVEN_WORD;
-  return "checks passing";
-}
-const CANCELLED_WORD = "checks cancelled; verification incomplete";
-function prStatusWord(pr: PullRequest): string {
-  if (pr.isDraft) return "draft";
-  if (workflow.conflicts.includes(pr.mergeable)) return "conflicting";
-  const word = verificationWord(pr);
-  if (word === "checks failing" || word === CANCELLED_WORD || word === "checks pending")
-    return word;
-  if (pr.reviewThreads.nodes.some((t) => !t.isResolved)) return "review findings open";
-  // A reviewer can request changes without inline threads; same rule as the blocker section.
-  if (pr.reviewDecision && workflow.changesRequested.includes(pr.reviewDecision))
-    return "changes requested";
-  return word;
-}
-function nextFor(pr: PullRequest): string {
-  const word = prStatusWord(pr);
-  if (word === "checks failing") return `Fix failing checks on PR #${pr.number}.`;
-  if (word === CANCELLED_WORD) return `Rerun checks on PR #${pr.number}.`;
-  if (word === "checks pending") return `Wait for checks on PR #${pr.number}.`;
-  if (word === "conflicting") return `Resolve conflicts on PR #${pr.number}.`;
-  if (word === "review findings open" || word === "changes requested")
-    return `Address review findings on PR #${pr.number}.`;
-  if (word === "draft") return `Finish draft PR #${pr.number}.`;
-  if (word === NOT_PROVEN_WORD)
-    return `Run or wait for the required verify check on PR #${pr.number}.`;
-  return `Review PR #${pr.number}; verify the current head before merging.`;
-}
-
 const attentionHeadline: Record<AttentionStatus, string> = {
   recorded: "Owner attention: RECORDED requests below.",
   candidate: "Owner attention: candidates only (need triage; not confirmed owner decisions).",
