@@ -15,6 +15,15 @@
 import { ticketHistory } from "../workflow/claims.js";
 import type { GraphQuery } from "../workflow/claims.js";
 import {
+  classifyMarkers,
+  foldClaimActivity,
+  parseActivityComment,
+  type ActivityComment,
+} from "../workflow/claimactivity.js";
+import { workflow } from "../workflow/definition.js";
+import { readRetained } from "../workflow/retained.js";
+import { evaluateDatalog } from "../rules/datalog/adapter.js";
+import {
   collectDeliveryFacts,
   deliveryMemberCap,
   evaluateDelivery,
@@ -27,7 +36,7 @@ import { assessmentGroups } from "./assessment.js";
 import type { CompletionVerdict } from "./aggregate.js";
 import { ticketLedger } from "./ledger.js";
 import type { LedgerFacts, LedgerPullRequest, LedgerTrust } from "./ledger.js";
-import type { HistoryCoverage, MetricTicket } from "./views.js";
+import type { HistoryCoverage, InventoryFacts, InventoryStage, MetricTicket } from "./views.js";
 import { createGhService } from "../github/service/service.js";
 import type { HistoryIssue } from "../github/service/history.js";
 
@@ -294,12 +303,157 @@ export async function readMetrics(
       },
       rt.trust.comment,
     );
+    let inventory: InventoryFacts | undefined;
+    if (issue.state === "OPEN") {
+      const labelsComplete = issue.labels ? !issue.labels.pageInfo.hasNextPage : false;
+      const labelNames = new Set((issue.labels?.nodes ?? []).map((l) => l.name));
+      const blocked: boolean | null =
+        issue.openBlockers !== null && issue.openBlockers !== undefined
+          ? issue.openBlockers > 0
+          : null;
+      const ownerLabels = [...labelNames].filter((l) => l.startsWith(workflow.ownerPrefix));
+      let stage: InventoryStage = "unknown";
+      if (labelsComplete) {
+        if (
+          assessment.complexity.group === "unassessed" ||
+          assessment.impact.group === "unassessed"
+        ) {
+          stage = "unassessed";
+        } else if (
+          labelNames.has("status:awaiting-review") ||
+          (issue.openClosingPrs !== null &&
+            issue.openClosingPrs !== undefined &&
+            issue.openClosingPrs > 0)
+        ) {
+          stage = "in-review";
+        } else if (ownerLabels.length > 0) {
+          stage = "claimed";
+        } else if (blocked === true) {
+          stage = "blocked";
+        } else if (issue.openClosingPrs === 0) {
+          // Delegate readiness to the canonical native Datalog evaluator rather than checking labels alone.
+          type DatalogSnapshot = Parameters<typeof evaluateDatalog>[0];
+          const url = `https://github.com/${repository}/issues/${issue.number}`;
+          const datalog = evaluateDatalog(
+            {
+              schemaVersion: 1,
+              repository,
+              fetchedAt: now,
+              warnings: [],
+              issues: [
+                {
+                  number: issue.number,
+                  title: `#${issue.number}`,
+                  url,
+                  state: "OPEN",
+                  createdAt: issue.createdAt,
+                  updatedAt: issue.updatedAt,
+                  labels: issue.labels,
+                  assignees: { nodes: [] },
+                  issueDependenciesSummary:
+                    issue.openBlockers === 0
+                      ? { blockedBy: 0, totalBlockedBy: 0, blocking: 0, totalBlocking: 0 }
+                      : null,
+                  blockedBy:
+                    issue.openBlockers === 0
+                      ? { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } }
+                      : undefined,
+                  closedByPullRequestsReferences: {
+                    nodes: [],
+                    pageInfo: { hasNextPage: false, endCursor: null },
+                  },
+                  comments: { totalCount: issue.comments.totalCount, nodes: [] },
+                } as unknown as DatalogSnapshot["issues"][number],
+              ],
+              pullRequests: [],
+              findings: [],
+            } as unknown as DatalogSnapshot,
+            new Map(),
+            {
+              role: "implementer",
+              limit: 50,
+              ownedClaims: { urls: [], complete: true },
+              signal: rt.signal,
+            },
+          );
+          if (datalog.items.some((a) => a.kind === "implement" && a.target === url)) {
+            stage = "ready";
+          }
+        }
+      }
+      let waiting: boolean | null = null;
+      if (ownerLabels.length === 1 && commentsComplete) {
+        const ownerLabel = ownerLabels[0]!;
+        const ownerAgent = ownerLabel.slice(workflow.ownerPrefix.length);
+        const latestClaimAdd =
+          history.events
+            .filter((e) => e.__typename === "LabeledEvent" && e.label.name === ownerLabel)
+            .map((e) => e.createdAt)
+            .sort((a, b) => a.localeCompare(b))
+            .at(-1) ?? null;
+        const classifiedActivity = await classifyMarkers(
+          comments as ActivityComment[],
+          { repository, issue: issue.number },
+          rt.trust.comment,
+          parseActivityComment,
+        );
+        const activity = foldClaimActivity(classifiedActivity, {
+          agent: ownerAgent,
+          claimStartedAt: latestClaimAdd,
+          historyComplete: commentsComplete,
+        });
+        if (activity.state === "waiting") {
+          try {
+            const permission = async (login: string) => {
+              const t = await rt.trust.actor({ __typename: "User", login });
+              return t.status === "trusted"
+                ? "write"
+                : t.status === "untrusted"
+                  ? "read"
+                  : "unknown";
+            };
+            const retained = await readRetained(
+              repository,
+              issue.number,
+              ownerAgent,
+              query,
+              permission,
+            );
+            waiting =
+              retained.activity.state === "waiting"
+                ? true
+                : retained.activity.state === "active"
+                  ? false
+                  : null;
+          } catch (error) {
+            if (rt.signal?.aborted) throw error;
+            waiting = null;
+          }
+        } else {
+          waiting = activity.state === "active" ? false : null;
+        }
+      } else if (
+        commentsComplete &&
+        !comments.some((c) => c.body.includes("github-triage:claim-activity"))
+      ) {
+        waiting = false;
+      }
+      inventory = {
+        stage,
+        createdAt: issue.createdAt,
+        lastObservedChangeAt: issue.updatedAt,
+        blocked,
+        waiting,
+        claimed: ownerLabels.length > 0,
+      };
+    }
     tickets.push({
       member: member(issue.number),
       ledger,
       verdict: verdictOf(evaluateDelivery(facts).delivery),
       complexity: assessment.complexity.group,
       assessment,
+      ...(inventory ? { inventory } : {}),
     });
   }
   if (skipped.length)

@@ -18,6 +18,7 @@ import {
   type DurationStats,
 } from "./aggregate.js";
 import type { AssessmentGroups } from "./assessment.js";
+import type { InventoryFacts } from "./inventory.js";
 import type { LedgerEvent, TicketLedger } from "./ledger.js";
 import {
   dailyAverage,
@@ -46,7 +47,22 @@ export interface MetricTicket {
    * supplied them; `complexity` above is the complexity group's name.
    */
   assessment?: AssessmentGroups;
+  /** Current open-inventory stage, blocker, and wait facts (#883), when supplied. */
+  inventory?: InventoryFacts;
 }
+
+export {
+  DEFAULT_STALLED_HOURS,
+  INVENTORY_STAGES,
+  inventoryView,
+  type InventoryFacts,
+  type InventoryResult,
+  type InventoryStage,
+  type StageAgeStats,
+  type StageInventory,
+  type StalledBucket,
+  type StalledInventory,
+} from "./inventory.js";
 
 /** How far back the historical event walk is known to be complete. */
 export type HistoryCoverage = DayCoverage;

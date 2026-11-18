@@ -2037,6 +2037,19 @@ describe("pipeline metrics endpoint (#573 slice 5b)", () => {
       // The quiet open ticket from the open inventory is part of the read, not missing.
       expect(timing.json.result.historyNotRead).toMatchObject({ count: 0 });
       expect(counter.n).toBe(before);
+      // The inventory view for the same 7-day cache entry reuses the cached read too.
+      const inventory = await call(
+        s.running.port,
+        "/api/v1/metrics?view=inventory&stalledHours=24",
+      );
+      expect(inventory.status).toBe(200);
+      expect(inventory.json.result).toMatchObject({
+        view: "inventory",
+        cohort: "current-open-inventory",
+        totalOpen: 2,
+        stalled: { thresholdHours: 24 },
+      });
+      expect(counter.n).toBe(before);
     } finally {
       await s.close();
     }

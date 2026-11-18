@@ -60,7 +60,13 @@ import { localPaths, redactLocalText, redactPaths } from "../mcp/redact.js";
 import { markerTrust } from "../workflow/delivery.js";
 import { ledgerTrust } from "../metrics/ledger.js";
 import { readMetrics, type MetricsRead } from "../metrics/read.js";
-import { dailyView, newsView, timingView } from "../metrics/views.js";
+import {
+  dailyView,
+  DEFAULT_STALLED_HOURS,
+  inventoryView,
+  newsView,
+  timingView,
+} from "../metrics/views.js";
 import { trailingWindow } from "../metrics/windows.js";
 import {
   readPullRequest,
@@ -938,24 +944,40 @@ export function readApi(
         await dataRoute(
           context,
           "metrics",
-          ["view", "days", "hours"],
+          ["view", "days", "hours", "stalledHours"],
           undefined,
           async (values, served) => {
             const view = values.get("view") ?? "daily";
-            if (view !== "news" && view !== "daily" && view !== "timing")
-              throw invalid("view must be news, daily or timing.");
+            if (view !== "news" && view !== "daily" && view !== "timing" && view !== "inventory")
+              throw invalid("view must be news, daily, timing or inventory.");
             const nowIso = runtime.now().toISOString();
             let from: string;
             let span: number;
+            let stalledHours = DEFAULT_STALLED_HOURS;
             if (view === "news") {
               span = Number(values.get("hours") ?? 6);
               if (span !== 1 && span !== 6) throw invalid("hours must be 1 or 6.");
               if (values.has("days")) throw invalid("days applies to daily and timing views only.");
+              if (values.has("stalledHours"))
+                throw invalid("stalledHours applies to the inventory view only.");
               from = new Date(Date.parse(nowIso) - span * 3_600_000).toISOString();
+            } else if (view === "inventory") {
+              if (values.has("days")) throw invalid("days applies to daily and timing views only.");
+              if (values.has("hours")) throw invalid("hours applies to the news view only.");
+              if (values.has("stalledHours")) {
+                const raw = Number(values.get("stalledHours"));
+                if (!Number.isInteger(raw) || raw < 1)
+                  throw invalid("stalledHours must be a positive integer.");
+                stalledHours = raw;
+              }
+              span = 7;
+              from = `${trailingWindow(nowIso, span).days[0]}T00:00:00.000Z`;
             } else {
               span = Number(values.get("days") ?? 7);
               if (span !== 7 && span !== 30) throw invalid("days must be 7 or 30.");
               if (values.has("hours")) throw invalid("hours applies to the news view only.");
+              if (values.has("stalledHours"))
+                throw invalid("stalledHours applies to the inventory view only.");
               from = `${trailingWindow(nowIso, span).days[0]}T00:00:00.000Z`;
             }
             if (!guardedQueryWith || !guardedRest)
@@ -984,7 +1006,9 @@ export function readApi(
                 ? newsView(nowIso, span, read.tickets, read.coverage, 200, unread, read.merges)
                 : view === "daily"
                   ? dailyView(nowIso, span, read.tickets, read.coverage, unread, read.merges)
-                  : timingView(nowIso, span, read.tickets, read.coverage);
+                  : view === "inventory"
+                    ? inventoryView(nowIso, read.tickets, read.coverage, { stalledHours })
+                    : timingView(nowIso, span, read.tickets, read.coverage);
             const complete = metricsReadComplete(read, from);
             return {
               status: complete ? "complete" : "incomplete",
