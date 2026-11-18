@@ -21,3 +21,5 @@ New research belongs here. Record the question, date, sources/method, findings,
 limitations and resulting decision or open question. Keep executable examples
 under their existing TypeScript validation boundary. Link an accepted decision
 from architecture or its detailed contract; do not copy competing policy here.
+
+- [Bounded logging package check](local-logging.md): standard daily rotation/retention and audit-acknowledgement limits.

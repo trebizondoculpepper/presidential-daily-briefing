@@ -76,3 +76,11 @@ The owner accepts a recent Node requirement: [the current Node LTS](runtime.md),
 - [Designer impact estimation direction](impact-estimation-direction.md): approved mirror-image metric and staged analysis/delivery, #244–#248.
 
 [Rules component](rules-component.md) is the #348 contract for native EDN policy sources, the rules build, the typed facts-in/decisions-out engine boundary and isolated rule tests.
+
+## Logging and human-directed recovery
+
+- [Shared local logging](local-logging.md): standard package, OS paths, seven-day retention and acknowledged audit writes (#1017).
+- [Explicit force overrides](human-force-overrides.md): required reason, native rule explanations and human-reporting warning (#1016).
+- [Human responsibility release](human-responsibility-release.md): preserve open PRs, release selected agent responsibility and allow adoption (#1014, #1018, #1019).
+
+The [central architecture](../architecture.md#10-policy-before-integration-and-ticket-types) defines policy-first delivery and prospective ticket types (#1020).

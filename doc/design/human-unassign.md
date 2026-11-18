@@ -92,3 +92,12 @@ permission/CSRF refusal; record-only partial failure; lost response and safe ret
 newer claim protection; cache invalidation and human-removal no-auto-reclaim.
 Use synthetic facts and focused UI/keyboard/narrow-layout checks. No live release,
 assignment, issue closure or new paid agent turn is required for validation.
+
+## Explicit human-directed responsibility release addendum
+
+[Human responsibility release](human-responsibility-release.md) (#1014/#1018/#1019)
+defines the separate operation that also clears selected-agent delivery
+responsibility while preserving useful open PRs and readiness. It refines the
+earlier claim-only/removal and open-PR reset limits for that operation; ordinary
+reset and existing UI/permission safeguards remain unchanged. Implementation
+requires the policy slice followed by its engineering integration.
