@@ -106,7 +106,9 @@ function coverageNote(from: string, coverage: DayCoverage): string | null {
 }
 
 function earliestPickupIso(t: InventoryTicket): string | null {
-  const candidates = [t.ledger.firstPickup["claim-marker"], t.ledger.firstPickup.label]
+  const sources = [t.ledger.firstPickup["claim-marker"], t.ledger.firstPickup.label];
+  if (sources.some((c) => c.status === "unknown")) return null;
+  const candidates = sources
     .filter(
       (c): c is { status: "found"; at: string; agent: string | null; key: string } =>
         c.status === "found",
