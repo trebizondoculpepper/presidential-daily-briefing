@@ -21,6 +21,7 @@ import { defaultEngine } from "../config/engine-setting.js";
 import { briefingRoleNames } from "../briefing/roles.js";
 import { httpMcp } from "./mcp.js";
 import { QuotaService } from "../github/quotas.js";
+import { createGhService } from "../github/service/service.js";
 import { quotasApi } from "./quotas-page.js";
 import type { ServeOptions } from "./options.js";
 
@@ -87,14 +88,20 @@ export function readServices(
       },
     });
     const api = readApi(options, read, cache)(facts);
+    // One typed GH service per server (#939) over its REST boundary; construction reads nothing.
+    const gh = createGhService({
+      rest:
+        read.rest ??
+        (async () => {
+          throw new Error("no REST boundary");
+        }),
+      now: () => serve.clock.now(),
+    });
     // #548: one quota service per server for its verified gh login; nothing runs until asked.
     const quotas = quotasApi(
       new QuotaService({
-        rest:
-          read.rest ??
-          (async () => {
-            throw new Error("no REST boundary");
-          }),
+        // The typed rate-limit capability (#923, #939) over this server's REST boundary.
+        rateLimits: (signal) => gh.account.rateLimits(signal),
         now: () => serve.clock.now(),
         telemetry: (context) => cache.quotaTelemetry(context),
       }),
