@@ -22,14 +22,23 @@ describe("Claude MCP install/uninstall (#769, attended-installer-delivery.md)", 
         url: null,
         projectRoot: "/w",
         entry: "open",
+        platform: "linux",
       }),
     ).toEqual({ type: "stdio", command: pdbMcp, args: ["--project", "/w", "--entry", "open"] });
-    expect(buildClaudeMcpEntry({ pdbMcp, transport: "http", url: "http://x/mcp" })).toEqual({
+    expect(
+      buildClaudeMcpEntry({ pdbMcp, transport: "http", url: "http://x/mcp", platform: "linux" }),
+    ).toEqual({
       type: "http",
       url: "http://x/mcp",
     });
     expect(
-      desiredClaudeMcpEntryText({ pdbMcp, transport: "stdio", url: null, projectRoot: "/w" }),
+      desiredClaudeMcpEntryText({
+        pdbMcp,
+        transport: "stdio",
+        url: null,
+        projectRoot: "/w",
+        platform: "linux",
+      }),
     ).toBe(JSON.stringify({ type: "stdio", command: pdbMcp, args: ["--project", "/w"] }));
   });
 
@@ -81,6 +90,7 @@ describe("Claude MCP install/uninstall (#769, attended-installer-delivery.md)", 
         manifestPath,
         pdbVersion: "0.1.0",
         pdbMcp,
+        platform: "linux",
         runtime: { now: fixedNow },
       });
       expect(install.mcp.outcome).toBe("applied");
@@ -100,6 +110,7 @@ describe("Claude MCP install/uninstall (#769, attended-installer-delivery.md)", 
         manifestPath,
         pdbVersion: "0.1.0",
         pdbMcp,
+        platform: "linux",
         runtime: { now: fixedNow },
       });
       expect(again.mcp.outcome).toBe("kept");
@@ -180,6 +191,7 @@ describe("Claude MCP install/uninstall (#769, attended-installer-delivery.md)", 
         manifestPath,
         pdbVersion: "0.1.0",
         pdbMcp,
+        platform: "linux",
         runtime: { now: fixedNow },
       });
       expect(install.mcp.outcome).toBe("applied");
