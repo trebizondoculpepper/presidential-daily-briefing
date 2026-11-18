@@ -105,8 +105,14 @@ function github(
                     title: "Ticket",
                     url: `https://github.com/${repo}/issues/${N}`,
                     state: "OPEN",
-                    labels: { nodes: state.labels.map((name) => ({ name })), pageInfo: {} },
-                    closedByPullRequestsReferences: { nodes: setup.linked ?? [], pageInfo: {} },
+                    labels: {
+                      nodes: state.labels.map((name) => ({ name })),
+                      pageInfo: { hasNextPage: false },
+                    },
+                    closedByPullRequestsReferences: {
+                      nodes: setup.linked ?? [],
+                      pageInfo: { hasNextPage: false },
+                    },
                     comments: page(state.comments.length),
                   },
         },
@@ -171,6 +177,7 @@ let ids = 100;
 function comment(body: string, login = "writer", id = ids++): DeliveryComment {
   return {
     databaseId: id,
+    url: `https://github.com/o/r/issues/1#issuecomment-${id}`,
     body,
     createdAt: new Date(Date.UTC(2026, 10, 13, 9, 0, id % 3600)).toISOString(),
     author: { __typename: "User", login },
