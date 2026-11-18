@@ -18,7 +18,8 @@ import type { ConfigRuntime } from "../config/configcli.js";
 import { isAgentName, readIdentity } from "../config/identity.js";
 import { resolveEntry, type Environment } from "../config/harness.js";
 import { createGitService } from "../git/service.js";
-import type { InstallItemKind } from "./manifest.js";
+import { manifestPath, type InstallItemKind, type InstallScope } from "./manifest.js";
+import { installCodexMcp, uninstallCodexMcp } from "./codexmcp.js";
 
 /** A registered installer client; only Codex is implemented in this slice. */
 export type InstallClient = "codex";
@@ -32,6 +33,8 @@ export type InstallErrorCode =
   | "IDENTITY_AMBIGUOUS"
   | "UNSUPPORTED_SCOPE"
   | "UNSUPPORTED_CLIENT_VERSION"
+  | "FUTURE_MANIFEST_VERSION"
+  | "MALFORMED_MANIFEST"
   | "MALFORMED_CONFIG"
   | "UNSUPPORTED_SCHEMA"
   | "UNSAFE_TOML_EDIT"
@@ -46,7 +49,9 @@ export type InstallErrorCode =
 export type InstallItemAction = "create" | "replace" | "remove" | "kept" | "absent" | "skipped";
 export type InstallItemOutcome =
   | "applied"
+  | "kept"
   | "committed-with-error"
+  | "adopted"
   | "planned"
   | "refused"
   | "failed"
@@ -276,8 +281,8 @@ async function identityDecision(
   args: InstallArguments,
   scope: InstallInternalScope,
   runtime: ConfigRuntime,
-): Promise<InstallItem | null> {
-  if (args.operation !== "install" || scope.kind !== "project") return null;
+): Promise<{ item: InstallItem | null; entry: string | null }> {
+  if (args.operation !== "install" || scope.kind !== "project") return { item: null, entry: null };
   const env: Environment = runtime.env ?? process.env;
   const fs = runtime.fs ?? nodeFileSystem;
   // The Codex install must target the Codex identity: without an explicit --entry/--harness,
@@ -296,27 +301,33 @@ async function identityDecision(
     // #844/Codex: entry resolution can fail on an unreadable/malformed identity file before
     // readIdentity runs; return the same structured refusal, never the raw filesystem error.
     return {
-      kind: "identity",
-      file: null,
-      action: "kept",
-      outcome: "refused",
-      code: "IDENTITY_REQUIRED",
-      message: "The repository identity file (pdb.toml) could not be read; check access and retry.",
-      diff: null,
-      retry: null,
+      item: {
+        kind: "identity",
+        file: null,
+        action: "kept",
+        outcome: "refused",
+        code: "IDENTITY_REQUIRED",
+        message:
+          "The repository identity file (pdb.toml) could not be read; check access and retry.",
+        diff: null,
+        retry: null,
+      },
+      entry: null,
     };
   }
   if (resolution.status === "unresolved")
     return {
-      kind: "identity",
-      file: null,
-      action: "kept",
-      outcome: "refused",
-      code: "IDENTITY_AMBIGUOUS",
-      message: `${resolution.message} No identity was borrowed: the Codex install resolves the Codex entry.`,
-      diff: null,
-      // A role choice is still required; never emit a literal `implementer|designer` template.
-      retry: null,
+      item: {
+        kind: "identity",
+        file: null,
+        action: "kept",
+        outcome: "refused",
+        code: "IDENTITY_AMBIGUOUS",
+        message: `${resolution.message} No identity was borrowed: the Codex install resolves the Codex entry.`,
+        diff: null,
+        retry: null,
+      },
+      entry: null,
     };
   const entry = resolution.entry;
   let record;
@@ -325,14 +336,18 @@ async function identityDecision(
   } catch (error) {
     // #844/CodeRabbit: never leak the checkout path or raw error; name only pdb.toml.
     return {
-      kind: "identity",
-      file: null,
-      action: "kept",
-      outcome: "refused",
-      code: "IDENTITY_REQUIRED",
-      message: "The repository identity file (pdb.toml) could not be read; check access and retry.",
-      diff: null,
-      retry: "pdb config get identity.name --entry " + entry,
+      item: {
+        kind: "identity",
+        file: null,
+        action: "kept",
+        outcome: "refused",
+        code: "IDENTITY_REQUIRED",
+        message:
+          "The repository identity file (pdb.toml) could not be read; check access and retry.",
+        diff: null,
+        retry: "pdb config get identity.name --entry " + entry,
+      },
+      entry: null,
     };
   }
   // Validate the name with the canonical validator (pattern + 100-character limit), not just
@@ -344,29 +359,35 @@ async function identityDecision(
     record.triageRole !== null;
   if (ready)
     return {
-      kind: "identity",
-      file: null,
-      action: "kept",
-      outcome: "applied",
-      code: null,
-      message: `Existing identity entry [agents.${entry}] is valid and will be preserved.`,
-      diff: null,
-      retry: null,
+      item: {
+        kind: "identity",
+        file: null,
+        action: "kept",
+        outcome: "applied",
+        code: null,
+        message: `Existing identity entry [agents.${entry}] is valid and will be preserved.`,
+        diff: null,
+        retry: null,
+      },
+      entry,
     };
   // Setup is needed. Preserve the explicitly requested role; when none was supplied, ask for a
   // role choice rather than silently choosing implementer (the supported setup command).
   const role = args.role;
   return {
-    kind: "identity",
-    file: null,
-    action: "kept",
-    outcome: "planned",
-    code: "IDENTITY_REQUIRED",
-    message: role
-      ? `Identity entry [agents.${entry}] needs setup; run pdb setup identity with role ${role}.`
-      : `Identity entry [agents.${entry}] needs setup; choose a role and run pdb setup identity.`,
-    diff: null,
-    retry: role ? `pdb setup identity --role ${role} --entry ${entry}` : null,
+    item: {
+      kind: "identity",
+      file: null,
+      action: "kept",
+      outcome: "planned",
+      code: "IDENTITY_REQUIRED",
+      message: role
+        ? `Identity entry [agents.${entry}] needs setup; run pdb setup identity with role ${role}.`
+        : `Identity entry [agents.${entry}] needs setup; choose a role and run pdb setup identity.`,
+      diff: null,
+      retry: role ? `pdb setup identity --role ${role} --entry ${entry}` : null,
+    },
+    entry: args.operation === "install" && scope.kind === "project" ? entry : null,
   };
 }
 
@@ -387,31 +408,86 @@ function globalScope(): InstallResultScope {
 const resultScope = (scope: InstallInternalScope): InstallResultScope =>
   scope.kind === "project" ? projectScope(scope) : globalScope();
 
+/** The manifest scope the shared primitives expect, and the private manifest location. */
+const manifestScope = (scope: InstallInternalScope): InstallScope =>
+  scope.kind === "project"
+    ? { kind: "project", root: scope.root, gitCommonDir: scope.gitCommonDir }
+    : { kind: "global", stateDir: scope.home, homeDir: scope.home };
+
+const manifestFor = (scope: InstallInternalScope, client: InstallClient): string =>
+  manifestPath(manifestScope(scope), client);
+
 /** Build a not-yet-implemented install result for slice 2a (no file writes). */
 export async function runCodexInstallSurface(
   args: InstallArguments,
-  runtime: ConfigRuntime,
+  runtime: ConfigRuntime & { confirm?: (prompt: string) => Promise<boolean> },
   output: (text: string) => Promise<void>,
 ): Promise<number> {
   const internal = await resolveInstallScope(args, runtime);
   const redacted = resultScope(internal);
+  // Confirmation contract: --dry-run always previews; --yes applies directly; otherwise a TTY
+  // requests confirmation and a non-TTY without --yes behaves as a dry run (never writes
+  // identity, MCP config or ownership records unconfirmed).
+  let apply = !args.dryRun;
+  if (apply && !args.yes) {
+    apply = runtime.confirm
+      ? await runtime.confirm(
+          `Apply pdb ${args.operation} codex in ${internal.kind === "project" ? internal.root : internal.home}?`,
+        )
+      : false;
+  }
+  const dryRun = args.dryRun || !apply;
   const identity = await identityDecision(args, internal, runtime);
-  const mcpMessage = args.dryRun
-    ? "MCP entry planned (slice 2b implements the write)."
-    : "MCP entry write not implemented in this slice (slice 2b).";
-  // Uninstall previews describe removal intent; install describes the planned entry. This slice
-  // performs no writes and cannot produce an exact transport-specific diff.
-  const mcpAction: InstallItemAction = args.operation === "uninstall" ? "remove" : "create";
-  const mcpOutcome: InstallItemOutcome = args.dryRun ? "planned" : "not-attempted";
+  const identityItem = identity.item;
+  const identityEntry = identity.entry;
+  // Identity/context boundary: a project MCP registration must not proceed when the identity
+  // decision refused (ambiguous or unreadable) — otherwise the server later picks an unrelated
+  // agent from client metadata instead of honoring the refused selection.
+  const identityRefused = identityItem?.outcome === "refused";
+  const manifest = manifestFor(internal, args.client);
+  const mcp =
+    identityRefused && internal.kind === "project" && args.operation === "install"
+      ? {
+          mcp: {
+            action: "kept" as const,
+            outcome: "not-attempted" as const,
+            ownership: "absent" as const,
+            code: "IDENTITY_REQUIRED" as const,
+            message:
+              "MCP registration withheld: the Codex identity could not be resolved; fix identity and re-run.",
+            diff: null,
+            manifestRecord: null,
+          },
+        }
+      : args.operation === "uninstall"
+        ? await uninstallCodexMcp({
+            scope: manifestScope(internal),
+            manifestPath: manifest,
+            dryRun,
+          })
+        : await installCodexMcp({
+            scope: manifestScope(internal),
+            options: {
+              transport: args.transport,
+              url: args.url,
+              entry: identityEntry ?? args.entry,
+              projectRoot: internal.kind === "project" ? internal.root : undefined,
+            },
+            manifestPath: manifest,
+            pdbVersion: "0.1.0",
+            dryRun,
+          });
+  // The primitive's message may embed absolute paths; the serialized result must use the
+  // scope-relative target and never leak private paths (output/privacy contract).
   const items: InstallItem[] = [
-    ...(identity ? [identity] : []),
+    ...(identityItem ? [identityItem] : []),
     {
       kind: "mcp",
       file: redacted.targets.config,
-      action: mcpAction,
-      outcome: mcpOutcome,
-      code: null,
-      message: mcpMessage,
+      action: mcp.mcp.action,
+      outcome: mcp.mcp.outcome,
+      code: mcp.mcp.code,
+      message: mcp.mcp.message,
       diff: null,
       retry: null,
     },
@@ -441,23 +517,27 @@ export async function runCodexInstallSurface(
       receiptVerified: "unknown",
     },
     next: [
-      "This slice only establishes the command surface; no Codex configuration was written.",
-      "Slice 2b implements the MCP entry; slice 2c the identity write and next-step text.",
-      args.dryRun
-        ? "Remove --dry-run when the write slices ship."
-        : "Re-run once the write slices ship.",
-    ],
+      args.operation === "install"
+        ? "Configured the Codex MCP server (STDIO unless --transport http)."
+        : "Removal preview/record of the Codex MCP entry.",
+      args.dryRun ? "Dry run: remove --dry-run to write." : "",
+      args.transport === "http" ? "HTTP MCP transport is unverified for Codex (#397)." : "",
+    ].filter(Boolean),
   };
-  // Exit status per the installer contract: 2 when an item is refused or setup is required;
-  // 1 when a non-preview request applied nothing (nothing is written in this slice); 0 for a
-  // clean explicit --dry-run preview.
-  const nothingApplied = !args.dryRun;
-  const exitCode =
-    items.some((i) => i.outcome === "refused") || items.some((i) => i.code === "IDENTITY_REQUIRED")
-      ? 2
-      : nothingApplied
-        ? 1
-        : 0;
+  // Exit status per the installer contract, derived from actual item outcomes now that this
+  // slice performs the MCP write: 2 when an item is refused, failed or committed-with-error;
+  // 1 when a non-preview request applied nothing; 0 for a successful apply/kept or a preview.
+  const refusedOrFailed = items.some(
+    (i) =>
+      i.outcome === "refused" ||
+      i.outcome === "failed" ||
+      i.outcome === "committed-with-error" ||
+      i.code === "IDENTITY_REQUIRED",
+  );
+  const appliedOrCurrent = items.some(
+    (i) => i.outcome === "applied" || i.outcome === "kept" || i.outcome === "adopted",
+  );
+  const exitCode = refusedOrFailed ? 2 : !appliedOrCurrent && !args.dryRun ? 1 : 0;
   if (args.json) {
     await output(JSON.stringify(result, null, 2) + "\n");
     return exitCode;
@@ -467,7 +547,7 @@ export async function runCodexInstallSurface(
       ? `project ${redacted.repository}`
       : "global (user-wide Codex home)";
   await output(
-    `pdb ${args.operation} codex: command surface only (no configuration written).\nScope: ${scopeLine}\nItems:\n${result.items
+    `pdb ${args.operation} codex\nScope: ${scopeLine}\nItems:\n${result.items
       .map((i) => `  ${i.kind} (${i.outcome}${i.code ? `, ${i.code}` : ""}): ${i.message}`)
       .join("\n")}\nNext:\n${result.next.map((n) => `  - ${n}`).join("\n")}\n`,
   );
