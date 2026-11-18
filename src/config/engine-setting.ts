@@ -6,7 +6,6 @@ import {
   settingFor,
   resolveRepositoryTarget,
   nodeFileSystem,
-  nodeGit,
 } from "./config.js";
 import type { GuideRuntime } from "../briefing/process.js";
 export type EngineName = "typescript" | "datalog";
@@ -113,7 +112,8 @@ export async function resolveEngineSetting(
     target = await resolveRepositoryTarget(
       runtime.cwd ?? process.cwd(),
       repository,
-      runtime.git ?? nodeGit,
+      // The shared typed Git service (or a legacy runner); none means the service's isolated default.
+      runtime.git,
     );
   } catch (error) {
     if (
