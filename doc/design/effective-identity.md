@@ -5,6 +5,14 @@ Contract for #677, reusing the private identity store, initializer and entry val
 resolver from #664. This is the core identity slice; optional Doctor, hook and installation
 suggestions belong to #681. This document alone changes no runtime behavior.
 
+## Later owner correction
+
+[Stable harness identity](stable-harness-identity.md) (#1047) supersedes the automatic
+session-entry allocation and default binding precedence below once implemented.
+Use one canonical default per harness/project across sessions; no presence detection
+or independent same-harness multi-session allocation. Other identity safeguards
+remain. Earlier paragraphs describe the pre-correction behavior.
+
 ## One preparation service
 
 A shared `config/effectiveidentity.ts` service prepares the effective agent, employing human,

@@ -2,6 +2,13 @@
 
 Owner-approved direction for #679, 2026-11-16. This architecture amendment is documentation first; runtime migrations follow in focused PRs. It extends rules-component.md and workflow.md, and supersedes any interpretation of earlier contracts that permits an independent TypeScript workflow policy or makes every opinionated default unoverrideable. It does not claim those migrations have shipped, change this repository's required CI, authorize unrelated human-assignment activation or bypass its recorded prerequisites, or implement a new override command.
 
+## Later owner decision: no rollback scheduler
+
+[Native ranking only](native-ranking-only.md) (#1050) supersedes any compatibility
+projection/rollback-option suggestion below. Remove the old scheduler and its
+selection controls entirely; there is no alias or alternative-policy fallback.
+Implementation remains separate from this contract.
+
 ## The decision boundary
 
 All PDB project/workflow judgments about what an agent may do, where and when, what should happen next, and activity priority belong in the native declarative rules engine. This includes eligibility, denials, required project criteria, ownership/workflow conventions, review acceptance, completion prerequisites, follow-up selection and ordering. Rules own matched reasons and evidence witnesses as well as outcomes. A declarative-looking TypeScript constant table or a second embedded workflow interpreter is still a policy source if it selects those outcomes independently.
