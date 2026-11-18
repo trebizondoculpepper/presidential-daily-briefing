@@ -65,3 +65,10 @@ No real official release is needed to test the workflow. Use injected command/re
 Existing package authorization and trusted publisher remain in place. Confirm npm scope ownership and the GitHub Actions publisher for `trebizondoculpepper/presidential-daily-briefing`, workflow `publish.yml`, when setup is needed. `NPM_PUBLISH=true` permits an explicitly requested publication; it does not cause one on main pushes. This contract does not change any live variable, permission, branch, tag or package.
 
 The explicit-only implementation merged in #90 for #79. Helpers, workflow and credential-free tests cover the dispatch path. Role views, MCP, update notices and wake-up adapters remain independent. Source/helper changes still need normal PR verification; do not publish a package merely to validate documentation.
+
+## Explicit dated exception
+
+The owner-authorized [19 November 2026 one-off controller](design/one-off-release-2026-11-19.md)
+may issue the normal explicit release dispatch at the requested time. Publish itself
+remains workflow_dispatch-only with all checks and channel/SHA guards intact. This
+is not authorization for recurring publication on arbitrary main pushes.
