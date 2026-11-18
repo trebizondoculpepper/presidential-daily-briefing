@@ -6,8 +6,26 @@
  * remaining capability groups arrive with their migration tickets (#878-#891).
  */
 
-import { ghQueryFailure, ghQueryWith, permissionLookup, restOverTransport } from "../github.js";
-import type { PermissionLookup, Rest } from "../github.js";
+import {
+  collect,
+  collectIssueFocus,
+  ghQueryFailure,
+  ghQueryWith,
+  graphqlApiOverTransport,
+  hydratePullRequests,
+  locateIssue,
+  permissionLookup,
+  restOverTransport,
+} from "../github.js";
+import type {
+  CollectOptions,
+  FocusOptions,
+  GraphqlApi,
+  IssueDiagnosis,
+  PermissionLookup,
+  Rest,
+} from "../github.js";
+import type { PullRequest, Snapshot } from "../types.js";
 import { execFileTransport } from "./transport.js";
 import type { GhTransport } from "./transport.js";
 import { repositoryFromCheckout, throwIfCancelled } from "./repository.js";
@@ -92,8 +110,10 @@ export interface GhService {
     /** Resolve normalized names to canonical labels; unresolved on any failed or partial read. */
     resolve(repository: string, names: readonly string[]): Promise<LabelResolution>;
   };
-  /** Issue creation and bounded read-back capabilities (#887). */
-  issues: IssueCapabilities;
+  /** Issue creation, locate, and bounded read-back capabilities (#887, #920). */
+  issues: IssueCapabilities & {
+    locate(repository: string, number: number, signal?: AbortSignal): Promise<IssueDiagnosis>;
+  };
   /** Closed-question discovery and comment pagination (#899). */
   closedQuestions: ClosedQuestionCapabilities;
   /** Open-work snapshot reads behind the shortlist briefing (#927). */
@@ -119,7 +139,21 @@ export interface GhService {
       cursor: string,
       signal?: AbortSignal,
     ): Promise<unknown>;
+    collect(repository: string, options?: CollectOptions, now?: () => Date): Promise<Snapshot>;
+    collectIssueFocus(
+      repository: string,
+      number: number,
+      options: FocusOptions,
+      now?: () => Date,
+    ): Promise<Snapshot>;
+    hydratePullRequests(
+      repository: string,
+      targets: readonly { number: number; url: string }[],
+      options: Parameters<typeof hydratePullRequests>[2],
+    ): Promise<PullRequest[]>;
   };
+  /** Transport-backed GraphQL query/mutation boundary (#920). */
+  graphql: GraphqlApi;
   completion: CompletionCapabilities;
 }
 
@@ -245,12 +279,22 @@ export function createGhService(options: GhServiceOptions = {}): GhService {
     labels: {
       resolve: (repository, names) => resolveLabels(repository, names, query as Query),
     },
-    issues: issueCapabilities(rest, post),
+    issues: {
+      ...issueCapabilities(rest, post),
+      locate: (repository, number, signal) => locateIssue(repository, number, rest, signal),
+    },
     snapshot: {
       discoveryPage: (...args) => discoveryPage(query as Query, ...args),
       issuesByNumber: (...args) => issuesByNumber(query as Query, ...args),
       issueCommentsPage: (...args) => issueCommentsPage(query as Query, ...args),
+      collect: (repository, collectOptions = {}, now) =>
+        collect(repository, { rest, ...collectOptions }, query as Query, now ?? options.now),
+      collectIssueFocus: (repository, number, focusOptions, now) =>
+        collectIssueFocus(repository, number, focusOptions, query as Query, now ?? options.now),
+      hydratePullRequests: (repository, targets, hydrateOptions) =>
+        hydratePullRequests(repository, targets, hydrateOptions, query as Query),
     },
+    graphql: graphqlApiOverTransport(transport, env),
     checks: checkReads(async (q, vars) => {
       const data = await query(q, vars);
       return typeof data === "object" && data !== null ? (data as Record<string, unknown>) : {};
