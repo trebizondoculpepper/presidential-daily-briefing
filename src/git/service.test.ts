@@ -296,6 +296,14 @@ describe("alternate index tracked check (#907 review)", () => {
       });
       expect(await withAlternate.isTracked({ cwd: dir }, "pdb.toml")).toBe(true);
       expect(await withAlternate.isTracked({ cwd: dir }, "other.toml")).toBe(false);
+      // Another checkout never consults this checkout's alternate index.
+      const other = await mkdtemp(join(tmpdir(), "pdb-altindex-other-"));
+      try {
+        await exec("git", ["init", "-q"], { cwd: other, env });
+        expect(await withAlternate.isTracked({ cwd: other }, "pdb.toml")).toBe(false);
+      } finally {
+        await rm(other, { recursive: true, force: true });
+      }
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
