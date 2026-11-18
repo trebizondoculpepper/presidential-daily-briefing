@@ -9,7 +9,9 @@ import {
   MAX_GUIDE_CODE_POINTS,
   mutatingCommands,
   policyVersion,
+  resolveGuideSetting,
 } from "./process.js";
+import { createGitService } from "../git/service.js";
 import { pickupPolicy } from "./ranking.js";
 import { clock, repo, snapshot } from "../testing/snapshots.js";
 
@@ -192,5 +194,21 @@ describe("workflow guide in help and briefings (#71, doc/design/workflow-guide.m
       id: rule.id,
     }));
     expect(policyVersion(reordered)).toBe(policyVersion(rules));
+  });
+
+  it("resolves guide settings through a typed GitService (#901)", async () => {
+    const fs: ConfigFileSystem = {
+      readText: async (file) =>
+        file === join(root, CONFIG_PATH)
+          ? JSON.stringify({ schemaVersion: 1, processGuide: true })
+          : null,
+      writeText: async () => undefined,
+      rename: async () => undefined,
+      remove: async () => undefined,
+      makeDirectory: async () => undefined,
+    };
+    const gitService = createGitService({ git: gitFor() });
+    const setting = await resolveGuideSetting(repo, undefined, { cwd: root, fs, gitService });
+    expect(setting).toEqual({ enabled: true, source: "config", diagnostics: [] });
   });
 });
