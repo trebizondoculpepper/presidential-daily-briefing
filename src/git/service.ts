@@ -263,8 +263,11 @@ export function createGitService(options: GitServiceOptions = {}): GitService {
       const fields = line.trim().split(/\s+/);
       if (fields.length < 2) continue;
       const [name, url] = fields as [string, string];
-      if (seen.has(name)) continue;
-      seen.add(name);
+      // A remote may fetch from one repository and push to another; both URLs are facts, so
+      // deduplicate identical name/URL pairs rather than every entry sharing a name.
+      const identity = `${name}\u0000${url}`;
+      if (seen.has(identity)) continue;
+      seen.add(identity);
       const host = remoteHost(url);
       const github =
         host === "github.com" ? (githubRepositories(`${name} ${url}`)[0] ?? null) : null;

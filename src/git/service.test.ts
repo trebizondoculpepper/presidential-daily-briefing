@@ -112,6 +112,19 @@ describe("typed Git service (#897)", () => {
     });
   });
 
+  it("keeps a remote's distinct fetch and push URLs, and refuses the ambiguity", async () => {
+    const { git } = fakeGit({
+      "remote -v":
+        "origin\thttps://github.com/owner/a.git (fetch)\norigin\thttps://github.com/other/b.git (push)\n",
+    });
+    const service = createGitService({ git });
+    const remotes = await service.remotes({ cwd: "/work" });
+    expect(remotes.map((remote) => remote.repository)).toEqual(["owner/a", "other/b"]);
+    // Fetching one repository and pushing to another is a real Git configuration, and it is
+    // not a verified identity.
+    expect(await service.checkout({ cwd: "/work" })).toBeNull();
+  });
+
   it("refuses to name a checkout whose remotes disagree", async () => {
     const { git } = fakeGit({
       "remote -v":
