@@ -302,4 +302,58 @@ describe("runCodexInstallSurface (#768 slice 2a)", () => {
       await rm(home, { recursive: true, force: true });
     }
   });
+
+  it("preserves an explicit role in the identity setup retry (#844 finding)", async () => {
+    const git: GitRunner = async (args, _cwd) => {
+      if (args[0] === "rev-parse" && args[1] === "--show-toplevel") return SYNTHETIC_ROOT + "\n";
+      if (args[0] === "remote") return "origin\thttps://github.com/example/project.git (fetch)\n";
+      if (args[0] === "rev-parse" && args[1] === "--git-common-dir") return ".git\n";
+      throw new Error(`unexpected git ${args.join(" ")}`);
+    };
+    const out: string[] = [];
+    const code = await runCodexInstallSurface(
+      installArgumentsFor(
+        ["codex", "--repo", "example/project", "--role", "designer", "--dry-run", "--json"],
+        "install",
+      ),
+      runtime(git),
+      async (text) => void out.push(text),
+    );
+    expect(code).toBe(2);
+    const result = JSON.parse(out.join("")) as {
+      items: { kind: string; retry: string | null }[];
+    };
+    const identity = result.items.find((i) => i.kind === "identity");
+    expect(identity).toBeDefined();
+    expect(identity!.retry).toContain("--role designer");
+    expect(identity!.retry).not.toContain("implementer");
+  });
+
+  it("returns a structured identity refusal when the identity file is unreadable (#844 finding)", async () => {
+    const git: GitRunner = async (args, _cwd) => {
+      if (args[0] === "rev-parse" && args[1] === "--show-toplevel") return SYNTHETIC_ROOT + "\n";
+      if (args[0] === "remote") return "origin\thttps://github.com/example/project.git (fetch)\n";
+      if (args[0] === "rev-parse" && args[1] === "--git-common-dir") return ".git\n";
+      throw new Error(`unexpected git ${args.join(" ")}`);
+    };
+    const badFs = {
+      ...emptyFileSystem,
+      readText: async () => {
+        throw Object.assign(new Error("EACCES"), { code: "EACCES" });
+      },
+    };
+    const out: string[] = [];
+    const code = await runCodexInstallSurface(
+      installArgumentsFor(["codex", "--repo", "example/project", "--dry-run", "--json"], "install"),
+      { ...runtime(git), fs: badFs },
+      async (text) => void out.push(text),
+    );
+    expect(code).toBe(2);
+    const result = JSON.parse(out.join("")) as {
+      items: { kind: string; outcome: string; message: string }[];
+    };
+    const identity = result.items.find((i) => i.kind === "identity");
+    expect(identity?.outcome).toBe("refused");
+    expect(identity?.message).toContain("pdb.toml");
+  });
 });

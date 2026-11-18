@@ -281,14 +281,31 @@ async function identityDecision(
   const env: Environment = runtime.env ?? process.env;
   const fs = runtime.fs ?? nodeFileSystem;
   // The Codex install must target the Codex identity: without an explicit --entry/--harness,
-  // resolve the `codex` entry, never the invoking runtime's harness (e.g. CLAUDECODE).
-  const resolution = await resolveEntry({
-    entry: args.entry ?? undefined,
-    harness: args.harness ?? "codex",
-    env,
-    root: scope.root,
-    fs,
-  });
+  // resolve the `codex` entry, never the invoking runtime's harness (e.g. CLAUDECODE). Entry
+  // resolution itself reads/parses pdb.toml, so it belongs inside the redacted error boundary.
+  let resolution;
+  try {
+    resolution = await resolveEntry({
+      entry: args.entry ?? undefined,
+      harness: args.harness ?? "codex",
+      env,
+      root: scope.root,
+      fs,
+    });
+  } catch (error) {
+    // #844/Codex: entry resolution can fail on an unreadable/malformed identity file before
+    // readIdentity runs; return the same structured refusal, never the raw filesystem error.
+    return {
+      kind: "identity",
+      file: null,
+      action: "kept",
+      outcome: "refused",
+      code: "IDENTITY_REQUIRED",
+      message: "The repository identity file (pdb.toml) could not be read; check access and retry.",
+      diff: null,
+      retry: null,
+    };
+  }
   if (resolution.status === "unresolved")
     return {
       kind: "identity",
@@ -336,16 +353,20 @@ async function identityDecision(
       diff: null,
       retry: null,
     };
-  // Setup is needed; the supported setup command is a separate action, never a re-run of install.
+  // Setup is needed. Preserve the explicitly requested role; when none was supplied, ask for a
+  // role choice rather than silently choosing implementer (the supported setup command).
+  const role = args.role;
   return {
     kind: "identity",
     file: null,
     action: "kept",
     outcome: "planned",
     code: "IDENTITY_REQUIRED",
-    message: `Identity entry [agents.${entry}] needs setup; run pdb setup identity with a role.`,
+    message: role
+      ? `Identity entry [agents.${entry}] needs setup; run pdb setup identity with role ${role}.`
+      : `Identity entry [agents.${entry}] needs setup; choose a role and run pdb setup identity.`,
     diff: null,
-    retry: "pdb setup identity --role implementer --entry " + entry,
+    retry: role ? `pdb setup identity --role ${role} --entry ${entry}` : null,
   };
 }
 
