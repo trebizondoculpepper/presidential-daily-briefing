@@ -3,6 +3,7 @@ import { completeNative, isRateLimit, nativeFields, RateLimitError } from "./dep
 import { execFile } from "node:child_process";
 import { repositoryFromCheckout } from "./service/repository.js";
 import { execFileTransport } from "./service/transport.js";
+import type { GhTransport } from "./service/transport.js";
 import { promisify } from "node:util";
 import {
   CHANGE_EVIDENCE_SCHEMA_VERSION,
@@ -381,38 +382,57 @@ export interface RestAnswer {
  */
 export type Rest = (path: string, options?: { signal?: AbortSignal }) => Promise<RestAnswer>;
 
-/** Read-only REST GET through gh (which follows GitHub's transfer redirects). */
-export const ghRestWith =
-  (bound?: AbortSignal): Rest =>
+/**
+ * A read-only REST GET reader over a GH transport (#869, #878): `gh api --include PATH`, run with
+ * the given environment. The status and quota headers come from the same response (#293).
+ */
+export const restOverTransport =
+  (transport: GhTransport, env?: NodeJS.ProcessEnv, bound?: AbortSignal): Rest =>
   async (path, options) => {
     const signal = options?.signal ?? bound;
     signal?.throwIfAborted();
-    // --include: the status and quota headers come from this response itself (#293).
-    try {
-      const { stdout } = await execute("gh", ["api", "--include", path], {
-        timeout: 30_000,
-        signal,
-      });
-      const response = parseGhResponse(stdout);
-      return { status: response.status ?? 200, body: JSON.parse(response.body) as unknown };
-    } catch (error) {
+    const outcome = await transport({
+      args: ["api", "--include", path],
+      ...(env ? { env } : {}),
+      timeoutMs: 30_000,
+      maxBufferBytes: 1024 * 1024,
+      signal,
+    });
+    if (!outcome.ok && outcome.kind === "cancelled") {
       signal?.throwIfAborted();
-      const response = responseOf(prop(error, "stdout"));
-      let body: unknown = null;
-      try {
-        body = response ? (JSON.parse(response.body) as unknown) : null;
-      } catch {
-        body = null;
-      }
-      const status = response?.status ?? (Number(prop(body, "status")) || null);
-      const timedOut = prop(error, "killed") === true && prop(error, "signal") === "SIGTERM";
-      const evidence =
-        response?.status !== null && response !== null
-          ? classifyGhFailure({ response, exitCode: prop(error, "code"), timedOut })
-          : undefined;
-      return { status, body, ...(evidence ? { evidence } : {}) };
+      throw new DOMException("The operation was aborted.", "AbortError");
     }
+    if (outcome.ok) {
+      try {
+        const response = parseGhResponse(outcome.stdout);
+        return { status: response.status ?? 200, body: JSON.parse(response.body) as unknown };
+      } catch {
+        // An unreadable success is no answer: never a status or a body.
+        return { status: null, body: null };
+      }
+    }
+    const response = responseOf(outcome.stdout);
+    let body: unknown = null;
+    try {
+      body = response ? (JSON.parse(response.body) as unknown) : null;
+    } catch {
+      body = null;
+    }
+    const status = response?.status ?? (Number(prop(body, "status")) || null);
+    const evidence =
+      response?.status !== null && response !== null
+        ? classifyGhFailure({
+            response,
+            exitCode: outcome.exitCode,
+            timedOut: outcome.kind === "timeout",
+          })
+        : undefined;
+    return { status, body, ...(evidence ? { evidence } : {}) };
   };
+
+/** Read-only REST GET through gh (which follows GitHub's transfer redirects). */
+export const ghRestWith = (bound?: AbortSignal): Rest =>
+  restOverTransport(execFileTransport, undefined, bound);
 export const ghRest: Rest = ghRestWith();
 
 interface LocationBase {

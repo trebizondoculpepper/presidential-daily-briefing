@@ -179,6 +179,7 @@ import {
 } from "./briefing/dependencyimpact.js";
 import { readTicketStatus, ticketLimits, ticketStatusText } from "./workflow/ticketstatus.js";
 import { ghAuthContext, runServe } from "./serve.js";
+import { createGhService } from "./github/service/service.js";
 import { runQuotas } from "./github/quotascli.js";
 import type { QuotasRuntime } from "./github/quotascli.js";
 import {
@@ -1789,7 +1790,9 @@ async function run(
     };
     const repository = repo ?? (await runtime.currentRepository());
     // Per run: a permission learned now is never reused by a later invocation.
-    const permission = permissionLookup(repository, runtime.rest ?? ghRest);
+    const permission = createGhService({ rest: runtime.rest ?? ghRest }).repos.permissionOf(
+      repository,
+    );
     const rt = {
       query: runtime.query ?? ghQuery,
       run: runtime.ghRun ?? ghRun,
@@ -1823,7 +1826,9 @@ async function run(
     };
     const repository = repo ?? (await runtime.currentRepository());
     // Per run: a permission learned now is never reused by a later invocation.
-    const permission = permissionLookup(repository, runtime.rest ?? ghRest);
+    const permission = createGhService({ rest: runtime.rest ?? ghRest }).repos.permissionOf(
+      repository,
+    );
     const rt = {
       query: runtime.query ?? ghQuery,
       run: runtime.ghRun ?? ghRun,
@@ -1853,7 +1858,9 @@ async function run(
     const values = { ...parsed, agent: await commandActor(parsed, identity, questionUsage) };
     const repository = values.repo ?? (await runtime.currentRepository());
     const query = runtime.query ?? ghQuery;
-    const permission = permissionLookup(repository, runtime.rest ?? ghRest);
+    const permission = createGhService({ rest: runtime.rest ?? ghRest }).repos.permissionOf(
+      repository,
+    );
     // Read live immediately before writing; never act on a cached snapshot.
     const plan = await planQuestionResolution(repository, values, query, permission);
     const result =
@@ -1873,7 +1880,9 @@ async function run(
     const values = { ...parsed, agent: await commandActor(parsed, identity, claimWaitUsage) };
     const repository = values.repo ?? (await runtime.currentRepository());
     const query = runtime.query ?? ghQuery;
-    const permission = permissionLookup(repository, runtime.rest ?? ghRest);
+    const permission = createGhService({ rest: runtime.rest ?? ghRest }).repos.permissionOf(
+      repository,
+    );
     // Read live immediately before writing; never act on a cached snapshot.
     const plan =
       "why" in values
@@ -1922,7 +1931,9 @@ async function run(
     const repository = values.repo ?? (await runtime.currentRepository());
     const query = runtime.query ?? ghQuery;
     // Per run: a permission learned now is never reused by a later invocation.
-    const permission = permissionLookup(repository, runtime.rest ?? ghRest);
+    const permission = createGhService({ rest: runtime.rest ?? ghRest }).repos.permissionOf(
+      repository,
+    );
     const rt = {
       query,
       run: runtime.ghRun ?? ghRun,
@@ -2240,7 +2251,10 @@ async function run(
     return runEstimate(rest, output, {
       now: runtime.now,
       // #245/#269: provenance authority for both metrics, the #212 rule over a per-run permission cache.
-      trust: (repository) => markerTrust(permissionLookup(repository, runtime.rest ?? ghRest)),
+      trust: (repository) =>
+        markerTrust(
+          createGhService({ rest: runtime.rest ?? ghRest }).repos.permissionOf(repository),
+        ),
       ...runtime.estimate,
       ...(identity
         ? {
