@@ -52,7 +52,8 @@ export interface ServeReadRuntime {
   queryWith?: (signal?: AbortSignal) => Query;
   now: () => Date;
   env: Environment;
-  git?: GitRunner;
+  /** The composition's shared typed Git service, or a legacy runner as its transport (#934). */
+  git?: GitService | GitRunner;
   fs?: ConfigFileSystem;
   /** Local configuration readers rooted at a project (estimation and guide settings). */
   projectRuntime?: (project: string | undefined) => Pick<ReadRuntime, "estimation" | "guide">;

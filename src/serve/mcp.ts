@@ -69,6 +69,7 @@ export function cachedMcpRuntime(
       : {}),
     now: read.now,
     env: read.env,
+    // The composition's shared Git service, forwarded unchanged.
     git: read.git,
     fs: read.fs,
     // pdb serve never resolves a repository from a working directory (#271).
