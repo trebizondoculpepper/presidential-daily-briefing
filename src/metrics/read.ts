@@ -405,7 +405,7 @@ export async function readMetrics(
         if (activity.state === "waiting") {
           try {
             const permission = async (login: string) => {
-              const t = await rt.trust.comment({ body: "", author: { __typename: "User", login } });
+              const t = await rt.trust.actor({ __typename: "User", login });
               return t.status === "trusted"
                 ? "write"
                 : t.status === "untrusted"
