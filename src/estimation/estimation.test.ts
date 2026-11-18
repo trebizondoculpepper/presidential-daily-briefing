@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { atomicJson, main } from "../cli.js";
 import { CONFIG_PATH, type ConfigFileSystem, type GitRunner } from "../config/config.js";
+import { createGitService } from "../git/service.js";
 import { complexityGuidance } from "./complexity.js";
 import { provenanceComment } from "./estimate.js";
 import {
@@ -462,6 +463,11 @@ describe("label-backed complexity classification and prepared reader (#151)", ()
         })
       ).status,
     ).toBe("disabled");
+    const gitService = createGitService({ git });
+    expect(
+      (await collectLabelEstimationInput(repo, { fs: fs(null), git: gitService, cwd: root }))
+        .status,
+    ).toBe("available");
   });
 
   it("suggests sizes from the registered table only, case-insensitively (#178)", () => {
