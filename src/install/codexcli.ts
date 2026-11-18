@@ -15,7 +15,7 @@ import { homedir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import { ConfigError, nodeFileSystem } from "../config/config.js";
 import type { ConfigRuntime } from "../config/configcli.js";
-import { isAgentName, readIdentity } from "../config/identity.js";
+import { isAgentName, readIdentity, setIdentity } from "../config/identity.js";
 import { resolveEntry, type Environment } from "../config/harness.js";
 import { createGitService } from "../git/service.js";
 import { manifestPath, type InstallItemKind, type InstallScope } from "./manifest.js";
@@ -276,15 +276,49 @@ function resolveHome(path: string, homeDir: string): string {
   return path;
 }
 
-/** A read-only identity decision for a project install (never writes, never allocates). */
-async function identityDecision(
+function redactUrl(url: string): string {
+  return url
+    .replace(/(https?:\/\/)[^/@\s]+@/gi, "$1***@")
+    .replace(/(https?:\/\/[^\s"?#]+)\?[^\s"]*/gi, "$1?***");
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+function buildRetryCommand(args: InstallArguments, resolvedEntry: string | null): string | null {
+  if (args.operation === "install" && args.transport === "http" && args.url) {
+    if (redactUrl(args.url) !== args.url) return null;
+  }
+  const globalOpt = args.global ? " --global" : "";
+  const roleOpt = args.role ? ` --role ${args.role}` : "";
+  const identityOpt = args.entry
+    ? ` --entry ${args.entry}`
+    : args.harness
+      ? ` --harness ${args.harness}`
+      : resolvedEntry
+        ? ` --entry ${resolvedEntry}`
+        : "";
+  const repoOpt = args.repo ? ` --repo ${args.repo}` : "";
+  const transportOpt =
+    args.operation === "install" && args.transport === "http"
+      ? ` --transport http${args.url ? ` --url ${shellQuote(args.url)}` : ""}`
+      : "";
+  return `pdb ${args.operation} codex${globalOpt}${roleOpt}${identityOpt}${repoOpt}${transportOpt} --yes`;
+}
+
+/** Identity decision and (when applying) creation/recovery via `setIdentity` (#800). */
+async function identityStep(
   args: InstallArguments,
   scope: InstallInternalScope,
   runtime: ConfigRuntime,
+  dryRun: boolean,
 ): Promise<{ item: InstallItem | null; entry: string | null }> {
   if (args.operation !== "install" || scope.kind !== "project") return { item: null, entry: null };
   const env: Environment = runtime.env ?? process.env;
   const fs = runtime.fs ?? nodeFileSystem;
+  const repoFlag = args.repo ? ` --repo ${args.repo}` : "";
+  const retryCmd = buildRetryCommand(args, null);
   // The Codex install must target the Codex identity: without an explicit --entry/--harness,
   // resolve the `codex` entry, never the invoking runtime's harness (e.g. CLAUDECODE). Entry
   // resolution itself reads/parses pdb.toml, so it belongs inside the redacted error boundary.
@@ -303,7 +337,7 @@ async function identityDecision(
     return {
       item: {
         kind: "identity",
-        file: null,
+        file: "pdb.toml",
         action: "kept",
         outcome: "refused",
         code: "IDENTITY_REQUIRED",
@@ -319,7 +353,7 @@ async function identityDecision(
     return {
       item: {
         kind: "identity",
-        file: null,
+        file: "pdb.toml",
         action: "kept",
         outcome: "refused",
         code: "IDENTITY_AMBIGUOUS",
@@ -338,14 +372,14 @@ async function identityDecision(
     return {
       item: {
         kind: "identity",
-        file: null,
+        file: "pdb.toml",
         action: "kept",
         outcome: "refused",
         code: "IDENTITY_REQUIRED",
         message:
           "The repository identity file (pdb.toml) could not be read; check access and retry.",
         diff: null,
-        retry: "pdb config get identity.name --entry " + entry,
+        retry: `pdb config get identity.name --entry ${entry}`,
       },
       entry: null,
     };
@@ -361,7 +395,7 @@ async function identityDecision(
     return {
       item: {
         kind: "identity",
-        file: null,
+        file: "pdb.toml",
         action: "kept",
         outcome: "applied",
         code: null,
@@ -371,24 +405,122 @@ async function identityDecision(
       },
       entry,
     };
-  // Setup is needed. Preserve the explicitly requested role; when none was supplied, ask for a
-  // role choice rather than silently choosing implementer (the supported setup command).
+  if (record.entryExists && (!record.name || !isAgentName(record.name))) {
+    return {
+      item: {
+        kind: "identity",
+        file: "pdb.toml",
+        action: "kept",
+        outcome: "refused",
+        code: "IDENTITY_REQUIRED",
+        message: `Identity entry [agents.${entry}] in pdb.toml has no valid name; set one explicitly.`,
+        diff: null,
+        retry: `pdb config set identity.name NAME --entry ${entry}${repoFlag}`,
+      },
+      entry: null,
+    };
+  }
   const role = args.role;
-  return {
-    item: {
-      kind: "identity",
-      file: null,
-      action: "kept",
-      outcome: "planned",
-      code: "IDENTITY_REQUIRED",
-      message: role
-        ? `Identity entry [agents.${entry}] needs setup; run pdb setup identity with role ${role}.`
-        : `Identity entry [agents.${entry}] needs setup; choose a role and run pdb setup identity.`,
-      diff: null,
-      retry: role ? `pdb setup identity --role ${role} --entry ${entry}` : null,
-    },
-    entry: args.operation === "install" && scope.kind === "project" ? entry : null,
-  };
+  if (!role) {
+    return {
+      item: {
+        kind: "identity",
+        file: "pdb.toml",
+        action: "kept",
+        outcome: "refused",
+        code: "IDENTITY_REQUIRED",
+        message: `Identity entry [agents.${entry}] needs setup; pass --role implementer|designer and retry.`,
+        diff: null,
+        retry: null,
+      },
+      entry: null,
+    };
+  }
+  const action = record.entryExists ? ("replace" as const) : ("create" as const);
+  const section = entry.includes(".") ? `[agents."${entry}"]` : `[agents.${entry}]`;
+  if (dryRun) {
+    return {
+      item: {
+        kind: "identity",
+        file: "pdb.toml",
+        action,
+        outcome: "planned",
+        code: null,
+        message: `Would configure [agents.${entry}] in pdb.toml with role ${role}.`,
+        diff: `+ ${section}\n+ identity.triage_role = "${role}"\n`,
+        retry: `pdb setup identity --role ${role} --entry ${entry}${repoFlag}`,
+      },
+      entry,
+    };
+  }
+  try {
+    const write = await setIdentity(
+      { root: scope.root, repository: scope.repository },
+      entry,
+      "identity.triage_role",
+      role,
+      {
+        fs,
+        git: runtime.git,
+        random: runtime.random,
+        requireName: true,
+        reuseExistingIdentity: true,
+      },
+    );
+    const storedRole = write.record.triageRole ?? role;
+    const finalAction = !write.changed ? ("kept" as const) : action;
+    if (write.lockCleanup) {
+      return {
+        item: {
+          kind: "identity",
+          file: "pdb.toml",
+          action: finalAction,
+          outcome: "committed-with-error",
+          code: "LOCKED",
+          message: write.lockCleanup,
+          diff: null,
+          retry: retryCmd,
+        },
+        entry,
+      };
+    }
+    return {
+      item: {
+        kind: "identity",
+        file: "pdb.toml",
+        action: finalAction,
+        outcome: "applied",
+        code: null,
+        message: !write.changed
+          ? `Existing identity entry [agents.${entry}] with role ${storedRole} is valid and was preserved.`
+          : `Configured [agents.${entry}] in pdb.toml with role ${storedRole}.`,
+        diff: null,
+        retry: null,
+      },
+      entry,
+    };
+  } catch (error) {
+    const isConfig = error instanceof ConfigError;
+    const code = isConfig && /lock/i.test(error.message) ? "LOCKED" : "WRITE_FAILED";
+    const message = isConfig
+      ? error.recovery
+        ? `${error.message} ${error.recovery}`
+        : error.message
+      : "Failed to configure repository identity in pdb.toml; check permissions and retry.";
+    return {
+      item: {
+        kind: "identity",
+        file: "pdb.toml",
+        action,
+        outcome: "failed",
+        code,
+        message,
+        diff: null,
+        retry: isConfig && code === "LOCKED" ? null : retryCmd,
+      },
+      entry: null,
+    };
+  }
 }
 
 function projectScope(
@@ -409,6 +541,28 @@ const resultScope = (scope: InstallInternalScope): InstallResultScope =>
   scope.kind === "project" ? projectScope(scope) : globalScope();
 
 /** The manifest scope the shared primitives expect, and the private manifest location. */
+/** Sanitize MCP diff text so absolute paths and URL credentials/query tokens never leak. */
+function redactMcpDiff(
+  diff: string | null,
+  internal: InstallInternalScope,
+  redacted: InstallResultScope,
+): string | null {
+  if (!diff) return null;
+  const basePath = internal.kind === "project" ? internal.root : internal.home;
+  const configTarget =
+    internal.kind === "project"
+      ? `${internal.root}/${redacted.targets.config}`
+      : `${internal.home}/${redacted.targets.config}`;
+  const replacementRoot = internal.kind === "project" ? "<project>" : "<codex-home>";
+  return diff
+    .split(configTarget)
+    .join(redacted.targets.config)
+    .split(basePath)
+    .join(replacementRoot)
+    .replace(/(https?:\/\/)[^/@\s]+@/gi, "$1***@")
+    .replace(/(https?:\/\/[^\s"?#]+)\?[^\s"]*/gi, "$1?***");
+}
+
 const manifestScope = (scope: InstallInternalScope): InstallScope =>
   scope.kind === "project"
     ? { kind: "project", root: scope.root, gitCommonDir: scope.gitCommonDir }
@@ -437,16 +591,16 @@ export async function runCodexInstallSurface(
       : false;
   }
   const dryRun = args.dryRun || !apply;
-  const identity = await identityDecision(args, internal, runtime);
+  const identity = await identityStep(args, internal, runtime, dryRun);
   const identityItem = identity.item;
   const identityEntry = identity.entry;
   // Identity/context boundary: a project MCP registration must not proceed when the identity
-  // decision refused (ambiguous or unreadable) — otherwise the server later picks an unrelated
-  // agent from client metadata instead of honoring the refused selection.
-  const identityRefused = identityItem?.outcome === "refused";
+  // decision refused or failed — otherwise the server later picks an unrelated agent from client
+  // metadata instead of honoring the refused selection.
+  const identityBlocked = identityItem?.outcome === "refused" || identityItem?.outcome === "failed";
   const manifest = manifestFor(internal, args.client);
   const mcp =
-    identityRefused && internal.kind === "project" && args.operation === "install"
+    identityBlocked && internal.kind === "project" && args.operation === "install"
       ? {
           mcp: {
             action: "kept" as const,
@@ -477,6 +631,17 @@ export async function runCodexInstallSurface(
             pdbVersion: "0.1.0",
             dryRun,
           });
+  const mcpFailed =
+    mcp.mcp.outcome === "refused" ||
+    mcp.mcp.outcome === "failed" ||
+    mcp.mcp.outcome === "committed-with-error";
+  const mcpConfigured =
+    args.operation === "install" &&
+    !dryRun &&
+    (mcp.mcp.outcome === "applied" ||
+      mcp.mcp.outcome === "kept" ||
+      mcp.mcp.outcome === "committed-with-error");
+  const retryCmd = buildRetryCommand(args, identityEntry);
   // The primitive's message may embed absolute paths; the serialized result must use the
   // scope-relative target and never leak private paths (output/privacy contract).
   const items: InstallItem[] = [
@@ -488,8 +653,8 @@ export async function runCodexInstallSurface(
       outcome: mcp.mcp.outcome,
       code: mcp.mcp.code,
       message: mcp.mcp.message,
-      diff: null,
-      retry: null,
+      diff: redactMcpDiff(mcp.mcp.diff, internal, redacted),
+      retry: mcpFailed ? retryCmd : null,
     },
     {
       kind: "hook",
@@ -508,25 +673,39 @@ export async function runCodexInstallSurface(
     client: args.client,
     operation: args.operation,
     scope: redacted,
-    dryRun: args.dryRun,
+    dryRun,
     items,
     status: {
-      configured: false,
+      configured: mcpConfigured,
       trusted: "unknown",
       executed: "unknown",
       receiptVerified: "unknown",
     },
     next: [
       args.operation === "install"
-        ? "Configured the Codex MCP server (STDIO unless --transport http)."
-        : "Removal preview/record of the Codex MCP entry.",
-      args.dryRun ? "Dry run: remove --dry-run to write." : "",
-      args.transport === "http" ? "HTTP MCP transport is unverified for Codex (#397)." : "",
+        ? dryRun
+          ? "Dry run: pass --yes (or confirm interactively without --dry-run) to apply."
+          : mcpConfigured
+            ? "Codex MCP server is configured; Codex starts it on the next session."
+            : "Fix any refused/failed items above and re-run."
+        : dryRun
+          ? "Dry run removal preview: pass --yes (or confirm interactively without --dry-run) to apply."
+          : mcpFailed
+            ? "Fix any refused/failed items above and re-run."
+            : mcp.mcp.action === "absent"
+              ? "No owned PDB Codex MCP entry was present; identity and unrelated entries were preserved."
+              : "Removed owned PDB Codex MCP entries; identity and unrelated entries were preserved.",
+      args.operation === "install" && args.transport === "http"
+        ? "HTTP MCP transport is unverified for Codex (#397)."
+        : "",
+      args.operation === "install"
+        ? "Hook setup is withheld until the installed adapter slice; run /hooks in Codex once hook support is installed."
+        : "",
     ].filter(Boolean),
   };
-  // Exit status per the installer contract, derived from actual item outcomes now that this
-  // slice performs the MCP write: 2 when an item is refused, failed or committed-with-error;
-  // 1 when a non-preview request applied nothing; 0 for a successful apply/kept or a preview.
+  // Exit status per the installer contract: 2 when an item is refused, failed or
+  // committed-with-error; 1 when a non-preview request applied nothing; 0 for a successful
+  // apply/kept or a preview.
   const refusedOrFailed = items.some(
     (i) =>
       i.outcome === "refused" ||
@@ -548,8 +727,11 @@ export async function runCodexInstallSurface(
       : "global (user-wide Codex home)";
   await output(
     `pdb ${args.operation} codex\nScope: ${scopeLine}\nItems:\n${result.items
-      .map((i) => `  ${i.kind} (${i.outcome}${i.code ? `, ${i.code}` : ""}): ${i.message}`)
-      .join("\n")}\nNext:\n${result.next.map((n) => `  - ${n}`).join("\n")}\n`,
+      .map(
+        (i) =>
+          `  ${i.kind} (${i.outcome}${i.code ? `, ${i.code}` : ""}): ${i.message}${i.diff ? `\n${i.diff.trimEnd()}` : ""}${i.retry ? `\n    retry: ${i.retry}` : ""}`,
+      )
+      .join("\n")}\nHere's what to do next:\n${result.next.map((n) => `  - ${n}`).join("\n")}\n`,
   );
   return exitCode;
 }
