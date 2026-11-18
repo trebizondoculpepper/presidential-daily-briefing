@@ -212,7 +212,7 @@ Use it instead of picking a broad capability umbrella for duplicate work.
 
 ## General shared-capability guardrail
 
-The [shared services and state-ownership contract](shared-services-and-state.md)
-applies this architecture beyond Git/GH: one canonical capability owner, explicit
+The [main architecture guidelines](../architecture.md)
+apply this architecture beyond Git/GH: one canonical capability owner, explicit
 scoped state-holders for retained mutable state, injected composition and no new
 consumer bypasses. Existing narrow script exceptions remain unchanged.

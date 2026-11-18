@@ -1,4 +1,8 @@
-# Design handoff: agent-first triage
+# Detailed feature contracts
+
+Start with [the main architecture guidelines](../architecture.md). The contracts
+below refine those principles; they are not separate sources of cross-cutting
+policy. [Research and rationale](../research/README.md) supplies supporting evidence.
 
 Status: owner-confirmed direction consolidated on 2026-11-13; implementation contracts take effect after this documentation PR merges. These documents describe proposed behavior, not features already shipped. They supersede conflicting historical paragraphs and older ticket proposals **for the features below**, without adopting the proposed project process wholesale (#12).
 

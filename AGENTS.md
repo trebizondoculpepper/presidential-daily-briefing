@@ -1,127 +1,44 @@
 # Agent guide
 
-This is the shared, cross-platform contributor guide for every coding agent working in this repository, including Codex, Claude Code, OpenCode, Ori and other CLI, IDE or MCP clients. It applies on Windows, macOS and Linux; no particular agent harness or personal infrastructure is required. `AGENTS.md` is authoritative; `CLAUDE.md` is a compatibility entry point linked to this same file.
+Applies to every coding/review agent on all supported platforms. `CLAUDE.md` is a
+compatibility entry point to this guide. Work in this standalone PDB repository,
+not its historical game-repository source.
 
-Read [HANDOFF.md](HANDOFF.md) first. This is the standalone Presidential Daily Briefing project, extracted from poker_blocks at the owner's request. Its source is under `src/`; do not continue development in the game repository.
+Read [HANDOFF.md](HANDOFF.md), then the main
+[architecture guidelines](doc/architecture.md). Read the
+[agent workflow](doc/agent-workflow.md) before intake, changes, checks or delivery.
+Detailed [feature contracts](doc/design/README.md) refine the architecture;
+[research](doc/research/README.md) explains decisions without overriding them.
 
-## Natural language
+## Working rules
 
-The natural language of this project is English. Use English for pull request
-titles and descriptions, documentation, user-facing prose, and explanatory code
-comments. Reject pull requests and proposed changes written in any other natural
-language.
+- Use the project's PDB toolchain for supported intake, claims, dependencies,
+  estimation and diagnostics; check current `--help`. Use GH only for unsupported
+  operations, missing evidence or PDB diagnosis.
+- Recheck human ownership, claims and native blockers before pickup. Preserve
+  other agents' work. Own PR follow-up comes first; finish review/CI and merge
+  rather than stopping at an open PR. Prefer small, focused tickets and changes.
+- English prose; strict TypeScript application code; private `pdb.toml`, tokens,
+  identity/config files and live snapshots stay out of the public repository.
+  Use config/setup commands and existing authentication; no external check-in.
+- Architecture changes require a reviewed docs PR before implementation; reuse
+  accurate merged contracts. Close tickets only when their acceptance is met.
+- Docs-only: `npx vp fmt --check`. Executable/config or mixed changes: `npm run
+  check`, `npm test`, `npm run build`, with appropriate smoke/package checks. Use
+  installed Vite+ hooks, never bypass them. Keep significant work in `diary/`.
+- Required CI must pass on the exact PR head and Codex **or** CodeRabbit must have
+  completed a clean review of that head. Resolve substantive findings from either;
+  missing/skipped/stale review is not approval. Never force/admin-bypass checks.
+  Merging is not publication; a release requires explicit owner authorization.
 
-## Source language
+## Code Review Rules
 
-Owner decision: application code in `src/` and maintained executable research examples must use TypeScript. Helpers in `scripts/` may use TypeScript, JavaScript, shell, batch, PowerShell or Python with a short justification, runtime requirements and supported platforms documented. Existing TypeScript helpers need no rewrite. A non-TypeScript file is acceptable only when nothing in TypeScript imports it and it holds no workflow logic, and each one is listed in an explicit allowlist (doc/design/typescript.md, #112; enforcement #113). Intentionally selected ancillary languages such as Datalog are allowed where the relevant design documents their purpose and validation boundary. Handwritten JavaScript is avoided in application code; the documented helper-script exception is intentional. Generated JavaScript bundles and third-party code remain normal runtime artifacts.
-
-Follow [the TypeScript architecture and migration contract](doc/design/typescript.md) (#91). Source is strict TypeScript, development uses the `tsx` devDependency, and installed consumers run `dist/cli.mjs`. A test enforces the language boundary in `src/`, `scripts/` and `doc/reports/examples/`: any `.js`, `.mjs`, `.cjs`, `.sh`, `.bat`, `.cmd`, `.ps1` or `.py` file there must be listed in `LANGUAGE_EXCEPTIONS` (`src/language-policy.ts`), and nothing in `src/` or `scripts/` may import a listed file. To add one, append an entry naming the exact file with its purpose, integration boundary, runtime requirements, supported platforms and validation, and justify it in the PR. Follow the [current-LTS runtime policy](doc/design/runtime.md) (#108): older-Node compatibility is not a migration requirement. Existing package engines and CI remain implementation facts until that follow-up ships.
-
-## Configuration and identity
-
-Prefer TOML for project-owned configuration. The local root-level `pdb.toml` persists per-agent names and triage_role and must remain Git-ignored/non-versioned. A legacy `agent-inbox.toml` entry is imported into it once by the first `pdb config set identity.…` for that entry and is never written by pdb. Reuse existing entries and preserve unrelated keys; no service or communications check-in is required. Use config/setup commands rather than edit identity/settings directly. Shared repository settings live in `.github/triage.toml`; an earlier `.github/triage.json` stays readable until `pdb config convert` (#160). npm manifests and workflow YAML retain their required formats. Follow doc/design/pdb-owned-identity.md, doc/design/identity.md and doc/design/configuration-formats.md.
-
-## Architecture and scope
-
-Shared application capabilities have one canonical typed service boundary in the
-owning area. Consumers must reuse it rather than create parallel clients or direct
-utility/API access. Retained shared mutable state belongs to an explicit scoped
-state-holder wrapper with documented lifecycle, partitioning and invalidation;
-application composition constructs/injects it, and controllers remain thin. Pure
-helpers need no artificial service layer. Reject new bypasses or hidden shared
-state; track existing deviations as explicit migration debt. Follow
-[shared services and state ownership](doc/design/shared-services-and-state.md).
-
-PDB serve is API-first: browser pages consume versioned backend data/text APIs; shared services own domain content and native decisions, and frontend components own rendering. New/migrated pages must not assemble HTML strings in backend TypeScript or rebuild domain logic in the browser. Serve built frontend assets/static entry; CLI/MCP may use the shared services directly. Existing generated pages migrate incrementally. Follow [the API-first frontend contract](doc/design/serve-api-first-frontend.md) (#852).
-
-- Run the TypeScript CLI from source with `npm run pdb` (tsx); use Vite+ for checks/tests/builds.
-- `github/github.ts` collects GitHub facts through existing authenticated `gh`, without a shell or new credentials. `github/dependencies.ts` owns native dependency queries and `deps add`/`remove`; `github/migration.ts` owns the read-only `deps migrate --plan` report (automatic apply is deferred, #48); `workflow/claims.ts` owns `claim` and `needs-human`; `workflow/delivery.ts` owns delivery records and their fold, `workflow/deliverables.ts` the `deliverables` commands (#189), and `workflow/completion.ts` the live delivery evidence, the pure completion evaluator and `complete` (#191). `workflow/team.ts` owns the read-only `team` view; `workflow/prstatus.ts` owns the read-only `pr N` progress report; `workflow/ticketdoctor.ts` owns the read-only `ticket-doctor` scan; `updates/updates.ts` owns the npm version check (#51); `rules/datalog/` holds the Datalog policy as native EDN (`policy/*.edn`), its build, the pure engine (`engine.ts`), the host adapter (`adapter.ts`) and the EDN rule scenarios (`scenarios/*.edn`), see doc/design/rules-component.md; `mcp/polling.ts` the MCP event polling; `mcp/server.ts` the MCP server factory (`mcp.ts` is the stdio entry); `serve.ts` and `serve/` own `pdb serve` (lifecycle and Host/Origin guard, memory cache, JSON read API, HTTP MCP sessions; doc/design/serve.md); `workflow/readservices.ts` the transport-neutral `team`, `who` and `pr` reads; `workflow/ticketstatus.ts` the read-only consolidated `ticket N` view (#197); `briefing/briefing.ts` owns registered workflow rules/policy over the label and state vocabulary in `workflow/definition.ts`, `briefing/compact.ts` presentation and `cli.ts` argument/filesystem orchestration.
-- Keep repository identities opaque. Extend registered workflow/rule/role handlers and declarative policy, not issue-number, named-agent or repository special cases.
-- Preserve schema versions, explicit freshness/completeness, full intake, offline/checkpoint safety and useful omission notices. Missing evidence is not approval.
-- Read the applicable contract in `doc/` before behavior changes. Record changed architectural contracts in a separate docs PR before implementation; existing accurate merged contracts can be reused.
-- Native blockedBy/blocking relationships are authoritative; body text is migration/drift context. `deps add`/`deps remove`, `claim` and `needs-human` are the implemented mutations; `release`/handoff (#62) is unfinished and automatic migration apply is deferred (#48). Never apply a live migration without a reviewed plan.
-- Use injected `gh`/clock/filesystem boundaries in tests. Do not add tokens, live snapshots, agent identity files or private configuration to this public repo.
-
-## Automated review and release gate
-
-Owner policy: either Codex or CodeRabbit may satisfy automated review. Required CI (`verify`) must pass on the current PR head, and at least one provider must have completed a clean review covering that head. A completed current-head Codex receipt with no unresolved findings is sufficient; a passing current-head CodeRabbit review is sufficient. Both are not required. Quota skips, neutral checks without a completed review, pending/error reviews and stale-head receipts are not approval. Address every substantive outstanding finding from either reviewer before merging, even when the other provider is clean. A missing second-provider review alone is not a blocker. Follow [review-gate.md](doc/design/review-gate.md).
-
-A merge does not publish to npm. Publication still requires the owner's explicit release request and the existing verified `npm run release` process. Never bypass required CI or use an admin/force merge merely because one reviewer is clean.
-
-## Work and checks
-
-Use this project's own toolchain for ticket intake, prioritization, claims, handoffs, estimation and diagnostics so routine work tests the product itself. No separate communications platform or external check-in is required. Use this project's triage tool instead of direct `gh` wherever the operation is supported. Use full ticket intake and native dependency views before separate GitHub searches; fall back to `gh` only for unsupported operations, missing evidence or triage diagnosis. Check current `--help`, not planned command syntax.
-
-Use this repository's issues, not the old poker_blocks issue numbers. Recheck current ownership and native blockers before claiming. Keep one issue/PR focused; preserve another agent's work. An unanswered question goes on its ticket with the concrete blocker.
-
-For documentation-only changes (root Markdown, `doc/`, `diary/` and GitHub Markdown templates, excluding `doc/reports/examples/`), run `npx vp fmt --check`; unit tests, builds and package tests are not required. Mixed changes and all executable/configuration changes retain the full checks. Before committing those changes run `npm run check`, `npm test` and `npm run build`. Use the installed Vite+ pre-commit hook; do not bypass it. Keep the developer diary in `diary/` for significant work.
-
-## Commands
-
-```sh
-npm install                                   # also installs the Vite+ hooks (prepare)
-npm run pdb -- --repo owner/repo [--json] [--issue 42] [--agent name]
-npm run pdb -- deps 42 --repo owner/repo --tree
-npm run check                                 # vp check (format, lint, type check) + examples tsc
-npm run fmt                                   # apply formatting
-npm test                                      # vp test run (Vitest)
-npx vp test run src/workflow/claims.test.ts -t "name"  # one file / one test by name
-npm run build                                 # vp pack -> dist/cli.mjs
-node dist/cli.mjs --help                      # quick CLI smoke test
-npm run smoke                                 # credential-free exit-code smoke of dist/cli.mjs
-npx tsx scripts/smoke.ts src/cli.ts           # same smoke against the TypeScript source
-npm run package-test                          # pack, install globally into a temp prefix, smoke
-npm run rules:build                           # validate policy/*.edn, write policy.generated.json
-npm run rules:test [-- --junit PATH]          # rules-only: run scenarios/*.edn against the engine
-npm run test:report                           # CI's JUnit reports + summary locally, into reports/
-```
-
-## Editing the rules
-
-The DataScript policy lives in `src/rules/datalog/policy/*.edn` (DataScript Datalog, not Prolog). Edit those files, never `policy.generated.json`, which `npm run rules:build` writes and `npm run check` verifies is current. Each decision rule is one map in `decisions.edn` holding its ID, band, `:when` clauses, `:why` text and evidence witnesses; attributes are strings, not keywords. Then:
-
-1. `npm run rules:test` runs every scenario in `src/rules/datalog/scenarios/*.edn` against the engine in seconds, without GitHub or the CLI. Exit 1 means a scenario's expected decision differs (`RuleDecisionFailure`); exit 2 means a source, scenario or the evaluator is broken (`RuleInfrastructureError`).
-2. Add or update a scenario for the behaviour you changed. A scenario gives engine facts and the complete expected result:
-
-   ```clojure
-   {:id "easy-win" :doc "An eligible L/S ticket is a known easy win."
-    :viewer {:role "implementer"}
-    :facts [{:e 1 "forward-complete" true}
-            {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "t1" "created" 1
-                    "label" "status:ready" "labels-complete" true "native-complete" true
-                    "reverse-complete" true "blocking-complete" true "open-blockers" 0
-                    "impact-state" "current" "impact-size" "L"
-                    "complexity-state" "current" "complexity-size" "S"}]
-    :expect {:actions [{:subject 100 :rule "D-EASY" :kind "implement" :band 4
-                        :why "Known easy win: impact L, complexity S."}]
-             :denials #{}}}
-   ```
-
-3. `npm run rules:build`, then the full checks. If decisions change on purpose, regenerate the golden parity file (`PDB_PARITY_REGENERATE=1 npx vp test run src/rules/datalog/parity.test.ts`) and state the change and the new rules hash in the PR.
-
-Without `--repo`, the target repository is resolved by `gh repo view` from the current working directory. The runtime uses only Node built-ins and `gh`; shared GitHub fact types live in `src/github/types.d.ts`; `tsconfig.json` (strict) covers `src/` and `scripts/`, and `doc/reports/examples/tsconfig.json` covers the rules examples. Tests sit beside the code they cover (`src/<area>/*.test.ts`), with shared fixtures in `src/testing/` and cross-feature suites in `src/acceptance/` (doc/design/source-layout.md); the `gh` wrapper tests in `src/github/github.test.ts` fake `gh` with a POSIX shell script and are skipped on Windows. The CLI and tooling target the current Node LTS, Node 26+ (`engines`, doc/design/runtime.md). CI runs the checks, tests, build, smoke tests and package test with Node 26 on Ubuntu and Windows (required) and, on trial, runs the built and source CLI, smoke tests and package test on FreeBSD in a VM (Vite+ has no FreeBSD binding, so check/test/build run on the Linux host; non-blocking: not part of `verify`, and may be removed if it proves problematic); macOS is not run unless explicitly requested, as it is expected to match Linux. The single `verify` job passes only when every Ubuntu/Windows matrix job passes, and is the check to require. Line endings are LF everywhere.
-
-## Choosing work
-
-Be proactive: when one job finishes, find the next one rather than stopping to ask.
-
-1. **Your own open PRs come first.** An implementer's job is to get code merged, not to open PRs. Wait for CI and review, address every substantive finding (reviewers, bots, comments on the linked ticket), reply on each thread, and push until the PR is ready to merge. Wait in the background while reviews are pending; do not end the session because a review has not arrived yet.
-2. **Then pick a ticket with the triage tool** (`npm run pdb`, `deps N`):
-   - first, the ticket that unblocks the most downstream work (last open blocker for the most dependants);
-   - failing that, a bug;
-   - otherwise, the oldest ticket before newer ones.
-3. **Any PR that needs work to merge, or any issue you can pick up, is fair game.** If two jobs both look valid, just pick one; the choice often does not matter. Do not stop to ask which.
-
-Skip only work that someone else is visibly doing now: an `agent:` label, an open PR by someone else, or a recent claim comment for active work. A queued intention ("I'll do this after X") is not an active claim. Comment on the ticket when you claim it.
-
-## Mirrored process proposal
-
-The owner requested a mirror of poker_blocks' design/implementation process. Review [doc/process.md](doc/process.md) and [doc/design-implementation.md](doc/design-implementation.md); [doc/poker-blocks-process.md](doc/poker-blocks-process.md) preserves historical process context with personal integration details removed. [Issue #12](https://github.com/trebizondoculpepper/presidential-daily-briefing/issues/12) asks this project to consider adoption and adaptations. These are review proposals; they do not silently override this guide or assert that branch protection/reviewer integrations exist.
-
-The [process adaptation audit](doc/reports/process-adaptation-audit.md) (#12) recommends retaining this guide and the focused merged contracts as active policy. The mirrored process remains context, not a second competing instruction source. Close tickets only when their stated acceptance is complete; completing a documentation phase alone does not finish its implementation or empirical follow-up.
-
-For a design/research phase with further ticket acceptance outstanding, use neutral PR wording such as `References #N`. Do not negate a GitHub closing keyword next to a real issue reference: GitHub still treated that wording as a closing directive in this project. Use an intentional closing directive only when the PR completes the issue’s stated acceptance. Verify the issue state after merge.
-
-## Proportionate research
-
-Follow [the research-stage instructions](doc/design/research-stages.md) for #72/#74/#75/#78: up to roughly one hour of agent time for initial plausibility/preparation. Higher-standard feasibility/practicality or repetitive evaluation is separate and must not block the original low-cost experiment. Later repetitive trials go to a cheaper agent after review and a separately agreed budget; a possible $20 cap is not current authorization. Cheap, bounded experiments can establish plausibility; costly ones need a plausible basis first. Unknown cost must be estimated, not treated as low.
+- Architectural consistency with [doc/architecture.md](doc/architecture.md) is the
+  primary review target. Read the shared [review prompt](.github/review-guidelines.md)
+  and relevant feature contracts before assessing the diff.
+- Prioritize new service/state-owner duplication, adapter bypasses, thick
+  controllers, native-policy forks, broken typed/evidence boundaries and context
+  leaks. Cite the changed code, principle and concrete consequence.
+- Distinguish existing migration debt from new drift; avoid unrelated rewrites
+  and style-only noise. Still report material correctness, data-loss, security
+  and compatibility regressions. Follow [the merge gate](doc/design/review-gate.md).
