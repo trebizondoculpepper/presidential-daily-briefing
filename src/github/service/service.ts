@@ -6,7 +6,7 @@
  * remaining capability groups arrive with their migration tickets (#878-#891).
  */
 
-import { ghQueryFailure, ghRest, permissionLookup } from "../github.js";
+import { ghQueryFailure, permissionLookup, restOverTransport } from "../github.js";
 import type { PermissionLookup, Rest } from "../github.js";
 import { execFileTransport } from "./transport.js";
 import type { GhTransport } from "./transport.js";
@@ -40,7 +40,7 @@ export interface GhServiceOptions {
   transport?: GhTransport;
   /** The environment gh itself reads (GH_HOST selects the host); injected for isolation. */
   env?: NodeJS.ProcessEnv;
-  /** The REST reader behind REST capabilities (production: ghRest); injected for tests and serve. */
+  /** The REST reader behind REST capabilities; by default one over this service's transport and env. */
   rest?: Rest;
 }
 
@@ -49,7 +49,9 @@ const LOGIN = /^[\w.-]+$/;
 export function createGhService(options: GhServiceOptions = {}): GhService {
   const transport = options.transport ?? execFileTransport;
   const env = options.env ?? process.env;
-  const rest = options.rest ?? ghRest;
+  // The default REST reader runs over this service's own transport and environment, so every
+  // capability honours the same execution context (host, account, injected transport).
+  const rest = options.rest ?? restOverTransport(transport, env);
   return {
     account: {
       async current(signal) {
