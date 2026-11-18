@@ -22,7 +22,10 @@ import type { Query } from "../github.js";
 import type { RateLimitAnswer } from "./ratelimits.js";
 import type { CheckReads } from "./checks.js";
 import type { HistoryReads } from "./history.js";
-import type { GraphQuery } from "../../workflow/claims.js";
+import { completionCapabilities, runOverTransport } from "./completion.js";
+import type { CompletionCapabilities } from "./completion.js";
+import { ghRun } from "../dependencies.js";
+import type { GhRun, GraphQuery } from "../../workflow/claims.js";
 
 export interface GhAccount {
   host: string;
@@ -84,6 +87,7 @@ export interface GhService {
       signal?: AbortSignal,
     ): Promise<unknown>;
   };
+  completion: CompletionCapabilities;
 }
 
 export interface GhServiceOptions {
@@ -94,6 +98,8 @@ export interface GhServiceOptions {
   rest?: Rest;
   /** The GraphQL executor behind query capabilities; by default one over this transport and env. */
   query?: GraphQuery;
+  /** Guarded `gh` write runner behind completion step execution; defaults to `ghRun` (or transport). */
+  run?: GhRun;
   /** Clock for observation times. */
   now?: () => Date;
 }
@@ -107,6 +113,7 @@ export function createGhService(options: GhServiceOptions = {}): GhService {
   // capability honours the same execution context (host, account, injected transport).
   const rest = options.rest ?? restOverTransport(transport, env);
   const query: GraphQuery = options.query ?? ghQueryWith(undefined, {}, { transport, env });
+  const run: GhRun = options.run ?? (options.transport ? runOverTransport(transport, env) : ghRun);
   return {
     account: {
       async current(signal) {
@@ -169,6 +176,7 @@ export function createGhService(options: GhServiceOptions = {}): GhService {
       const data = await query(q, vars);
       return typeof data === "object" && data !== null ? (data as Record<string, unknown>) : {};
     }, rest),
+    completion: completionCapabilities(query, rest, run),
   };
 }
 

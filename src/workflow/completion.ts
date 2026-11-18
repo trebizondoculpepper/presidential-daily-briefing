@@ -20,17 +20,12 @@ import { identitySelection, identitySelectionOptions } from "../config/commandid
 import { createHash } from "node:crypto";
 import { parseArgs } from "node:util";
 import { workflow } from "./definition.js";
-import { claimPolicy, failStep, retryLine, shellQuote, ticketGuard } from "./claims.js";
+import { claimPolicy, failStep, retryLine, shellQuote } from "./claims.js";
 import type { Comment, PlanStep } from "./claims.js";
-import {
-  defaultBranch,
-  deliveryCommentFields,
-  legacyRelease,
-  readDeliveryComments,
-  readPr,
-  targetContainment,
-} from "./deliverables.js";
+import { legacyRelease } from "./deliverables.js";
 import type { DeliverablesRuntime } from "./deliverables.js";
+import { completionCapabilities } from "../github/service/completion.js";
+import type { CompleteIssueRead, CompletionCapabilities } from "../github/service/completion.js";
 import {
   deliverableKey,
   deliverableLabel,
@@ -42,7 +37,6 @@ import {
 import type {
   ClassifiedRecord,
   Deliverable,
-  DeliveryComment,
   DeliveryFold,
   DeliveryRecord,
   EvidenceSnapshot,
@@ -406,6 +400,23 @@ const prLink = (d: Extract<Deliverable, { kind: "pr" }>) =>
  * that member `unknown`. Requests: one PR read per PR member, one compare per merged PR or
  * commit member, one default-branch read per distinct target repository with no branch.
  */
+export type CompleteRuntime = DeliverablesRuntime & {
+  completion?: CompletionCapabilities;
+};
+
+const completionCapabilitiesFromRuntime = (
+  rt: Pick<DeliverablesRuntime, "query" | "rest"> &
+    Partial<Pick<DeliverablesRuntime, "run">> & {
+      completion?: CompletionCapabilities;
+    },
+): CompletionCapabilities =>
+  rt.completion ??
+  completionCapabilities(
+    rt.query,
+    rt.rest,
+    rt.run ?? (() => Promise.reject(new Error("run unavailable"))),
+  );
+
 export async function collectDeliveryFacts(
   input: {
     repository: string;
@@ -414,23 +425,16 @@ export async function collectDeliveryFacts(
     fold: DeliveryFold;
     legacyHandoff: boolean;
   },
-  rt: Pick<DeliverablesRuntime, "query" | "rest">,
+  rt: Pick<DeliverablesRuntime, "query" | "rest"> & { completion?: CompletionCapabilities },
 ): Promise<DeliveryFacts> {
   let requests = 0;
-  const counted: Pick<DeliverablesRuntime, "query" | "rest"> = {
-    query: (q, v) => {
-      requests++;
-      return rt.query(q, v);
-    },
-    rest: (p, o) => {
-      requests++;
-      return rt.rest(p, o);
-    },
-  };
+  const capabilities = completionCapabilitiesFromRuntime(rt).counted(() => {
+    requests++;
+  });
   const branches = new Map<string, Promise<string | null>>();
   const branchOf = (repository: string) => {
     const key = repository.toLowerCase();
-    if (!branches.has(key)) branches.set(key, defaultBranch(repository, counted.query));
+    if (!branches.has(key)) branches.set(key, capabilities.defaultBranch(repository));
     return branches.get(key)!;
   };
   const { fold } = input;
@@ -458,7 +462,7 @@ export async function collectDeliveryFacts(
       continue;
     }
     if (d.kind === "commit") {
-      const c = await targetContainment(d.target, d.oid, counted, branchOf);
+      const c = await capabilities.targetContainment(d.target, d.oid, branchOf);
       members.push({
         ...base,
         branch: c.branch,
@@ -474,7 +478,7 @@ export async function collectDeliveryFacts(
       });
       continue;
     }
-    const live = await readPr(prLink(d), counted.query);
+    const live = await capabilities.readPr(prLink(d));
     if (!live || live.number !== d.number) {
       members.push({
         ...base,
@@ -514,7 +518,7 @@ export async function collectDeliveryFacts(
         continue;
       }
       // No same-base shortcut: containment is decided only by this live compare.
-      const c = await targetContainment(d.target, oid, counted, branchOf);
+      const c = await capabilities.targetContainment(d.target, oid, branchOf);
       members.push({
         ...base,
         baseRefName,
@@ -720,35 +724,6 @@ export type CompleteResult = CompletePlan & {
   exitCode: number;
 };
 
-interface CompleteIssue {
-  __typename: "Issue";
-  number: number;
-  title: string;
-  url: string;
-  state: string;
-  stateReason?: string | null;
-  labels: { nodes: { name: string }[]; pageInfo?: { hasNextPage?: boolean } };
-  timelineItems?: { nodes: { actor?: { login?: string } | null }[] };
-  comments: {
-    nodes: DeliveryComment[];
-    pageInfo?: { hasPreviousPage?: boolean; startCursor?: string | null };
-  };
-}
-async function readCompleteIssue(repository: string, number: number, rt: DeliverablesRuntime) {
-  const [owner, name] = repository.split("/");
-  const data = (await rt.query(
-    `query($owner:String!,$name:String!,$number:Int!){viewer{__typename login} repository(owner:$owner,name:$name){issueOrPullRequest(number:$number){__typename ... on PullRequest{url} ... on Issue{number title url state stateReason labels(first:100){nodes{name} pageInfo{hasNextPage}} timelineItems(itemTypes:[CLOSED_EVENT],last:1){nodes{... on ClosedEvent{actor{login}}}} comments(last:100){nodes{${deliveryCommentFields}} pageInfo{hasPreviousPage startCursor}}}}}}`,
-    { owner, name, number },
-  )) as {
-    viewer?: { __typename?: string; login?: string } | null;
-    repository: {
-      issueOrPullRequest: CompleteIssue | { __typename: "PullRequest"; url: string } | null;
-    } | null;
-  };
-  if (!data.repository) throw new Error(`Repository unavailable: ${repository}`);
-  return { viewer: data.viewer ?? null, item: data.repository.issueOrPullRequest };
-}
-
 const snapshotOf = (m: MemberEvidence): EvidenceSnapshot => ({
   deliverable: m.label,
   state: m.state,
@@ -771,9 +746,10 @@ export const completeCommand = (repository: string, r: CompleteRequest): string 
 export async function planComplete(
   repository: string,
   request: CompleteRequest,
-  rt: DeliverablesRuntime,
+  rt: CompleteRuntime,
   resume?: { opId: string; closedByRun: boolean },
 ): Promise<CompletePlan> {
+  const capabilities = completionCapabilitiesFromRuntime(rt);
   const { number, agent } = request;
   const cmd = (text: string): string => `pdb ${text} --repo ${repository}`;
   const retry = completeCommand(repository, request);
@@ -798,9 +774,9 @@ export async function planComplete(
 
   // The time of this read is the evaluation time recorded as `evaluatedAt`.
   const evaluatedAt = rt.now().toISOString();
-  let read: Awaited<ReturnType<typeof readCompleteIssue>>;
+  let read: CompleteIssueRead;
   try {
-    read = await readCompleteIssue(repository, number, rt);
+    read = await capabilities.readIssue(repository, number);
   } catch (error) {
     return refuse(
       "EVIDENCE_INCOMPLETE",
@@ -864,10 +840,10 @@ export async function planComplete(
 
   // After this run's record is posted, any failure re-reading the history (an older comment
   // page, a permission lookup) must still report the written record, never escape as a throw.
-  let history: Awaited<ReturnType<typeof readDeliveryComments>>;
+  let history: Awaited<ReturnType<CompletionCapabilities["readDeliveryComments"]>>;
   let folded: Awaited<ReturnType<typeof readDeliveryFold>>;
   try {
-    history = await readDeliveryComments(repository, number, item.comments, rt.query);
+    history = await capabilities.readDeliveryComments(repository, number, item.comments);
     folded = await readDeliveryFold(
       history.comments,
       history.complete,
@@ -1254,9 +1230,10 @@ function completionBody(agent: string, record: DeliveryRecord): string {
 export async function applyComplete(
   repository: string,
   request: CompleteRequest,
-  rt: DeliverablesRuntime,
+  rt: CompleteRuntime,
   first?: CompletePlan,
 ): Promise<CompleteResult> {
+  const capabilities = completionCapabilitiesFromRuntime(rt);
   const initial = first ?? (await planComplete(repository, request, rt));
   if (!initial.ok) return { ...initial, exitCode: 1 };
   if (initial.noop) return { ...initial, exitCode: 0 };
@@ -1324,7 +1301,7 @@ export async function applyComplete(
     const step: PlanStep = { ...next, status: "pending" };
     steps.push(step);
     try {
-      await rt.run(step.command, { guard: ticketGuard(repository, request.number, rt.query) });
+      await capabilities.executeStep(repository, request.number, step.command);
       step.status = "done";
       if (step.step === "record") opId = plan.record?.opId ?? plan.opId;
       if (step.step === "close") closedByRun = true;
