@@ -13,6 +13,7 @@ import {
   serverHumanContext,
   type AuthContextReader,
 } from "./humancontext.js";
+import { createGhService } from "../github/service/service.js";
 import { AuthenticationError } from "../github/github.js";
 
 const at = (iso: string) => () => new Date(iso);
@@ -150,5 +151,46 @@ describe("employing human resolver (#664)", () => {
     ).toBe(
       "Working for: unknown (github.com: gh is not signed in to github.com (run gh auth status))",
     );
+  });
+
+  it("accepts a typed GhService account boundary and distinguishes auth refusal from outage (#909)", async () => {
+    await withDir(async (cacheDir) => {
+      const okService = createGhService({
+        transport: async () => ({ ok: true, stdout: JSON.stringify({ login: "alice" }) }),
+      });
+      expect(await resolveHumanContext(okService, { cacheDir })).toMatchObject({
+        state: "current",
+        host: "github.com",
+        login: "alice",
+      });
+
+      const outageService = createGhService({
+        transport: async () => ({
+          ok: false,
+          kind: "exit",
+          exitCode: 1,
+          stdout: "",
+          stderr: "connection timed out",
+        }),
+      });
+      expect(await resolveHumanContext(outageService, { cacheDir })).toMatchObject({
+        state: "last-known",
+        login: "alice",
+      });
+
+      const unauthService = createGhService({
+        transport: async () => ({
+          ok: false,
+          kind: "exit",
+          exitCode: 4,
+          stdout: "",
+          stderr: "To get started with GitHub CLI, please run: gh auth login",
+        }),
+      });
+      expect(await resolveHumanContext(unauthService, { cacheDir })).toMatchObject({
+        state: "unresolved",
+        login: null,
+      });
+    });
   });
 });
