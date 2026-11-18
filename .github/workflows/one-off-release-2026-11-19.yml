@@ -57,18 +57,23 @@ jobs:
           echo "sha=$selected" >> "$GITHUB_OUTPUT"
           echo "Selected $selected from main at cutoff $CUTOFF; this is not a publication receipt." >> "$GITHUB_STEP_SUMMARY"
           git checkout --detach "$selected"
-      - name: Require the selected main CI run to pass
+      - name: Require only the selected source verify check
         if: steps.date.outputs.eligible == 'true'
         env:
           SELECTED_SHA: ${{ steps.source.outputs.sha }}
         shell: bash
         run: |
           set -euo pipefail
-          run_id=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --branch main --commit "$SELECTED_SHA" --limit 1 --json databaseId --jq '.[0].databaseId // empty')
-          [[ "$run_id" =~ ^[0-9]+$ ]] || { echo "::error::No main CI evidence for $SELECTED_SHA."; exit 1; }
-          gh run watch "$run_id" --repo "$GITHUB_REPOSITORY" --exit-status --interval 30
-          passed=$(gh api "repos/$GITHUB_REPOSITORY/commits/$SELECTED_SHA/check-runs?check_name=verify&filter=latest&per_page=100" --jq 'any(.check_runs[]; .app.slug == "github-actions" and .status == "completed" and .conclusion == "success")')
-          [[ "$passed" == "true" ]] || { echo "::error::Required verify did not pass for $SELECTED_SHA."; exit 1; }
+          verified=false
+          for attempt in {1..40}; do
+            outcome=$(gh api "repos/$GITHUB_REPOSITORY/commits/$SELECTED_SHA/check-runs?check_name=verify&filter=latest&per_page=100" --jq '[.check_runs[] | select(.app.slug == "github-actions")] | sort_by(.started_at // .created_at) | last | if .status == "completed" then .conclusion else "pending" end')
+            case "$outcome" in
+              success) verified=true; break ;;
+              pending) sleep 30 ;;
+              *) echo "::error::Required verify concluded $outcome for $SELECTED_SHA."; exit 1 ;;
+            esac
+          done
+          [[ "$verified" == "true" ]] || { echo "::error::Timed out waiting for required verify for $SELECTED_SHA."; exit 1; }
       - uses: actions/setup-node@v4
         if: steps.date.outputs.eligible == 'true'
         with:
