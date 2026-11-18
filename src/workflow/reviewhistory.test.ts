@@ -30,7 +30,15 @@ describe("pr review history: why does this keep failing review (#60)", () => {
           originalCommit: { oid: commit },
         },
         ...(o.reply
-          ? [{ author: me, body: o.reply, createdAt: "2026-11-19T00:00:00Z", url: "https://r" }]
+          ? [
+              {
+                author: me,
+                body: o.reply,
+                createdAt: "2026-11-19T00:00:00Z",
+                url: "https://r",
+                originalCommit: null,
+              },
+            ]
           : []),
       ],
     },
@@ -48,8 +56,9 @@ describe("pr review history: why does this keep failing review (#60)", () => {
     headRefOid: o.head ?? c4,
     author: me,
     commits: {
+      totalCount: (o.commits ?? [c1, c2, c3, c4]).length,
       nodes: (o.commits ?? [c1, c2, c3, c4]).map((oid: string) => ({
-        commit: { oid, messageHeadline: `commit ${oid[0]}` },
+        commit: { oid, committedDate: null, messageHeadline: `commit ${oid[0]}` },
       })),
       pageInfo: { hasNextPage: false },
     },
