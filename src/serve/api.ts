@@ -1402,14 +1402,12 @@ export function readApi(
               follow &&
               Number.isSafeInteger(Number(diagnosis.destination.number))
             ) {
+              const destinationProject = servedSet.find(
+                (s) =>
+                  s.repository.toLowerCase() === diagnosis.destination.repository.toLowerCase(),
+              )?.project;
               const destination = await readBriefing(
-                readRuntime(
-                  servedSet.find(
-                    (s) =>
-                      s.repository.toLowerCase() === diagnosis.destination.repository.toLowerCase(),
-                  )?.project,
-                  diagnosis.destination.repository,
-                ),
+                readRuntime(destinationProject, diagnosis.destination.repository),
                 {
                   repository: diagnosis.destination.repository,
                   agent: chosen?.agent ?? undefined,
@@ -1420,6 +1418,24 @@ export function readApi(
                   signal: context.signal,
                 },
               );
+              // #808: the destination repository is a followed context of its own. If a live
+              // application changed or removed it while the destination briefing was collected,
+              // presenting its facts as fresh would leak an obsolete context even though the
+              // originally selected repository is unchanged. Re-check the live served set for
+              // the destination (the same array the routes read per request).
+              const destinationNow = servedSet.find(
+                (s) =>
+                  s.repository.toLowerCase() === diagnosis.destination.repository.toLowerCase(),
+              );
+              if (
+                destinationNow === undefined ||
+                (destinationNow.project ?? null) !== (destinationProject ?? null)
+              )
+                throw new HttpFailure(
+                  409,
+                  "CONTEXT_CHANGED",
+                  "The served configuration changed while this read was running; retry.",
+                );
               if (destination.kind === "report")
                 return {
                   status: destination.complete ? "complete" : "incomplete",
