@@ -11,6 +11,7 @@
 import type { Value } from "datascript";
 import type { CompiledProjectPolicy } from "./compile.js";
 import { ProjectEvaluationError, actionIdentity, protectedBands } from "./projection.js";
+import { RANK_PARTITION } from "../engine.js";
 import type { AdmittedAction, Projection } from "./projection.js";
 
 /** Contract v1 bounds on the evaluation output. */
@@ -282,9 +283,14 @@ export function applyProjectPreferences<A extends WithWhy>(
     };
   });
   const key = (a: AdmittedAction) => admitted.matches.get(actionIdentity(a))?.priority ?? 0;
-  const bands = new Map<number, number[]>();
+  // Regroup only within one native rank partition and band (#652): a project preference never
+  // moves new work ahead of an owned obligation, an addressed response or preferred-role duties.
+  const bands = new Map<string, number[]>();
   for (const [i, a] of out.entries())
-    if (!protectedBands.has(a.band)) bands.set(a.band, [...(bands.get(a.band) ?? []), i]);
+    if (!protectedBands.has(a.band)) {
+      const group = `${(a as { [RANK_PARTITION]?: string })[RANK_PARTITION] ?? ""}|${a.band}`;
+      bands.set(group, [...(bands.get(group) ?? []), i]);
+    }
   for (const slots of bands.values()) {
     const sorted = slots.map((i) => out[i]).sort((x, y) => key(y) - key(x));
     for (const [n, i] of slots.entries()) out[i] = sorted[n];

@@ -6,6 +6,7 @@ import { requiredCheckEvidence } from "../../github/requiredchecks.js";
  * decisions all come from engine.ts; nothing here chooses, orders or explains an action.
  */
 import type { Datom, Value } from "datascript";
+import { RANK_PARTITION } from "./engine.js";
 import type { Snapshot, Issue, PullRequest } from "../../github/types.js";
 import type { SubjectAssessments } from "../../briefing/assessments.js";
 import type {
@@ -110,6 +111,8 @@ export interface Explanation {
   overriddenRuleIds: string[];
 }
 export interface DatalogAction extends RankedAction {
+  /** The native rank partition (#652), outside the action's JSON. */
+  [RANK_PARTITION]?: string;
   ruleIds: string[];
   why: Explanation;
   /** Human role only (#643): native section grouping (`input` vs `waiting`) and its reason. */
@@ -463,6 +466,8 @@ export function evaluateDatalog(
       } else if (others.length > 1) nextCommand = "";
     }
     return {
+      // The native rank partition (#652) travels with the action, outside its JSON.
+      [RANK_PARTITION]: decision[RANK_PARTITION],
       id: `${snapshot.repository} ${subject.url} ${decision.kind}`,
       kind: decision.kind as ActionKind,
       target: subject.url,
