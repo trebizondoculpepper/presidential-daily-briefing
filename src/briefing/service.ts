@@ -505,7 +505,7 @@ async function presentHuman(
         snapshot.repository,
         {
           closedQuestions: (
-            live.gh ??
+            (live.closedQuery ? undefined : live.gh) ??
             createGhService({
               query: live.closedQuery ?? live.query,
               rest: live.rest,
