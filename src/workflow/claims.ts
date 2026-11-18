@@ -19,6 +19,8 @@ import { workflow } from "./definition.js";
 import { ghQuery, permissionLookup, writePermissions } from "../github/github.js";
 import type { PermissionLookup } from "../github/github.js";
 import { ghRun } from "../github/dependencies.js";
+import { ticketReads } from "../github/service/tickets.js";
+import type { TicketReads } from "../github/service/tickets.js";
 import { CommentWriteError } from "../github/commentwrite.js";
 import type { CommentCallOptions, CommentRecovery } from "../github/commentwrite.js";
 
@@ -162,31 +164,18 @@ export type GhRun = (args: string[], call?: CommentCallOptions) => Promise<unkno
 export function ticketGuard(
   repository: string,
   number: number,
-  query: GraphQuery,
+  query: GraphQuery | TicketReads,
 ): () => Promise<string> {
-  const [owner, name] = repository.split("/");
-  return async () => {
-    const data = await query(
-      `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){state labels(first:100){totalCount nodes{name}} assignees(first:20){nodes{login}} comments{totalCount}}}}`,
-      { owner: owner ?? "", name: name ?? "", number },
-    );
-    const issue = (data as { repository?: { issue?: unknown } } | null)?.repository?.issue;
-    if (!issue || typeof issue !== "object") throw new Error("ticket unreadable");
-    const i = issue as {
-      state?: string;
-      labels?: { totalCount?: number; nodes?: { name: string }[] };
-      assignees?: { nodes?: { login: string }[] };
-      comments?: { totalCount?: number };
-    };
-    return JSON.stringify([
-      i.state,
-      i.labels?.totalCount,
-      (i.labels?.nodes ?? []).map((l) => l.name).sort(),
-      (i.assignees?.nodes ?? []).map((a) => a.login).sort(),
-      i.comments?.totalCount,
-    ]);
-  };
+  // The typed, validated guard read (#942): a malformed answer fails the guard.
+  return () => ticketsOver(query).guardState(repository, number);
 }
+
+/**
+ * The typed ticket capabilities (#942): the application facade's `tickets` group when injected,
+ * else the same capability over the caller's executor (compatibility while callers migrate).
+ */
+const ticketsOver = (source: GraphQuery | TicketReads): TicketReads =>
+  typeof source === "function" ? ticketReads(source) : source;
 
 export interface ClaimRequest {
   number: number;
@@ -1419,16 +1408,11 @@ export async function planNeedsHuman(
 }
 
 /** Live state of a supplied pull request URL; null when it cannot be verified. */
-async function readPullRequest(url: string, query: GraphQuery): Promise<string | null> {
-  try {
-    const data = (await query(
-      `query($url:URI!){resource(url:$url){__typename ... on PullRequest{state}}}`,
-      { url },
-    )) as { resource: { __typename: string; state?: string } | null };
-    return data.resource?.__typename === "PullRequest" ? (data.resource.state ?? null) : null;
-  } catch {
-    return null;
-  }
+async function readPullRequest(
+  url: string,
+  query: GraphQuery | TicketReads,
+): Promise<string | null> {
+  return ticketsOver(query).pullStateByUrl(url);
 }
 
 /**
