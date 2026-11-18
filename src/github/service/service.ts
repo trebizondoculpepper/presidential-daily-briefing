@@ -36,6 +36,8 @@ import { resolveLabels } from "./labels.js";
 import { ticketReads } from "./tickets.js";
 import { referenceReads } from "./references.js";
 import { reviewHistoryReads } from "./reviewhistory.js";
+import { prStatusReads } from "./prstatus.js";
+import type { PrStatusReads } from "./prstatus.js";
 import type { ReviewHistoryReads } from "./reviewhistory.js";
 import type { ReferenceReads } from "./references.js";
 import type { TicketReads } from "./tickets.js";
@@ -118,6 +120,8 @@ export interface GhService {
   references: ReferenceReads;
   /** Pull request review-history reads (#950). */
   reviewHistory: ReviewHistoryReads;
+  /** Pull request status reads (#946). */
+  prStatus: PrStatusReads;
   /** Repository label resolution (#921). */
   labels: {
     /** Resolve normalized names to canonical labels; unresolved on any failed or partial read. */
@@ -270,6 +274,7 @@ export function createGhService(options: GhServiceOptions = {}): GhService {
     tickets: ticketReads(query),
     references: referenceReads(query as Query),
     reviewHistory: reviewHistoryReads(query as Query),
+    prStatus: prStatusReads(query as Query),
     estimation: estimationCapabilities(graphqlApiOverTransport(transport, env)),
     delivery: {
       issue: (repository, number) => deliveryIssue(query as Query, repository, number),

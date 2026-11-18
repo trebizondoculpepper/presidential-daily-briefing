@@ -135,10 +135,10 @@ describe("pr N under the declared policy", () => {
           },
         ],
       },
-      reviews: { nodes: o.reviews ?? [] },
+      reviews: { nodes: o.reviews ?? [], pageInfo: { hasPreviousPage: false } },
       reviewThreads: { nodes: [], pageInfo: { hasNextPage: false } },
-      comments: { nodes: o.comments ?? [] },
-      closingIssuesReferences: { nodes: [] },
+      comments: { nodes: o.comments ?? [], pageInfo: { hasPreviousPage: false } },
+      closingIssuesReferences: { nodes: [], pageInfo: { hasNextPage: false } },
     }) as unknown as Parameters<typeof prStatus>[1];
   const codex = (
     sha: string,

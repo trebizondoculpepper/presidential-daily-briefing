@@ -74,10 +74,10 @@ describe("pr status: why is a PR not progressing (#59)", () => {
         },
       ],
     },
-    reviews: { nodes: o.reviews ?? [] },
+    reviews: { nodes: o.reviews ?? [], pageInfo: { hasPreviousPage: false } },
     reviewThreads: { nodes: o.threads ?? [], pageInfo: { hasNextPage: false } },
-    comments: { nodes: o.comments ?? [] },
-    closingIssuesReferences: { nodes: o.issues ?? [] },
+    comments: { nodes: o.comments ?? [], pageInfo: { hasPreviousPage: false } },
+    closingIssuesReferences: { nodes: o.issues ?? [], pageInfo: { hasNextPage: false } },
     ...o.pr,
   });
   it("computes head acceptance over every receipt before the display limit (#192)", async () => {
