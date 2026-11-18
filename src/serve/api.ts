@@ -567,6 +567,20 @@ export function readApi(
     guardedRest,
   } = cachedBoundaries(runtime, cache, isServed);
   let known = localPaths(...options.projects);
+  // #808: served projects grow when a live configuration application installs checkouts; refresh
+  // the redaction set from the (mutable, in-place) served set so a newly served checkout path is
+  // redacted exactly as a startup-registered one would be. The union keeps coverage for
+  // outstanding old-context responses too.
+  const knownProjects = new Set(options.projects);
+  const refreshKnown = (served: readonly ServedRepository[]): void => {
+    let changed = false;
+    for (const entry of served) {
+      if (!entry.project || knownProjects.has(entry.project)) continue;
+      knownProjects.add(entry.project);
+      changed = true;
+    }
+    if (changed) known = localPaths(...knownProjects);
+  };
   const redact = <T>(value: T): T => redactPaths(value, known);
 
   const readRuntime = (project: string | undefined, repository: string): ReadRuntime => ({
@@ -681,10 +695,7 @@ export function readApi(
   return (facts) => {
     servedSet = facts.served;
     identitySession = facts.identitySession;
-    known = localPaths(
-      ...options.projects,
-      ...facts.served.flatMap((entry) => (entry.project ? [entry.project] : [])),
-    );
+    refreshKnown(facts.served);
     if (humanContextEnabled())
       serverHuman = async () =>
         facts.effectiveHuman?.context ?? serverHumanContext(facts.auth, facts.startedAt);
@@ -915,6 +926,9 @@ export function readApi(
     };
 
     return async (context) => {
+      // #808: keep the local-path redaction set aligned with the (mutable) live served set, so
+      // checkouts installed by a live application are redacted exactly as startup ones are.
+      refreshKnown(facts.served);
       const path = context.url.pathname;
       if (path === "/api/v1/refresh") {
         if (context.request.method !== "POST")

@@ -26,6 +26,7 @@ import { quotasApi } from "./quotas-page.js";
 import type { ServeOptions } from "./options.js";
 import { applyLiveApplication } from "./liveapp.js";
 import { verifySavedRoot } from "./registration.js";
+import { revisionOf } from "./appstate.js";
 
 /** Production read boundaries: authenticated gh through the existing argument-array runners. */
 export const defaultReadRuntime = (serve: ServeRuntime): ServeReadRuntime => ({
@@ -183,39 +184,56 @@ export function readServices(
       },
       live: serve.globalConfig
         ? {
-            apply: (saved) => {
+            apply: async (saved) => {
               // #816: observe the fresh saved snapshot before recording its application, so
               // the acknowledgement is accepted for the observed revision and the view reports
               // the applied values and revision instead of the startup ones.
               facts.applicationState?.observe(saved);
-              return applyLiveApplication(saved, {
-                currentServed: () => facts.served,
-                // Bump the repository epoch and drop its entries so reads started before the
-                // change cannot insert as fresh facts.
-                invalidate: (repository) => cache.refresh(repository),
-                // Conservative cross-repository invalidation: cache.read drops the collector
-                // `deps` entries of this repository (see #808 doc).
-                invalidateDependencies: (repository) => cache.refresh(repository, ["deps"]),
-                // The verified-checkout boundary registration reuses: a moved or reassigned
-                // saved root serves the repository repo-only, exactly as at startup.
-                ...(serve.git || serve.currentRepository
-                  ? {
-                      verifyProject: (repository, localRoot) =>
-                        verifySavedRoot(repository, localRoot, {
-                          cwd: serve.cwd,
-                          git: serve.git,
-                          currentRepository: serve.currentRepository,
-                          globalConfig: serve.globalConfig,
-                        }),
-                    }
-                  : {}),
-                // #816: record live-key application against the observed saved snapshot.
-                ...(facts.applicationState
-                  ? {
-                      record: (result) => facts.applicationState!.recordApplication(result),
-                    }
-                  : {}),
-              });
+              try {
+                return await applyLiveApplication(saved, {
+                  currentServed: () => facts.served,
+                  // Bump the repository epoch and drop its entries so reads started before the
+                  // change cannot insert as fresh facts.
+                  invalidate: (repository) => cache.refresh(repository),
+                  // Conservative cross-repository invalidation: cache.read drops the collector
+                  // `deps` entries of this repository (see #808 doc).
+                  invalidateDependencies: (repository) => cache.refresh(repository, ["deps"]),
+                  // The verified-checkout boundary registration reuses: a moved or reassigned
+                  // saved root serves the repository repo-only, exactly as at startup.
+                  ...(serve.git || serve.currentRepository
+                    ? {
+                        verifyProject: (repository, localRoot) =>
+                          verifySavedRoot(repository, localRoot, {
+                            cwd: serve.cwd,
+                            git: serve.git,
+                            currentRepository: serve.currentRepository,
+                            globalConfig: serve.globalConfig,
+                          }),
+                      }
+                    : {}),
+                  // #816: record live-key application against the observed saved snapshot.
+                  ...(facts.applicationState
+                    ? {
+                        record: (result) => facts.applicationState!.recordApplication(result),
+                      }
+                    : {}),
+                });
+              } catch (error) {
+                // #816: a rejected application (e.g. conflicting saved roots) must be reported as
+                // failed-live for the already-observed revision, never left pending-live forever,
+                // and the actionable error is kept in the view.
+                facts.applicationState?.recordApplication({
+                  revision: revisionOf(saved),
+                  applied: [],
+                  failed: [
+                    {
+                      key: "serve.projects",
+                      error: error instanceof Error ? error.message : String(error),
+                    },
+                  ],
+                });
+                throw error;
+              }
             },
           }
         : undefined,
