@@ -6,7 +6,8 @@ import { codexResponse } from "./codex.js";
 /** Opt-in process-per-hook wrapper. No native hooks or repository configuration are written. */
 import { parseArgs } from "node:util";
 import { isAbsolute } from "node:path";
-import { collect, currentRepository, ghQueryWith, ghRest } from "../github/github.js";
+import { collect } from "../github/github.js";
+import { createGhService, type GhService } from "../github/service/service.js";
 import { collectShortlist } from "../github/shortlist.js";
 import { dependencyReport } from "../github/dependencies.js";
 import { resolveIdentityTarget } from "../config/identity.js";
@@ -14,8 +15,8 @@ import { validateHarness } from "../config/harness.js";
 import { validateEntryKey } from "../config/identity.js";
 import type { ReadIdentity } from "../config/readidentity.js";
 import { resolveReadIdentity } from "../config/readidentity.js";
-import { nodeGit } from "../config/config.js";
 import type { ConfigFileSystem, GitRunner } from "../config/config.js";
+import { createGitService, type GitService } from "../git/service.js";
 import { noLocalProject } from "../serve/api.js";
 import { contextKey, defaults, initialize, RebriefSession, stopped } from "./core.js";
 import type { ReadRuntime } from "../briefing/service.js";
@@ -44,8 +45,9 @@ Exit: 0 structured decision (including stop/defer); 1 invalid arguments/setup.\n
 export interface CliRuntime {
   prepareIdentity?: PrepareCommandIdentity;
   input?: Readable;
-  currentRepository?: typeof currentRepository;
-  git?: GitRunner;
+  currentRepository?: (cwd?: string, signal?: AbortSignal) => Promise<string>;
+  gh?: GhService;
+  git?: GitService | GitRunner;
   fs?: ConfigFileSystem;
   env?: Record<string, string | undefined>;
   signal?: AbortSignal;
@@ -98,10 +100,33 @@ export async function runRebrief(
       controller.signal.removeEventListener("abort", cancel);
     }
   };
-  const git: GitRunner = (args, cwd) => {
-    controller.signal.throwIfAborted();
-    return (runtime.git ?? nodeGit)(args, cwd, controller.signal);
-  };
+  const legacyGit: GitRunner | undefined =
+    typeof runtime.git === "function"
+      ? (args, cwd) => {
+          controller.signal.throwIfAborted();
+          return (runtime.git as GitRunner)(args, cwd, controller.signal);
+        }
+      : typeof runtime.git === "object"
+        ? async (args, cwd) => {
+            controller.signal.throwIfAborted();
+            const svc = runtime.git as GitService;
+            if (args[0] === "rev-parse" && args[1] === "--show-toplevel")
+              return `${(await svc.workingTreeRoot({ cwd, signal: controller.signal })) ?? ""}\n`;
+            if (args[0] === "remote" && args[1] === "-v")
+              return (await svc.remotes({ cwd, signal: controller.signal }))
+                .map((r) => `${r.name}\t${r.url} (fetch)\n`)
+                .join("");
+            throw new Error(`Unsupported git args in rebrief adapter: ${args.join(" ")}`);
+          }
+        : undefined;
+  const git: GitService =
+    typeof runtime.git === "object"
+      ? runtime.git
+      : createGitService(legacyGit ? { git: legacyGit } : {});
+  const gh =
+    runtime.gh ??
+    runtime.read?.gh ??
+    createGhService({ rest: runtime.read?.rest, query: runtime.read?.query });
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     const mode = args[0];
@@ -198,7 +223,10 @@ export async function runRebrief(
     const setup = async () => {
       input.repository =
         values.repo ??
-        (await (runtime.currentRepository ?? currentRepository)(values.project, controller.signal));
+        (await (runtime.currentRepository ?? ((cwd, signal) => gh.repos.fromCheckout(cwd, signal)))(
+          values.project,
+          controller.signal,
+        ));
       if (values.project)
         input.project = (await resolveIdentityTarget(values.project, input.repository, git)).root;
       effectiveIdentity = runtime.prepareIdentity
@@ -262,13 +290,12 @@ export async function runRebrief(
                 collect,
                 collectShortlist,
                 dependencyReport,
-                rest: ghRest,
-                queryWith: runtime.read ? undefined : ghQueryWith,
+                gh,
                 ...runtime.read,
                 ...(input.project
                   ? {
-                      guide: { cwd: input.project, fs: runtime.fs, git },
-                      estimation: { cwd: input.project, fs: runtime.fs, git },
+                      guide: { cwd: input.project, fs: runtime.fs, git: legacyGit },
+                      estimation: { cwd: input.project, fs: runtime.fs, git: legacyGit },
                     }
                   : noLocalProject(input.repository)),
               }));
