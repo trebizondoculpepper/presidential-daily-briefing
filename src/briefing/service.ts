@@ -266,7 +266,10 @@ async function presentBriefingFor(
     options.retained ??
     (!options.full &&
     !options.issue &&
-    (datalogPath ? (options.role ?? defaultEngineRole) : options.role) === "implementer"
+    // #652: every agent role shares the owned-work pool, so retained facts are read for both;
+    // only the separate human audience has none.
+    (datalogPath ? (options.role ?? defaultEngineRole) : options.role) !== "human" &&
+    (datalogPath || options.role !== undefined)
       ? await readRetainedFacts(
           snapshot,
           options.agent,
@@ -843,7 +846,7 @@ export async function readBriefing(
   let activity: ReadonlyMap<string, ClaimActivityFact> | undefined;
   let activityReadFor = new Set<string>();
   const retainedFor = async (collected: Snapshot): Promise<PresentOptions["retained"]> => {
-    if (!request.agent || (request.role ?? defaultEngineRole) !== "implementer") return undefined;
+    if (!request.agent || (request.role ?? defaultEngineRole) === "human") return undefined;
     const owned = ownedClaims(collected, request.agent);
     const fresh = owned.urls.filter((url) => !activityReadFor.has(url));
     if (fresh.length && permission && liveQuery) {

@@ -26,6 +26,7 @@
  ;; then role affinity, then the existing lifecycle bands. Owned obligations precede all new work.
  [(owned ?t ?r) [?r "owned" true]]
  [(owned ?t ?r) [?r "kind" "pr-follow-up"] [?t "linked-key" -1]]
+ [(owned ?t ?r) [?r "kind" "addressed-response"] [?t "linked-key" -1]]
  [(owned ?t ?r) [?r "kind" "decide"] [?t "linked-key" -1]]
  [(owned ?t ?r) [?r "kind" "document"] [?t "linked-key" -1]]
  [(owned ?t ?r) [?r "kind" "design"] [?t "linked-key" -1]]

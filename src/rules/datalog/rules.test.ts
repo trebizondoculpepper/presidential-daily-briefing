@@ -80,6 +80,7 @@ const audience: Record<
   "D-COMPLEXITY": { role: "agents", kind: "issue" },
   "D-IMPACT-BOOST": { role: "agents", kind: "issue" },
   "D-IMPACT": { role: "agents", kind: "issue" },
+  "D-BAD-ASSESSMENTS": { role: "agents", kind: "issue" },
   "D-BAD-COMPLEXITY": { role: "agents", kind: "issue" },
   "D-BAD-IMPACT": { role: "agents", kind: "issue" },
   "D-ORDINARY": { role: "agents", kind: "issue" },
