@@ -34,6 +34,8 @@ export const defaultReadRuntime = (serve: ServeRuntime): ServeReadRuntime => ({
   queryWith: ghQueryWith,
   now: () => serve.clock.now(),
   env: process.env,
+  // The serve composition's shared Git service for read-time identity (#934, #870).
+  ...(serve.git ? { git: serve.git } : {}),
 });
 
 /** The cache, read routes and status counters, built once the server is listening. */

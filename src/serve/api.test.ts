@@ -495,12 +495,16 @@ describe("pdb serve without a local project (#271)", () => {
 
   it("presents an empty checkout of exactly that repository, read-only", async () => {
     const readers = noLocalProject("owner/name");
-    const git = readers.estimation!.git!;
-    if (typeof git !== "function") throw new Error("expected legacy GitRunner in noLocalProject");
-    expect(await git(["rev-parse", "--show-toplevel"], NO_PROJECT_ROOT)).toBe(
-      `${NO_PROJECT_ROOT}\n`,
-    );
-    expect(await git(["remote", "-v"], NO_PROJECT_ROOT)).toContain("github.com/owner/name.git");
+    // A typed GitService (#934), shared by the estimation and guide readers.
+    const git = readers.guide!.gitService!;
+    expect(readers.estimation!.git).toBe(git);
+    const ctx = { cwd: NO_PROJECT_ROOT };
+    expect(await git.workingTreeRoot(ctx)).toBe(NO_PROJECT_ROOT);
+    expect(await git.checkout(ctx)).toEqual({ host: "github.com", repository: "owner/name" });
+    expect((await git.remotes(ctx)).map((r) => r.url)).toEqual([
+      "https://github.com/owner/name.git",
+    ]);
+    expect(await git.isTracked(ctx, "pdb.toml")).toBe(false);
     expect(await readers.guide!.fs!.readText(join(NO_PROJECT_ROOT, TOML_CONFIG_PATH))).toBeNull();
     await expect(readers.guide!.fs!.writeText("x", "y")).rejects.toThrow(/never writes/);
   });

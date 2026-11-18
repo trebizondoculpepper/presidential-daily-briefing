@@ -113,7 +113,7 @@ export async function resolveEngineSetting(
       runtime.cwd ?? process.cwd(),
       repository,
       // The shared typed Git service (or a legacy runner); none means the service's isolated default.
-      runtime.git,
+      runtime.gitService ?? runtime.git,
     );
   } catch (error) {
     if (
