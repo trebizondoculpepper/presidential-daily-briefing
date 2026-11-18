@@ -1076,6 +1076,7 @@ export const defaultRuntime = (options: McpOptions): McpRuntime => {
   const git = createGitService();
   return {
     gh,
+    ghWith: (signal) => createGhService({ query: ghQueryWith(signal) }),
     git,
     collect: (repo, opts, injected, now) =>
       injected ? collect(repo, opts, injected, now) : gh.snapshot.collect(repo, opts, now),
