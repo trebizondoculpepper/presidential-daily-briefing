@@ -13,6 +13,7 @@
  */
 import { promisify } from "node:util";
 import { execFile } from "node:child_process";
+import { resolve as resolvePath } from "node:path";
 import { githubRepositories, type GitRunner } from "./remotes.js";
 
 /** Why a Git read failed. Absence is a result, never an error code. */
@@ -93,6 +94,12 @@ export interface GitService {
 export interface GitServiceOptions {
   /** Injected transport: the existing runner, faked in tests. */
   readonly git?: GitRunner;
+  /**
+   * The caller's inherited alternate index (`GIT_INDEX_FILE`, e.g. inside a commit hook), checked
+   * in addition to the checkout's own index by `isTracked`. Defaults to the process's value when
+   * no runner is injected; tests pass it with a runner.
+   */
+  readonly alternateIndex?: { file: string; runner: GitRunner };
 }
 
 /**
@@ -134,6 +141,21 @@ const isolatedNodeGit: GitRunner = async (args, cwd, signal) =>
       env: sanitizedGitEnvironment(),
     })
   ).stdout;
+
+/** A sanitized runner that reads one named index, for the alternate-index tracked check. */
+const alternateIndexGit =
+  (file: string): GitRunner =>
+  async (args, cwd, signal) =>
+    (
+      await runGit("git", [...args], {
+        cwd,
+        signal,
+        windowsHide: true,
+        env: { ...sanitizedGitEnvironment(), GIT_INDEX_FILE: file },
+      })
+    ).stdout;
+
+const alternateIndexOf = (file: string) => ({ file, runner: alternateIndexGit(file) });
 
 const SCP = /^(?:[^@/\s]+@)?([^:/\s]+):(?!\/)(.+)$/;
 
@@ -253,6 +275,11 @@ async function maybe(
  */
 export function createGitService(options: GitServiceOptions = {}): GitService {
   const git = options.git ?? isolatedNodeGit;
+  const alternate =
+    options.alternateIndex ??
+    (!options.git && process.env.GIT_INDEX_FILE
+      ? alternateIndexOf(resolvePath(process.cwd(), process.env.GIT_INDEX_FILE))
+      : undefined);
 
   const remotes = async (context: GitContext): Promise<readonly GitRemote[]> => {
     const output = await maybe(git, ["remote", "-v"], context, "git remote");
@@ -377,20 +404,27 @@ export function createGitService(options: GitServiceOptions = {}): GitService {
 
     async isTracked(context, path) {
       if (!path.trim()) throw new GitError("failed", "A tracked check needs a path.");
-      try {
-        await git(
-          ["--literal-pathspecs", "ls-files", "--error-unmatch", "--", path],
-          context.cwd,
-          context.signal,
-        );
-        return true;
-      } catch (error) {
-        const classified = classify(error, "git ls-files");
-        // Exit 1 is "not tracked"; a missing checkout cannot answer, and is not tracked.
-        if (classified.exitCode === 1) return false;
-        if (classified.code === "not-a-repository") return false;
-        throw classified;
-      }
+      const ask = async (runner: GitRunner): Promise<boolean> => {
+        try {
+          await runner(
+            ["--literal-pathspecs", "ls-files", "--error-unmatch", "--", path],
+            context.cwd,
+            context.signal,
+          );
+          return true;
+        } catch (error) {
+          const classified = classify(error, "git ls-files");
+          // Exit 1 is "not tracked"; a missing checkout cannot answer, and is not tracked.
+          if (classified.exitCode === 1) return false;
+          if (classified.code === "not-a-repository") return false;
+          throw classified;
+        }
+      };
+      if (await ask(git)) return true;
+      // An inherited alternate index (a commit hook's) may track what the checkout's own index
+      // does not: tracked in either is tracked, and an alternate that cannot answer is a failure,
+      // so a tracked-file guard refuses rather than writing.
+      return alternate ? ask(alternate.runner) : false;
     },
   };
 }
