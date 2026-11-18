@@ -98,7 +98,7 @@ function harness(
   };
   const git: GitRunner = async (args) =>
     args[0] === "rev-parse"
-      ? args[1] === "HEAD"
+      ? args.includes("HEAD")
         ? `${sha}\n`
         : "/repo\n"
       : "origin\thttps://github.com/owner/name.git (fetch)\n";
