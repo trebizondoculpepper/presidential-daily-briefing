@@ -6,11 +6,14 @@
  * remaining capability groups arrive with their migration tickets (#878-#891).
  */
 
-import { ghQueryFailure, permissionLookup, restOverTransport } from "../github.js";
+import { ghQueryFailure, ghQueryWith, permissionLookup, restOverTransport } from "../github.js";
 import type { PermissionLookup, Rest } from "../github.js";
 import { execFileTransport } from "./transport.js";
 import type { GhTransport } from "./transport.js";
 import { repositoryFromCheckout, throwIfCancelled } from "./repository.js";
+import { historyReads } from "./history.js";
+import type { HistoryReads } from "./history.js";
+import type { GraphQuery } from "../../workflow/claims.js";
 
 export interface GhAccount {
   host: string;
@@ -34,6 +37,8 @@ export interface GhService {
      */
     permissionOf(repository: string, signal?: AbortSignal): PermissionLookup;
   };
+  /** Validated ticket-history reads for bounded history consumers (#931). */
+  history: HistoryReads;
 }
 
 export interface GhServiceOptions {
@@ -42,6 +47,8 @@ export interface GhServiceOptions {
   env?: NodeJS.ProcessEnv;
   /** The REST reader behind REST capabilities; by default one over this service's transport and env. */
   rest?: Rest;
+  /** The GraphQL executor behind query capabilities; by default one over this transport and env. */
+  query?: GraphQuery;
 }
 
 const LOGIN = /^[\w.-]+$/;
@@ -52,6 +59,7 @@ export function createGhService(options: GhServiceOptions = {}): GhService {
   // The default REST reader runs over this service's own transport and environment, so every
   // capability honours the same execution context (host, account, injected transport).
   const rest = options.rest ?? restOverTransport(transport, env);
+  const query: GraphQuery = options.query ?? ghQueryWith(undefined, {}, { transport, env });
   return {
     account: {
       async current(signal) {
@@ -94,6 +102,7 @@ export function createGhService(options: GhServiceOptions = {}): GhService {
         return permissionLookup(repository, rest, signal);
       },
     },
+    history: historyReads(query),
   };
 }
 
