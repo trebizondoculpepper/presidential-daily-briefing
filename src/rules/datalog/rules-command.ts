@@ -7,6 +7,7 @@
  * GitHub or repository configuration, so it works from the installed package anywhere.
  */
 import englishJson from "./english.generated.json" with { type: "json" };
+import { CLAIM_OBLIGATIONS } from "./action-reminders.js";
 import {
   rulesHash as engineRulesHash,
   narrationHash as engineNarrationHash,
@@ -262,7 +263,14 @@ export function rulesDocument(
       `--role must be ${rulesRoles.join(" or ")}, not "${filters.role}"`,
     );
   const projectSelected = filters.rule !== undefined && projectIds.includes(filters.rule);
-  if (filters.rule !== undefined && !projectSelected && !ruleIds(model).includes(filters.rule)) {
+  const obligationSelected =
+    filters.rule !== undefined && CLAIM_OBLIGATIONS.some((o) => o.id === filters.rule);
+  if (
+    filters.rule !== undefined &&
+    !projectSelected &&
+    !obligationSelected &&
+    !ruleIds(model).includes(filters.rule)
+  ) {
     const near = [
       ...projectIds.filter((id) => id.includes(filters.rule!.toLowerCase())),
       ...suggestions(model, filters.rule),
@@ -289,8 +297,8 @@ export function rulesDocument(
     type: "decision" | "denial" | "predicate";
   } | null = null;
 
-  if (projectSelected) {
-    // A project preference or helper: no default rule is selected, only the project's own.
+  if (projectSelected || obligationSelected) {
+    // A project preference, helper, or procedural obligation: no default Datalog rule is selected.
     decisions = [];
     denials = [];
     predicates = [];
@@ -499,6 +507,22 @@ export function rulesDocument(
       note: "Authored purposes explain intent; generated conditions define the represented policy. A purpose is not evidence that a rule matched a ticket. Mutation guards remain outside this listing.",
     },
     decisions: decisionOut,
+    obligations: CLAIM_OBLIGATIONS.filter((o) => {
+      if (
+        filters.role &&
+        o.roles !== null &&
+        !(o.roles as readonly string[]).includes(filters.role)
+      )
+        return false;
+      if (filters.rule !== undefined) return obligationSelected && o.id === filters.rule;
+      return true;
+    }).map((o) => ({
+      id: o.id,
+      roles: o.roles,
+      outcomes: o.outcomes,
+      purpose: o.purpose,
+      sourceFile: o.sourceFile,
+    })),
     eligibility: {
       denials,
       denialQuery:
@@ -634,6 +658,22 @@ export function rulesText(doc: RulesDocument): string {
       );
     }
     for (const d of doc.eligibility.denials) push(...mdDenialLines(d));
+  }
+
+  if (doc.obligations.length) {
+    push(
+      "",
+      `## Procedural obligations (${doc.obligations.length})`,
+      "",
+      "Structured action-time obligations (distinct from formally validated Datalog decisions):",
+      "",
+    );
+    for (const o of doc.obligations) {
+      const roleNote = o.roles ? o.roles.map(mdCode).join(", ") : "all";
+      push(
+        `- ${mdCode(o.id)} (outcomes: ${o.outcomes.map(mdCode).join(", ")}; roles: ${roleNote}): ${mdEscape(o.purpose)}`,
+      );
+    }
   }
 
   push(

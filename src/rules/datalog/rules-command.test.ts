@@ -235,6 +235,16 @@ describe("pdb rules command (#416)", () => {
     expect(out).not.toContain("\n10. all of:\n   - ");
   });
 
+  it("exposes procedural obligations in full and --rule filtered views (#1029)", () => {
+    const full = rulesText(rulesDocument(context));
+    expect(full).toContain("## Procedural obligations (");
+    expect(full).toContain("`O-CLAIM-NOOP-CONTINUE`");
+
+    const single = rulesText(rulesDocument(context, { rule: "O-CLAIM-NOOP-CONTINUE" }));
+    expect(single).toContain("## Procedural obligations (1)");
+    expect(single).toContain("`O-CLAIM-NOOP-CONTINUE`");
+  });
+
   it("defines every predicate a filtered view names, context included (#480 review)", () => {
     const names = new Set(model.predicates.map((p) => p.name));
     const filters = [

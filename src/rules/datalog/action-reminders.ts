@@ -1,0 +1,456 @@
+/**
+ * Native action-specific rule reminder selection (#1029; doc/design/action-rule-reminders.md).
+ *
+ * Selects applicable rule IDs and structured procedural obligations for modifying actions
+ * (starting with `claim`), reusing bundled decisions/denials and authored narration without
+ * duplicating admission engines or inventing prose in renderers.
+ */
+import { createHash } from "node:crypto";
+import englishJson from "./english.generated.json" with { type: "json" };
+import { rulesHash, policyVersion } from "./adapter.js";
+import type { EnglishPolicy } from "./english-model.js";
+import { purposeText } from "./narration.js";
+
+const sanitizeText = (value: string): string =>
+  Array.from(value.replace(/[\r\n\t]+/g, " "))
+    .filter((c) => {
+      const code = c.charCodeAt(0);
+      return code >= 32 && code !== 127 && code !== 133 && code !== 8232 && code !== 8233;
+    })
+    .join("");
+
+export const RULE_REMINDERS_SCHEMA_VERSION = 1;
+export const RULE_REMINDERS_MAX_ITEMS = 6;
+export const RULE_REMINDERS_MAX_CODE_POINTS = 2000;
+
+export type ReminderAction = "claim";
+export type ClaimOutcome = "claimed" | "noop" | "denied" | "partial";
+export type RuleReminderCategory = "admission" | "obligation";
+export type RuleReminderSourceKind = "decision" | "denial" | "procedural-obligation";
+
+export interface ProceduralObligation {
+  readonly id: string;
+  readonly sourceFile: string;
+  readonly roles: readonly ("implementer" | "designer" | "human")[] | null;
+  readonly outcomes: readonly ClaimOutcome[];
+  readonly purpose: string;
+}
+
+/**
+ * Structured procedural obligations authored in the rules component (#1029).
+ * Kept distinct from formally validated Datalog decisions and denials.
+ */
+export const CLAIM_OBLIGATIONS: readonly ProceduralObligation[] = [
+  {
+    id: "O-CLAIM-ACCEPTANCE",
+    sourceFile: "src/rules/datalog/action-reminders.ts",
+    roles: null,
+    outcomes: ["claimed", "noop"],
+    purpose:
+      "Follow the ticket acceptance criteria and applicable architecture contracts before considering the work complete.",
+  },
+  {
+    id: "O-CLAIM-OWNERSHIP",
+    sourceFile: "src/rules/datalog/action-reminders.ts",
+    roles: null,
+    outcomes: ["claimed", "noop", "denied", "partial"],
+    purpose:
+      "Respect human ownership and other agents' active claims; never overwrite or displace another owner's work.",
+  },
+  {
+    id: "O-CLAIM-BLOCKERS",
+    sourceFile: "src/rules/datalog/action-reminders.ts",
+    roles: null,
+    outcomes: ["claimed", "noop"],
+    purpose:
+      "Surface blockers, missing design decisions, or unresolved questions explicitly instead of guessing.",
+  },
+  {
+    id: "O-CLAIM-REMOVAL",
+    sourceFile: "src/rules/datalog/action-reminders.ts",
+    roles: null,
+    outcomes: ["claimed", "noop", "partial"],
+    purpose:
+      "Preserve useful unfinished work and share a truthful handoff if your claim is released or removed.",
+  },
+  {
+    id: "O-CLAIM-DELIVERABLE",
+    sourceFile: "src/rules/datalog/action-reminders.ts",
+    roles: ["implementer"],
+    outcomes: ["claimed", "noop"],
+    purpose:
+      "For an implementation deliverable, retain responsibility through review, CI checks, fixes, and merging.",
+  },
+  {
+    id: "O-CLAIM-NOOP-CONTINUE",
+    sourceFile: "src/rules/datalog/action-reminders.ts",
+    roles: null,
+    outcomes: ["noop"],
+    purpose:
+      "This ticket is already claimed by you (no-op); continue from the existing work rather than re-claiming.",
+  },
+  {
+    id: "O-CLAIM-PARTIAL-RECOVERY",
+    sourceFile: "src/rules/datalog/action-reminders.ts",
+    roles: null,
+    outcomes: ["partial"],
+    purpose:
+      "Claim writes were partial or unverified; inspect the live ticket state and retry only the missing steps.",
+  },
+  {
+    id: "O-CLAIM-DENIED-RECOVERY",
+    sourceFile: "src/rules/datalog/action-reminders.ts",
+    roles: null,
+    outcomes: ["denied"],
+    purpose:
+      "Claim was refused; do not start work until the reported prerequisite or ownership conflict is resolved.",
+  },
+];
+
+for (const obligation of CLAIM_OBLIGATIONS) {
+  purposeText(obligation.purpose, `action-reminders:${obligation.id}`);
+}
+
+const OBLIGATIONS_HASH = createHash("sha256")
+  .update(JSON.stringify(CLAIM_OBLIGATIONS))
+  .digest("hex");
+
+export const claimObligationsHash = (): string => OBLIGATIONS_HASH;
+
+const bundledEnglishModel = (): EnglishPolicy => englishJson as EnglishPolicy;
+
+export interface ClaimReminderFactInput {
+  /** Refusal error code from claim planning (e.g. OWNED_BY_OTHER, OTHER_ACTIVE_CLAIM). */
+  error?: string;
+  /** Explicit native denial IDs (e.g. D-DENY-CLAIM). */
+  denialIds?: readonly string[];
+  /** Explicit native decision IDs (e.g. D-OWN, D-PR-FAIL, D-REVIEW-OWNED). */
+  decisionIds?: readonly string[];
+  hasOtherClaims?: boolean;
+  inventoryComplete?: boolean;
+  labelsComplete?: boolean;
+  closingComplete?: boolean;
+  nativeComplete?: boolean;
+  hasOpenPr?: boolean;
+  hasBlockers?: boolean;
+  needsDesign?: boolean;
+}
+
+export interface SelectClaimRemindersInput {
+  action?: ReminderAction;
+  role?: string | null;
+  outcome: ClaimOutcome;
+  facts?: ClaimReminderFactInput;
+  /** False when live claim/policy context could not be fully resolved. */
+  contextResolved?: boolean;
+  effectivePolicy?: {
+    rulesHash?: string;
+    narrationHash?: string | null;
+    projectRulesHash?: string | null;
+  };
+  /** Optional model override for tests; defaults to bundled english.generated.json. */
+  model?: EnglishPolicy;
+  /** Optional purpose overrides (including `undefined`) to test missing-purpose handling. */
+  purposesOverride?: Record<string, string | undefined>;
+  maxItems?: number;
+  maxCodePoints?: number;
+}
+
+export interface RuleReminderItem {
+  id: string;
+  category: RuleReminderCategory;
+  sourceKind: RuleReminderSourceKind;
+  sourceFile: string;
+  english: string;
+  purposeSupplied: boolean;
+  reference: string;
+}
+
+export interface ActionRuleReminders {
+  schemaVersion: typeof RULE_REMINDERS_SCHEMA_VERSION;
+  action: ReminderAction;
+  role: string | null;
+  outcome: ClaimOutcome;
+  label: "claimed" | "no-op" | "denied" | "partial";
+  effectivePolicy: {
+    policyVersion: number;
+    rulesHash: string;
+    narrationHash: string | null;
+    obligationsHash: string;
+    projectRulesHash: string | null;
+  };
+  admissionRationale: RuleReminderItem[];
+  obligations: RuleReminderItem[];
+  items: RuleReminderItem[];
+  selectedIds: string[];
+  omissions: {
+    count: number;
+    omittedIds: string[];
+    reason: "none" | "item-limit" | "code-point-limit";
+    reference: string;
+  };
+  coverage: {
+    status: "complete" | "partial" | "unresolved";
+    contextResolved: boolean;
+    missingPurposes: string[];
+    notes: string[];
+  };
+}
+
+const refusalErrorToRuleId = (
+  error: string | undefined,
+  facts: ClaimReminderFactInput,
+): string | null => {
+  switch (error) {
+    case "OWNED_BY_OTHER":
+      return "D-DENY-CLAIM";
+    case "OTHER_ACTIVE_CLAIM":
+      return facts.inventoryComplete === false ? "D-REVIEW-OWNED-PARTIAL" : "D-REVIEW-OWNED";
+    case "EVIDENCE_INCOMPLETE":
+      if (facts.labelsComplete === false) return "D-DENY-LABELS-UNKNOWN";
+      if (facts.closingComplete === false) return "D-DENY-CLOSING-UNKNOWN";
+      if (facts.nativeComplete === false) return "D-DENY-NATIVE-UNKNOWN";
+      if (facts.inventoryComplete === false) return "D-DENY-INVENTORY-UNKNOWN";
+      return null;
+    case "BLOCKED":
+    case "BLOCKED_BY_DEPENDENCY":
+      return "D-DENY-BLOCKER";
+    case "HAS_OPEN_PR":
+    case "OPEN_PR":
+    case "HAS_CLOSING_PR":
+    case "REWORK_NOT_AUTHORISED":
+      return "D-DENY-OPEN-PR";
+    case "NOT_READY":
+    case "PREREQUISITE":
+    case "NEEDS_DESIGN":
+      return "D-DENY-PREREQUISITE";
+    case "PLATFORM_UNKNOWN":
+    case "PLATFORM_MISMATCH":
+    case "PLATFORM":
+    case "PLATFORM_UNSUPPORTED":
+      return "D-DENY-PLATFORM";
+    default:
+      return null;
+  }
+};
+
+function resolvePolicyRule(
+  id: string,
+  category: RuleReminderCategory,
+  model: EnglishPolicy,
+  purposesOverride: Record<string, string | undefined> | undefined,
+  missingPurposes: string[],
+): RuleReminderItem | null {
+  const decision = model.decisions.find((d) => d.id === id);
+  const denial = decision ? undefined : model.denials.find((d) => d.id === id);
+  if (!decision && !denial) return null;
+
+  const sourceKind: RuleReminderSourceKind = decision ? "decision" : "denial";
+  const sourceFile = decision ? "policy/decisions.edn" : "policy/rules.edn";
+  const rawPurpose =
+    purposesOverride && Object.prototype.hasOwnProperty.call(purposesOverride, id)
+      ? purposesOverride[id]
+      : (decision?.purpose ?? denial?.purpose);
+  const cleanPurpose = typeof rawPurpose === "string" ? sanitizeText(rawPurpose).trim() : "";
+
+  if (!cleanPurpose) {
+    missingPurposes.push(id);
+    return {
+      id,
+      category,
+      sourceKind,
+      sourceFile,
+      english: `Purpose not supplied (see pdb rules --rule ${id}).`,
+      purposeSupplied: false,
+      reference: `pdb rules --rule ${id}`,
+    };
+  }
+
+  return {
+    id,
+    category,
+    sourceKind,
+    sourceFile,
+    english: cleanPurpose,
+    purposeSupplied: true,
+    reference: `pdb rules --rule ${id}`,
+  };
+}
+
+function outcomeLabel(outcome: ClaimOutcome): ActionRuleReminders["label"] {
+  if (outcome === "noop") return "no-op";
+  return outcome;
+}
+
+function normalizeRole(
+  role: string | null | undefined,
+): "implementer" | "designer" | "human" | null {
+  if (role === "implementer" || role === "designer" || role === "human") return role;
+  return null;
+}
+
+/**
+ * Select applicable admission rationale and post-action procedural obligations for a claim outcome.
+ */
+export function selectClaimRuleReminders(input: SelectClaimRemindersInput): ActionRuleReminders {
+  const model = input.model ?? bundledEnglishModel();
+  const facts = input.facts ?? {};
+  const contextResolved = input.contextResolved ?? true;
+  const normalizedRole = normalizeRole(input.role);
+  const maxItems = Math.max(1, input.maxItems ?? RULE_REMINDERS_MAX_ITEMS);
+  const maxCodePoints = Math.max(1, input.maxCodePoints ?? RULE_REMINDERS_MAX_CODE_POINTS);
+
+  const missingPurposes: string[] = [];
+  const notes: string[] = [];
+  const seenIds = new Set<string>();
+  const admissionRationale: RuleReminderItem[] = [];
+  const obligations: RuleReminderItem[] = [];
+
+  const addPolicyItem = (id: string | null | undefined, category: RuleReminderCategory): void => {
+    if (!id || seenIds.has(id)) return;
+    const resolved = resolvePolicyRule(
+      id,
+      category,
+      model,
+      input.purposesOverride,
+      missingPurposes,
+    );
+    if (!resolved) return;
+    seenIds.add(id);
+    if (category === "admission") admissionRationale.push(resolved);
+    else obligations.push(resolved);
+  };
+
+  let unresolvedEvidenceCategory = false;
+  let unmappedRefusal = false;
+  if (input.outcome === "denied") {
+    const explicitDenials = facts.denialIds ?? [];
+    for (const id of explicitDenials) addPolicyItem(id, "admission");
+    if (explicitDenials.length === 0) {
+      const mapped = refusalErrorToRuleId(facts.error, facts);
+      if (mapped) addPolicyItem(mapped, "admission");
+      else if (facts.error === "EVIDENCE_INCOMPLETE") unresolvedEvidenceCategory = true;
+      else if ((facts.decisionIds ?? []).length === 0) unmappedRefusal = true;
+    }
+    for (const id of facts.decisionIds ?? []) addPolicyItem(id, "admission");
+  } else if (input.outcome === "partial") {
+    for (const id of facts.denialIds ?? []) addPolicyItem(id, "admission");
+    if (facts.inventoryComplete === false) addPolicyItem("D-OWNED-INCOMPLETE", "admission");
+    for (const id of facts.decisionIds ?? []) addPolicyItem(id, "admission");
+  } else {
+    // claimed or noop
+    if (normalizedRole === "designer" || facts.needsDesign) {
+      addPolicyItem("D-DESIGN", "admission");
+    } else if (normalizedRole === "implementer") {
+      addPolicyItem("D-OWN", "admission");
+    }
+    if (facts.hasOtherClaims) {
+      addPolicyItem(
+        facts.inventoryComplete === false ? "D-REVIEW-OWNED-PARTIAL" : "D-REVIEW-OWNED",
+        "admission",
+      );
+    } else if (facts.inventoryComplete === false) {
+      addPolicyItem("D-INVENTORY-UNKNOWN", "admission");
+    }
+    for (const id of facts.decisionIds ?? []) addPolicyItem(id, "admission");
+  }
+
+  for (const obl of CLAIM_OBLIGATIONS) {
+    if (!obl.outcomes.includes(input.outcome)) continue;
+    if (obl.roles !== null && (!normalizedRole || !obl.roles.includes(normalizedRole))) continue;
+    if (seenIds.has(obl.id)) continue;
+    seenIds.add(obl.id);
+    obligations.push({
+      id: obl.id,
+      category: "obligation",
+      sourceKind: "procedural-obligation",
+      sourceFile: obl.sourceFile,
+      english: sanitizeText(obl.purpose),
+      purposeSupplied: true,
+      reference: `pdb rules --rule ${obl.id}`,
+    });
+  }
+
+  const allItems = [...admissionRationale, ...obligations];
+  const selectedIds = allItems.map((i) => i.id);
+
+  const bounded: RuleReminderItem[] = [];
+  let usedCodePoints = 0;
+  let omissionReason: "none" | "item-limit" | "code-point-limit" = "none";
+
+  for (const item of allItems) {
+    if (bounded.length >= maxItems) {
+      omissionReason = "item-limit";
+      break;
+    }
+    const itemLen = Array.from(item.english).length;
+    if (usedCodePoints + itemLen > maxCodePoints) {
+      omissionReason = "code-point-limit";
+      break;
+    }
+    bounded.push(item);
+    usedCodePoints += itemLen;
+  }
+
+  if (!contextResolved) {
+    notes.push(
+      "Reminder context is unresolved; showing only applicable baseline rules without inventing ticket-specific instructions.",
+    );
+  }
+  if (!normalizedRole) {
+    notes.push("Viewer role is unresolved; role-specific deliverable obligations are omitted.");
+  }
+  if (unresolvedEvidenceCategory) {
+    notes.push("Incomplete-evidence refusal did not identify a specific native denial category.");
+  }
+  if (unmappedRefusal) {
+    notes.push(
+      `Refusal ${facts.error ? sanitizeText(facts.error) : "reason"} has no single mapped Datalog denial rule; see the refusal prerequisite.`,
+    );
+  }
+  if (missingPurposes.length > 0) {
+    notes.push(`Purpose not supplied for ${missingPurposes.length} rule(s); see pdb rules.`);
+  }
+
+  const coverageStatus: ActionRuleReminders["coverage"]["status"] = !contextResolved
+    ? "unresolved"
+    : !normalizedRole || missingPurposes.length > 0 || unresolvedEvidenceCategory || unmappedRefusal
+      ? "partial"
+      : "complete";
+
+  const omittedIds = allItems.slice(bounded.length).map((i) => i.id);
+
+  return {
+    schemaVersion: RULE_REMINDERS_SCHEMA_VERSION,
+    action: input.action ?? "claim",
+    role: normalizedRole,
+    outcome: input.outcome,
+    label: outcomeLabel(input.outcome),
+    effectivePolicy: {
+      policyVersion,
+      rulesHash: input.effectivePolicy?.rulesHash ?? model.rulesHash ?? rulesHash,
+      narrationHash:
+        input.effectivePolicy?.narrationHash !== undefined
+          ? input.effectivePolicy.narrationHash
+          : (model.narrationHash ?? null),
+      obligationsHash: OBLIGATIONS_HASH,
+      projectRulesHash: input.effectivePolicy?.projectRulesHash ?? null,
+    },
+    admissionRationale,
+    obligations,
+    items: bounded,
+    selectedIds,
+    omissions: {
+      count: omittedIds.length,
+      omittedIds,
+      reason: omittedIds.length === 0 ? "none" : omissionReason,
+      reference: "pdb rules",
+    },
+    coverage: {
+      status: coverageStatus,
+      contextResolved,
+      missingPurposes,
+      notes,
+    },
+  };
+}
