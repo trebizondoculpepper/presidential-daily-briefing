@@ -25,13 +25,8 @@ import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod";
-import {
-  collect,
-  currentRepository,
-  ghQueryWith,
-  ghRest,
-  permissionLookup,
-} from "../github/github.js";
+import { collect, ghQueryWith, ghRest } from "../github/github.js";
+import { createGhService } from "../github/service/service.js";
 import { collectShortlist } from "../github/shortlist.js";
 import { dependencyReport } from "../github/dependencies.js";
 import { impactGuidanceSummary } from "../estimation/impact.js";
@@ -44,7 +39,7 @@ import {
   resolveHumanContext,
   type HumanContext,
 } from "../config/humancontext.js";
-import { ghAuthContext } from "../github/ghauth.js";
+import { createGitService, type GitService } from "../git/service.js";
 import { onboardingDocument, onboardingInstructions } from "../briefing/onboarding.js";
 import { catchUp, catchUpLimits } from "../briefing/catchup.js";
 import { collectBriefing, WindowRefusal } from "../briefing/catchupcli.js";
@@ -61,7 +56,6 @@ import {
 import type { Clock } from "./polling.js";
 import type { ReadRuntime } from "../briefing/service.js";
 import type { ConfigFileSystem, GitRunner } from "../config/config.js";
-import type { GitService } from "../git/service.js";
 import { detectClientEntry, validateHarness } from "../config/harness.js";
 import type { Environment } from "../config/harness.js";
 import { TRIAGE_ROLES, validateEntryKey, type TriageRole } from "../config/identity.js";
@@ -1075,27 +1069,35 @@ function errorResult(
   });
 }
 
-/** Production boundaries: authenticated gh through the existing argument-array runners. */
-export const defaultRuntime = (options: McpOptions): McpRuntime => ({
-  collect,
-  // #664: the employing human, from the signed-in gh account (last known during an outage).
-  ...(humanContextEnabled()
-    ? { humanContext: (signal?: AbortSignal) => resolveHumanContext(ghAuthContext, { signal }) }
-    : {}),
-  // #368: the routine briefing hydrates only its shortlist.
-  collectShortlist,
-  dependencyReport,
-  currentRepository,
-  // Provenance authors' permissions for the paired assessments (#247), cached per read.
-  rest: ghRest,
-  // Delivery evidence (#192): PR reads and target compares by recorded identity, bounded.
-  queryWith: ghQueryWith,
-  env: process.env,
-  // Every runtime piece that reads local state resolves against the configured project, not
-  // the server's working directory: estimation settings and the workflow-guide opt-out (#71).
-  estimation: options.project ? { cwd: options.project } : undefined,
-  guide: options.project ? { cwd: options.project } : undefined,
-});
+/** Production boundaries: shared typed GH and Git services with legacy read fallbacks. */
+export const defaultRuntime = (options: McpOptions): McpRuntime => {
+  const gh = createGhService();
+  const git = createGitService();
+  return {
+    gh,
+    ghWith: (signal) => createGhService({ query: ghQueryWith(signal) }),
+    git,
+    collect: (repo, opts, injected, now) =>
+      injected ? collect(repo, opts, injected, now) : gh.snapshot.collect(repo, opts, now),
+    // #664: the employing human, from the signed-in gh account (last known during an outage).
+    ...(humanContextEnabled()
+      ? { humanContext: (signal?: AbortSignal) => resolveHumanContext(gh, { signal }) }
+      : {}),
+    // #368: the routine briefing hydrates only its shortlist.
+    collectShortlist,
+    dependencyReport,
+    currentRepository: (cwd, signal) => gh.repos.fromCheckout(cwd, signal),
+    // Provenance authors' permissions for the paired assessments (#247), cached per read.
+    rest: ghRest,
+    // Delivery evidence (#192): PR reads and target compares by recorded identity, bounded.
+    queryWith: ghQueryWith,
+    env: process.env,
+    // Every runtime piece that reads local state resolves against the configured project, not
+    // the server's working directory: estimation settings and the workflow-guide opt-out (#71).
+    estimation: options.project ? { cwd: options.project, git } : undefined,
+    guide: options.project ? { cwd: options.project } : undefined,
+  };
+};
 
 /**
  * Bind the opt-in watcher to the one explicit startup target (#271, #291). Refuses before any
@@ -1127,9 +1129,12 @@ export async function bindPolling(
       collect: runtime.collect,
       clock,
       responsible: async (snap, signal) => {
-        const trust = runtime.rest
-          ? markerTrust(permissionLookup(repository, runtime.rest, signal))
-          : undefined;
+        const permission = runtime.gh
+          ? runtime.gh.repos.permissionOf(repository, signal)
+          : runtime.rest
+            ? createGhService({ rest: runtime.rest }).repos.permissionOf(repository, signal)
+            : undefined;
+        const trust = permission ? markerTrust(permission) : undefined;
         return readSnapshotResponsibility(snap, trust, signal);
       },
     },
