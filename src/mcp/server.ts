@@ -781,8 +781,7 @@ export function createServer(
               // #301/#796: attach the declared review policy so the shared readiness evaluator
               // sees the same context over MCP as over the CLI (never undeclared legacy policy).
               const declared =
-                runtime.reviewPolicy ??
-                (await resolveReviewPolicy(selection.repository, runtime.guide));
+                rt.reviewPolicy ?? (await resolveReviewPolicy(selection.repository, rt.guide));
               const withPolicy = declared ? { ...snapshot, reviewPolicy: declared } : snapshot;
               const built = catchUp(withPolicy, {
                 agent: selection.agent ?? undefined,
