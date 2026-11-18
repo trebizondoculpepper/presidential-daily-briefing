@@ -121,6 +121,18 @@ describe("Working for header (#669)", () => {
       (await header({ state: "current", login: "octo", host: "github.com", source: "gh-login" }))
         .textContent,
     ).toBe("Working for GitHub user octo (github.com, the signed-in gh account)");
+    expect(
+      (
+        await header({
+          state: "current",
+          login: "octo",
+          host: "github.com",
+          observedAt: "2026-11-18T20:00:00Z",
+        })
+      ).textContent,
+    ).toBe(
+      "Working for GitHub user octo (github.com, the signed-in gh account, verified 2026-11-18T20:00:00Z)",
+    );
     const last = await header({
       state: "last-known",
       login: "octo",
@@ -206,4 +218,46 @@ it("re-reads whose work this is after a page announces a refresh (#669)", async 
   listener!();
   await new Promise((resolve) => setTimeout(resolve, 0));
   expect(text).toContain("second");
+});
+
+it("never lets an older, slower status read replace a newer header (#669)", async () => {
+  let listener: (() => void) | undefined;
+  let text = "";
+  const releases: (() => void)[] = [];
+  let call = 0;
+  const pending = runInNewContext(projectSelectionScript(), {
+    URL,
+    window: {
+      location: { href: "http://localhost/?repo=a%2Fb", replace: () => undefined },
+      localStorage: { getItem: () => null, setItem: () => undefined },
+    },
+    document: {
+      addEventListener: (name: string, fn: () => void) => {
+        if (name === "pdb:refreshed") listener = fn;
+      },
+      querySelector: () => ({
+        set textContent(v: string) {
+          text = v;
+        },
+        setAttribute: () => undefined,
+      }),
+    },
+    fetch: async () => {
+      const login = ++call === 1 ? "old" : "new";
+      await new Promise<void>((resolve) => releases.push(resolve));
+      return {
+        ok: true,
+        json: async () => ({
+          repositories: [{ repository: "a/b" }],
+          human: { state: "current", login, host: "github.com" },
+        }),
+      };
+    },
+  });
+  listener!(); // a refresh starts while the first read is still pending
+  releases[1]!(); // the newer read answers first
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  releases[0]!(); // then the older one
+  await pending;
+  expect(text).toContain("new");
 });
