@@ -814,9 +814,11 @@ export async function readBriefing(
   const baseQuery = runtime.queryWith ? runtime.queryWith(request.signal) : runtime.query;
   const liveQuery =
     meter && baseQuery ? meter.query(baseQuery, "delivery-records", request.repository) : baseQuery;
+  const gh = runtime.ghWith?.(request.signal) ?? runtime.gh;
+  const permissionService = gh ?? (rest ? createGhService({ rest }) : undefined);
   // One permission cache for every ranking pass and the final presentation.
-  const trust = rest
-    ? markerTrust(createGhService({ rest }).repos.permissionOf(request.repository, request.signal))
+  const trust = permissionService
+    ? markerTrust(permissionService.repos.permissionOf(request.repository, request.signal))
     : undefined;
   // #413: claim activity is read live, before the first shortlist ranking, so every selection
   // pass and the final presentation rank the same retained-claim rows: hydration then covers
@@ -829,16 +831,13 @@ export async function readBriefing(
     if (!request.agent || (request.role ?? defaultEngineRole) !== "implementer") return undefined;
     const owned = ownedClaims(collected, request.agent);
     const fresh = owned.urls.filter((url) => !activityReadFor.has(url));
-    if (fresh.length && rest && liveQuery) {
+    if (fresh.length && permissionService && liveQuery) {
       const facts = await readRetainedFacts(
         { ...collected, issues: collected.issues.filter((i) => fresh.includes(i.url)) },
         request.agent,
         {
           query: liveQuery as GraphQuery,
-          permission: createGhService({ rest }).repos.permissionOf(
-            request.repository,
-            request.signal,
-          ),
+          permission: permissionService.repos.permissionOf(request.repository, request.signal),
         },
         runtime.claimActivityReader,
       );
@@ -870,6 +869,7 @@ export async function readBriefing(
       // Delivery requests are bound to the request's cancellation signal, like collection.
       live && rest && liveQuery
         ? {
+            ...(gh ? { gh } : {}),
             query: liveQuery,
             rest: (path, options) =>
               rest(path, { ...options, signal: options?.signal ?? request.signal }),
