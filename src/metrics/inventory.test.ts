@@ -211,15 +211,31 @@ describe("inventoryView (#883)", () => {
           },
         },
       ),
+      // Unassessed ticket with an active claim must still appear in stalled work.
+      ticket(16, "open", {
+        stage: "unassessed",
+        claimed: true,
+        createdAt: "2026-11-10T00:00:00.000Z",
+        claimedAt: "2026-11-10T00:00:00.000Z",
+        waiting: false,
+        blocked: false,
+      }),
     ];
 
     const view = inventoryView(now, tickets, coverage, { stalledHours: 24 });
     expect(view.stalled.thresholdHours).toBe(24);
     expect(view.stalled.cutoff).toBe("2026-11-11T10:00:00.000Z");
-    expect(view.stalled.total).toEqual({ count: 3, members: ["o/r#11", "o/r#12", "o/r#13"] });
+    expect(view.stalled.total).toEqual({
+      count: 4,
+      members: ["o/r#11", "o/r#12", "o/r#13", "o/r#16"],
+    });
     expect(view.stalled.knownWait).toEqual({ count: 1, members: ["o/r#11"] });
     expect(view.stalled.blocked).toEqual({ count: 1, members: ["o/r#12"] });
-    expect(view.stalled.noRecordedProgress).toEqual({ count: 1, members: ["o/r#13"] });
+    expect(view.stalled.noRecordedProgress).toEqual({
+      count: 2,
+      members: ["o/r#13", "o/r#16"],
+    });
     expect(view.stalled.unknownActivity).toEqual({ count: 2, members: ["o/r#14", "o/r#15"] });
+    expect(view.stages.unassessed.members).toEqual(["o/r#16"]);
   });
 });

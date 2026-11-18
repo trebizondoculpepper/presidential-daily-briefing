@@ -21,6 +21,7 @@ import {
   type ActivityComment,
 } from "../workflow/claimactivity.js";
 import { workflow } from "../workflow/definition.js";
+import { evaluatePolicy } from "../rules/datalog/engine.js";
 import {
   collectDeliveryFacts,
   deliveryMemberCap,
@@ -317,14 +318,48 @@ export async function readMetrics(
           assessment.impact.group === "unassessed"
         ) {
           stage = "unassessed";
-        } else if (labelNames.has("status:awaiting-review")) {
+        } else if (
+          labelNames.has("status:awaiting-review") ||
+          (issue.openClosingPrs !== null &&
+            issue.openClosingPrs !== undefined &&
+            issue.openClosingPrs > 0)
+        ) {
           stage = "in-review";
         } else if (ownerLabels.length > 0) {
           stage = "claimed";
         } else if (blocked === true) {
           stage = "blocked";
-        } else if (labelNames.has("status:ready") || labelNames.has("status:incomplete")) {
-          stage = "ready";
+        } else {
+          // Delegate readiness to the native Datalog policy rather than checking labels alone.
+          const id = 100;
+          const datoms: [number, string, string | number | boolean][] = [
+            [1, "owned-claims-complete", true],
+            [id, "kind", "issue"],
+            [id, "state", "OPEN"],
+            [id, "labels-complete", labelsComplete],
+            [
+              id,
+              "native-complete",
+              issue.openBlockers !== null && issue.openBlockers !== undefined,
+            ],
+            [id, "open-blockers", issue.openBlockers ?? -1],
+            [
+              id,
+              "reverse-complete",
+              issue.openClosingPrs !== null && issue.openClosingPrs !== undefined,
+            ],
+            ...[...labelNames].map((name): [number, string, string] => [id, "label", name]),
+          ];
+          const policy = evaluatePolicy(
+            {
+              viewer: { role: "implementer", agent: "", platform: "", order: "impact" },
+              datoms,
+            },
+            { signal: rt.signal },
+          );
+          if (policy.decisions.some((d) => d.kind === "implement")) {
+            stage = "ready";
+          }
         }
       }
       let waiting: boolean | null = null;
@@ -361,6 +396,7 @@ export async function readMetrics(
         lastObservedChangeAt: issue.updatedAt,
         blocked,
         waiting,
+        claimed: ownerLabels.length > 0,
       };
     }
     tickets.push({

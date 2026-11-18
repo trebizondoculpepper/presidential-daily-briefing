@@ -8,7 +8,8 @@
  */
 
 import { median } from "./aggregate.js";
-import type { HistoryCoverage, MetricTicket } from "./views.js";
+import type { TicketLedger } from "./ledger.js";
+import type { DayCoverage } from "./windows.js";
 
 export const DEFAULT_STALLED_HOURS = 24;
 
@@ -37,6 +38,8 @@ export interface InventoryFacts {
   blocked?: boolean | null;
   /** Known wait status from claim-activity `waiting` state; null/undefined means unknown. */
   waiting?: boolean | null;
+  /** Whether the ticket currently has an agent claim, independent of its exclusive display stage. */
+  claimed?: boolean;
 }
 
 export interface StageAgeStats {
@@ -82,13 +85,19 @@ export interface InventoryResult {
   stateUnknown: StalledBucket;
 }
 
+export interface InventoryTicket {
+  member: string;
+  ledger: TicketLedger;
+  inventory?: InventoryFacts;
+}
+
 function parseMs(iso: string | null | undefined): number | null {
   if (typeof iso !== "string" || !iso) return null;
   const ms = Date.parse(iso);
   return Number.isFinite(ms) ? ms : null;
 }
 
-function coverageNote(from: string, coverage: HistoryCoverage): string | null {
+function coverageNote(from: string, coverage: DayCoverage): string | null {
   if (coverage.completeFrom === null) return "event history was not read; figures are unknown";
   if (Date.parse(coverage.completeFrom) > Date.parse(from)) {
     return `events before ${coverage.completeFrom} may be missing`;
@@ -96,7 +105,7 @@ function coverageNote(from: string, coverage: HistoryCoverage): string | null {
   return null;
 }
 
-function earliestPickupIso(t: MetricTicket): string | null {
+function earliestPickupIso(t: InventoryTicket): string | null {
   const candidates = [t.ledger.firstPickup["claim-marker"], t.ledger.firstPickup.label]
     .filter(
       (c): c is { status: "found"; at: string; agent: string | null; key: string } =>
@@ -107,13 +116,13 @@ function earliestPickupIso(t: MetricTicket): string | null {
   return candidates[0] ?? null;
 }
 
-function createdIsoOf(t: MetricTicket): string | null {
+function createdIsoOf(t: InventoryTicket): string | null {
   if (t.inventory?.createdAt) return t.inventory.createdAt;
   const created = t.ledger.events.find((e) => e.kind === "created");
   return created?.at ?? null;
 }
 
-function latestEventIsoOf(t: MetricTicket): string | null {
+function latestEventIsoOf(t: InventoryTicket): string | null {
   const times = t.ledger.events
     .map((e) => ({ at: e.at, ms: parseMs(e.at) }))
     .filter((x): x is { at: string; ms: number } => x.ms !== null)
@@ -121,7 +130,7 @@ function latestEventIsoOf(t: MetricTicket): string | null {
   return times.at(-1)?.at ?? null;
 }
 
-function stageAgeStartMs(t: MetricTicket, stage: InventoryStage): number | null {
+function stageAgeStartMs(t: InventoryTicket, stage: InventoryStage): number | null {
   if (stage === "claimed") {
     return parseMs(t.inventory?.claimedAt ?? earliestPickupIso(t));
   }
@@ -139,7 +148,7 @@ function emptyStage(): StageInventory {
   };
 }
 
-function hasCompleteActivityEvidence(t: MetricTicket): boolean {
+function hasCompleteActivityEvidence(t: InventoryTicket): boolean {
   const c = t.ledger.coverage;
   return (
     c.timeline === "complete" &&
@@ -155,8 +164,8 @@ function hasCompleteActivityEvidence(t: MetricTicket): boolean {
  */
 export function inventoryView(
   now: string,
-  tickets: readonly MetricTicket[],
-  coverage: HistoryCoverage,
+  tickets: readonly InventoryTicket[],
+  coverage: DayCoverage,
   options: { stalledHours?: number } = {},
 ): InventoryResult {
   const thresholdHours = options.stalledHours ?? DEFAULT_STALLED_HOURS;
@@ -210,7 +219,7 @@ export function inventoryView(
       stageAges[stage].push(nowMs - startMs);
     }
 
-    if (stage === "claimed") {
+    if (t.inventory?.claimed ?? stage === "claimed") {
       const hasRecentEvent = t.ledger.events.some((e) => {
         const ms = parseMs(e.at);
         return ms !== null && ms >= cutoffMs && ms <= nowMs;
