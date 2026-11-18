@@ -273,3 +273,39 @@ describe("typed Git service (#897)", () => {
     }
   });
 });
+
+describe("alternate index tracked check (#907 review)", () => {
+  it("counts a file tracked only in an inherited alternate index as tracked", async () => {
+    const exec = promisify(execFile);
+    const dir = await mkdtemp(join(tmpdir(), "pdb-altindex-"));
+    const env = sanitizedGitEnvironment();
+    try {
+      await exec("git", ["init", "-q"], { cwd: dir, env });
+      await writeFile(join(dir, "pdb.toml"), "x");
+      const alternate = join(dir, ".git", "alt-index");
+      const runner =
+        (extra: NodeJS.ProcessEnv): GitRunner =>
+        async (args, cwd) =>
+          (await exec("git", [...args], { cwd, env: { ...env, ...extra } })).stdout;
+      await runner({ GIT_INDEX_FILE: alternate })(["update-index", "--add", "pdb.toml"], dir);
+      const own = createGitService({ git: runner({}) });
+      expect(await own.isTracked({ cwd: dir }, "pdb.toml")).toBe(false);
+      const withAlternate = createGitService({
+        git: runner({}),
+        alternateIndex: { file: alternate, runner: runner({ GIT_INDEX_FILE: alternate }) },
+      });
+      expect(await withAlternate.isTracked({ cwd: dir }, "pdb.toml")).toBe(true);
+      expect(await withAlternate.isTracked({ cwd: dir }, "other.toml")).toBe(false);
+      // Another checkout never consults this checkout's alternate index.
+      const other = await mkdtemp(join(tmpdir(), "pdb-altindex-other-"));
+      try {
+        await exec("git", ["init", "-q"], { cwd: other, env });
+        expect(await withAlternate.isTracked({ cwd: other }, "pdb.toml")).toBe(false);
+      } finally {
+        await rm(other, { recursive: true, force: true });
+      }
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
