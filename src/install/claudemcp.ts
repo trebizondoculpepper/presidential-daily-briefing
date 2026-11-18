@@ -183,6 +183,8 @@ export async function installClaudeMcp(params: {
   dryRun?: boolean;
   adopt?: boolean;
   pdbMcp?: string;
+  /** Platform used to shape the STDIO command (win32 launches through Node); tests inject. */
+  platform?: NodeJS.Platform;
   runtime?: ManifestRuntime;
 }): Promise<ClaudeMcpResult> {
   const { scope, options, manifestPath, pdbVersion, dryRun, adopt, runtime } = params;
@@ -196,6 +198,7 @@ export async function installClaudeMcp(params: {
     url: options.url,
     projectRoot: scope.kind === "project" ? scope.root : undefined,
     entry: options.entry,
+    platform: params.platform,
   });
   const adapter = claudeMcpJsonAdapter(desired);
   const read = await readInstallManifest(manifestPath, runtime?.fs);
