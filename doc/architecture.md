@@ -212,6 +212,21 @@ Logging and overrides follow the [local logging](design/local-logging.md),
 [force override](design/human-force-overrides.md) and
 [human responsibility release](design/human-responsibility-release.md) contracts.
 
+## 11. Generated action guidance and onboarding
+
+Modifying operations should, where practical, show applicable current rules in
+English through the shared native policy/document generator. Distinguish admission
+reasons from ongoing obligations and actual success from no-op/partial/failure.
+Keep routine work-list reads unchanged. Never duplicate policy text in command
+handlers; keep machine-readable receipts intact. Missing native obligation coverage
+is a policy ticket before its display integration. See
+[action reminders](design/action-rule-reminders.md).
+
+[Onboarding](design/onboarding-rules-files.md) may write an explicitly managed,
+refreshable rules.md snapshot and its AGENTS.md reference in a verified project;
+that snapshot is not a competing policy authority. npm installation only hints at
+onboarding and never edits the user's project or configures an agent automatically.
+
 ## Reading map
 
 - [Research index and evidence](research/README.md): reasons, experiments and limits.
