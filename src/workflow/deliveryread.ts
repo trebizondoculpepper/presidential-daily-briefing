@@ -13,7 +13,7 @@ import { requiredCheckEvidence } from "../github/requiredchecks.js";
  * never "not delivered". Read-only: `next` lists supported commands, never runs them.
  */
 import { closureOf, diagnoseDelivery } from "./deliverydoctor.js";
-import { deliveryCommentFields, readDeliveryComments } from "./deliverables.js";
+import { readDeliveryComments } from "./deliverables.js";
 import type { TrustDecision } from "./delivery.js";
 import type { Query, Rest } from "../github/github.js";
 import type { Closure, DeliveryDiagnosis, IssueDeliveryDiagnosis } from "./deliverydoctor.js";
@@ -482,7 +482,7 @@ export async function readIssuesDelivery(
   for (const number of numbers) {
     try {
       // The typed delivery-issue read (#945): no GraphQL composed in this module.
-      const node = await deliveryIssue(rt.query, repository, number, deliveryCommentFields);
+      const node = await deliveryIssue(rt.query, repository, number);
       if (!node) throw new Error("not readable");
       const history = await readDeliveryComments(
         repository,

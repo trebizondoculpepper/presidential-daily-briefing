@@ -7,8 +7,20 @@
 import type { Query } from "../github.js";
 
 /** The fields a delivery comment carries; kept identical to deliverables' read (#189). */
-export const deliveryIssueCommentFields =
+const deliveryIssueCommentFields =
   "databaseId url body createdAt author{__typename login} lastEditedAt includesCreatedEdit editor{__typename login}";
+
+/** One validated delivery comment record. */
+export interface DeliveryIssueComment {
+  databaseId: number | null;
+  url: string;
+  body: string;
+  createdAt: string;
+  author: { __typename?: string; login: string } | null;
+  lastEditedAt: string | null;
+  includesCreatedEdit: boolean;
+  editor: { __typename?: string; login: string } | null;
+}
 
 export interface DeliveryIssue {
   number: number;
@@ -22,7 +34,7 @@ export interface DeliveryIssue {
   } | null;
   /** The newest comment page, as the history pager expects it. */
   comments: {
-    nodes: unknown[];
+    nodes: DeliveryIssueComment[];
     pageInfo: { hasPreviousPage: boolean; startCursor: string | null };
   };
 }
@@ -40,11 +52,10 @@ export async function deliveryIssue(
   query: Query,
   repository: string,
   number: number,
-  commentFields: string = deliveryIssueCommentFields,
 ): Promise<DeliveryIssue | null> {
   const [owner, name] = repository.split("/");
   const data = await query(
-    `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){number title url state stateReason closedByPullRequestsReferences(first:10,includeClosedPrs:false){nodes{number url state} pageInfo{hasNextPage}} comments(last:100){nodes{${commentFields}} pageInfo{hasPreviousPage startCursor}}}}}`,
+    `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){number title url state stateReason closedByPullRequestsReferences(first:10,includeClosedPrs:false){nodes{number url state} pageInfo{hasNextPage}} comments(last:100){nodes{${deliveryIssueCommentFields}} pageInfo{hasPreviousPage startCursor}}}}}`,
     { owner: owner!, name: name!, number },
   );
   const repo = isRecord(data) ? data.repository : null;
@@ -63,6 +74,24 @@ export async function deliveryIssue(
     !Array.isArray(comments.nodes) ||
     !info ||
     typeof info.hasPreviousPage !== "boolean"
+  )
+    throw new Error("malformed issue answer");
+  // Every comment record is validated here; one malformed record makes the issue unreadable
+  // (its delivery unknown), never silently dropped.
+  const actor = (v: unknown): v is { login: string } | null =>
+    v === null || v === undefined || (isRecord(v) && str(v.login));
+  if (
+    !comments.nodes.every(
+      (c) =>
+        isRecord(c) &&
+        str(c.url) &&
+        str(c.body) &&
+        str(c.createdAt) &&
+        (c.databaseId === null || c.databaseId === undefined || int(c.databaseId)) &&
+        (c.lastEditedAt === null || c.lastEditedAt === undefined || str(c.lastEditedAt)) &&
+        actor(c.author) &&
+        actor(c.editor),
+    )
   )
     throw new Error("malformed issue answer");
   const closing = isRecord(node.closedByPullRequestsReferences)
@@ -91,7 +120,16 @@ export async function deliveryIssue(
         }
       : null,
     comments: {
-      nodes: comments.nodes,
+      nodes: (comments.nodes as Record<string, unknown>[]).map((c) => ({
+        databaseId: int(c.databaseId) ? c.databaseId : null,
+        url: c.url as string,
+        body: c.body as string,
+        createdAt: c.createdAt as string,
+        author: (c.author ?? null) as DeliveryIssueComment["author"],
+        lastEditedAt: str(c.lastEditedAt) ? c.lastEditedAt : null,
+        includesCreatedEdit: c.includesCreatedEdit === true,
+        editor: (c.editor ?? null) as DeliveryIssueComment["editor"],
+      })),
       pageInfo: {
         hasPreviousPage: info.hasPreviousPage,
         startCursor: str(info.startCursor) ? info.startCursor : null,
