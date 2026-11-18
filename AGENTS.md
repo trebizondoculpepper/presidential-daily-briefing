@@ -23,6 +23,15 @@ Prefer TOML for project-owned configuration. The local root-level `pdb.toml` per
 
 ## Architecture and scope
 
+Shared application capabilities have one canonical typed service boundary in the
+owning area. Consumers must reuse it rather than create parallel clients or direct
+utility/API access. Retained shared mutable state belongs to an explicit scoped
+state-holder wrapper with documented lifecycle, partitioning and invalidation;
+application composition constructs/injects it, and controllers remain thin. Pure
+helpers need no artificial service layer. Reject new bypasses or hidden shared
+state; track existing deviations as explicit migration debt. Follow
+[shared services and state ownership](doc/design/shared-services-and-state.md).
+
 PDB serve is API-first: browser pages consume versioned backend data/text APIs; shared services own domain content and native decisions, and frontend components own rendering. New/migrated pages must not assemble HTML strings in backend TypeScript or rebuild domain logic in the browser. Serve built frontend assets/static entry; CLI/MCP may use the shared services directly. Existing generated pages migrate incrementally. Follow [the API-first frontend contract](doc/design/serve-api-first-frontend.md) (#852).
 
 - Run the TypeScript CLI from source with `npm run pdb` (tsx); use Vite+ for checks/tests/builds.
