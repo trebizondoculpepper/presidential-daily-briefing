@@ -7,7 +7,6 @@
  * edits the repository. Every Git call has its own timeout, the whole probe has a deadline and
  * a call budget, and anything Git cannot establish is reported as unknown, never as current.
  */
-import { execFile } from "node:child_process";
 import { realpath, stat } from "node:fs/promises";
 import { isAbsolute, join, resolve } from "node:path";
 
@@ -21,109 +20,12 @@ export const fetchCommand = "git fetch";
 /** Disables only the source-checkout probe (the npm opt-outs disable both). */
 export const checkoutOptOutEnv = "PDB_NO_CHECKOUT_CHECK";
 
-/** Result of one Git call: its trimmed stdout, or why it gave none. */
-export type GitResult =
-  | { ok: true; stdout: string }
-  | { ok: false; reason: "missing" | "timeout" | "failed"; code?: number };
-
-/** Runs `git` with an argument array (no shell) in `cwd`. */
-export type GitRunner = (args: string[], cwd: string, timeoutMs: number) => Promise<GitResult>;
-
-export const runGit: GitRunner = (args, cwd, timeoutMs) => gitWith("git", args, cwd, timeoutMs);
-
-/** Variables that would make Git inspect some other repository than the one at `cwd`. */
-const repositorySelection = [
-  "GIT_DIR",
-  "GIT_WORK_TREE",
-  "GIT_INDEX_FILE",
-  "GIT_COMMON_DIR",
-  "GIT_OBJECT_DIRECTORY",
-  "GIT_ALTERNATE_OBJECT_DIRECTORIES",
-  "GIT_NAMESPACE",
-  "GIT_CEILING_DIRECTORIES",
-  "GIT_DISCOVERY_ACROSS_FILESYSTEM",
-  "GIT_PREFIX",
-  "GIT_CONFIG_PARAMETERS",
-  "GIT_CONFIG_COUNT",
-  // Transport overrides: only the empty GIT_ALLOW_PROTOCOL set below may apply.
-  "GIT_ALLOW_PROTOCOL",
-  "GIT_PROTOCOL_FROM_USER",
-  "GIT_SSH",
-  "GIT_SSH_COMMAND",
-  "GIT_PROXY_COMMAND",
-  "GIT_ASKPASS",
-  "GIT_EXEC_PATH",
-];
-
-/**
- * The exact argument array and environment for one read-only Git call. Repository selection
- * comes only from `cwd`; lazy fetching of missing objects in partial/promisor clones is off
- * (`GIT_NO_LAZY_FETCH`, Git 2.44+), and every transport is refused (`protocol.allow=never`) so
- * older Git fails on a missing object instead of reaching the network. An empty
- * `GIT_ALLOW_PROTOCOL` overrides any `protocol.<name>.allow` configuration as well.
- */
-export function gitInvocation(
-  args: string[],
-  env: NodeJS.ProcessEnv = process.env,
-): { args: string[]; env: NodeJS.ProcessEnv } {
-  const clean: NodeJS.ProcessEnv = { ...env };
-  for (const key of Object.keys(clean))
-    if (repositorySelection.includes(key) || /^GIT_CONFIG_(KEY|VALUE)_\d+$/.test(key))
-      delete clean[key];
-  return {
-    args: ["-c", "protocol.allow=never", "-c", "core.fsmonitor=false", ...args],
-    env: {
-      ...clean,
-      GIT_NO_LAZY_FETCH: "1",
-      GIT_ALLOW_PROTOCOL: "",
-      GIT_PROTOCOL_FROM_USER: "0",
-      GIT_OPTIONAL_LOCKS: "0",
-      GIT_TERMINAL_PROMPT: "0",
-      LC_ALL: "C",
-    },
-  };
-}
-
-/** The real runner for a given executable; tests use it to simulate a missing Git. */
-export function gitWith(
-  binary: string,
-  args: string[],
-  cwd: string,
-  timeoutMs: number,
-): Promise<GitResult> {
-  return new Promise((resolve) => {
-    try {
-      const invocation = gitInvocation(args);
-      execFile(
-        binary,
-        invocation.args,
-        {
-          cwd,
-          timeout: timeoutMs,
-          windowsHide: true,
-          maxBuffer: 64 * 1024,
-          env: invocation.env,
-        },
-        (error, stdout) => {
-          if (!error) return resolve({ ok: true, stdout: String(stdout).trim() });
-          const e = error as Omit<NodeJS.ErrnoException, "code"> & {
-            killed?: boolean;
-            code?: number | string;
-          };
-          if (e.code === "ENOENT") return resolve({ ok: false, reason: "missing" });
-          if (e.killed) return resolve({ ok: false, reason: "timeout" });
-          resolve({
-            ok: false,
-            reason: "failed",
-            ...(typeof e.code === "number" ? { code: e.code } : {}),
-          });
-        },
-      );
-    } catch {
-      resolve({ ok: false, reason: "failed" });
-    }
-  });
-}
+// The hardened probe transport lives behind the probe Git facade (#940); re-exported for
+// existing importers and tests.
+export { gitInvocation, gitWith, runGit } from "../git/probe.js";
+export type { GitResult, GitRunner } from "../git/probe.js";
+import { createProbeGitService } from "../git/probe.js";
+import type { GitRunner } from "../git/probe.js";
 
 export interface Comparison {
   /** The local ref compared with, shown short, for example `origin/main`. */
@@ -230,7 +132,7 @@ async function probe({
   root,
   installed,
   optOut = false,
-  git = runGit,
+  git,
   now = Date.now,
   callTimeoutMs = gitCallTimeoutMs,
   deadlineMs = probeDeadlineMs,
@@ -241,48 +143,27 @@ async function probe({
   if (optOut) return blank(now, "skipped", "disabled (opt-out or --no-update-check)");
   if (!root) return blank(now, "unknown", "installation root unknown");
 
-  const repo: string = root;
-  const started = now();
-  let calls = 0;
-  let missing = false;
-  let timedOut = false;
-  // One bounded Git call: refused once the budget or deadline is spent.
-  const call = async (args: string[]): Promise<string | null> => {
-    const result = await raw(args);
-    return result.ok ? result.stdout : null;
-  };
-  async function raw(args: string[]): Promise<GitResult> {
-    const left = deadlineMs - (now() - started);
-    if (calls >= gitCallLimit || left <= 0) {
-      timedOut = true;
-      return { ok: false, reason: "timeout" };
-    }
-    calls++;
-    const timeout = Math.min(callTimeoutMs, left);
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const result = await Promise.race([
-      git(args, repo, timeout),
-      new Promise<GitResult>((resolve) => {
-        timer = setTimeout(() => resolve({ ok: false, reason: "timeout" }), timeout + 50);
-      }),
-    ]).finally(() => clearTimeout(timer));
-    if (!result.ok && result.reason === "missing") missing = true;
-    if (!result.ok && result.reason === "timeout") timedOut = true;
-    return result;
-  }
+  // The bounded offline probe facade (#940): every Git read is typed, hardened and budgeted.
+  const repo = createProbeGitService({
+    root,
+    ...(git ? { runner: git } : {}),
+    callTimeoutMs,
+    callBudget: gitCallLimit,
+    deadlineMs,
+    now,
+  });
 
   /**
    * Every non-Git await (filesystem reads) goes through this: it settles with `fallback` when
    * the remaining overall budget runs out first, or when the operation throws.
    */
   async function bounded<T>(work: () => Promise<T>, fallback: T): Promise<T> {
-    const left = Math.max(0, deadlineMs - (now() - started));
     let timer: ReturnType<typeof setTimeout> | undefined;
     const expired = new Promise<T>((resolve) => {
       timer = setTimeout(() => {
-        timedOut = true;
+        repo.expire();
         resolve(fallback);
-      }, left);
+      }, repo.remainingMs());
     });
     return Promise.race([
       Promise.resolve()
@@ -292,23 +173,21 @@ async function probe({
     ]).finally(() => clearTimeout(timer));
   }
 
-  const info = await call([
-    "rev-parse",
-    "--show-toplevel",
-    "--git-dir",
-    "--git-common-dir",
-    "--is-shallow-repository",
-  ]);
-  if (info === null)
+  const layout = await repo.layout();
+  if (layout === null)
     return blank(
       now,
       "unknown",
-      missing ? "Git is not available" : timedOut ? "Git timed out" : "not a Git checkout",
+      repo.state.missing
+        ? "Git is not available"
+        : repo.state.timedOut
+          ? "Git timed out"
+          : "not a Git checkout",
     );
-  const [toplevel = "", gitDir = "", commonDir = "", shallow = ""] = info.split(/\r?\n/);
+  const { toplevel, gitDir, commonDir, shallow } = layout;
   // The repository found must be this installation itself, not one that merely contains a
   // copy of it (for example pdb vendored or unpacked inside some other project).
-  const same = await bounded<boolean | null>(() => samePath(toplevel, repo), null);
+  const same = await bounded<boolean | null>(() => samePath(toplevel, root), null);
   if (same === null)
     return blank(now, "unknown", "timed out checking the installation root against Git");
   if (!same)
@@ -316,10 +195,10 @@ async function probe({
   const result: CheckoutStatus = { ...blank(now, "checkout", ""), reason: undefined };
 
   // Attached or detached: exit 1 from `symbolic-ref -q` is the only proof of a detached HEAD.
-  const head = await raw(["symbolic-ref", "-q", "HEAD"]);
-  const branchRef = head.ok && head.stdout.startsWith("refs/heads/") ? head.stdout : null;
+  const head = await repo.headRef();
+  const branchRef = head.ref;
   result.branch = branchRef ? branchRef.slice("refs/heads/".length) : null;
-  result.detached = head.ok ? false : head.reason === "failed" && head.code === 1 ? true : null;
+  result.detached = head.detached;
 
   // FETCH_HEAD lives in the common directory; a worktree's own git dir is checked too.
   const abs = (p: string) => (isAbsolute(p) ? p : join(root, p));
@@ -353,42 +232,26 @@ async function probe({
     ahead: null,
     reason,
   });
-  const failure = (fallback: string) => (timedOut ? "Git timed out" : fallback);
+  const failure = (fallback: string) => (repo.state.timedOut ? "Git timed out" : fallback);
 
   // Which remote: the branch upstream's remote, else the only configured remote.
-  const remotesOut = await call(["remote"]);
-  const remotes = (remotesOut ?? "").split(/\r?\n/).filter(Boolean).slice(0, 20);
+  const names = await repo.remoteNames();
+  const remotes = (names ?? []).slice(0, 20);
   const patterns = remotes.flatMap((r) => [`refs/remotes/${r}/HEAD`, `refs/remotes/${r}/main`]);
   if (branchRef) patterns.push(branchRef);
-  const refs =
-    remotesOut === null
-      ? null
-      : await call([
-          "for-each-ref",
-          "--format=%(refname)%09%(symref)%09%(upstream)%09%(upstream:remotename)",
-          ...patterns,
-        ]);
-  const rows = new Map(
-    (refs ?? "")
-      .split(/\r?\n/)
-      .filter(Boolean)
-      .map((line) => {
-        const [name, symref = "", upstream = "", remote = ""] = line.split("\t");
-        return [name, { symref, upstream, remote }] as const;
-      }),
-  );
-  const branchRow = branchRef ? rows.get(branchRef) : undefined;
+  const rows = names === null ? null : await repo.refRows(patterns);
+  const branchRow = branchRef ? rows?.get(branchRef) : undefined;
   const upstreamRemote =
     branchRow?.remote && remotes.includes(branchRow.remote) ? branchRow.remote : null;
-  result.remote = upstreamRemote ?? (remotes.length === 1 ? remotes[0] : null);
+  result.remote = upstreamRemote ?? (remotes.length === 1 ? remotes[0]! : null);
   const short = (full: string) => full.replace(/^refs\/(remotes|heads)\//, "");
 
   let defaultRef: { full: string; source: Comparison["source"] } | null = null;
   if (result.remote) {
-    const symref = rows.get(`refs/remotes/${result.remote}/HEAD`)?.symref;
+    const symref = rows?.get(`refs/remotes/${result.remote}/HEAD`)?.symref;
     if (symref?.startsWith(`refs/remotes/${result.remote}/`))
       defaultRef = { full: symref, source: "remote-default" };
-    else if (rows.has(`refs/remotes/${result.remote}/main`))
+    else if (rows?.has(`refs/remotes/${result.remote}/main`))
       defaultRef = { full: `refs/remotes/${result.remote}/main`, source: "fallback" };
   }
   const upstreamFull =
@@ -396,46 +259,33 @@ async function probe({
 
   // Capture HEAD and every compared ref by object ID; counts use those IDs, never names.
   const targets = [defaultRef?.full, upstreamFull].filter((r): r is string => !!r);
-  // One call in the usual case; only if it fails is HEAD read alone, to tell unborn from unreadable.
-  // `show-ref --head` lists HEAD and whichever targets exist, so one missing target (say a
-  // deleted upstream branch) leaves the other comparison intact. Exact names only.
-  const snapshot = async (): Promise<Map<string, string> | null> => {
-    const out = await call(["show-ref", "--head", ...targets]);
-    if (out === null) return null;
-    const ids = new Map<string, string>();
-    for (const line of out.split(/\r?\n/)) {
-      const [id, name] = line.split(" ");
-      if (name === "HEAD" || targets.includes(name)) ids.set(name, id);
-    }
-    return ids;
-  };
+  // One call in the usual case; only if it fails is HEAD read alone, to tell unborn from
+  // unreadable. A missing target leaves the other comparison intact. Exact names only.
+  let unborn = false;
   const capture = async (): Promise<{ head: string; ids: Map<string, string> } | null> => {
-    const ids = await snapshot();
-    const head = ids?.get("HEAD");
-    if (ids && head) return { head, ids };
-    if (ids === null && timedOut) return null;
-    const proof = await raw(["rev-parse", "--verify", "-q", "HEAD^{commit}"]);
-    if (proof.ok) return { head: proof.stdout, ids: new Map() };
-    unborn = proof.reason === "failed" && proof.code === 1;
+    const ids = await repo.refSnapshot(targets);
+    const headId = ids?.get("HEAD");
+    if (ids && headId) return { head: headId, ids };
+    if (ids === null && repo.state.timedOut) return null;
+    const proof = await repo.headCommit();
+    if (proof && "commit" in proof) return { head: proof.commit, ids: new Map() };
+    // Proven unborn only by `rev-parse --verify -q` exiting 1 on an attached branch.
+    unborn = proof !== null && "unborn" in proof;
     return null;
   };
-  // Proven unborn only by `rev-parse --verify -q` exiting 1 on an attached branch.
-  let unborn = false;
   const first = await capture();
   result.commit = first?.head ?? null;
 
   const compare = async (full: string, source: Comparison["source"]): Promise<Comparison> => {
     const ref = short(full);
     if (result.commit === null) return unknown(ref, source, "no commit checked out", full);
-    if (shallow !== "false") return unknown(ref, source, "shallow or unknown history depth", full);
+    if (shallow !== false) return unknown(ref, source, "shallow or unknown history depth", full);
     const id = first?.ids.get(full);
     if (!id || !/^[0-9a-f]{40,64}$/.test(id))
       return unknown(ref, source, failure("ref missing or unreadable"), full);
-    const counts = await call(["rev-list", "--left-right", "--count", `${id}...${result.commit}`]);
-    const m = /^(\d+)\s+(\d+)$/.exec(counts ?? "");
-    if (!m) return unknown(ref, source, failure("comparison failed"), full);
-    const behind = +m[1];
-    const ahead = +m[2];
+    const counts = await repo.divergence(id, result.commit);
+    if (!counts) return unknown(ref, source, failure("comparison failed"), full);
+    const { behind, ahead } = counts;
     const state =
       behind && ahead ? "diverged" : behind ? "behind" : ahead ? "ahead" : ("equal" as const);
     return { ref, fullRef: full, source, state, behind, ahead };
@@ -446,7 +296,7 @@ async function probe({
     result.comparison = unknown(
       result.remote ? `${result.remote}/main` : "main",
       "fallback",
-      refs === null
+      rows === null
         ? failure("refs unreadable")
         : !remotes.length
           ? "no remote configured"
@@ -459,7 +309,7 @@ async function probe({
   // HEAD or any compared ref moving during collection makes every count unreliable.
   const measured = [result.comparison, result.upstream].some((c) => c && c.state !== "unknown");
   if (result.commit && measured) {
-    const now2 = await snapshot();
+    const now2 = await repo.refSnapshot(targets);
     const key = (m: Map<string, string> | null | undefined) =>
       m ? ["HEAD", ...targets].map((t) => m.get(t) ?? "").join("\n") : null;
     const again = key(now2);
@@ -474,7 +324,7 @@ async function probe({
     }
   }
   if (result.commit === null)
-    result.reason = timedOut
+    result.reason = repo.state.timedOut
       ? "Git timed out"
       : result.branch && unborn
         ? "no commit checked out (unborn HEAD)"
