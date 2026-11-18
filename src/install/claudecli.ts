@@ -12,7 +12,12 @@ import { parseArgs } from "node:util";
 import { homedir } from "node:os";
 import { ConfigError, nodeFileSystem, type GitRunner } from "../config/config.js";
 import type { ConfigRuntime } from "../config/configcli.js";
-import { resolveIdentityTarget, setIdentity, type IdentityTarget } from "../config/identity.js";
+import {
+  readIdentity,
+  resolveIdentityTarget,
+  setIdentity,
+  type IdentityTarget,
+} from "../config/identity.js";
 import { resolveEntry, type Environment } from "../config/harness.js";
 import { createGitService, type GitService } from "../git/service.js";
 import { manifestPath, resolveProjectGitCommonDir, type InstallScope } from "./manifest.js";
@@ -192,6 +197,7 @@ async function prepareIdentity(
   args: ClaudeInstallArguments,
   scope: ClaudeInstallScope,
   runtime: ClaudeRunRuntime,
+  dryRun: boolean,
 ): Promise<IdentityPrepareOutcome> {
   if (args.operation !== "install" || scope.kind !== "project")
     return { entry: null, created: false, refused: null, retry: null };
@@ -216,6 +222,11 @@ async function prepareIdentity(
   }
   const entry = resolution.entry;
   const target: IdentityTarget = { root, repository: scope.repository };
+  // A valid existing identity is preserved unchanged: read the record first and only require a
+  // role (or write) when setup is actually needed (attended-installer identity contract).
+  const existing = await readIdentity(root, entry, fs);
+  if (existing.entryExists && existing.name && existing.triageRole !== null)
+    return { entry, created: false, refused: null, retry: null };
   if (!args.role) {
     return {
       entry: null,
@@ -226,7 +237,7 @@ async function prepareIdentity(
   }
   // Dry-run previews identity setup without writing (setIdentity is the same locked writer
   // `pdb setup identity` uses; it must never run during a --dry-run preview).
-  if (args.dryRun) return { entry, created: false, refused: null, retry: null };
+  if (dryRun) return { entry, created: false, refused: null, retry: null };
   const write = await setIdentity(target, entry, "identity.triage_role", args.role, {
     fs,
     git: runtime.git,
@@ -304,20 +315,34 @@ export async function runClaudeInstall(
   const scope = await resolveClaudeInstallScope(args, runtime);
   const manifestPathForScope = manifestPath(scope, "claude");
   const mcpFile = mcpFileFor(scope);
+  // Confirmation contract: --dry-run always previews; --yes applies directly; otherwise a TTY
+  // shows the preview and asks for confirmation, and a non-TTY without --yes behaves as a dry
+  // run (never writes identity, MCP config or ownership records unconfirmed).
+  let apply = !args.dryRun;
+  if (apply && !args.yes) {
+    if (runtime.confirm) {
+      apply = await runtime.confirm(
+        `Apply pdb ${args.operation} claude in ${scope.kind === "project" ? scope.root : scope.homeDir}?`,
+      );
+    } else {
+      apply = false;
+    }
+  }
+  const dryRun = args.dryRun || !apply;
   // A STDIO install needs the installed pdb-mcp command; refusing here avoids writing a
   // command that cannot run (attended-installer-delivery.md "never a checkout or .mjs helper").
   const pdbMcp =
     args.operation === "install" && args.transport === "stdio"
       ? await resolveInstalledPdbMcp()
       : null;
-  if (!args.dryRun && args.operation === "install" && args.transport === "stdio" && !pdbMcp) {
+  if (!dryRun && args.operation === "install" && args.transport === "stdio" && !pdbMcp) {
     const refused: ClaudeInstallResult = {
       schemaVersion: 1,
       kind: "install-result",
       client: args.client,
       operation: args.operation,
       scope,
-      dryRun: args.dryRun,
+      dryRun,
       items: [
         {
           kind: "mcp",
@@ -365,10 +390,10 @@ export async function runClaudeInstall(
   // Resolve/recover the per-repository identity before writing the project MCP entry so the
   // installed server uses the intended identity (attended-installer-delivery.md). A refusal is
   // reported as a partial outcome, never silently swallowed.
-  const identity = await prepareIdentity(args, scope, runtime);
+  const identity = await prepareIdentity(args, scope, runtime, dryRun);
   const identityEntry = identity.entry;
   let identityItem: ClaudeInstallItem | null = null;
-  if (identity.refused !== null && !args.dryRun) {
+  if (identity.refused !== null && !dryRun) {
     identityItem = {
       kind: "identity",
       file: null,
@@ -392,12 +417,12 @@ export async function runClaudeInstall(
           },
           manifestPath: manifestPathForScope,
           pdbVersion: "0.1.0",
-          dryRun: args.dryRun,
+          dryRun,
         })
       : await uninstallClaudeMcp({
           scope,
           manifestPath: manifestPathForScope,
-          dryRun: args.dryRun,
+          dryRun,
         });
   const mcp = performed.mcp;
   const items: ClaudeInstallItem[] = [
@@ -449,7 +474,7 @@ export async function runClaudeInstall(
     client: args.client,
     operation: args.operation,
     scope,
-    dryRun: args.dryRun,
+    dryRun,
     items,
     status: {
       configured: false,
@@ -461,21 +486,29 @@ export async function runClaudeInstall(
       scope.kind === "project"
         ? "Configured the Claude MCP server for this project (STDIO unless --transport http)."
         : "Configured the Claude MCP server in your user-wide Claude config.",
-      args.dryRun ? "Dry run: remove --dry-run to write." : "",
+      dryRun ? "Dry run: remove --dry-run (or confirm) to write." : "",
       args.transport === "http" ? "HTTP MCP transport is unverified for Claude Code." : "",
       args.operation === "install"
         ? "Claude will start the PDB MCP server on the next session after you approve it."
         : "",
     ].filter(Boolean),
   };
+  // Exit code comes from the requested item outcomes: 0 when everything applied/kept, 2 when any
+  // item was refused, failed, or committed-with-error (partial), matching the installer contract.
+  const exitCode = result.items.some(
+    (i) =>
+      i.outcome === "refused" || i.outcome === "failed" || i.outcome === "committed-with-error",
+  )
+    ? 2
+    : 0;
   if (args.json) {
     await output(JSON.stringify(result, null, 2) + "\n");
-    return 0;
+    return exitCode;
   }
   await output(
     `pdb ${args.operation} claude\nScope: ${scope.kind === "project" ? `project ${scope.repository} at ${scope.root}` : `global ${scope.homeDir}`}\nItems:\n${result.items
       .map((i) => `  ${i.kind} (${i.outcome}${i.code ? `, ${i.code}` : ""}): ${i.message}`)
       .join("\n")}\nNext:\n${result.next.map((n) => `  - ${n}`).join("\n")}\n`,
   );
-  return mcp.code === "CONFLICT" || mcp.outcome === "failed" ? 2 : 0;
+  return exitCode;
 }

@@ -50,6 +50,7 @@ export function buildClaudeMcpEntry(options: {
   url: string | null;
   projectRoot?: string;
   entry?: string | null;
+  platform?: NodeJS.Platform;
 }): Record<string, unknown> {
   if (options.transport === "http") {
     const url = options.url ?? "http://127.0.0.1:4372/mcp";
@@ -60,7 +61,12 @@ export function buildClaudeMcpEntry(options: {
     args.push("--project", options.projectRoot);
     if (options.entry) args.push("--entry", options.entry);
   }
-  return { type: "stdio", command: options.pdbMcp, args };
+  // Windows cannot execute a JavaScript file directly; launch the packaged script through
+  // Node (the same shape the package smoke test uses, scripts/package-test.ts).
+  const platform = options.platform ?? process.platform;
+  const command = platform === "win32" ? process.execPath : options.pdbMcp;
+  const commandArgs = platform === "win32" ? [options.pdbMcp, ...args] : args;
+  return { type: "stdio", command, args: commandArgs };
 }
 
 /** Canonical JSON text of the desired `mcpServers.pdb` entry. */
@@ -70,6 +76,7 @@ export function desiredClaudeMcpEntryText(options: {
   url: string | null;
   projectRoot?: string;
   entry?: string | null;
+  platform?: NodeJS.Platform;
 }): string {
   return JSON.stringify(buildClaudeMcpEntry(options));
 }
