@@ -2049,6 +2049,15 @@ describe("pipeline metrics endpoint (#573 slice 5b)", () => {
         totalOpen: 2,
         stalled: { thresholdHours: 24 },
       });
+      // The assessment-queue view for the same window also reuses the cached read.
+      const aq = await call(s.running.port, "/api/v1/metrics?view=assessment-queue&days=7");
+      expect(aq.status).toBe(200);
+      expect(aq.json.result).toMatchObject({
+        view: "assessment-queue",
+        days: 7,
+      });
+      expect(aq.json.result.metrics.complexity.unassessed.count).toBeTypeOf("number");
+      expect(aq.json.result.metrics.impact.unassessed.count).toBeTypeOf("number");
       expect(counter.n).toBe(before);
     } finally {
       await s.close();
