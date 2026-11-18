@@ -27,7 +27,7 @@ import { assessmentGroups } from "./assessment.js";
 import type { CompletionVerdict } from "./aggregate.js";
 import { ticketLedger } from "./ledger.js";
 import type { LedgerFacts, LedgerPullRequest, LedgerTrust } from "./ledger.js";
-import type { HistoryCoverage, MetricTicket } from "./views.js";
+import type { HistoryCoverage, InventoryFacts, InventoryStage, MetricTicket } from "./views.js";
 import { createGhService } from "../github/service/service.js";
 import type { HistoryIssue } from "../github/service/history.js";
 
@@ -294,12 +294,47 @@ export async function readMetrics(
       },
       rt.trust.comment,
     );
+    let inventory: InventoryFacts | undefined;
+    if (issue.state === "OPEN") {
+      const labelsComplete = issue.labels ? !issue.labels.pageInfo.hasNextPage : false;
+      const labelNames = new Set((issue.labels?.nodes ?? []).map((l) => l.name));
+      const blocked: boolean | null =
+        issue.openBlockers !== null && issue.openBlockers !== undefined
+          ? issue.openBlockers > 0 || labelNames.has("status:blocked")
+          : labelNames.has("status:blocked")
+            ? true
+            : null;
+      const hasOwner = [...labelNames].some((l) => l.startsWith("owner:"));
+      let stage: InventoryStage = "unknown";
+      if (labelsComplete) {
+        if (
+          assessment.complexity.group === "unassessed" ||
+          assessment.impact.group === "unassessed"
+        ) {
+          stage = "unassessed";
+        } else if (labelNames.has("status:awaiting-review")) {
+          stage = "in-review";
+        } else if (hasOwner) {
+          stage = "claimed";
+        } else if (blocked === true) {
+          stage = "blocked";
+        } else if (labelNames.has("status:ready") || labelNames.has("status:incomplete")) {
+          stage = "ready";
+        }
+      }
+      const waiting: boolean | null =
+        commentsComplete && !comments.some((c) => c.body.includes("github-triage:claim-activity"))
+          ? false
+          : null;
+      inventory = { stage, createdAt: issue.createdAt, blocked, waiting };
+    }
     tickets.push({
       member: member(issue.number),
       ledger,
       verdict: verdictOf(evaluateDelivery(facts).delivery),
       complexity: assessment.complexity.group,
       assessment,
+      ...(inventory ? { inventory } : {}),
     });
   }
   if (skipped.length)
