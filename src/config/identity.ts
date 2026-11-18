@@ -28,13 +28,9 @@
 
 import { dirname, isAbsolute, join } from "node:path";
 import { stringify } from "smol-toml";
-import {
-  ConfigError,
-  githubRepositories,
-  nodeFileSystem,
-  nodeGit,
-  parseTomlTable,
-} from "./config.js";
+import { ConfigError, nodeFileSystem, parseTomlTable } from "./config.js";
+import { createGitService, GitError } from "../git/service.js";
+import type { GitService } from "../git/service.js";
 import type { ConfigFileSystem, GitRunner } from "./config.js";
 import { acquireFileLock, releaseProblem, type LockFs, type LockTiming } from "./filelock.js";
 
@@ -145,12 +141,15 @@ export interface IdentityTarget {
 export async function resolveIdentityTarget(
   cwd: string,
   repository: string | undefined,
-  git: GitRunner = nodeGit,
+  git?: GitService | GitRunner,
 ): Promise<IdentityTarget> {
+  // The typed Git service (#910): checkout root and remotes, parsed behind the facade.
+  const service = gitServiceOf(git);
   let root = "";
   try {
-    root = (await git(["rev-parse", "--show-toplevel"], cwd)).trim();
-  } catch {
+    root = (await service.workingTreeRoot({ cwd })) ?? "";
+  } catch (error) {
+    if (error instanceof GitError && error.code === "cancelled") throw error;
     root = "";
   }
   if (!root) {
@@ -161,14 +160,17 @@ export async function resolveIdentityTarget(
     );
   }
   if (repository === undefined) return { root, repository: null };
-  let remotes = "";
+  let repositories: string[] = [];
   try {
-    remotes = await git(["remote", "-v"], root);
-  } catch {
-    remotes = "";
+    repositories = (await service.remotes({ cwd: root })).flatMap((r) =>
+      r.repository ? [r.repository.toLowerCase()] : [],
+    );
+  } catch (error) {
+    if (error instanceof GitError && error.code === "cancelled") throw error;
+    repositories = [];
   }
   const wanted = repository.toLowerCase();
-  if (!githubRepositories(remotes).includes(wanted)) {
+  if (!repositories.includes(wanted)) {
     throw new ConfigError(
       "repository-mismatch",
       `The current checkout is not ${repository}; its local identity file cannot be selected by --repo alone.`,
@@ -497,7 +499,7 @@ export async function lookupIdentity(options: {
   readonly cwd: string;
   readonly entry: string;
   readonly repository?: string;
-  readonly git?: GitRunner;
+  readonly git?: GitService | GitRunner;
   readonly fs?: ConfigFileSystem;
 }): Promise<IdentityRecord & { readonly repository: string | null }> {
   const target = await resolveIdentityTarget(options.cwd, options.repository, options.git);
@@ -612,28 +614,32 @@ function namesInUse(document: Table | null, except: string, taken = new Set<stri
   return taken;
 }
 
-/** Exit code of a Git command: 0 on success, the process exit code on failure, else null. */
-async function gitStatus(git: GitRunner, args: readonly string[], cwd: string) {
+/** A typed Git answer, or null when Git could not answer (unknown is never "no"). */
+async function known(answer: () => Promise<boolean>): Promise<boolean | null> {
   try {
-    await git(args, cwd);
-    return 0;
+    return await answer();
   } catch (error) {
-    const code = (error as { code?: unknown }).code;
-    return typeof code === "number" ? code : null;
+    if (error instanceof GitError && error.code === "cancelled") throw error;
+    return null;
   }
+}
+
+/** The typed Git service for a caller's injection: a shared service, a legacy runner, or none. */
+export function gitServiceOf(git?: GitService | GitRunner): GitService {
+  return typeof git === "object" ? git : createGitService(typeof git === "function" ? { git } : {});
 }
 
 /** Git standing of an identity file (pdb.toml by default): tracked, ignored, or neither. */
 export async function identityGitState(
   root: string,
-  git: GitRunner = nodeGit,
+  git?: GitService | GitRunner,
   file: string = IDENTITY_FILE,
 ): Promise<{ tracked: boolean | null; ignored: boolean | null }> {
-  const tracked = await gitStatus(git, ["ls-files", "--error-unmatch", "--", file], root);
-  const ignored = await gitStatus(git, ["check-ignore", "--quiet", "--no-index", file], root);
+  const service = gitServiceOf(git);
+  const context = { cwd: root };
   return {
-    tracked: tracked === 0 ? true : tracked === 1 ? false : null,
-    ignored: ignored === 0 ? true : ignored === 1 ? false : null,
+    tracked: await known(() => service.isTracked(context, file)),
+    ignored: await known(() => service.isIgnored(context, file)),
   };
 }
 
@@ -658,9 +664,12 @@ export const IDENTITY_LOCK_TIMING: LockTiming = {
 /** Root-relative temporary copy name; always matched by `TEMPORARY_RULE`. */
 export const temporaryIdentityName = (token: string): string => `${IDENTITY_FILE}.${token}.tmp`;
 
-async function ignoredByGit(git: GitRunner, root: string, name: string): Promise<boolean | null> {
-  const status = await gitStatus(git, ["check-ignore", "--quiet", "--no-index", name], root);
-  return status === 0 ? true : status === 1 ? false : null;
+async function ignoredByGit(
+  git: GitService | GitRunner,
+  root: string,
+  name: string,
+): Promise<boolean | null> {
+  return known(() => gitServiceOf(git).isIgnored({ cwd: root }, name));
 }
 
 /**
@@ -675,7 +684,7 @@ async function ignoredByGit(git: GitRunner, root: string, name: string): Promise
  */
 export async function ensureExcluded(
   root: string,
-  git: GitRunner,
+  git: GitService | GitRunner,
   fs: ConfigFileSystem,
   temporaryName: string,
 ): Promise<boolean> {
@@ -714,7 +723,13 @@ export async function ensureExcluded(
       `Add ${missing.join(" and ")} to .git/info/exclude yourself, then retry.`,
     );
   }
-  let excludePath = (await git(["rev-parse", "--git-path", "info/exclude"], root)).trim();
+  let excludePath = await gitServiceOf(git).gitPath({ cwd: root }, "info/exclude");
+  if (!excludePath)
+    throw new ConfigError(
+      "filesystem",
+      `Could not locate this checkout's info/exclude file; nothing was written.`,
+      `Add the rules to .git/info/exclude yourself, then retry.`,
+    );
   if (!isAbsolute(excludePath)) excludePath = join(root, excludePath);
   const existing = (await fs.readText(excludePath)) ?? "";
   const lines = existing.split(/\r?\n/);
@@ -763,7 +778,7 @@ function assertLosslessRewrite(raw: string | null, text: string): void {
 
 export interface IdentityWriteOptions {
   readonly fs?: ConfigFileSystem;
-  readonly git?: GitRunner;
+  readonly git?: GitService | GitRunner;
   /** Random source for name generation; injected for deterministic tests. */
   readonly random?: () => number;
   /** Unique temporary-file suffix; injected for deterministic tests. */
@@ -932,7 +947,7 @@ async function readLegacyImport(
   root: string,
   entry: string,
   fs: ConfigFileSystem,
-  git: GitRunner,
+  git: GitService | GitRunner,
 ): Promise<{ found: LegacyImport | null; document: Table | null }> {
   const path = join(root, LEGACY_IDENTITY_FILE);
   let raw: string | null;
@@ -1025,7 +1040,7 @@ export async function setIdentity(
   const field = identityKey(key).field;
   validateIdentityValue(key, value);
   const fs = options.fs ?? nodeFileSystem;
-  const git = options.git ?? nodeGit;
+  const git = gitServiceOf(options.git);
   const token =
     options.token ?? (() => `${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}`);
   const path = join(target.root, IDENTITY_FILE);
