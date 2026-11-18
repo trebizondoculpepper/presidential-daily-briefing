@@ -23,3 +23,5 @@ under their existing TypeScript validation boundary. Link an accepted decision
 from architecture or its detailed contract; do not copy competing policy here.
 
 - [Bounded logging package check](local-logging.md): standard daily rotation/retention and audit-acknowledgement limits.
+
+- [GitHub conflict editor investigation](github-conflict-editor.md): observed ruleset/head permissions versus the separate branch-update setting; historical disabled-button cause remains unconfirmed.
