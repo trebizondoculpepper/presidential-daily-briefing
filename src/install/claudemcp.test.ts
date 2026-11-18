@@ -33,6 +33,35 @@ describe("Claude MCP install/uninstall (#769, attended-installer-delivery.md)", 
     ).toBe(JSON.stringify({ type: "stdio", command: pdbMcp, args: ["--project", "/w"] }));
   });
 
+  it("launches the packaged MCP script through Node on Windows (#970 finding)", () => {
+    const execPath = "/usr/bin/node";
+    const original = process.execPath;
+    (process as NodeJS.Process & { execPath: string }).execPath = execPath;
+    try {
+      expect(
+        buildClaudeMcpEntry({
+          pdbMcp,
+          transport: "stdio",
+          url: null,
+          projectRoot: "/w",
+          platform: "win32",
+        }),
+      ).toEqual({ type: "stdio", command: execPath, args: [pdbMcp, "--project", "/w"] });
+      // Non-Windows keeps the packaged script as the command.
+      expect(
+        buildClaudeMcpEntry({
+          pdbMcp,
+          transport: "stdio",
+          url: null,
+          projectRoot: "/w",
+          platform: "linux",
+        }),
+      ).toEqual({ type: "stdio", command: pdbMcp, args: ["--project", "/w"] });
+    } finally {
+      (process as NodeJS.Process & { execPath: string }).execPath = original;
+    }
+  });
+
   it("installs a project .mcp.json MCP entry, rounds trip, and uninstalls it", async () => {
     const dir = await mkdtemp(join(tmpdir(), "pdb-claude-install-"));
     try {
