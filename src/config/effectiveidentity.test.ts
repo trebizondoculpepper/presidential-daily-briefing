@@ -409,7 +409,7 @@ describe("effective identity preparation (#677)", () => {
             allocations++;
             return f.random();
           },
-          git: async (args, cwd) => (args[0] === "ls-files" ? "pdb.toml\n" : f.git(args, cwd)),
+          git: async (args, cwd) => (args.includes("ls-files") ? "pdb.toml\n" : f.git(args, cwd)),
         },
       );
       expect(result.state).toBe("failed");

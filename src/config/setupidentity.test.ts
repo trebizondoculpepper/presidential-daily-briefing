@@ -39,7 +39,7 @@ function setup(initial?: string, env: Record<string, string> = { CLAUDECODE: "1"
     if (args[0] === "rev-parse" && args[1] === "--show-toplevel") return `${root}\n`;
     if (args[0] === "rev-parse" && args[1] === "--git-path") return ".git/info/exclude\n";
     if (args[0] === "remote") return "origin\thttps://github.com/owner/name.git (fetch)\n";
-    if (args[0] === "ls-files") throw fail(1);
+    if (args.includes("ls-files")) throw fail(1);
     if (args[0] === "check-ignore") {
       const rules = (files.get(exclude) ?? "").split("\n");
       const name = args.at(-1)!;
