@@ -6,7 +6,8 @@
  * remaining capability groups arrive with their migration tickets (#878-#891).
  */
 
-import { ghQueryFailure } from "../github.js";
+import { ghQueryFailure, ghRest, permissionLookup } from "../github.js";
+import type { PermissionLookup, Rest } from "../github.js";
 import { execFileTransport } from "./transport.js";
 import type { GhTransport } from "./transport.js";
 import { repositoryFromCheckout, throwIfCancelled } from "./repository.js";
@@ -27,6 +28,11 @@ export interface GhService {
      * and its own configuration) followed by a repository lookup, not a single API call.
      */
     fromCheckout(cwd?: string, signal?: AbortSignal): Promise<string>;
+    /**
+     * A cached lookup of a login's permission on the repository:
+     * `GET /repos/{owner}/{repo}/collaborators/{login}/permission`. Unknown, never guessed.
+     */
+    permissionOf(repository: string, signal?: AbortSignal): PermissionLookup;
   };
 }
 
@@ -34,6 +40,8 @@ export interface GhServiceOptions {
   transport?: GhTransport;
   /** The environment gh itself reads (GH_HOST selects the host); injected for isolation. */
   env?: NodeJS.ProcessEnv;
+  /** The REST reader behind REST capabilities (production: ghRest); injected for tests and serve. */
+  rest?: Rest;
 }
 
 const LOGIN = /^[\w.-]+$/;
@@ -41,6 +49,7 @@ const LOGIN = /^[\w.-]+$/;
 export function createGhService(options: GhServiceOptions = {}): GhService {
   const transport = options.transport ?? execFileTransport;
   const env = options.env ?? process.env;
+  const rest = options.rest ?? ghRest;
   return {
     account: {
       async current(signal) {
@@ -78,6 +87,9 @@ export function createGhService(options: GhServiceOptions = {}): GhService {
     repos: {
       fromCheckout(cwd, signal) {
         return repositoryFromCheckout(transport, cwd, signal, env);
+      },
+      permissionOf(repository, signal) {
+        return permissionLookup(repository, rest, signal);
       },
     },
   };
