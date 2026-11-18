@@ -12,6 +12,7 @@ import { identitySelection, identitySelectionOptions } from "../config/commandid
  * only ever made on fresh evidence and a retry completes only what is missing.
  */
 import { deliverableIssue, olderCommentsPage, pullByUrl } from "../github/service/delivery.js";
+import { issueWrites, WRITE } from "../github/service/issuewrites.js";
 import type { LivePr } from "../github/service/delivery.js";
 import { parseArgs } from "node:util";
 import { workflow } from "./definition.js";
@@ -1514,7 +1515,7 @@ export async function applyDeliverables(
     const step: PlanStep = { ...next, status: "pending" };
     steps.push(step);
     try {
-      await rt.run(step.command, {
+      const call = {
         guard: ticketGuard(repository, request.number, rt.query),
         // After a throttle wait, re-run this command's own prerequisite reads (PR states, the
         // delivery fold, readiness): retry only if the fresh plan still makes this exact write.
@@ -1527,7 +1528,12 @@ export async function applyDeliverables(
             ? null
             : "the delivery prerequisites changed during the wait";
         },
-      });
+      };
+      // The typed write (#943) through the shared gh write boundary; a caller-built step without
+      // one still dispatches its command.
+      const op = step[WRITE];
+      if (op) await issueWrites(rt.run).apply(op, call);
+      else await rt.run(step.command, call);
       step.status = "done";
       if (step.step === "record" && plan.record) posted = { plan, record: plan.record };
     } catch (error) {
