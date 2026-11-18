@@ -78,6 +78,10 @@ export interface ServeRuntime {
    * serves only the explicit targets.
    */
   globalConfig?: GlobalConfigBoundary;
+  /** Environment used to resolve the per-OS-user configuration directory (#818). */
+  configEnv?: NodeJS.ProcessEnv;
+  /** Filesystem boundary for the configuration page's reads (#818). */
+  configFs?: ConfigFileSystem;
   /** Resolve a local checkout to its owner/name (startup only). */
   currentRepository: (cwd?: string, signal?: AbortSignal) => Promise<string>;
   /** The gh host and login (startup, and before live collections at most once per TTL). */
