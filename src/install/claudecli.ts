@@ -10,9 +10,11 @@
  */
 import { parseArgs } from "node:util";
 import { homedir } from "node:os";
-import { ConfigError } from "../config/config.js";
+import { ConfigError, nodeFileSystem, type GitRunner } from "../config/config.js";
 import type { ConfigRuntime } from "../config/configcli.js";
-import { resolveIdentityTarget } from "../config/identity.js";
+import { resolveIdentityTarget, setIdentity, type IdentityTarget } from "../config/identity.js";
+import { resolveEntry, type Environment } from "../config/harness.js";
+import { createGitService, type GitService } from "../git/service.js";
 import { manifestPath, resolveProjectGitCommonDir, type InstallScope } from "./manifest.js";
 import type { InstallEditErrorCode, InstallEditOutcome, InstallItemKind } from "./manifest.js";
 import { installClaudeMcp, resolveInstalledPdbMcp, uninstallClaudeMcp } from "./claudemcp.js";
@@ -30,6 +32,9 @@ export type ClaudeInstallErrorCode =
   | "LOCKED"
   | "HOOK_NOT_AVAILABLE";
 
+/** Installer item kinds: the managed native entries plus the identity preparation outcome. */
+export type ClaudeInstallItemKind = InstallItemKind | "identity";
+
 export type ClaudeInstallItemAction =
   | "create"
   | "replace"
@@ -40,7 +45,7 @@ export type ClaudeInstallItemAction =
 export type ClaudeInstallItemOutcome = InstallEditOutcome | "not-attempted";
 
 export interface ClaudeInstallItem {
-  kind: InstallItemKind;
+  kind: ClaudeInstallItemKind;
   file: string | null;
   action: ClaudeInstallItemAction;
   outcome: ClaudeInstallItemOutcome;
@@ -160,6 +165,83 @@ function resolveHome(path: string, homeDir: string): string {
   return path;
 }
 
+/** The typed Git service over the injected runner (or the node default when absent). */
+function gitService(git: GitRunner | undefined): GitService {
+  return createGitService(git === undefined ? {} : { git });
+}
+
+export interface IdentityPrepareOutcome {
+  /** The resolved logical entry key, or null when none was set up (uninstall or global). */
+  entry: string | null;
+  /** Whether a new identity was created for this install. */
+  created: boolean;
+  /** A refusal message when identity could not be prepared; null otherwise. */
+  refused: string | null;
+  /** Exact retry command, when refused. */
+  retry: string | null;
+}
+
+/**
+ * Resolve/recover the per-repository identity for a project install (attended-installer-delivery.md
+ * "Project setup reuses identity resolution/allocation"). A valid existing entry is kept; a missing
+ * entry is initialized through the same locked writer `pdb setup identity` uses, with `--role`.
+ * Global scope and uninstall never invent an identity. Non-interactive installs without `--role`
+ * refuse rather than guessing.
+ */
+async function prepareIdentity(
+  args: ClaudeInstallArguments,
+  scope: ClaudeInstallScope,
+  runtime: ClaudeRunRuntime,
+): Promise<IdentityPrepareOutcome> {
+  if (args.operation !== "install" || scope.kind !== "project")
+    return { entry: null, created: false, refused: null, retry: null };
+  const env: Environment = runtime.env ?? process.env;
+  const fs = runtime.fs ?? nodeFileSystem;
+  const root = scope.root;
+  const resolution = await resolveEntry({
+    entry: args.entry ?? undefined,
+    harness: args.harness ?? undefined,
+    env,
+    root,
+    fs,
+  });
+  if (resolution.status === "unresolved") {
+    const flags = `--entry KEY${args.repo ? ` --repo ${args.repo}` : ""}`;
+    return {
+      entry: null,
+      created: false,
+      refused: resolution.message,
+      retry: `pdb setup identity --role implementer|designer ${flags.trim()}`,
+    };
+  }
+  const entry = resolution.entry;
+  const target: IdentityTarget = { root, repository: scope.repository };
+  if (!args.role) {
+    return {
+      entry: null,
+      created: false,
+      refused: "IDENTITY_REQUIRED: a role is needed to set up a missing identity.",
+      retry: `pdb install claude --role implementer|designer --entry ${entry}${args.repo ? ` --repo ${args.repo}` : ""}`,
+    };
+  }
+  // Dry-run previews identity setup without writing (setIdentity is the same locked writer
+  // `pdb setup identity` uses; it must never run during a --dry-run preview).
+  if (args.dryRun) return { entry, created: false, refused: null, retry: null };
+  const write = await setIdentity(target, entry, "identity.triage_role", args.role, {
+    fs,
+    git: runtime.git,
+    requireName: true,
+  });
+  if (!write.record.name)
+    return {
+      entry: null,
+      created: false,
+      refused: `IDENTITY_REQUIRED: entry [agents.${entry}] has no valid name.`,
+      retry: `pdb config set identity.name NAME --entry ${entry}`,
+    };
+  return { entry, created: write.createdEntry || write.changed, refused: null, retry: null };
+}
+
 /** Resolve the installer scope: project root (default) or user-wide Claude config (--global). */
 export async function resolveClaudeInstallScope(
   args: ClaudeInstallArguments,
@@ -172,19 +254,30 @@ export async function resolveClaudeInstallScope(
     return { kind: "global", stateDir: home, homeDir: home };
   }
   try {
-    const target = await resolveIdentityTarget(
-      runtime.cwd ?? process.cwd(),
-      args.repo ?? undefined,
-      runtime.git,
-    );
-    if (!target.root) throw new Error("NO_PROJECT: no Git working-tree root.");
-    const root = target.root;
-    const repository = target.repository ?? args.repo ?? "";
+    // Resolve the verified working-tree root first (never a parent or global fallback).
+    const git = runtime.git;
+    const cwd = runtime.cwd ?? process.cwd();
+    const root = await gitService(git).workingTreeRoot({ cwd });
+    if (!root) throw new Error("NO_PROJECT: no Git working-tree root.");
+    // With --repo, verify the checkout matches it; without one, derive the repository from the
+    // checkout's own remotes (a CheckoutIdentity requires exactly one trusted GitHub remote).
+    let repository: string | null;
+    if (args.repo !== null && args.repo !== undefined) {
+      try {
+        repository = (await resolveIdentityTarget(cwd, args.repo, git)).repository;
+      } catch (error) {
+        if (error instanceof ConfigError) throw new Error(`NO_PROJECT: ${error.message}`);
+        throw error;
+      }
+    } else {
+      const identity = await gitService(git).checkout({ cwd: root });
+      repository = identity ? identity.repository : null;
+    }
     if (!repository)
       throw new Error(
-        "NO_PROJECT: the repository could not be resolved; run from the checkout or pass --repo owner/name.",
+        "NO_PROJECT: the repository could not be resolved; run from a checkout with a single GitHub remote or pass --repo owner/name.",
       );
-    const gitCommonDir = await resolveProjectGitCommonDir(root, runtime.git);
+    const gitCommonDir = await resolveProjectGitCommonDir(root, git);
     return { kind: "project", root, repository, gitCommonDir };
   } catch (error) {
     if (error instanceof ConfigError) throw new Error(`NO_PROJECT: ${error.message}`);
@@ -269,6 +362,24 @@ export async function runClaudeInstall(
       );
     return 2;
   }
+  // Resolve/recover the per-repository identity before writing the project MCP entry so the
+  // installed server uses the intended identity (attended-installer-delivery.md). A refusal is
+  // reported as a partial outcome, never silently swallowed.
+  const identity = await prepareIdentity(args, scope, runtime);
+  const identityEntry = identity.entry;
+  let identityItem: ClaudeInstallItem | null = null;
+  if (identity.refused !== null && !args.dryRun) {
+    identityItem = {
+      kind: "identity",
+      file: null,
+      action: "kept",
+      outcome: "refused",
+      code: "IDENTITY_REQUIRED",
+      message: identity.refused,
+      diff: null,
+      retry: identity.retry,
+    };
+  }
   const performed =
     args.operation === "install"
       ? await installClaudeMcp({
@@ -276,7 +387,7 @@ export async function runClaudeInstall(
           options: {
             transport: args.transport,
             url: args.url,
-            entry: args.entry,
+            entry: identityEntry ?? args.entry,
             projectRoot: scope.kind === "project" ? scope.root : undefined,
           },
           manifestPath: manifestPathForScope,
@@ -290,6 +401,24 @@ export async function runClaudeInstall(
         });
   const mcp = performed.mcp;
   const items: ClaudeInstallItem[] = [
+    ...(identityItem
+      ? [identityItem]
+      : identityEntry && scope.kind === "project" && args.operation === "install"
+        ? [
+            {
+              kind: "identity" as const,
+              file: null,
+              action: "kept" as const,
+              outcome: identity.created ? ("applied" as const) : ("kept" as const),
+              code: null,
+              message: identity.created
+                ? `Setup/reused identity entry [agents.${identityEntry}] for this repository.`
+                : `Using existing identity entry [agents.${identityEntry}] for this repository.`,
+              diff: null,
+              retry: null,
+            },
+          ]
+        : []),
     {
       kind: "mcp",
       file: mcpFile,
