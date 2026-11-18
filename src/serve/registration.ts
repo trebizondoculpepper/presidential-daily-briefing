@@ -129,6 +129,51 @@ async function workingRoot(git: GitService, path: string): Promise<string | null
   }
 }
 
+/** A saved local root, verified against its repository before serving. */
+export interface SavedRootVerification {
+  /**
+   * The root to serve, or undefined to serve the repository without a local project when the
+   * saved root is missing or now belongs to another repository.
+   */
+  readonly project: string | undefined;
+  /** Non-fatal reason the root was not served as saved, when there is one. */
+  readonly diagnostic?: string;
+}
+
+/**
+ * Verify a saved registration's local root against its repository, exactly as the startup loop
+ * does (#805): a missing root and a root that now belongs to another repository serve the
+ * repository without a local project; a root whose identity cannot be read right now is kept as
+ * saved, so a network blip never drops a registration. Shared by startup registration and live
+ * application (#808), so a live reload and a fresh start agree on a moved checkout.
+ */
+export async function verifySavedRoot(
+  repository: string,
+  root: string,
+  runtime: RegistrationRuntime,
+): Promise<SavedRootVerification> {
+  let present = true;
+  const git = typedGit(runtime);
+  if (git) present = (await workingRoot(git, root)) !== null;
+  if (!present)
+    return {
+      project: undefined,
+      diagnostic: `saved project ${root} for ${repository} is missing or no longer a Git checkout; serving ${repository} without a local project. Re-register it with pdb config set serve.projects, or start the server with --project PATH.`,
+    };
+  const resolved = await checkoutRepository(root, runtime);
+  if (resolved === null)
+    return {
+      project: root,
+      diagnostic: `saved project ${root} could not be identified as ${repository} right now (gh or the network did not answer); serving it as saved. Check gh auth status if this persists.`,
+    };
+  if (resolved.toLowerCase() !== repository.toLowerCase())
+    return {
+      project: undefined,
+      diagnostic: `saved project ${root} is now ${resolved || "not a GitHub repository"}, not ${repository}; serving ${repository} without that local project. Update the registration with pdb config set serve.projects, or start the server with --project PATH.`,
+    };
+  return { project: root };
+}
+
 async function checkoutRepository(
   root: string,
   runtime: RegistrationRuntime,
@@ -262,42 +307,22 @@ export async function resolveServeProjects(
       saved.push(entry);
       continue;
     }
-    const saved_without_root = (message: string): void => {
-      diagnostics.push(message);
-      saved.push({ ...entry, localRoot: undefined });
-      served.add(entry.repository, undefined, "the saved registration");
-    };
     if (root === undefined) {
       saved.push(entry);
       served.add(entry.repository, undefined, "the saved registration");
       continue;
     }
-    let present = true;
-    const git = typedGit(runtime);
-    if (git) present = (await workingRoot(git, root)) !== null;
-    if (!present) {
-      saved_without_root(
-        `saved project ${root} for ${entry.repository} is missing or no longer a Git checkout; serving ${entry.repository} without a local project. Re-register it with pdb config set serve.projects, or start the server with --project PATH.`,
-      );
-      continue;
-    }
-    const resolved = await checkoutRepository(root, runtime);
-    if (resolved === null) {
-      diagnostics.push(
-        `saved project ${root} could not be identified as ${entry.repository} right now (gh or the network did not answer); serving it as saved. Check gh auth status if this persists.`,
-      );
+    const verified = await verifySavedRoot(entry.repository, root, runtime);
+    if (verified.diagnostic !== undefined) diagnostics.push(verified.diagnostic);
+    if (verified.project !== undefined) {
       saved.push(entry);
-      served.add(entry.repository, root, "the saved registration");
-      continue;
+      served.add(entry.repository, verified.project, "the saved registration");
+    } else {
+      // The verification result is a repo-only serving decision; the diagnostic (if any) was
+      // already recorded above, so only the membership changes here.
+      saved.push({ ...entry, localRoot: undefined });
+      served.add(entry.repository, undefined, "the saved registration");
     }
-    if (resolved.toLowerCase() !== entry.repository.toLowerCase()) {
-      saved_without_root(
-        `saved project ${root} is now ${resolved || "not a GitHub repository"}, not ${entry.repository}; serving ${entry.repository} without that local project. Update the registration with pdb config set serve.projects, or start the server with --project PATH.`,
-      );
-      continue;
-    }
-    saved.push(entry);
-    served.add(entry.repository, root, "the saved registration");
   }
 
   // Explicit targets: a repo-only entry never erases a saved local root, and a verified root

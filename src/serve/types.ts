@@ -12,7 +12,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { ReadRuntime } from "../briefing/service.js";
 import type { ConfigFileSystem, GitRunner } from "../config/config.js";
 import type { GitService } from "../git/service.js";
-import type { GlobalConfigFileSystem } from "../config/globalconfig.js";
+import type { GlobalConfigFileSystem, LoadedGlobalConfig } from "../config/globalconfig.js";
 import type { Environment } from "../config/harness.js";
 import type { dependencyReport as DependencyReportFn } from "../github/dependencies.js";
 import type {
@@ -23,6 +23,7 @@ import type {
 } from "../github/github.js";
 import type { Clock } from "../mcp/polling.js";
 import type { RulesPageRuntime } from "./rules-page.js";
+import type { ApplicationState } from "./appstate.js";
 
 /** The gh account every collection runs as: host and login only, never a token. */
 export interface AuthContext {
@@ -135,6 +136,26 @@ export interface ServerFacts {
   served: ServedRepository[];
   ttlMs: number;
   auth: AuthContext;
+  /**
+   * The application state (#816): startup/applied/saved snapshots and their live-versus-restart
+   * consequences. Created once when the server starts with a verified global configuration
+   * boundary; absent otherwise (live application is unavailable then).
+   */
+  applicationState?: ApplicationState;
+  /**
+   * Request-context generation (#808): bumped once per successful live configuration
+   * application, and read at selection and again before responding so a read that started for
+   * one context can never deliver facts collected for an obsolete one.
+   */
+  contextVersion?: { value: number };
+  /**
+   * Per-repository context revisions (#808): keyed by canonical repository, incremented on
+   * every live application that changed or removed that repository. Carried through selection,
+   * identity resolution and response delivery so an A → B → A transition still rejects an
+   * in-flight read whose identity was resolved for the obsolete B window, even though the path
+   * equality check alone would accept the restored A context.
+   */
+  contextRevisions?: Map<string, number>;
 }
 
 /** Per-request context handed to routes. */
@@ -165,6 +186,18 @@ export interface ServeServices {
   status?: StatusSource;
   /** Close long-lived resources (in-flight collections, MCP sessions) during shutdown. */
   close?: () => Promise<void>;
+  /**
+   * Live configuration application (#808). Present when this build owns the cache and can
+   * invalidate it; `startServe` uses it to implement `RunningServer.applyLiveConfiguration`.
+   */
+  live?: {
+    /**
+     * Reconcile and apply a fresh saved configuration against the served set and invalidate
+     * changed/removed contexts through the cache. The implementation owns cache invalidation per
+     * repository and per dependency collector, and records the outcome in the application state.
+     */
+    apply(saved: LoadedGlobalConfig): Promise<import("./liveapp.js").LiveApplicationResult>;
+  };
 }
 
 /** Builds the services from the startup facts (bound URL, served set, auth context). */
@@ -174,6 +207,13 @@ export type ServeExtensions = (facts: ServerFacts) => ServeServices;
 export interface RunningServer {
   facts: ServerFacts;
   port: number;
+  /**
+   * Apply a fresh saved global configuration to the running server (#808): reconcile the served
+   * set from the saved registrations, invalidate changed/removed contexts and request-context
+   * generations, and record the applied keys in the application state. Resolves with the applied
+   * result. Absent (or rejecting) when live application is not available in this build.
+   */
+  applyLiveConfiguration?(config: LoadedGlobalConfig): Promise<unknown>;
   /** Graceful shutdown; resolves once every connection is closed. Idempotent. */
   close(): Promise<void>;
   /** Resolves when shutdown completes. */

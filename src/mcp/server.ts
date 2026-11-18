@@ -131,12 +131,18 @@ export interface McpRuntime extends ReadRuntime {
     runtime?: Partial<ReadRuntime>;
   };
   /**
+   * `pdb serve` (#808): this repository's live context revision, bumped on every application
+   * that changed or removed it. A call that resolved identity while the revision advanced must
+   * be refused, even when an A -> B -> A transition restores the matching path.
+   */
+  contextRevision?: (repository: string) => number;
+  /**
    * `pdb serve`: run one call's read and report the freshness of the cached reads it made,
    * added to the bounded envelope as `freshness.cache`. Absent (stdio) means no cache.
    */
   track?: <T>(work: () => Promise<T>) => Promise<{ value: T; freshness: CallFreshness | null }>;
-  /** Further local directories to redact (served projects). */
-  localProjects?: readonly string[];
+  /** Further local directories to redact (served projects), refreshed live with #808. */
+  localProjects?: () => readonly string[];
 }
 
 /** Freshness of a cached read as `pdb serve` reports it. */
@@ -543,6 +549,11 @@ export function createServer(
       if (!repoPattern.test(repository)) throw new Failure("repository-unresolved");
     }
     if (signal.aborted) throw new Failure("cancelled");
+    // #808: this repository's context revision when selection/resolution began. If a live
+    // application changes the context while identity resolution is pending, the resolved
+    // identity may describe the old context even when an A -> B -> A transition restores the
+    // matching path; every application that changed or removed the repository advances it.
+    const revisionAtStart = runtime.contextRevision?.(repository) ?? 0;
     const effectiveIdentity = await runtime.identitySession?.read(project, repository);
     // Verified Ori client names can select read-only display focus; they never bind execution.
     const clientEntry = detectClientEntry(server.server.getClientVersion()?.name ?? "");
@@ -570,6 +581,31 @@ export function createServer(
             fs: runtime.fs,
           });
     if (signal.aborted) throw new Failure("cancelled");
+    // #808: re-validate the selected context after identity resolution. A live configuration
+    // application may have changed or removed the repository while identity resolved; starting
+    // a collection under the old project and identity must be refused (same guard as the JSON
+    // API), so obsolete facts are never returned as fresh. Revalidate the *resolved* repository:
+    // adding an unrelated registration must not disturb an in-flight read whose own context is
+    // unchanged (a default selection would otherwise become ambiguous after the addition).
+    if (runtime.served) {
+      // The repository's context revision must not have advanced while identity resolved: an
+      // A -> B -> A transition restores the matching path but still invalidates the resolved
+      // identity (the guard is a revision carried through selection, not path equality alone).
+      if ((runtime.contextRevision?.(repository) ?? 0) !== revisionAtStart)
+        throw new Failure("repository-not-served");
+      let still: { repository: string; project?: string } | undefined;
+      try {
+        still = runtime.served(repository);
+      } catch {
+        // Removed or unresolvable: treated as not served below.
+      }
+      if (
+        !still ||
+        still.repository.toLowerCase() !== repository.toLowerCase() ||
+        (still.project ?? null) !== (project ?? null)
+      )
+        throw new Failure("repository-not-served");
+    }
     if (effectiveIdentity)
       callReader = {
         ...callReader,
@@ -630,7 +666,7 @@ export function createServer(
         : { value: await work(), freshness: null };
       if (signal.aborted) throw new Failure("cancelled");
       // Diagnostics (e.g. config errors) can name local directories; never return them.
-      const known = localPaths(options.project, ...(runtime.localProjects ?? []));
+      const known = localPaths(options.project, ...(runtime.localProjects?.() ?? []));
       const redact = <T>(value: T): T => redactPaths(value, known);
       // The INCOMPLETE notice is added by boundedResult from the view's final status.
       const notices = identityNotice(selection)
@@ -694,7 +730,7 @@ export function createServer(
             ? plain(
                 redactPaths(
                   effectiveIdentity,
-                  localPaths(options.project, ...(runtime.localProjects ?? [])),
+                  localPaths(options.project, ...(runtime.localProjects?.() ?? [])),
                 ),
               )
             : undefined,
@@ -956,7 +992,7 @@ export function createServer(
                   effectiveIdentity: plain(
                     redactPaths(
                       effectiveIdentity,
-                      localPaths(options.project, ...(runtime.localProjects ?? [])),
+                      localPaths(options.project, ...(runtime.localProjects?.() ?? [])),
                     ),
                   ),
                 }

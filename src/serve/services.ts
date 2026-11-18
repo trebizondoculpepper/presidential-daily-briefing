@@ -25,6 +25,9 @@ import { createGhService } from "../github/service/service.js";
 import { createGitService } from "../git/service.js";
 import { quotasApi } from "./quotas-page.js";
 import type { ServeOptions } from "./options.js";
+import { applyLiveApplication, invalidationPlan } from "./liveapp.js";
+import { verifySavedRoot } from "./registration.js";
+import { revisionOf } from "./appstate.js";
 
 /** Production read boundaries: authenticated gh through the existing argument-array runners. */
 export const defaultReadRuntime = (serve: ServeRuntime): ServeReadRuntime => ({
@@ -188,6 +191,87 @@ export function readServices(
         repositories: () => cache.repositories(),
         diagnostics: () => diagnosticViews.map((v) => `/api/v1/diagnostics/${v}`),
       },
+      live: serve.globalConfig
+        ? {
+            apply: async (saved) => {
+              // #816: observe the fresh saved snapshot before recording its application, so
+              // the acknowledgement is accepted for the observed revision and the view reports
+              // the applied values and revision instead of the startup ones.
+              facts.applicationState?.observe(saved);
+              try {
+                const result = await applyLiveApplication(saved, {
+                  currentServed: () => facts.served,
+                  // The verified-checkout boundary registration reuses: a moved or reassigned
+                  // saved root serves the repository repo-only, exactly as at startup.
+                  ...(serve.git || serve.currentRepository
+                    ? {
+                        verifyProject: (repository, localRoot) =>
+                          verifySavedRoot(repository, localRoot, {
+                            cwd: serve.cwd,
+                            git: serve.git,
+                            currentRepository: serve.currentRepository,
+                            globalConfig: serve.globalConfig,
+                          }),
+                      }
+                    : {}),
+                  // #816: compare the saved value against the applied configuration snapshot
+                  // (exact, JSON-based), so acknowledgements are correct for unsupported-host
+                  // registrations, duplicates, and verification-reduced roots.
+                  ...(facts.applicationState
+                    ? {
+                        appliedValue: (key) =>
+                          facts.applicationState!.view().keys.find((k) => k.key === key)?.applied,
+                      }
+                    : {}),
+                  // #816: record live-key application against the observed saved snapshot.
+                  ...(facts.applicationState
+                    ? {
+                        record: (result) => facts.applicationState!.recordApplication(result),
+                      }
+                    : {}),
+                });
+                // Commit atomically, in one synchronous step with no await between, so an
+                // in-flight request that resolves identity during the application can never
+                // observe the new cache epoch together with the old served context: the served
+                // set is replaced, the per-repository revisions advance, then the changed and
+                // cross-repository dependency caches are invalidated. A request resuming after
+                // this block sees the new context everywhere and is either valid or rejected.
+                const plan = invalidationPlan(result.changes, result.served);
+                facts.served.splice(0, facts.served.length, ...result.served);
+                facts.contextVersion!.value += 1;
+                for (const change of result.changes) {
+                  if (change.change === "changed" || change.change === "removed") {
+                    const lower = change.repository.toLowerCase();
+                    facts.contextRevisions!.set(
+                      lower,
+                      (facts.contextRevisions!.get(lower) ?? 0) + 1,
+                    );
+                  }
+                }
+                // Bump the epoch and drop entries of changed/removed repositories.
+                for (const repository of plan.repositories) cache.refresh(repository);
+                // Conservatively drop the dependency trees of the retained served set.
+                for (const repository of plan.dependencies) cache.refresh(repository, ["deps"]);
+                return result;
+              } catch (error) {
+                // #816: a rejected application (e.g. conflicting saved roots) must be reported as
+                // failed-live for the already-observed revision, never left pending-live forever,
+                // and the actionable error is kept in the view.
+                facts.applicationState?.recordApplication({
+                  revision: revisionOf(saved),
+                  applied: [],
+                  failed: [
+                    {
+                      key: "serve.projects",
+                      error: error instanceof Error ? error.message : String(error),
+                    },
+                  ],
+                });
+                throw error;
+              }
+            },
+          }
+        : undefined,
       // Sessions first, then in-flight collections; dropping sessions never drops entries.
       close: async () => {
         activeDiagnostics.close();

@@ -67,8 +67,10 @@ that machinery as one **context generation pass**:
   resolution, cache lookup and the final response all carry the generation they started under.
 - An in-flight response that started under an earlier generation and completes after a later
   application is **rejected** (never delivered as fresh facts), matching the existing
-  invalidated-while-running guard. Responses that are still useful as unchanged-context facts
-  survive.
+  invalidated-while-running guard. Rejection answers the data envelope's error with
+  `CONTEXT_CHANGED`. Responses that are still useful as unchanged-context facts survive: the guard
+  re-selects the request's repository from the current served set and only rejects when its
+  context was actually changed or removed.
 - A request may be **cancelled** voluntarily (reload transport) or **rejected** on completion;
   the distinguishing outcome is reported faithfully (cancelled vs complete-but-stale vs fresh).
 
@@ -83,6 +85,14 @@ A registered project's briefing/dependency facts can reference another registere
 **conservatively invalidate** cross-repository dependency facts whose provenance points at the
 changed/removed context — re-computation is cheap and correctness beats staleness. Reuse of an
 unchanged context does not invalidate its cross-repo facts.
+
+## Verified saved roots
+
+A saved `localRoot` is verified against its repository before it is served, reusing the startup
+verified-checkout boundary (`resolveServeProjects`): a root that is missing, or now belongs to
+another repository, serves the repository without a local project; a root whose identity cannot
+be read right now is kept as saved. A live reload and a fresh start therefore agree on a moved
+checkout, and `readApi` never resolves one repository's identity from another checkout.
 
 ## Reporting and acknowledgement
 

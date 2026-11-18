@@ -558,6 +558,8 @@ export function readApi(
 ): (facts: ServerFacts) => Routes {
   // The served set, known once listening.
   let servedSet: readonly ServedRepository[] = [];
+  // #808: per-repository context revisions, updated by live application (A -> B -> A guard).
+  let contextRevisions = new Map<string, number>();
   // #664: the one execution-human context of this process, known once listening.
   let serverHuman: (() => Promise<HumanContext>) | undefined;
   let identitySession: LocalIdentitySession | undefined;
@@ -574,6 +576,20 @@ export function readApi(
     guardedRest,
   } = cachedBoundaries(runtime, cache, isServed);
   let known = localPaths(...options.projects);
+  // #808: served projects grow when a live configuration application installs checkouts; refresh
+  // the redaction set from the (mutable, in-place) served set so a newly served checkout path is
+  // redacted exactly as a startup-registered one would be. The union keeps coverage for
+  // outstanding old-context responses too.
+  const knownProjects = new Set(options.projects);
+  const refreshKnown = (served: readonly ServedRepository[]): void => {
+    let changed = false;
+    for (const entry of served) {
+      if (!entry.project || knownProjects.has(entry.project)) continue;
+      knownProjects.add(entry.project);
+      changed = true;
+    }
+    if (changed) known = localPaths(...knownProjects);
+  };
   const redact = <T>(value: T): T => redactPaths(value, known);
 
   const readRuntime = (project: string | undefined, repository: string): ReadRuntime => ({
@@ -622,6 +638,10 @@ export function readApi(
     values: Map<string, string>,
     served: ServedRepository,
   ): Promise<Selection> => {
+    // #808: the repository's context revision when this identity resolution began. If a live
+    // application changes the context while resolution is pending, the resolved identity may
+    // describe the old context even when the path eventually matches again (A -> B -> A).
+    const revisionAtStart = contextRevisions.get(served.repository.toLowerCase()) ?? 0;
     const agent = values.get("agent");
     if (agent !== undefined && !agentPattern.test(agent))
       throw invalid("agent must be an agent name such as kavya_sabbagh.");
@@ -668,6 +688,22 @@ export function readApi(
       ...(resolved.store ? { identityStore: resolved.store } : {}),
       ...(effective?.role ? { effectiveRole: effective.role } : {}),
     };
+    // #808: the served context may have changed or been removed while identity resolution ran
+    // (selection -> identity). A collection started now would capture the new cache epoch while
+    // still using the old selected project and identity, returning old-context facts as fresh;
+    // reject instead of starting it. The revision check also rejects an A -> B -> A transition
+    // whose restored path alone would pass equality.
+    const still = servedSet.find(
+      (s) => s.repository.toLowerCase() === served.repository.toLowerCase(),
+    );
+    const revisionChanged =
+      (contextRevisions.get(served.repository.toLowerCase()) ?? 0) !== revisionAtStart;
+    if (revisionChanged || !still || (still.project ?? null) !== (served.project ?? null))
+      throw new HttpFailure(
+        409,
+        "CONTEXT_CHANGED",
+        "The served configuration changed while this read was running; retry.",
+      );
     if (effective) identityContexts.set(selection, effective);
     return selection;
   };
@@ -675,10 +711,8 @@ export function readApi(
   return (facts) => {
     servedSet = facts.served;
     identitySession = facts.identitySession;
-    known = localPaths(
-      ...options.projects,
-      ...facts.served.flatMap((entry) => (entry.project ? [entry.project] : [])),
-    );
+    contextRevisions = facts.contextRevisions ?? new Map();
+    refreshKnown(facts.served);
     if (humanContextEnabled())
       serverHuman = async () =>
         facts.effectiveHuman?.context ?? serverHumanContext(facts.auth, facts.startedAt);
@@ -729,11 +763,40 @@ export function readApi(
         const values = parameters(context.url, [...allowed, "repo", "refresh"]);
         served = selectRepository(facts.served, values.get("repo"));
         selection = noIdentity(served.repository);
+        const generation = facts.contextVersion?.value ?? 0;
+        const selectionRevision = facts.contextRevisions?.get(served.repository.toLowerCase()) ?? 0;
         const refresh = booleanParam(values, "refresh");
         const chosen = served;
+        // #808 request-context guard: if a live application replaced, removed, or changed and
+        // restored (A -> B -> A) this repository's context since selection, the collected facts
+        // describe an obsolete context. Reject rather than deliver them as fresh; a repository
+        // untouched by any application since selection (same canonical repository and project)
+        // is still valid. Run it after the cache read AND immediately before the response (the
+        // response-identity resolution below can itself await an identity read).
+        const assertContextStillCurrent = (): void => {
+          if (
+            (facts.contextVersion?.value ?? 0) === generation &&
+            (facts.contextRevisions?.get(chosen.repository.toLowerCase()) ?? 0) ===
+              selectionRevision
+          )
+            return;
+          let still: ServedRepository | undefined;
+          try {
+            still = selectRepository(facts.served, chosen.repository);
+          } catch {
+            still = undefined;
+          }
+          if (still === undefined || (still.project ?? null) !== (chosen.project ?? null))
+            throw new HttpFailure(
+              409,
+              "CONTEXT_CHANGED",
+              "The served configuration changed while this read was running; retry.",
+            );
+        };
         const { value, freshness } = await cache.track(refresh, () =>
           read(values, chosen, (s) => (selection = s)),
         );
+        assertContextStillCurrent();
         const primary = freshness[0] ?? liveNow(cache, runtime.now());
         const stale = freshness.find((f) => f.stale);
         const warnings = [
@@ -754,6 +817,10 @@ export function readApi(
           "employingHuman" in result
         )
           result = { ...result, employingHuman: effectiveIdentity.human };
+        // #808: the response-identity resolution above can itself await an identity read, so
+        // re-check immediately before sending: a change during that read must not let a
+        // complete-looking, fresh-looking old-context response escape.
+        assertContextStillCurrent();
         respond(context, 200, {
           ...(effectiveIdentity ? { effectiveIdentity } : {}),
           schemaVersion: 1,
@@ -888,6 +955,9 @@ export function readApi(
     };
 
     return async (context) => {
+      // #808: keep the local-path redaction set aligned with the (mutable) live served set, so
+      // checkouts installed by a live application are redacted exactly as startup ones are.
+      refreshKnown(facts.served);
       const path = context.url.pathname;
       if (path === "/api/v1/refresh") {
         if (context.request.method !== "POST")
@@ -1366,14 +1436,12 @@ export function readApi(
               follow &&
               Number.isSafeInteger(Number(diagnosis.destination.number))
             ) {
+              const destinationProject = servedSet.find(
+                (s) =>
+                  s.repository.toLowerCase() === diagnosis.destination.repository.toLowerCase(),
+              )?.project;
               const destination = await readBriefing(
-                readRuntime(
-                  servedSet.find(
-                    (s) =>
-                      s.repository.toLowerCase() === diagnosis.destination.repository.toLowerCase(),
-                  )?.project,
-                  diagnosis.destination.repository,
-                ),
+                readRuntime(destinationProject, diagnosis.destination.repository),
                 {
                   repository: diagnosis.destination.repository,
                   agent: chosen?.agent ?? undefined,
@@ -1384,6 +1452,24 @@ export function readApi(
                   signal: context.signal,
                 },
               );
+              // #808: the destination repository is a followed context of its own. If a live
+              // application changed or removed it while the destination briefing was collected,
+              // presenting its facts as fresh would leak an obsolete context even though the
+              // originally selected repository is unchanged. Re-check the live served set for
+              // the destination (the same array the routes read per request).
+              const destinationNow = servedSet.find(
+                (s) =>
+                  s.repository.toLowerCase() === diagnosis.destination.repository.toLowerCase(),
+              );
+              if (
+                destinationNow === undefined ||
+                (destinationNow.project ?? null) !== (destinationProject ?? null)
+              )
+                throw new HttpFailure(
+                  409,
+                  "CONTEXT_CHANGED",
+                  "The served configuration changed while this read was running; retry.",
+                );
               if (destination.kind === "report")
                 return {
                   status: destination.complete ? "complete" : "incomplete",
