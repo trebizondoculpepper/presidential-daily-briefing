@@ -11,7 +11,6 @@
  * Construction performs no Git work and no remote lookup. One instance is safe for concurrent
  * calls because it holds no per-call state: every method takes its checkout explicitly.
  */
-import { promisify } from "node:util";
 import { execFile } from "node:child_process";
 import { basename, dirname, resolve as resolvePath, sep } from "node:path";
 import { realpath } from "node:fs/promises";
@@ -127,34 +126,60 @@ export function sanitizedGitEnvironment(env: NodeJS.ProcessEnv = process.env): N
   return copy;
 }
 
-const runGit = promisify(execFile);
+const runIsolatedGit = (
+  args: readonly string[],
+  cwd: string,
+  signal: AbortSignal | undefined,
+  env: NodeJS.ProcessEnv,
+): Promise<string> => {
+  signal?.throwIfAborted();
+  return new Promise((resolve, reject) => {
+    let outcome: { ok: true; stdout: string } | { ok: false; error: unknown } = {
+      ok: false,
+      error: new Error("git exited without an outcome"),
+    };
+    const child = execFile(
+      "git",
+      [...args],
+      {
+        cwd,
+        signal,
+        windowsHide: true,
+        killSignal: "SIGKILL",
+        env,
+      },
+      (error, stdout) => {
+        outcome = error ? { ok: false, error } : { ok: true, stdout: String(stdout ?? "") };
+      },
+    );
+    // Wait for `close` so an aborted/timed-out child is killed (SIGKILL) and reaped before settling.
+    child.once("close", () => {
+      if (signal?.aborted) {
+        reject(
+          signal.reason ??
+            Object.assign(new Error("The operation was aborted"), { name: "AbortError" }),
+        );
+      } else if (outcome.ok) {
+        resolve(outcome.stdout);
+      } else {
+        reject(outcome.error);
+      }
+    });
+  });
+};
 
 /**
  * The default transport: the installed binary, an argument array, no shell, an explicit cwd and
  * a sanitized environment. Each call gets its own copy, so concurrent calls cannot interfere.
  */
-const isolatedNodeGit: GitRunner = async (args, cwd, signal) =>
-  (
-    await runGit("git", [...args], {
-      cwd,
-      signal,
-      windowsHide: true,
-      env: sanitizedGitEnvironment(),
-    })
-  ).stdout;
+const isolatedNodeGit: GitRunner = (args, cwd, signal) =>
+  runIsolatedGit(args, cwd, signal, sanitizedGitEnvironment());
 
 /** A sanitized runner that reads one named index, for the alternate-index tracked check. */
 const alternateIndexGit =
   (file: string): GitRunner =>
-  async (args, cwd, signal) =>
-    (
-      await runGit("git", [...args], {
-        cwd,
-        signal,
-        windowsHide: true,
-        env: { ...sanitizedGitEnvironment(), GIT_INDEX_FILE: file },
-      })
-    ).stdout;
+  (args, cwd, signal) =>
+    runIsolatedGit(args, cwd, signal, { ...sanitizedGitEnvironment(), GIT_INDEX_FILE: file });
 
 const alternateIndexOf = (file: string) => ({ file, runner: alternateIndexGit(file) });
 
