@@ -41,7 +41,7 @@ const load = async () => {
   const scope = document.getElementById("scope");
   const rows = document.getElementById("rows");
   const warnings = document.getElementById("warnings");
-  const repo = document.body.dataset.repo || "";
+  const repo = (document.querySelector("main") || {}).dataset?.repo || "";
   const query = repo ? "?repo=" + encodeURIComponent(repo) : "";
   const response = await fetch("/api/v1/configuration" + query, { headers: { accept: "application/json" } });
   const body = await response.json();
