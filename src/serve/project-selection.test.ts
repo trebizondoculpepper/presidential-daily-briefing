@@ -86,3 +86,178 @@ describe("shared project selection", () => {
     ]);
   });
 });
+
+describe("Working for header (#669)", () => {
+  async function header(human: unknown, ok = true) {
+    const slot = { textContent: "", attrs: {} as Record<string, string> };
+    const sandbox = {
+      URL,
+      window: {
+        location: { href: "http://localhost/?repo=a%2Fb", replace: () => undefined },
+        localStorage: { getItem: () => null, setItem: () => undefined },
+      },
+      document: {
+        querySelector: (selector: string) =>
+          selector === "[data-working-for]"
+            ? {
+                set textContent(v: string) {
+                  slot.textContent = v;
+                },
+                setAttribute: (k: string, v: string) => (slot.attrs[k] = v),
+              }
+            : null,
+      },
+      fetch: async () => ({
+        ok,
+        json: async () => ({ repositories: [{ repository: "a/b" }], human }),
+      }),
+    };
+    await runInNewContext(projectSelectionScript(), sandbox);
+    return slot;
+  }
+
+  it("states whose work this is, with its source and freshness", async () => {
+    expect(
+      (await header({ state: "current", login: "octo", host: "github.com", source: "gh-login" }))
+        .textContent,
+    ).toBe("Working for GitHub user octo (github.com, the signed-in gh account)");
+    expect(
+      (
+        await header({
+          state: "current",
+          login: "octo",
+          host: "github.com",
+          observedAt: "2026-11-18T20:00:00Z",
+        })
+      ).textContent,
+    ).toBe(
+      "Working for GitHub user octo (github.com, the signed-in gh account, verified 2026-11-18T20:00:00Z)",
+    );
+    const last = await header({
+      state: "last-known",
+      login: "octo",
+      host: "github.com",
+      observedAt: "2026-11-18T00:00:00Z",
+      reason: "gh is offline",
+    });
+    expect(last.textContent).toContain("last known at 2026-11-18T00:00:00Z; gh is offline");
+    expect(last.attrs["data-state"]).toBe("last-known");
+  });
+
+  it("shows unknown and unavailable honestly, and never renders markup", async () => {
+    expect(
+      (await header({ state: "unresolved", login: null, reason: "not signed in" })).textContent,
+    ).toBe("Working for: unknown (not signed in)");
+    expect((await header(undefined)).textContent).toBe("Working for: unavailable");
+    expect((await header(undefined, false)).attrs["data-state"]).toBe("unavailable");
+    for (const failure of ["reject", "json"] as const) {
+      const slot = { textContent: "Working for: loading…", attrs: {} as Record<string, string> };
+      await runInNewContext(projectSelectionScript(), {
+        URL,
+        window: {
+          location: { href: "http://localhost/", replace: () => undefined },
+          localStorage: { getItem: () => null, setItem: () => undefined },
+        },
+        document: {
+          querySelector: () => ({
+            set textContent(v: string) {
+              slot.textContent = v;
+            },
+            setAttribute: (k: string, v: string) => (slot.attrs[k] = v),
+          }),
+        },
+        fetch: async () => {
+          if (failure === "reject") throw new Error("connection lost");
+          return {
+            ok: true,
+            json: async () => {
+              throw new Error("bad json");
+            },
+          };
+        },
+      });
+      expect(slot.textContent).toBe("Working for: unavailable");
+    }
+    expect(
+      (await header({ state: "current", login: "<b>x</b>", host: "github.com" })).textContent,
+    ).toContain("<b>x</b>");
+  });
+});
+
+it("re-reads whose work this is after a page announces a refresh (#669)", async () => {
+  let listener: (() => void) | undefined;
+  let login = "first";
+  let text = "";
+  await runInNewContext(projectSelectionScript(), {
+    URL,
+    window: {
+      location: { href: "http://localhost/?repo=a%2Fb", replace: () => undefined },
+      localStorage: { getItem: () => null, setItem: () => undefined },
+    },
+    document: {
+      addEventListener: (name: string, fn: () => void) => {
+        if (name === "pdb:refreshed") listener = fn;
+      },
+      querySelector: () => ({
+        set textContent(v: string) {
+          text = v;
+        },
+        setAttribute: () => undefined,
+      }),
+    },
+    fetch: async () => ({
+      ok: true,
+      json: async () => ({
+        repositories: [{ repository: "a/b" }],
+        human: { state: "current", login, host: "github.com" },
+      }),
+    }),
+  });
+  expect(text).toContain("first");
+  login = "second";
+  listener!();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(text).toContain("second");
+});
+
+it("never lets an older, slower status read replace a newer header (#669)", async () => {
+  let listener: (() => void) | undefined;
+  let text = "";
+  const releases: (() => void)[] = [];
+  let call = 0;
+  const pending = runInNewContext(projectSelectionScript(), {
+    URL,
+    window: {
+      location: { href: "http://localhost/?repo=a%2Fb", replace: () => undefined },
+      localStorage: { getItem: () => null, setItem: () => undefined },
+    },
+    document: {
+      addEventListener: (name: string, fn: () => void) => {
+        if (name === "pdb:refreshed") listener = fn;
+      },
+      querySelector: () => ({
+        set textContent(v: string) {
+          text = v;
+        },
+        setAttribute: () => undefined,
+      }),
+    },
+    fetch: async () => {
+      const login = ++call === 1 ? "old" : "new";
+      await new Promise<void>((resolve) => releases.push(resolve));
+      return {
+        ok: true,
+        json: async () => ({
+          repositories: [{ repository: "a/b" }],
+          human: { state: "current", login, host: "github.com" },
+        }),
+      };
+    },
+  });
+  listener!(); // a refresh starts while the first read is still pending
+  releases[1]!(); // the newer read answers first
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  releases[0]!(); // then the older one
+  await pending;
+  expect(text).toContain("new");
+});
