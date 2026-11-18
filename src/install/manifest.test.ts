@@ -3,6 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, posix, resolve } from "node:path";
 import { nodeSafeFs } from "../config/safejson.js";
+import { createGitService } from "../git/service.js";
 import {
   assertSafeInstallPath,
   classifyEntry,
@@ -73,6 +74,11 @@ describe("installer ownership manifest & scope (#767)", () => {
       async () => ".git/worktrees/wt1\n",
     );
     expect(common).toBe(resolve("repo root with spaces", ".git/worktrees/wt1"));
+    const typedCommon = await resolveProjectGitCommonDir(
+      resolve("repo root with spaces"),
+      createGitService({ git: async () => ".git/worktrees/wt2\n" }),
+    );
+    expect(typedCommon).toBe(resolve("repo root with spaces", ".git/worktrees/wt2"));
     expect(defaultUserStateDir({ XDG_STATE_HOME: "/xdg/state" }, "/home/u", "linux")).toBe(
       posix.resolve("/xdg/state"),
     );
