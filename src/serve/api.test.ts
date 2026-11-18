@@ -958,6 +958,56 @@ describe("pdb serve cache (#373)", () => {
     cache.close();
   });
 
+  it("collector-scoped refresh invalidates only that collector's flights and entries (#808 deps)", async () => {
+    const clock = new ManualClock();
+    const cache = new ServeCache({
+      ttlMs: 300_000,
+      clock,
+      authContext: async () => ({ host: "h", login: "l" }),
+      initialAuth: { host: "h", login: "l" },
+    });
+    const briefing = { repository: "o/r", collector: "briefing", coverage: { v: 1 } };
+    const deps = { repository: "o/r", collector: "deps", coverage: { v: 1 } };
+    const counts = { briefing: 0, deps: 0 };
+    const produce = (which: "briefing" | "deps") => async () => {
+      counts[which]++;
+      return `${which}#${counts[which]}`;
+    };
+    // Collect both collectors, then a collector-scoped refresh of exactly `deps`.
+    expect(await cache.read(briefing, produce("briefing"))).toBe("briefing#1");
+    expect(await cache.read(deps, produce("deps"))).toBe("deps#1");
+    const dropped = cache.refresh("o/r", ["deps"]);
+    expect(dropped).toBe(1);
+    // The briefing entry survives its cache row; the deps row is gone and re-collected.
+    expect(await cache.read(briefing, produce("briefing"))).toBe("briefing#1");
+    expect(await cache.read(deps, produce("deps"))).toBe("deps#2");
+    expect(counts).toEqual({ briefing: 1, deps: 2 });
+    cache.close();
+  });
+
+  it("a repository-scoped refresh invalidates every collector of the repository", async () => {
+    const clock = new ManualClock();
+    const cache = new ServeCache({
+      ttlMs: 300_000,
+      clock,
+      authContext: async () => ({ host: "h", login: "l" }),
+      initialAuth: { host: "h", login: "l" },
+    });
+    const briefing = { repository: "o/r", collector: "briefing", coverage: { v: 1 } };
+    const deps = { repository: "o/r", collector: "deps", coverage: { v: 1 } };
+    const counts = { briefing: 0, deps: 0 };
+    const produce = (which: "briefing" | "deps") => async () => {
+      counts[which]++;
+      return `${which}#${counts[which]}`;
+    };
+    expect(await cache.read(briefing, produce("briefing"))).toBe("briefing#1");
+    expect(await cache.read(deps, produce("deps"))).toBe("deps#1");
+    expect(cache.refresh("o/r")).toBe(2);
+    expect(await cache.read(briefing, produce("briefing"))).toBe("briefing#2");
+    expect(await cache.read(deps, produce("deps"))).toBe("deps#2");
+    cache.close();
+  });
+
   it("refresh drops entries; refresh=true bypasses a fresh entry", async () => {
     const s = await setup();
     try {

@@ -148,6 +148,14 @@ export interface ServerFacts {
    * one context can never deliver facts collected for an obsolete one.
    */
   contextVersion?: { value: number };
+  /**
+   * Per-repository context revisions (#808): keyed by canonical repository, incremented on
+   * every live application that changed or removed that repository. Carried through selection,
+   * identity resolution and response delivery so an A → B → A transition still rejects an
+   * in-flight read whose identity was resolved for the obsolete B window, even though the path
+   * equality check alone would accept the restored A context.
+   */
+  contextRevisions?: Map<string, number>;
 }
 
 /** Per-request context handed to routes. */

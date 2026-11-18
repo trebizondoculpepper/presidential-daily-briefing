@@ -309,6 +309,7 @@ export async function startServe(
   }
   // #808: bumped on every successful live application; the read path guards on it.
   facts.contextVersion = { value: 0 };
+  facts.contextRevisions = new Map();
 
   let buildIdentity = {};
   try {
@@ -716,6 +717,15 @@ export async function startServe(
         // facts.served is the same array the routes and page handlers read per request.
         served.splice(0, served.length, ...result.served);
         facts.contextVersion!.value += 1;
+        // Per-repository context revision: an A -> B -> A transition still increments the
+        // repository's revision, so an in-flight read that resolved identity during the B
+        // window is rejected on delivery even though the restored path matches again.
+        for (const change of result.changes) {
+          if (change.change === "changed" || change.change === "removed") {
+            const lower = change.repository.toLowerCase();
+            facts.contextRevisions!.set(lower, (facts.contextRevisions!.get(lower) ?? 0) + 1);
+          }
+        }
         return result;
       });
     // Keep only the success path on the chain: a rejected application must not wedge the next

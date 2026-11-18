@@ -104,7 +104,14 @@ export function cachedMcpRuntime(
       const chosen = freshness.find((f) => f.stale) ?? freshness[0];
       return { value, freshness: chosen ? ({ ...chosen } as CallFreshness) : null };
     },
-    localProjects: options.projects,
+    contextRevision: (repository) => facts.contextRevisions?.get(repository.toLowerCase()) ?? 0,
+    // #808: served projects grow when live application installs checkouts; redact them exactly
+    // like startup-registered ones. A function so each read sees the current served set (the
+    // startup CLI projects are retained alongside, matching the JSON API's union semantics).
+    localProjects: () => [
+      ...options.projects,
+      ...facts.served.flatMap((entry) => (entry.project ? [entry.project] : [])),
+    ],
   };
 }
 
