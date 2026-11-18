@@ -12,7 +12,8 @@
  * unread delivery record or a quota stop leaves the document incomplete (exit 2), never "no PR",
  * "no blocker" or "done". Read-only: next steps name supported commands, never run them.
  */
-import { prop, selected, SubjectUnavailable } from "../github/github.js";
+import { referenceReads } from "../github/service/references.js";
+import { SubjectUnavailable } from "../github/github.js";
 import type { FocusOptions, Query } from "../github/github.js";
 import { collectIssueFocus, ghQueryWith } from "../github/github.js";
 import { hydrate, quotaRefusal, ReadMeter, readProfiles } from "../github/readplan.js";
@@ -200,9 +201,11 @@ async function closingReferences(
   signal: AbortSignal | undefined,
 ): Promise<{ refs: { number: number; url: string; state: string }[]; complete: boolean }> {
   const bounds = readProfiles["ticket-status-v1"].bounds;
-  const [owner, name] = repository.split("/");
   const subject = `${repository}#${number}`;
   const q = meter.query(base, "linked-pull-requests", `${subject} (closed included)`);
+  // The typed reference capability (#951), built once for this read over its metered executor:
+  // the same factory as the facade's `references` group, so metering and coverage stay here.
+  const references = referenceReads(q as Query);
   const refs: { number: number; url: string; state: string }[] = [];
   let cursor: string | null = null;
   let more = true;
@@ -216,15 +219,12 @@ async function closingReferences(
         quotaStopped = true;
         break;
       }
-      const data = await q(
-        `query($owner:String!,$name:String!,$number:Int!,$cursor:String){repository(owner:$owner,name:$name){issue(number:$number){closedByPullRequestsReferences(first:${bounds.linkedPullRequestsPerPage},includeClosedPrs:true,after:$cursor){nodes{number url state} pageInfo{hasNextPage endCursor}}}}}`,
-        { owner, name, number, ...(cursor ? { cursor } : {}) },
+      const page = await references.closingPage(
+        repository,
+        number,
+        bounds.linkedPullRequestsPerPage,
+        cursor,
       );
-      const page = selected<{
-        nodes: { number: number; url: string; state: string }[];
-        pageInfo: { hasNextPage: boolean; endCursor: string | null };
-      }>(prop(data, "repository", "issue", "closedByPullRequestsReferences"));
-      if (!page) throw new Error("closing references not readable");
       pagesRead++;
       refs.push(...page.nodes);
       more = page.pageInfo.hasNextPage;
