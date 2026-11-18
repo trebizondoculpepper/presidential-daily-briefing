@@ -77,7 +77,7 @@ Rules, each covered by a test:
 6. **Invalid or unreadable saved config:** `readError` is set, `saved` is `null` for every key, and `applied` keeps the last valid values, as serve-configuration-layers.md already requires.
 7. **After a restart:** a new process starts with fresh snapshots, so earlier restart notices disappear by construction.
 8. **Overridden keys:** an `overridden` key shows its saved value for information and never produces `pending-live` or `restart-required`, whatever is saved later. Its saved value takes effect only on a restart without the override. An acceptance case starts with `--port 9000` over a saved 4372, observes the unchanged file and expects `overridden` with no restart notice. It then saves 5000 and still expects no restart notice.
-9. **Deleted file:** deleting `config.toml` and reloading gives a saved revision of `\"absent\"` with default values. For example, `serve.projects` becomes `[]`, a `pending-live` change that #808 can apply and report against `\"absent\"`, exactly as for any other revision. An acceptance case covers deletion followed by reload, both for success and for failure.
+9. **Deleted file:** deleting `config.toml` and reloading gives a saved revision of `"absent"` with default values. For example, `serve.projects` becomes `[]`, a `pending-live` change that #808 can apply and report against `"absent"`, exactly as for any other revision. An acceptance case covers deletion followed by reload, both for success and for failure.
 
 ## Interface
 
