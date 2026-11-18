@@ -23,6 +23,7 @@ import type { DeclaredReviewPolicy } from "../workflow/reviewpolicy.js";
  * in their own modules and are never reachable through this service.
  */
 import { collect, ghQuery, IssueUnavailable, permissionLookup } from "../github/github.js";
+import { createGhService } from "../github/service/service.js";
 import { classifyChecks, requiredCheckEvidence } from "../github/requiredchecks.js";
 import type { IssueDiagnosis, Query, Rest } from "../github/github.js";
 import type { GraphQuery } from "../workflow/claims.js";
@@ -498,7 +499,10 @@ async function presentHuman(
     ? await discoverClosedQuestions(
         snapshot.repository,
         {
-          query: live.closedQuery ?? live.query,
+          closedQuestions: createGhService({
+            query: live.closedQuery ?? live.query,
+            rest: live.rest,
+          }).closedQuestions,
           rest: live.rest,
           ...(live.trustWith ? { trustWith: live.trustWith } : {}),
           ...(live.closedQuestions ? { slot: live.closedQuestions } : {}),
