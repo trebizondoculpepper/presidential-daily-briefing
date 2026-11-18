@@ -227,6 +227,33 @@ describe("live application with request-context isolation (#808)", () => {
     expect(ok.diagnostics).toEqual([]);
   });
 
+  it("deduplicates saved registrations by canonical repository before reconciling", async () => {
+    const { b, invalidated } = boundaries({ current: [] });
+    // Same repository twice: first repo-only, then with a verified root — refined once.
+    const result = await applyLiveApplication(
+      savedConfig([
+        { host: "github.com", repository: "Owner/Repo" },
+        { host: "github.com", repository: "owner/repo", localRoot: "/work/repo" },
+      ]),
+      b,
+    );
+    expect(result.served).toEqual([{ repository: "Owner/Repo", project: "/work/repo" }]);
+    expect(result.changes).toEqual([{ repository: "Owner/Repo", change: "added" }]);
+
+    // Two different roots for the same repository are a configuration error.
+    await expect(
+      applyLiveApplication(
+        savedConfig([
+          { host: "github.com", repository: "owner/repo", localRoot: "/work/one" },
+          { host: "github.com", repository: "owner/repo", localRoot: "/work/two" },
+        ]),
+        b,
+      ),
+    ).rejects.toThrow(/two saved local projects/);
+    // Nothing was invalidated by a rejected dedupe.
+    expect(invalidated).toEqual([]);
+  });
+
   it("reconcileContexts is pure and order-preserving", () => {
     const current: ServedEntry[] = [{ repository: "a/b" }, { repository: "z/y" }];
     const target: ServedEntry[] = [

@@ -114,6 +114,34 @@ const sameEntry = (left: ServedEntry, right: ServedEntry): boolean =>
   canonical(left.repository) === canonical(right.repository) &&
   (left.project ?? null) === (right.project ?? null);
 
+/**
+ * Deduplicate a saved projection by canonical repository, preserving startup's unambiguous
+ * semantics (`registration.ts` `ServedSet`): a repo-only entry is refined by a verified root,
+ * an identical verified root is kept once, and two different roots for one repository are a
+ * configuration error rather than an order-dependent context set.
+ */
+export function dedupeSaved(served: readonly ServedEntry[]): ServedEntry[] {
+  const byRepository = new Map<string, ServedEntry>();
+  for (const entry of served) {
+    const key = canonical(entry.repository);
+    const existing = byRepository.get(key);
+    if (!existing) {
+      byRepository.set(key, entry);
+      continue;
+    }
+    if (!entry.project) continue;
+    if (!existing.project) {
+      byRepository.set(key, { repository: existing.repository, project: entry.project });
+      continue;
+    }
+    if (existing.project !== entry.project)
+      throw new Error(
+        `${entry.repository} has two saved local projects (${existing.project} and ${entry.project}); update serve.projects so one repository has one checkout.`,
+      );
+  }
+  return [...byRepository.values()];
+}
+
 /** Reconcile the saved-set projection against the current served set (pure). */
 export function reconcileContexts(
   current: readonly ServedEntry[],
@@ -170,21 +198,25 @@ export async function applyLiveApplication(
   // Verify saved local roots against their repositories before serving them (mirrors the
   // startup boundary): a root that is missing or now belongs to another repository serves the
   // repository without a local project, and reports why.
-  const served: ServedEntry[] = [];
+  const verified: ServedEntry[] = [];
   for (const entry of projected.served) {
     if (entry.project === undefined || !boundaries.verifyProject) {
-      served.push(entry);
+      verified.push(entry);
       continue;
     }
-    const verified = await boundaries.verifyProject(entry.repository, entry.project);
-    if (verified.diagnostic !== undefined) diagnostics.push(verified.diagnostic);
-    served.push(
-      verified.project !== undefined
-        ? { ...entry, project: verified.project }
+    const result = await boundaries.verifyProject(entry.repository, entry.project);
+    if (result.diagnostic !== undefined) diagnostics.push(result.diagnostic);
+    verified.push(
+      result.project !== undefined
+        ? { ...entry, project: result.project }
         : { repository: entry.repository },
     );
   }
 
+  // Deduplicate by canonical repository before reconciling, mirroring startup's unambiguous
+  // `ServedSet`: a repo-only entry is refined by a verified root, and two different roots for
+  // one repository are a configuration error, never an order-dependent context set.
+  const served = dedupeSaved(verified);
   const current = boundaries.currentServed();
   const changes = reconcileContexts(current, served);
 
