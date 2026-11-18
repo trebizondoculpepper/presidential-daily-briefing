@@ -31,6 +31,7 @@ describe("typed delivery-issue read (#945)", () => {
       { ...base, number: "3" },
       { ...base, comments: { nodes: [] } },
       { ...base, closedByPullRequestsReferences: { nodes: [{ number: "x" }] } },
+      { ...base, comments: { nodes: [{}], pageInfo: { hasPreviousPage: false } } },
     ])
       await expect(deliveryIssue(q(bad), "o/r", 3)).rejects.toThrow(/malformed/);
   });
