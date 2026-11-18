@@ -110,7 +110,7 @@ describe("estimate N records a size label with provenance (#152)", () => {
     };
     const git: GitRunner = async (args) =>
       args[0] === "rev-parse"
-        ? args[1] === "HEAD"
+        ? args.includes("HEAD")
           ? `${sha}\n`
           : `${root}\n`
         : "origin\thttps://github.com/owner/name.git (fetch)\n";
