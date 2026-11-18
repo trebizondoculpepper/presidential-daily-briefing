@@ -19,7 +19,8 @@
  * Diagnostics name entry keys and root-relative files only, never paths or other values.
  */
 
-import { ConfigError, nodeFileSystem, nodeGit } from "./config.js";
+import { ConfigError, nodeFileSystem } from "./config.js";
+import type { GitService } from "../git/service.js";
 import type { ConfigFileSystem, GitRunner } from "./config.js";
 import { detectClientEntry, resolveEntry } from "./harness.js";
 import type { Environment } from "./harness.js";
@@ -67,7 +68,7 @@ export interface ReadIdentityOptions {
   /** Verified MCP clientInfo name from initialization. */
   readonly clientName?: string;
   readonly env: Environment;
-  readonly git?: GitRunner;
+  readonly git?: GitService | GitRunner;
   readonly fs?: ConfigFileSystem;
 }
 
@@ -119,7 +120,8 @@ export async function resolveReadIdentity(options: ReadIdentityOptions): Promise
     const target = await resolveIdentityTarget(
       options.project,
       options.repository,
-      options.git ?? nodeGit,
+      // A shared GitService, a legacy runner, or none: the typed service's isolated default.
+      options.git,
     );
     const client =
       options.entry === undefined && options.harness === undefined && options.clientName
