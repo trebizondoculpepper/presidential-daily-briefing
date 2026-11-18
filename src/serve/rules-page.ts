@@ -326,7 +326,7 @@ export async function rulesPage(
       undefined,
       limits,
     );
-    return { status: 200, html: rulesPageHtml(doc, rules.rulesText(doc), page) };
+    return { status: 200, html: rulesPageHtml(doc, rules.rulesFormalText(doc), page) };
   } catch (error) {
     if (error instanceof rules.RulesArgumentError)
       return { status: 400, html: rulesErrorHtml(error.message, page) };

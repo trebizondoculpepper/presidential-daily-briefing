@@ -69,11 +69,12 @@ describe("effective English document (#516)", () => {
     expect(doc.project?.helpers.map((h) => h.name)).toEqual(["project-hotfix"]);
     expect(doc.project?.limits?.protectedBands).toEqual([1, 2]);
     const text = rulesText(doc);
-    expect(text).toContain(`effectiveRulesHash ${policy.effectiveRulesHash}`);
-    expect(text).toContain("== Project preferences (1) ==");
-    expect(text).toContain('project-hotfix: reason "Project priority label matched: {label}."');
+    expect(text).toContain(`\`effectiveRulesHash\` \`${policy.effectiveRulesHash}\``);
+    expect(text).toContain("## Project preferences (1)");
+    expect(text).toContain("`project-hotfix`");
+    expect(text).toContain("Project priority label matched:");
     expect(text).toContain("Protected bands 1 and 2");
-    expect(text).toContain("pdb.action-label: collected label");
+    expect(text).toContain("`pdb.action-label`: collected label");
   });
 
   it("selects one project preference by ID, and suggests project IDs", () => {

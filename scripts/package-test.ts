@@ -1058,9 +1058,9 @@ try {
     const listing = await rules([]);
     const lines = listing.stdout.split("\n");
     if (
-      !lines[0]?.startsWith("pdb rules: the represented policy") ||
-      !lines[1]?.startsWith("Policy: version ") ||
-      !listing.stdout.includes("== Not formalized here ==") ||
+      lines[0] !== "# `pdb rules` — Compiled Policy" ||
+      !listing.stdout.includes("- Policy: version ") ||
+      !listing.stdout.includes("## Not formalized here") ||
       !/Coverage of the full policy: \d+ decision rules/.test(listing.stdout) ||
       !listing.stdout.endsWith("\n") ||
       listing.stderr !== ""

@@ -211,3 +211,111 @@ export function decisionGroups<T extends FormalDecision>(decisions: T[]) {
         .sort((a, b) => a.preference - b.preference || a.source.index - b.source.index),
     }));
 }
+
+/** Normalize control chars/newlines so untrusted text cannot inject Markdown structure or ANSI escapes. */
+export function sanitizeInlineText(value: string): string {
+  return value
+    .replace(/\x1b\[[0-9;]*[A-Za-z]/g, "")
+    .replace(/[\r\n\t]+/g, " ")
+    .replace(/[\x00-\x1f\x7f]/g, "");
+}
+
+/** Escape Markdown metacharacters in literal/project-defined text so it renders as inert data. */
+export function mdEscape(value: string): string {
+  const clean = sanitizeInlineText(value);
+  return clean.replace(/([\\`*_[\]()#!|<>~{}&])/g, "\\$1");
+}
+
+/** Wrap an identifier, predicate, flag or setting in an unambiguous Markdown inline code span. */
+export function mdCode(value: string): string {
+  const clean = sanitizeInlineText(value);
+  let longest = 0;
+  for (const m of clean.matchAll(/`+/g)) {
+    if (m[0].length > longest) longest = m[0].length;
+  }
+  const fence = "`".repeat(longest + 1);
+  const pad = clean.startsWith("`") || clean.endsWith("`") ? " " : "";
+  return `${fence}${pad}${clean}${pad}${fence}`;
+}
+
+/** Render clauses as nested Markdown lists with 2-space indentation and escaped inline text. */
+export function mdClauseLines(clauses: Clause[], indent = ""): string[] {
+  const lines: string[] = [];
+  for (const c of clauses) {
+    if (c.type === "not" && c.body.length > 1) {
+      lines.push(`${indent}- **no match**${mdEscape(joinText(c.join))} for all of:`);
+      lines.push(...mdClauseLines(c.body, `${indent}  `));
+    } else if (c.type === "and" && c.body.length > 1) {
+      lines.push(`${indent}- **all of**:`);
+      lines.push(...mdClauseLines(c.body, `${indent}  `));
+    } else if (c.type === "or" && (c.alternatives.length > 1 || c.join)) {
+      lines.push(`${indent}- **at least one of**${mdEscape(joinText(c.join))}:`);
+      c.alternatives.forEach((alt, i) => {
+        const marker = `${i + 1}. `;
+        lines.push(`${indent}  ${marker}all of:`);
+        lines.push(...mdClauseLines(alt, `${indent}  ${" ".repeat(marker.length)}`));
+      });
+    } else {
+      lines.push(`${indent}- ${mdEscape(clauseText(c))}`);
+    }
+  }
+  return lines;
+}
+
+export function mdDecisionLines(d: FormalDecision): string[] {
+  const lines = [
+    "",
+    `#### ${mdCode(d.id)}`,
+    "",
+    `- Action: ${mdCode(d.kind)} · Preference: ${mdCode(String(d.preference))} · Codes: ${d.codes.map(mdCode).join(", ")}`,
+    "- When all of:",
+    ...mdClauseLines(d.clauses, "  "),
+  ];
+  if (d.overriddenBy.length) {
+    lines.push(
+      `- Declared override: ${d.overriddenBy.map(mdCode).join(", ")} win(s) over ${mdCode(d.id)} when both match.`,
+    );
+  }
+  if (d.overrides.length) {
+    lines.push(
+      `- Declared override: ${mdCode(d.id)} wins over ${d.overrides.map(mdCode).join(", ")} when both match.`,
+    );
+  }
+  if (d.evidence.length) {
+    lines.push("- Evidence shown:");
+    for (const e of d.evidence) {
+      lines.push(
+        `  - ${mdCode(e.name)} (${mdEscape(e.scope)}): ${mdEscape(conjunctionText(e.clauses as Clause[]))}`,
+      );
+    }
+  }
+  return lines;
+}
+
+export function mdDenialLines(d: CompiledDenial): string[] {
+  return [
+    "",
+    `### ${mdCode(d.id)}`,
+    "",
+    `- Predicate: ${mdCode(d.predicate)}`,
+    "- When all of:",
+    ...mdClauseLines(d.clauses, "  "),
+  ];
+}
+
+export function mdPreferenceLines(p: FormalPreference): string[] {
+  const lines = [
+    "",
+    `### ${mdCode(p.id)}`,
+    "",
+    `- Reason: ${mdEscape(JSON.stringify(p.why))}`,
+    "- Matches an admitted action `?a` when all of:",
+    ...mdClauseLines(p.clauses.when, "  "),
+    "- Priority (`?value`, higher sorts first) when all of:",
+    ...mdClauseLines(p.clauses.priority, "  "),
+  ];
+  for (const [name, cs] of Object.entries(p.clauses.witnesses)) {
+    lines.push(`- Witness ${mdCode(name)} (\`?value\`) when all of:`, ...mdClauseLines(cs, "  "));
+  }
+  return lines;
+}
