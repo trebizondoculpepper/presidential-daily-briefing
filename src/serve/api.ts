@@ -67,6 +67,7 @@ import {
   inventoryView,
   newsView,
   timingView,
+  waitingImpactView,
 } from "../metrics/views.js";
 import { trailingWindow } from "../metrics/windows.js";
 import {
@@ -954,9 +955,12 @@ export function readApi(
               view !== "daily" &&
               view !== "timing" &&
               view !== "inventory" &&
-              view !== "assessment-queue"
+              view !== "assessment-queue" &&
+              view !== "waiting-impact"
             )
-              throw invalid("view must be news, daily, timing, inventory or assessment-queue.");
+              throw invalid(
+                "view must be news, daily, timing, inventory, assessment-queue or waiting-impact.",
+              );
             const nowIso = runtime.now().toISOString();
             let from: string;
             let span: number;
@@ -969,9 +973,12 @@ export function readApi(
               if (values.has("stalledHours"))
                 throw invalid("stalledHours applies to the inventory view only.");
               from = new Date(Date.parse(nowIso) - span * 3_600_000).toISOString();
-            } else if (view === "inventory") {
-              if (values.has("days")) throw invalid("days applies to daily and timing views only.");
+            } else if (view === "inventory" || view === "waiting-impact") {
+              if (values.has("days"))
+                throw invalid("days applies to daily, timing and assessment-queue views only.");
               if (values.has("hours")) throw invalid("hours applies to the news view only.");
+              if (view === "waiting-impact" && values.has("stalledHours"))
+                throw invalid("stalledHours applies to the inventory view only.");
               if (values.has("stalledHours")) {
                 const raw = Number(values.get("stalledHours"));
                 if (!Number.isInteger(raw) || raw < 1)
@@ -1018,7 +1025,9 @@ export function readApi(
                     ? inventoryView(nowIso, read.tickets, read.coverage, { stalledHours })
                     : view === "assessment-queue"
                       ? assessmentQueueView(nowIso, span, read.tickets, read.coverage, unread)
-                      : timingView(nowIso, span, read.tickets, read.coverage);
+                      : view === "waiting-impact"
+                        ? waitingImpactView(nowIso, read.tickets, read.coverage)
+                        : timingView(nowIso, span, read.tickets, read.coverage);
             const complete = metricsReadComplete(read, from);
             return {
               status: complete ? "complete" : "incomplete",
