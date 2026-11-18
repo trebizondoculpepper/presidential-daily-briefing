@@ -20,7 +20,6 @@ import {
   loadConfig,
   retiredKeyNotices,
   nodeFileSystem,
-  nodeGit,
   resolveRepositoryTarget,
   settingFor,
   filesystemRefusal,
@@ -68,17 +67,61 @@ import type {
   EffectiveSetting,
   GitRunner,
 } from "./config.js";
+import { createGitService } from "../git/service.js";
+import type { GitService } from "../git/service.js";
 
 /** Injected boundaries; tests replace all three so the real checkout is never touched. */
 export interface ConfigRuntime {
   readonly fs?: ConfigFileSystem;
+  /** Legacy `GitRunner` retained while callers/tests migrate to `gitService`. */
   readonly git?: GitRunner;
+  /** Typed Git service (#905). */
+  readonly gitService?: GitService;
   readonly cwd?: string;
   /** Random source for generated agent names (identity initializer). */
   readonly random?: () => number;
   /** Environment for harness detection (#38); tests always inject one. */
   readonly env?: Environment;
 }
+
+const gitServiceOf = (runtime: ConfigRuntime): GitService =>
+  runtime.gitService ?? createGitService(runtime.git ? { git: runtime.git } : {});
+
+const gitRunnerFromService =
+  (service: GitService): GitRunner =>
+  async (args, cwd) => {
+    const ctx = { cwd };
+    if (args[0] === "rev-parse" && args[1] === "--show-toplevel") {
+      const root = await service.workingTreeRoot(ctx);
+      if (!root) throw Object.assign(new Error("not a git repository"), { code: 128 });
+      return `${root}\n`;
+    }
+    if (args[0] === "rev-parse" && args[1] === "--git-path" && args[2]) {
+      const path = await service.gitPath(ctx, args[2]);
+      if (!path) throw Object.assign(new Error("git-path unavailable"), { code: 128 });
+      return `${path}\n`;
+    }
+    if (args[0] === "remote" && args[1] === "-v") {
+      const remotes = await service.remotes(ctx);
+      return remotes.map((r) => `${r.name}\t${r.url} (fetch)`).join("\n");
+    }
+    if (args[0] === "check-ignore") {
+      const target = args[args.length - 1]!;
+      const ignored = await service.isIgnored(ctx, target);
+      if (ignored) return "";
+      throw Object.assign(new Error("not ignored"), { code: 1 });
+    }
+    if (args[0] === "ls-files") {
+      const target = args[args.length - 1]!;
+      const tracked = await service.isTracked(ctx, target);
+      if (tracked) return target;
+      throw Object.assign(new Error("not tracked"), { code: 1 });
+    }
+    throw new Error(`Unsupported legacy git command in configcli adapter: ${args[0] ?? ""}`);
+  };
+
+const legacyGitRunnerOf = (runtime: ConfigRuntime): GitRunner =>
+  !runtime.gitService && runtime.git ? runtime.git : gitRunnerFromService(gitServiceOf(runtime));
 
 export const configUsage = `Usage: pdb config get KEY [--scope repository|global] [--entry KEY | --harness NAME] [--json] [--repo owner/name]
        pdb config set KEY VALUE [--scope repository|global] [--entry KEY | --harness NAME] [--json] [--repo owner/name]
@@ -390,7 +433,7 @@ export async function runConfig(
     const target = await resolveRepositoryTarget(
       runtime.cwd ?? process.cwd(),
       parsed.repo,
-      runtime.git ?? nodeGit,
+      gitServiceOf(runtime),
     );
     const at = (config: LoadedConfig) => ({
       repository: target.repository,
@@ -616,12 +659,9 @@ async function runIdentity(
   else identityKeyEntry(parsed.key);
   if (parsed.entry !== undefined) validateEntryKey(parsed.entry);
   const fs = runtime.fs ?? nodeFileSystem;
+  const git = legacyGitRunnerOf(runtime);
   // Project selection precedes entry lookup: only this checkout's root file is consulted.
-  const target = await resolveIdentityTarget(
-    runtime.cwd ?? process.cwd(),
-    parsed.repo,
-    runtime.git ?? nodeGit,
-  );
+  const target = await resolveIdentityTarget(runtime.cwd ?? process.cwd(), parsed.repo, git);
   const resolution = await resolveFor(parsed, target.root, runtime);
   if (resolution.status === "unresolved") throw unresolved(command, parsed, resolution);
   const entry = resolution.entry;
@@ -661,7 +701,7 @@ async function runIdentity(
   }
   const write = await setIdentity(target, entry, parsed.key, parsed.value, {
     fs,
-    git: runtime.git ?? nodeGit,
+    git,
     random: runtime.random,
   });
   const setting = identitySetting(write.record, parsed.key);
@@ -957,11 +997,8 @@ export async function runSetup(
       throw new ConfigUsageError("usage", "--repo must be owner/name.", setupUsage);
     const parsed = { entry: values.entry, harness: values.harness, repo: values.repo };
     const fs = runtime.fs ?? nodeFileSystem;
-    const target = await resolveIdentityTarget(
-      runtime.cwd ?? process.cwd(),
-      values.repo,
-      runtime.git ?? nodeGit,
-    );
+    const git = legacyGitRunnerOf(runtime);
+    const target = await resolveIdentityTarget(runtime.cwd ?? process.cwd(), values.repo, git);
     const resolution = await resolveFor(parsed, target.root, runtime);
     const repoFlag = values.repo ? ` --repo ${values.repo}` : "";
     if (resolution.status === "unresolved") {
@@ -988,7 +1025,7 @@ export async function runSetup(
       ? null
       : await setIdentity(target, entry, "identity.triage_role", role, {
           fs,
-          git: runtime.git ?? nodeGit,
+          git,
           random: runtime.random,
           requireName: true,
         });
