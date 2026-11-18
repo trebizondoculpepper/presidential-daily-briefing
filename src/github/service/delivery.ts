@@ -88,7 +88,9 @@ export async function deliveryIssue(
         str(c.body) &&
         str(c.createdAt) &&
         (c.databaseId === null || c.databaseId === undefined || int(c.databaseId)) &&
-        (c.lastEditedAt === null || c.lastEditedAt === undefined || str(c.lastEditedAt)) &&
+        // Edit evidence must be present: missing evidence is never read as "unedited".
+        (c.lastEditedAt === null || str(c.lastEditedAt)) &&
+        typeof c.includesCreatedEdit === "boolean" &&
         actor(c.author) &&
         actor(c.editor),
     )
@@ -127,7 +129,7 @@ export async function deliveryIssue(
         createdAt: c.createdAt as string,
         author: (c.author ?? null) as DeliveryIssueComment["author"],
         lastEditedAt: str(c.lastEditedAt) ? c.lastEditedAt : null,
-        includesCreatedEdit: c.includesCreatedEdit === true,
+        includesCreatedEdit: c.includesCreatedEdit as boolean,
         editor: (c.editor ?? null) as DeliveryIssueComment["editor"],
       })),
       pageInfo: {
