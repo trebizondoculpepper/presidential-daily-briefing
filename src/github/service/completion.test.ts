@@ -123,7 +123,7 @@ describe("typed GH service: completion (#889)", () => {
             stdout: JSON.stringify({
               data: {
                 repository: {
-                  issue: {
+                  issueOrPullRequest: {
                     comments: {
                       pageInfo: { hasPreviousPage: false },
                       nodes: [
