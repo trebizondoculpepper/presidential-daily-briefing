@@ -45,6 +45,10 @@ describe("typed GH service: account (#869)", () => {
     const plain = createGhService({ transport: t.transport, env: {} });
     expect((await enterprise.account.current()).host).toBe("ghe.example");
     expect((await plain.account.current()).host).toBe("github.com");
+    // gh itself runs with the same environment, for both capabilities.
+    await enterprise.repos.fromCheckout().catch(() => undefined);
+    expect(t.calls.filter((c) => c.env?.GH_HOST === "ghe.example")).toHaveLength(2);
+    expect(t.calls[1]!.env).toEqual({});
   });
 
   it("rejects malformed and login-less responses rather than guessing", async () => {
@@ -118,7 +122,7 @@ describe("GH transport (#869)", () => {
         // A stand-in gh that echoes its literal arguments, or fails, or waits.
         await writeFile(
           join(dir, "gh"),
-          '#!/bin/sh\ncase "$1" in\n  ok) printf "%s|" "$@";;\n  fail) echo partial; echo "HTTP 401" >&2; exit 4;;\n  wait) exec sleep 30;;\nesac\n',
+          '#!/bin/sh\ncase "$1" in\n  ok) printf "%s|" "$@";;\n  host) printf "%s" "$GH_HOST";;\n  fail) echo partial; echo "HTTP 401" >&2; exit 4;;\n  wait) exec sleep 30;;\nesac\n',
           { mode: 0o700 },
         );
         process.env.PATH = `${dir}:${path}`;
@@ -128,6 +132,14 @@ describe("GH transport (#869)", () => {
           ok: true,
           stdout: "ok|a; echo pwned|",
         });
+        // The environment reaches gh: the stand-in echoes GH_HOST when asked.
+        expect(
+          await execFileTransport({
+            ...base,
+            args: ["host"],
+            env: { ...process.env, GH_HOST: "ghe.example" },
+          }),
+        ).toEqual({ ok: true, stdout: "ghe.example" });
         expect(await execFileTransport({ ...base, args: ["fail"] })).toMatchObject({
           ok: false,
           kind: "exit",
