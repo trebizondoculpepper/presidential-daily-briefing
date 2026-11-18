@@ -9,52 +9,15 @@
  * never judges value, and never changes scope, threads or reviews; the consuming agent
  * interprets the signals.
  */
-import { ghQuery, prop, selected, SubjectUnavailable } from "../github/github.js";
+import { ghQuery, SubjectUnavailable } from "../github/github.js";
 import type { Query } from "../github/github.js";
 import { codexMarker, excerpt, pullRequestStatus } from "./prstatus.js";
 import type { PrStatusReport } from "./prstatus.js";
 
-type Login = { login: string } | null;
-type HistoryComment = {
-  author: Login;
-  body?: string | null;
-  createdAt: string | null;
-  url: string;
-  originalCommit?: { oid: string } | null;
-};
-/** The pull request as selected by `historyQuery` below. */
-export type ReviewHistoryNode = {
-  number: number;
-  url: string;
-  headRefOid: string;
-  author: Login;
-  commits: {
-    totalCount?: number;
-    nodes: { commit: { oid: string; committedDate?: string; messageHeadline?: string } }[];
-    pageInfo?: { hasNextPage?: boolean };
-  };
-  reviews: {
-    nodes: {
-      author: Login;
-      state: string;
-      submittedAt: string | null;
-      url: string;
-      commit: { oid: string } | null;
-    }[];
-    pageInfo?: { hasNextPage?: boolean };
-  };
-  reviewThreads: {
-    nodes: {
-      isResolved: boolean;
-      isOutdated?: boolean;
-      path?: string | null;
-      line?: number | null;
-      comments: { totalCount?: number; nodes: HistoryComment[] };
-    }[];
-    pageInfo?: { hasNextPage?: boolean };
-  };
-  comments: { nodes: HistoryComment[]; pageInfo?: { hasNextPage?: boolean } };
-};
+// The history node types and their document live with the typed GH read (#950).
+import type { Login, ReviewHistoryNode } from "../github/service/reviewhistory.js";
+import { reviewHistoryReads } from "../github/service/reviewhistory.js";
+export type { ReviewHistoryNode } from "../github/service/reviewhistory.js";
 
 /** How a finding relates to earlier findings. Candidates for inspection, never verdicts. */
 export type FindingClass =
@@ -127,12 +90,6 @@ export type ReviewHistoryReport = {
   cost: { requests: number };
   completeness: { complete: boolean; warnings: string[] };
 };
-
-const historyQuery = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){number url headRefOid author{login}
-commits(first:100){totalCount nodes{commit{oid committedDate messageHeadline}} pageInfo{hasNextPage}}
-reviews(first:100){nodes{author{login} state submittedAt url commit{oid}} pageInfo{hasNextPage}}
-reviewThreads(first:100){nodes{isResolved isOutdated path line comments(first:20){totalCount nodes{author{login} body createdAt url originalCommit{oid}}}} pageInfo{hasNextPage}}
-comments(first:100){nodes{author{login} body createdAt url} pageInfo{hasNextPage}}}}}`;
 
 /**
  * Presentation bounds and the inspection threshold. Reaching the threshold marks a candidate
@@ -546,11 +503,11 @@ export async function pullRequestReviewHistory(
   now: () => Date = () => new Date(),
 ): Promise<ReviewHistoryReport> {
   const startedAt = now().toISOString();
-  const [owner, name] = repository.split("/");
+  // The typed review-history read (#950), once for this report over its executor.
+  const history = reviewHistoryReads(q);
   const collect = async () => {
     const status = await pullRequestStatus(repository, number, q, now);
-    const data = await q(historyQuery, { owner, name, number });
-    const pr = selected<ReviewHistoryNode>(prop(data, "repository", "pullRequest"));
+    const pr = await history.pullHistory(repository, number);
     if (!pr)
       throw new SubjectUnavailable(`Pull request #${number} is unavailable in ${repository}.`);
     return { status, pr };
