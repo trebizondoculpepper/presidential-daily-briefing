@@ -79,7 +79,8 @@ export async function deliveryIssue(
   // Every comment record is validated here; one malformed record makes the issue unreadable
   // (its delivery unknown), never silently dropped.
   const actor = (v: unknown): v is { login: string } | null =>
-    v === null || v === undefined || (isRecord(v) && str(v.login));
+    // Present as null (a deleted account) or an actor; an omitted field is missing evidence.
+    v === null || (isRecord(v) && str(v.login));
   if (
     !comments.nodes.every(
       (c) =>
@@ -127,10 +128,10 @@ export async function deliveryIssue(
         url: c.url as string,
         body: c.body as string,
         createdAt: c.createdAt as string,
-        author: (c.author ?? null) as DeliveryIssueComment["author"],
+        author: c.author as DeliveryIssueComment["author"],
         lastEditedAt: str(c.lastEditedAt) ? c.lastEditedAt : null,
         includesCreatedEdit: c.includesCreatedEdit as boolean,
-        editor: (c.editor ?? null) as DeliveryIssueComment["editor"],
+        editor: c.editor as DeliveryIssueComment["editor"],
       })),
       pageInfo: {
         hasPreviousPage: info.hasPreviousPage,
