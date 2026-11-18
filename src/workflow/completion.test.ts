@@ -207,6 +207,7 @@ let ids = 100;
 function comment(body: string, login = "writer", id = ids++): DeliveryComment {
   return {
     databaseId: id,
+    url: `https://github.com/o/r/issues/1#issuecomment-${id}`,
     body,
     // Fixtures are created before the run's clock (2026-11-14T12:00Z); posted ones after it.
     createdAt:

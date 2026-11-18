@@ -249,3 +249,210 @@ export function deliveryReads(query: Query): DeliveryReads {
     closedSince: (repository, since, first) => closedIssuesSince(query, repository, since, first),
   };
 }
+
+/** One validated older page of an issue's delivery comments (newest-first paging backwards). */
+export async function olderCommentsPage(
+  query: Query,
+  repository: string,
+  number: number,
+  before: string,
+): Promise<{
+  nodes: DeliveryIssueComment[];
+  pageInfo: { hasPreviousPage: boolean; startCursor: string | null };
+} | null> {
+  const [owner, name] = repository.split("/");
+  const data = await query(
+    `query($owner:String!,$name:String!,$number:Int!,$before:String!){repository(owner:$owner,name:$name){issue(number:$number){comments(last:100,before:$before){nodes{${deliveryIssueCommentFields}} pageInfo{hasPreviousPage startCursor}}}}}`,
+    { owner: owner!, name: name!, number, before },
+  );
+  const repo = isRecord(data) ? data.repository : null;
+  const issue = isRecord(repo) ? repo.issue : null;
+  const comments = isRecord(issue) ? issue.comments : null;
+  // An unreadable page is null (the caller reports history incomplete); a malformed one throws.
+  if (!isRecord(comments)) return null;
+  const info = isRecord(comments.pageInfo) ? comments.pageInfo : null;
+  if (
+    !Array.isArray(comments.nodes) ||
+    !comments.nodes.every(validComment) ||
+    !info ||
+    typeof info.hasPreviousPage !== "boolean"
+  )
+    throw new Error("malformed comment page");
+  return {
+    nodes: (comments.nodes as Record<string, unknown>[]).map(toComment),
+    pageInfo: {
+      hasPreviousPage: info.hasPreviousPage,
+      startCursor: str(info.startCursor) ? info.startCursor : null,
+    },
+  };
+}
+
+/** A pull request by URL with the identity and target facts deliverables record. */
+export interface LivePr {
+  id: string;
+  number: number;
+  url: string;
+  state: string;
+  isDraft?: boolean;
+  merged: boolean;
+  mergeCommit: { oid: string } | null;
+  headRefOid: string;
+  baseRefName: string;
+  baseRepository: { nameWithOwner: string; defaultBranchRef: { name: string } | null } | null;
+  closingIssuesReferences?: {
+    nodes: { number: number; repository: { nameWithOwner: string } }[];
+  };
+}
+
+/** A pull request by URL, or null when it is not a readable, well-formed pull request. */
+export async function pullByUrl(query: Query, url: string): Promise<LivePr | null> {
+  try {
+    const data = await query(
+      `query($url:URI!){resource(url:$url){__typename ... on PullRequest{id number url state isDraft merged mergeCommit{oid} headRefOid baseRefName baseRepository{nameWithOwner defaultBranchRef{name}} closingIssuesReferences(first:50){nodes{number repository{nameWithOwner}}}}}}`,
+      { url },
+    );
+    const r = isRecord(data) ? data.resource : null;
+    if (!isRecord(r) || r.__typename !== "PullRequest") return null;
+    const base = r.baseRepository;
+    const closing = r.closingIssuesReferences;
+    const valid =
+      str(r.id) &&
+      r.id !== "" &&
+      int(r.number) &&
+      str(r.url) &&
+      str(r.state) &&
+      r.state !== "" &&
+      (r.isDraft === undefined || typeof r.isDraft === "boolean") &&
+      typeof r.merged === "boolean" &&
+      (r.mergeCommit === null || (isRecord(r.mergeCommit) && str(r.mergeCommit.oid))) &&
+      str(r.headRefOid) &&
+      str(r.baseRefName) &&
+      r.baseRefName !== "" &&
+      isRecord(base) &&
+      str(base.nameWithOwner) &&
+      (base.defaultBranchRef === null ||
+        (isRecord(base.defaultBranchRef) && str(base.defaultBranchRef.name))) &&
+      (closing === undefined ||
+        (isRecord(closing) &&
+          Array.isArray(closing.nodes) &&
+          closing.nodes.every(
+            (n) =>
+              isRecord(n) &&
+              int(n.number) &&
+              isRecord(n.repository) &&
+              str(n.repository.nameWithOwner),
+          )));
+    return valid ? (r as unknown as LivePr) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The viewer and the issue (or a pull request in its place) for a deliverables plan (#943). */
+export interface DeliverableIssueRead {
+  viewer: { __typename?: string; login?: string } | null;
+  item:
+    | {
+        __typename: "Issue";
+        number: number;
+        title: string;
+        url: string;
+        state: string;
+        labels: { nodes: { name: string }[]; pageInfo: { hasNextPage: boolean } };
+        closedByPullRequestsReferences: {
+          nodes: { number: number; url: string; state: string }[];
+          pageInfo: { hasNextPage: boolean };
+        };
+        comments: {
+          nodes: DeliveryIssueComment[];
+          pageInfo: { hasPreviousPage: boolean; startCursor: string | null };
+        };
+      }
+    | { __typename: "PullRequest"; url: string }
+    | null;
+}
+
+/**
+ * Read the viewer and an issue for a deliverables plan. Throws when the repository is
+ * unavailable or any part of the answer is malformed; missing paging evidence is more remaining.
+ */
+export async function deliverableIssue(
+  query: Query,
+  repository: string,
+  number: number,
+): Promise<DeliverableIssueRead> {
+  const [owner, name] = repository.split("/");
+  const data = await query(
+    `query($owner:String!,$name:String!,$number:Int!){viewer{__typename login} repository(owner:$owner,name:$name){issueOrPullRequest(number:$number){__typename ... on PullRequest{url} ... on Issue{number title url state labels(first:100){nodes{name} pageInfo{hasNextPage}} closedByPullRequestsReferences(first:20,includeClosedPrs:false){nodes{number url state} pageInfo{hasNextPage}} comments(last:100){nodes{${deliveryIssueCommentFields}} pageInfo{hasPreviousPage startCursor}}}}}}`,
+    { owner: owner!, name: name!, number },
+  );
+  const repo = isRecord(data) ? data.repository : null;
+  if (!isRecord(repo)) throw new Error(`Repository unavailable: ${repository}`);
+  const v = isRecord(data) ? data.viewer : null;
+  const viewer =
+    v === null || v === undefined
+      ? null
+      : isRecord(v) && (v.login === undefined || str(v.login))
+        ? (v as DeliverableIssueRead["viewer"])
+        : (() => {
+            throw new Error("malformed issue answer");
+          })();
+  const node = repo.issueOrPullRequest;
+  if (node === null || node === undefined) return { viewer, item: null };
+  if (!isRecord(node)) throw new Error("malformed issue answer");
+  if (node.__typename === "PullRequest") {
+    if (!str(node.url)) throw new Error("malformed issue answer");
+    return { viewer, item: { __typename: "PullRequest", url: node.url } };
+  }
+  const labels = isRecord(node.labels) ? node.labels : null;
+  const closing = isRecord(node.closedByPullRequestsReferences)
+    ? node.closedByPullRequestsReferences
+    : null;
+  const comments = isRecord(node.comments) ? node.comments : null;
+  const info = comments && isRecord(comments.pageInfo) ? comments.pageInfo : null;
+  if (
+    node.__typename !== "Issue" ||
+    !int(node.number) ||
+    !str(node.title) ||
+    !str(node.url) ||
+    !str(node.state) ||
+    !labels ||
+    !Array.isArray(labels.nodes) ||
+    !labels.nodes.every((l) => isRecord(l) && str(l.name)) ||
+    !closing ||
+    !Array.isArray(closing.nodes) ||
+    !closing.nodes.every((n) => isRecord(n) && int(n.number) && str(n.url) && str(n.state)) ||
+    !comments ||
+    !Array.isArray(comments.nodes) ||
+    !comments.nodes.every(validComment) ||
+    !info ||
+    typeof info.hasPreviousPage !== "boolean"
+  )
+    throw new Error("malformed issue answer");
+  const more = (p: unknown) => !isRecord(p) || p.hasNextPage !== false;
+  return {
+    viewer,
+    item: {
+      __typename: "Issue",
+      number: node.number,
+      title: node.title,
+      url: node.url,
+      state: node.state,
+      labels: {
+        nodes: labels.nodes as { name: string }[],
+        pageInfo: { hasNextPage: more(labels.pageInfo) },
+      },
+      closedByPullRequestsReferences: {
+        nodes: closing.nodes as { number: number; url: string; state: string }[],
+        pageInfo: { hasNextPage: more(closing.pageInfo) },
+      },
+      comments: {
+        nodes: (comments.nodes as Record<string, unknown>[]).map(toComment),
+        pageInfo: {
+          hasPreviousPage: info.hasPreviousPage,
+          startCursor: str(info.startCursor) ? info.startCursor : null,
+        },
+      },
+    },
+  };
+}

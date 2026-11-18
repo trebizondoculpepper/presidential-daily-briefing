@@ -37,6 +37,7 @@ describe("typed GH service: completion (#889)", () => {
             state: "MERGED",
             merged: true,
             isDraft: false,
+            headRefOid: "f".repeat(40),
             baseRefName: "main",
             baseRepository: { nameWithOwner: "o/r", defaultBranchRef: { name: "main" } },
             mergeCommit: { oid: "abc1234567890" },
