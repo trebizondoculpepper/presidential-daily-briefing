@@ -6,7 +6,14 @@
  * `briefing/closedquestions.ts` consumes validated TypeScript pages without raw GraphQL queries
  * or raw response traversal.
  */
-import { comment as commentFields, common, info, permissionLookup, prop } from "../github.js";
+import {
+  comment as commentFields,
+  common,
+  info,
+  isRecord,
+  permissionLookup,
+  prop,
+} from "../github.js";
 import type { PermissionLookup, Query, QueryVariables, Rest } from "../github.js";
 import type { Comment, Issue } from "../types.js";
 
@@ -49,13 +56,45 @@ const commentsSource = (size: number) =>
 
 const pageOf = (value: unknown): { nodes: unknown[]; more: boolean; cursor: string | null } => {
   const nodes = prop(value, "nodes");
+  const hasNextPage = prop(value, "pageInfo", "hasNextPage");
   const cursor = prop(value, "pageInfo", "endCursor");
-  if (!Array.isArray(nodes)) throw new Error("the response has no page of nodes");
+  if (!Array.isArray(nodes) || typeof hasNextPage !== "boolean") {
+    throw new Error("the response has no valid page of nodes");
+  }
   return {
     nodes,
-    more: prop(value, "pageInfo", "hasNextPage") === true,
+    more: hasNextPage,
     cursor: typeof cursor === "string" ? cursor : null,
   };
+};
+
+const validateComment = (node: unknown): Comment => {
+  if (
+    !isRecord(node) ||
+    typeof node.body !== "string" ||
+    typeof node.createdAt !== "string" ||
+    (node.url !== undefined && typeof node.url !== "string")
+  ) {
+    throw new Error("the response contains a malformed comment node");
+  }
+  return node as unknown as Comment;
+};
+
+const validateIssue = (node: unknown): Issue => {
+  if (
+    !isRecord(node) ||
+    typeof node.number !== "number" ||
+    !Number.isInteger(node.number) ||
+    node.number < 1 ||
+    typeof node.url !== "string" ||
+    !node.url ||
+    typeof node.state !== "string"
+  ) {
+    throw new Error("the response contains a malformed closed issue node");
+  }
+  const comments = pageOf(node.comments);
+  comments.nodes.forEach(validateComment);
+  return node as unknown as Issue;
 };
 
 /** Build typed closed-question capabilities over GraphQL and REST readers. */
@@ -91,7 +130,7 @@ export function closedQuestionsCapabilities(query: Query, rest: Rest): ClosedQue
       );
       const page = pageOf(prop(repo, "issues"));
       return {
-        issues: page.nodes as Issue[],
+        issues: page.nodes.map(validateIssue),
         hasNextPage: page.more,
         endCursor: page.cursor,
       };
@@ -113,7 +152,7 @@ export function closedQuestionsCapabilities(query: Query, rest: Rest): ClosedQue
       }
       const page = pageOf(prop(target, "comments"));
       return {
-        comments: page.nodes as Comment[],
+        comments: page.nodes.map(validateComment),
         hasNextPage: page.more,
         endCursor: page.cursor,
       };

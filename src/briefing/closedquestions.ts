@@ -328,11 +328,11 @@ async function scan(
       : (runtime.trust ??
         markerTrust(async (login) => {
           if (!checked.has(login)) {
-            checked.add(login);
             if (used >= bounds.requests) {
               permissionGaps++;
               return "unknown";
             }
+            checked.add(login);
             used++;
           }
           return lookup(login);
