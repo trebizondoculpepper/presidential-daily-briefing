@@ -22,12 +22,12 @@ import {
   info,
   pages,
   prop,
-  selected,
 } from "./github.js";
-import type { Query, QueryVariables, Rest } from "./github.js";
+import type { Query, Rest } from "./github.js";
 import type { ReadCollection, ReadSourceCoverage } from "./readplan.js";
 import { hydrate, quotaRefusal, ReadMeter, readProfiles } from "./readplan.js";
 import { hydrateRequiredChecks } from "./requiredchecks.js";
+import { discoveryPage, issueCommentsPage, issuesByNumber } from "./service/snapshot.js";
 import type { Comment, Issue, Page, PullRequest, Snapshot } from "./types.js";
 
 export type ShortlistBounds = { -readonly [K in keyof Profile["bounds"]]: number };
@@ -182,19 +182,7 @@ export async function collectShortlist(
     new ReadMeter("briefing-shortlist-v1", "briefing", now, options.monotonic, signal);
   const base = injected ?? ghQueryWith(signal, { operation: "snapshot" });
   const startedAt = now().toISOString();
-  const [owner, name] = repository.split("/");
   const warnings: string[] = [];
-  const read = async (
-    q: Query,
-    source: string,
-    variables: QueryVariables = {},
-    activeSignal = signal,
-  ) => {
-    activeSignal?.throwIfAborted();
-    const data = await q(source, { owner, name, ...variables });
-    if (!data.repository) throw new Error(`Repository unavailable: ${repository}`);
-    return data.repository;
-  };
 
   // 1. Discovery: each whole connection result is independently cacheable. No page cache.
   const discover = async (field: "issues" | "pullRequests", fields: string) => {
@@ -204,15 +192,19 @@ export async function collectShortlist(
       activeSignal?: AbortSignal,
     ): Promise<DiscoveryFacts> => {
       const q = meter.query(baseQuery, label, repository);
-      const source = `query($owner:String!,$name:String!,$cursor:String){repository(owner:$owner,name:$name){${field}(first:${bounds.pageSize},after:$cursor,orderBy:{field:UPDATED_AT,direction:DESC},states:OPEN){nodes{${fields}} ${info}}}}`;
       let count = 0;
       let more = false;
       const nodes = await pages<Issue | PullRequest>(
         async (cursor) => {
-          activeSignal?.throwIfAborted();
-          const data = await q(source, { owner, name, ...(cursor ? { cursor } : {}) });
-          if (!data.repository) throw new Error(`Repository unavailable: ${repository}`);
-          const page = prop(data.repository, field);
+          const page = await discoveryPage(
+            q,
+            repository,
+            field,
+            fields,
+            bounds.pageSize,
+            cursor ?? null,
+            activeSignal,
+          );
           count++;
           more = prop(page, "pageInfo", "hasNextPage") === true;
           return page;
@@ -466,7 +458,6 @@ export async function collectShortlist(
     return changed;
   };
 
-  const commentsSource = `query($owner:String!,$name:String!,$number:Int!,$cursor:String){repository(owner:$owner,name:$name){issue(number:$number){comments(first:100,after:$cursor){nodes{${comment}} ${info}}}}}`;
   const loadIssues = async (urls: string[], baseQuery = base, activeSignal = signal) => {
     const batches: string[][] = [];
     for (let i = 0; i < urls.length; i += bounds.issuesPerRequest)
@@ -476,17 +467,7 @@ export async function collectShortlist(
       async (batch) => {
         const numbers = batch.map((url) => stubs.get(url)!.number);
         const q = meter.query(baseQuery, "issue", `${repository}#${numbers.join(",")}`);
-        const declared = numbers.map((_, i) => `$n${i}:Int!`).join(",");
-        const fields = numbers
-          .map((_, i) => `i${i}:issue(number:$n${i}){${hydratedIssueFields}}`)
-          .join(" ");
-        const repo = await read(
-          q,
-          `query($owner:String!,$name:String!,${declared}){repository(owner:$owner,name:$name){${fields}}}`,
-          Object.fromEntries(numbers.map((n, i) => [`n${i}`, n])),
-          activeSignal,
-        );
-        return numbers.map((_, i) => selected<Issue>(prop(repo, `i${i}`)));
+        return issuesByNumber(q, repository, numbers, hydratedIssueFields, activeSignal);
       },
       { concurrency: bounds.hydrationConcurrency, signal: activeSignal },
     );
@@ -536,11 +517,7 @@ export async function collectShortlist(
             const initial = issue.comments;
             issue.comments.nodes = await pages<Comment>(async (cursor) => {
               if (!cursor) return initial;
-              return prop(
-                await read(q, commentsSource, { number: issue.number, cursor }, activeSignal),
-                "issue",
-                "comments",
-              );
+              return issueCommentsPage(q, repository, issue.number, comment, cursor, activeSignal);
             });
             issue.comments.pageInfo = { hasNextPage: false, endCursor: null };
           }
