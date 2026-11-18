@@ -66,37 +66,37 @@ const audience: Record<
   }
 > = {
   "D-ATTENTION": { role: "any", kind: "any" },
-  "D-PR-FAIL": { role: "pr-action", kind: "pr" },
-  "D-PR-REVIEW": { role: "pr-action", kind: "pr" },
-  "D-PR-CONFLICT": { role: "pr-action", kind: "pr" },
-  "D-PR-MERGE": { role: "pr-action", kind: "pr" },
-  "D-PR-INTEGRATE": { role: "pr-action", kind: "pr" },
-  "D-DECIDE": { role: "designer", kind: "any" },
-  "D-DOCUMENT": { role: "designer", kind: "any" },
-  "D-DESIGN-REVIEW": { role: "designer", kind: "pr" },
-  "D-EASY": { role: "implementer", kind: "issue" },
-  "D-OWN-EASY": { role: "implementer", kind: "issue" },
-  "D-COMPLEXITY-BOOST": { role: "implementer", kind: "issue" },
-  "D-COMPLEXITY": { role: "implementer", kind: "issue" },
-  "D-IMPACT-BOOST": { role: "designer", kind: "issue" },
-  "D-IMPACT": { role: "designer", kind: "issue" },
-  "D-BAD-COMPLEXITY": { role: "implementer", kind: "issue" },
-  "D-BAD-IMPACT": { role: "designer", kind: "issue" },
-  "D-ORDINARY": { role: "implementer", kind: "issue" },
-  "D-OWN": { role: "implementer", kind: "issue" },
-  "D-DESIGN": { role: "designer", kind: "issue" },
-  "D-UNFAVORABLE": { role: "implementer", kind: "issue" },
-  "D-OWN-UNFAVORABLE": { role: "implementer", kind: "issue" },
+  "D-PR-FAIL": { role: "agents", kind: "pr" },
+  "D-PR-REVIEW": { role: "agents", kind: "pr" },
+  "D-PR-CONFLICT": { role: "agents", kind: "pr" },
+  "D-PR-MERGE": { role: "agents", kind: "pr" },
+  "D-PR-INTEGRATE": { role: "agents", kind: "pr" },
+  "D-DECIDE": { role: "agents", kind: "any" },
+  "D-DOCUMENT": { role: "agents", kind: "any" },
+  "D-DESIGN-REVIEW": { role: "agents", kind: "pr" },
+  "D-EASY": { role: "agents", kind: "issue" },
+  "D-OWN-EASY": { role: "agents", kind: "issue" },
+  "D-COMPLEXITY-BOOST": { role: "agents", kind: "issue" },
+  "D-COMPLEXITY": { role: "agents", kind: "issue" },
+  "D-IMPACT-BOOST": { role: "agents", kind: "issue" },
+  "D-IMPACT": { role: "agents", kind: "issue" },
+  "D-BAD-COMPLEXITY": { role: "agents", kind: "issue" },
+  "D-BAD-IMPACT": { role: "agents", kind: "issue" },
+  "D-ORDINARY": { role: "agents", kind: "issue" },
+  "D-OWN": { role: "agents", kind: "issue" },
+  "D-DESIGN": { role: "agents", kind: "issue" },
+  "D-UNFAVORABLE": { role: "agents", kind: "issue" },
+  "D-OWN-UNFAVORABLE": { role: "agents", kind: "issue" },
   "D-INSPECT": { role: "agents", kind: "issue" },
   // Retained claims (#413): the viewer's own issue claims only.
-  "D-OWN-RESUME": { role: "implementer", kind: "issue" },
-  "D-REVIEW-OWNED": { role: "implementer", kind: "issue" },
-  "D-REVIEW-OWNED-PARTIAL": { role: "implementer", kind: "issue" },
-  "D-OWN-UNKNOWN": { role: "implementer", kind: "issue" },
+  "D-OWN-RESUME": { role: "agents", kind: "issue" },
+  "D-REVIEW-OWNED": { role: "agents", kind: "issue" },
+  "D-REVIEW-OWNED-PARTIAL": { role: "agents", kind: "issue" },
+  "D-OWN-UNKNOWN": { role: "agents", kind: "issue" },
   // Repository context has no GitHub issue/PR kind.
-  "D-INVENTORY-UNKNOWN": { role: "implementer", kind: "any" },
-  "D-OWNED-INCOMPLETE": { role: "implementer", kind: "issue" },
-  "D-OWN-WAIT": { role: "implementer", kind: "issue" },
+  "D-INVENTORY-UNKNOWN": { role: "agents", kind: "any" },
+  "D-OWNED-INCOMPLETE": { role: "agents", kind: "issue" },
+  "D-OWN-WAIT": { role: "agents", kind: "issue" },
   "D-HUMAN-ASK-YOU": { role: "human", kind: "issue" },
   "D-HUMAN-ASK": { role: "human", kind: "issue" },
   "D-HUMAN-UNVERIFIED": { role: "human", kind: "issue" },
@@ -107,25 +107,6 @@ const audience: Record<
   "D-HUMAN-ORPHANED-UNKNOWN": { role: "human", kind: "issue" },
 };
 const roles = ["implementer", "designer", "human"] as const;
-
-/**
- * The designer half of `pr-action` (rules.edn), restated independently of the policy: a design PR
- * (a design label on the PR or on an issue it closes) linked to the viewer as owner, as
- * responsible, or by closing an issue the viewer owns.
- */
-const designLabels = ["documentation", "status:needs-design"];
-function ownDesignPr(datoms: Datom[], pr: number, agent: string): boolean {
-  const has = (e: number, a: string, v: unknown) =>
-    datoms.some(([x, y, z]) => x === e && y === a && z === v);
-  const closes = datoms.filter(([e, a]) => e === pr && a === "closes").map(([, , v]) => Number(v));
-  const design = [pr, ...closes].some((e) => designLabels.some((l) => has(e, "label", l)));
-  const mine =
-    !!agent &&
-    (has(pr, "owner", agent) ||
-      has(pr, "responsible", agent) ||
-      closes.some((i) => has(i, "owner", agent)));
-  return design && mine;
-}
 
 describe("rule audience: roles and subject kinds (#469)", () => {
   it("pins every decision rule's audience", () => {
@@ -140,7 +121,8 @@ describe("rule audience: roles and subject kinds (#469)", () => {
         role === "pr-action"
           ? d.clauses.includes("(pr-action ?t)")
           : role === "agents"
-            ? d.clauses.includes('[(not= ?role "human")]')
+            ? // Directly, or through pr-action, which is itself agent-only (#652).
+              d.clauses.includes('[(not= ?role "human")]') || d.clauses.includes("(pr-action ?t)")
             : d.clauses.includes(`[1 "role" "${role}"]`);
       expect(guarded, `${d.id} lost its ${role} guard`).toBe(true);
     }
@@ -168,10 +150,8 @@ describe("rule audience: roles and subject kinds (#469)", () => {
             const allowed =
               meant.role === "any" ||
               meant.role === role ||
-              (meant.role === "agents" && role !== "human") ||
-              (meant.role === "pr-action" &&
-                (role === "implementer" ||
-                  (role === "designer" && ownDesignPr(datoms, d.subject, s.viewer.agent))));
+              // #651: every agent duty is in one pool for both agent roles; human stays separate.
+              (meant.role === "agents" && role !== "human");
             expect(allowed, where).toBe(true);
             expect(meant.kind === "any" || meant.kind === kindOf.get(d.subject), where).toBe(true);
           }

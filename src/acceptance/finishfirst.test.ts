@@ -332,7 +332,13 @@ describe("own submitted PR follow-up survives the released claim (#182 S2)", () 
         world.issues[1]!,
       ],
     };
-    expect(ranked(await cli(untrusted, "designer"))).toEqual(["design-review#21", "design#5"]);
+    // #651: one activity pool; the implementer's PR follow-up is visible to a designer too,
+    // after the designer's own duties.
+    expect(ranked(await cli(untrusted, "designer"))).toEqual([
+      "design-review#21",
+      "design#5",
+      "pr-follow-up#21",
+    ]);
   });
 });
 
@@ -363,7 +369,7 @@ describe("accepted PRs needing refresh are integration actions (#182 S9)", () =>
       expect(next(ts)[0]).toBe(22);
     });
 
-  it("another agent's actionable review precedes continuing own implementation (PR #251)", async () => {
+  it("own continuation precedes another agent's actionable review (#651 supersedes PR #251)", async () => {
     const r = await cli(
       {
         issues: [
@@ -375,7 +381,8 @@ describe("accepted PRs needing refresh are integration actions (#182 S9)", () =>
       },
       "implementer",
     );
-    expect(ranked(r)).toEqual(["pr-follow-up#24", "continue-implementation#6", "implement#7"]);
+    // #651: every owned obligation precedes every new or unowned activity.
+    expect(ranked(r)).toEqual(["continue-implementation#6", "pr-follow-up#24", "implement#7"]);
   });
 
   it("unknown or failing evidence is never an integration action", async () => {

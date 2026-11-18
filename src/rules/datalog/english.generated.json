@@ -1,8 +1,8 @@
 {
   "modelVersion": 2,
   "policyVersion": 1,
-  "rulesHash": "0e25b69a67ff95c6f4c0d9e0a6b6fae00769f7e6c434439c76c12e615b27a471",
-  "narrationHash": "3e8dbf3ed6f5679b5965135aa2def0b8ac5996a802a0947873b6901494e7a59a",
+  "rulesHash": "ec5452c6abfab7d92ea66fdbb06c385afed05bfa12bd1b2c32da5b387ad6e74f",
+  "narrationHash": "199a99dd8184a40af3b9ca219f7962332764a06ca5e0df70866346361961c255",
   "sources": [
     "policy/schema.edn",
     "policy/rules.edn",
@@ -22,6 +22,8 @@
       "active-dependent": "active dependent",
       "assessment-kind": "assessment action kind",
       "attention": "agent whose attention is requested",
+      "affinity": "role affinity",
+      "owned": "whether the duty is an owned obligation",
       "band": "band",
       "blocker": "native blocker",
       "blocking-complete": "completeness of dependent coverage",
@@ -973,7 +975,7 @@
       "band": 3,
       "preference": 0,
       "codes": ["designer-duty"],
-      "roles": ["designer"],
+      "roles": null,
       "clauses": [
         {
           "type": "call",
@@ -992,10 +994,22 @@
           },
           "attribute": "role",
           "value": {
-            "lit": "designer"
+            "var": "?role"
           },
           "phrase": "role",
           "many": false
+        },
+        {
+          "type": "compare",
+          "op": "not=",
+          "args": [
+            {
+              "var": "?role"
+            },
+            {
+              "lit": "human"
+            }
+          ]
         },
         {
           "type": "fact",
@@ -1056,7 +1070,7 @@
       "band": 3,
       "preference": 1,
       "codes": ["designer-duty"],
-      "roles": ["designer"],
+      "roles": null,
       "clauses": [
         {
           "type": "call",
@@ -1075,10 +1089,22 @@
           },
           "attribute": "role",
           "value": {
-            "lit": "designer"
+            "var": "?role"
           },
           "phrase": "role",
           "many": false
+        },
+        {
+          "type": "compare",
+          "op": "not=",
+          "args": [
+            {
+              "var": "?role"
+            },
+            {
+              "lit": "human"
+            }
+          ]
         },
         {
           "type": "fact",
@@ -1139,7 +1165,7 @@
       "band": 3,
       "preference": 2,
       "codes": ["designer-duty"],
-      "roles": ["designer"],
+      "roles": null,
       "clauses": [
         {
           "type": "call",
@@ -1158,10 +1184,22 @@
           },
           "attribute": "role",
           "value": {
-            "lit": "designer"
+            "var": "?role"
           },
           "phrase": "role",
           "many": false
+        },
+        {
+          "type": "compare",
+          "op": "not=",
+          "args": [
+            {
+              "var": "?role"
+            },
+            {
+              "lit": "human"
+            }
+          ]
         },
         {
           "type": "call",
@@ -1285,7 +1323,7 @@
       "band": 4,
       "preference": 0,
       "codes": ["easy-win"],
-      "roles": ["implementer"],
+      "roles": null,
       "clauses": [
         {
           "type": "call",
@@ -1304,10 +1342,22 @@
           },
           "attribute": "role",
           "value": {
-            "lit": "implementer"
+            "var": "?role"
           },
           "phrase": "role",
           "many": false
+        },
+        {
+          "type": "compare",
+          "op": "not=",
+          "args": [
+            {
+              "var": "?role"
+            },
+            {
+              "lit": "human"
+            }
+          ]
         },
         {
           "type": "call",
@@ -1356,7 +1406,7 @@
       "band": 4,
       "preference": 0,
       "codes": ["easy-win", "own-claim"],
-      "roles": ["implementer"],
+      "roles": null,
       "clauses": [
         {
           "type": "call",
@@ -1375,10 +1425,22 @@
           },
           "attribute": "role",
           "value": {
-            "lit": "implementer"
+            "var": "?role"
           },
           "phrase": "role",
           "many": false
+        },
+        {
+          "type": "compare",
+          "op": "not=",
+          "args": [
+            {
+              "var": "?role"
+            },
+            {
+              "lit": "human"
+            }
+          ]
         },
         {
           "type": "call",
@@ -1414,7 +1476,7 @@
       "band": 5,
       "preference": 0,
       "codes": ["assessment", "cross-role-boost"],
-      "roles": ["implementer"],
+      "roles": null,
       "clauses": [
         {
           "type": "call",
@@ -1433,10 +1495,22 @@
           },
           "attribute": "role",
           "value": {
-            "lit": "implementer"
+            "var": "?role"
           },
           "phrase": "role",
           "many": false
+        },
+        {
+          "type": "compare",
+          "op": "not=",
+          "args": [
+            {
+              "var": "?role"
+            },
+            {
+              "lit": "human"
+            }
+          ]
         },
         {
           "type": "call",
@@ -1481,7 +1555,7 @@
       "band": 5,
       "preference": 1,
       "codes": ["assessment"],
-      "roles": ["implementer"],
+      "roles": null,
       "clauses": [
         {
           "type": "call",
@@ -1500,10 +1574,22 @@
           },
           "attribute": "role",
           "value": {
-            "lit": "implementer"
+            "var": "?role"
           },
           "phrase": "role",
           "many": false
+        },
+        {
+          "type": "compare",
+          "op": "not=",
+          "args": [
+            {
+              "var": "?role"
+            },
+            {
+              "lit": "human"
+            }
+          ]
         },
         {
           "type": "call",
@@ -1539,7 +1625,7 @@
       "band": 5,
       "preference": 0,
       "codes": ["assessment", "cross-role-boost"],
-      "roles": ["designer"],
+      "roles": null,
       "clauses": [
         {
           "type": "call",
@@ -1558,10 +1644,22 @@
           },
           "attribute": "role",
           "value": {
-            "lit": "designer"
+            "var": "?role"
           },
           "phrase": "role",
           "many": false
+        },
+        {
+          "type": "compare",
+          "op": "not=",
+          "args": [
+            {
+              "var": "?role"
+            },
+            {
+              "lit": "human"
+            }
+          ]
         },
         {
           "type": "call",
@@ -1606,7 +1704,7 @@
       "band": 5,
       "preference": 1,
       "codes": ["assessment"],
-      "roles": ["designer"],
+      "roles": null,
       "clauses": [
         {
           "type": "call",
@@ -1625,10 +1723,22 @@
           },
           "attribute": "role",
           "value": {
-            "lit": "designer"
+            "var": "?role"
           },
           "phrase": "role",
           "many": false
+        },
+        {
+          "type": "compare",
+          "op": "not=",
+          "args": [
+            {
+              "var": "?role"
+            },
+            {
+              "lit": "human"
+            }
+          ]
         },
         {
           "type": "call",
@@ -1664,7 +1774,7 @@
       "band": 5,
       "preference": 1,
       "codes": ["assessment", "inspection"],
-      "roles": ["implementer"],
+      "roles": null,
       "clauses": [
         {
           "type": "call",
@@ -1683,10 +1793,22 @@
           },
           "attribute": "role",
           "value": {
-            "lit": "implementer"
+            "var": "?role"
           },
           "phrase": "role",
           "many": false
+        },
+        {
+          "type": "compare",
+          "op": "not=",
+          "args": [
+            {
+              "var": "?role"
+            },
+            {
+              "lit": "human"
+            }
+          ]
         },
         {
           "type": "call",
@@ -1722,7 +1844,7 @@
       "band": 5,
       "preference": 1,
       "codes": ["assessment", "inspection"],
-      "roles": ["designer"],
+      "roles": null,
       "clauses": [
         {
           "type": "call",
@@ -1741,10 +1863,22 @@
           },
           "attribute": "role",
           "value": {
-            "lit": "designer"
+            "var": "?role"
           },
           "phrase": "role",
           "many": false
+        },
+        {
+          "type": "compare",
+          "op": "not=",
+          "args": [
+            {
+              "var": "?role"
+            },
+            {
+              "lit": "human"
+            }
+          ]
         },
         {
           "type": "call",
@@ -1780,7 +1914,7 @@
       "band": 6,
       "preference": 0,
       "codes": ["ordinary"],
-      "roles": ["implementer"],
+      "roles": null,
       "clauses": [
         {
           "type": "call",
@@ -1799,10 +1933,22 @@
           },
           "attribute": "role",
           "value": {
-            "lit": "implementer"
+            "var": "?role"
           },
           "phrase": "role",
           "many": false
+        },
+        {
+          "type": "compare",
+          "op": "not=",
+          "args": [
+            {
+              "var": "?role"
+            },
+            {
+              "lit": "human"
+            }
+          ]
         },
         {
           "type": "call",
@@ -1829,7 +1975,7 @@
       "band": 6,
       "preference": 0,
       "codes": ["ordinary", "own-claim"],
-      "roles": ["implementer"],
+      "roles": null,
       "clauses": [
         {
           "type": "call",
@@ -1848,10 +1994,22 @@
           },
           "attribute": "role",
           "value": {
-            "lit": "implementer"
+            "var": "?role"
           },
           "phrase": "role",
           "many": false
+        },
+        {
+          "type": "compare",
+          "op": "not=",
+          "args": [
+            {
+              "var": "?role"
+            },
+            {
+              "lit": "human"
+            }
+          ]
         },
         {
           "type": "call",
@@ -1878,7 +2036,7 @@
       "band": 6,
       "preference": 0,
       "codes": ["ordinary"],
-      "roles": ["designer"],
+      "roles": null,
       "clauses": [
         {
           "type": "call",
@@ -1897,10 +2055,22 @@
           },
           "attribute": "role",
           "value": {
-            "lit": "designer"
+            "var": "?role"
           },
           "phrase": "role",
           "many": false
+        },
+        {
+          "type": "compare",
+          "op": "not=",
+          "args": [
+            {
+              "var": "?role"
+            },
+            {
+              "lit": "human"
+            }
+          ]
         },
         {
           "type": "call",
@@ -1957,7 +2127,7 @@
       "band": 7,
       "preference": 0,
       "codes": ["unfavorable"],
-      "roles": ["implementer"],
+      "roles": null,
       "clauses": [
         {
           "type": "call",
@@ -1976,10 +2146,22 @@
           },
           "attribute": "role",
           "value": {
-            "lit": "implementer"
+            "var": "?role"
           },
           "phrase": "role",
           "many": false
+        },
+        {
+          "type": "compare",
+          "op": "not=",
+          "args": [
+            {
+              "var": "?role"
+            },
+            {
+              "lit": "human"
+            }
+          ]
         },
         {
           "type": "call",
@@ -2028,7 +2210,7 @@
       "band": 7,
       "preference": 0,
       "codes": ["unfavorable", "own-claim"],
-      "roles": ["implementer"],
+      "roles": null,
       "clauses": [
         {
           "type": "call",
@@ -2047,10 +2229,22 @@
           },
           "attribute": "role",
           "value": {
-            "lit": "implementer"
+            "var": "?role"
           },
           "phrase": "role",
           "many": false
+        },
+        {
+          "type": "compare",
+          "op": "not=",
+          "args": [
+            {
+              "var": "?role"
+            },
+            {
+              "lit": "human"
+            }
+          ]
         },
         {
           "type": "call",
@@ -2086,7 +2280,7 @@
       "band": 3,
       "preference": 0,
       "codes": ["own-claim", "resume-required"],
-      "roles": ["implementer"],
+      "roles": null,
       "clauses": [
         {
           "type": "call",
@@ -2105,10 +2299,22 @@
           },
           "attribute": "role",
           "value": {
-            "lit": "implementer"
+            "var": "?role"
           },
           "phrase": "role",
           "many": false
+        },
+        {
+          "type": "compare",
+          "op": "not=",
+          "args": [
+            {
+              "var": "?role"
+            },
+            {
+              "lit": "human"
+            }
+          ]
         },
         {
           "type": "call",
@@ -2168,7 +2374,7 @@
       "band": 3,
       "preference": 1,
       "codes": ["own-claim", "review-owned-work"],
-      "roles": ["implementer"],
+      "roles": null,
       "clauses": [
         {
           "type": "call",
@@ -2187,10 +2393,22 @@
           },
           "attribute": "role",
           "value": {
-            "lit": "implementer"
+            "var": "?role"
           },
           "phrase": "role",
           "many": false
+        },
+        {
+          "type": "compare",
+          "op": "not=",
+          "args": [
+            {
+              "var": "?role"
+            },
+            {
+              "lit": "human"
+            }
+          ]
         },
         {
           "type": "fact",
@@ -2288,7 +2506,7 @@
       "band": 3,
       "preference": 1,
       "codes": ["own-claim", "review-owned-work", "inspection"],
-      "roles": ["implementer"],
+      "roles": null,
       "clauses": [
         {
           "type": "call",
@@ -2307,10 +2525,22 @@
           },
           "attribute": "role",
           "value": {
-            "lit": "implementer"
+            "var": "?role"
           },
           "phrase": "role",
           "many": false
+        },
+        {
+          "type": "compare",
+          "op": "not=",
+          "args": [
+            {
+              "var": "?role"
+            },
+            {
+              "lit": "human"
+            }
+          ]
         },
         {
           "type": "fact",
@@ -2408,7 +2638,7 @@
       "band": 3,
       "preference": 3,
       "codes": ["inspection", "inventory-unknown"],
-      "roles": ["implementer"],
+      "roles": null,
       "clauses": [
         {
           "type": "call",
@@ -2427,10 +2657,22 @@
           },
           "attribute": "role",
           "value": {
-            "lit": "implementer"
+            "var": "?role"
           },
           "phrase": "role",
           "many": false
+        },
+        {
+          "type": "compare",
+          "op": "not=",
+          "args": [
+            {
+              "var": "?role"
+            },
+            {
+              "lit": "human"
+            }
+          ]
         },
         {
           "type": "fact",
@@ -2487,7 +2729,7 @@
       "band": 3,
       "preference": 3,
       "codes": ["own-claim", "inspection"],
-      "roles": ["implementer"],
+      "roles": null,
       "clauses": [
         {
           "type": "call",
@@ -2506,10 +2748,22 @@
           },
           "attribute": "role",
           "value": {
-            "lit": "implementer"
+            "var": "?role"
           },
           "phrase": "role",
           "many": false
+        },
+        {
+          "type": "compare",
+          "op": "not=",
+          "args": [
+            {
+              "var": "?role"
+            },
+            {
+              "lit": "human"
+            }
+          ]
         },
         {
           "type": "fact",
@@ -2575,7 +2829,7 @@
       "band": 3,
       "preference": 2,
       "codes": ["own-claim", "inspection"],
-      "roles": ["implementer"],
+      "roles": null,
       "clauses": [
         {
           "type": "call",
@@ -2594,10 +2848,22 @@
           },
           "attribute": "role",
           "value": {
-            "lit": "implementer"
+            "var": "?role"
           },
           "phrase": "role",
           "many": false
+        },
+        {
+          "type": "compare",
+          "op": "not=",
+          "args": [
+            {
+              "var": "?role"
+            },
+            {
+              "lit": "human"
+            }
+          ]
         },
         {
           "type": "call",
@@ -2657,7 +2923,7 @@
       "band": 8,
       "preference": 0,
       "codes": ["own-claim", "waiting"],
-      "roles": ["implementer"],
+      "roles": null,
       "clauses": [
         {
           "type": "call",
@@ -2676,10 +2942,22 @@
           },
           "attribute": "role",
           "value": {
-            "lit": "implementer"
+            "var": "?role"
           },
           "phrase": "role",
           "many": false
+        },
+        {
+          "type": "compare",
+          "op": "not=",
+          "args": [
+            {
+              "var": "?role"
+            },
+            {
+              "lit": "human"
+            }
+          ]
         },
         {
           "type": "call",
@@ -5518,19 +5796,6 @@
           "clauses": [
             {
               "type": "fact",
-              "scope": "viewer",
-              "entity": {
-                "lit": 1
-              },
-              "attribute": "role",
-              "value": {
-                "lit": "designer"
-              },
-              "phrase": "role",
-              "many": false
-            },
-            {
-              "type": "fact",
               "scope": "entity",
               "entity": {
                 "var": "?t"
@@ -8110,59 +8375,31 @@
               },
               "attribute": "role",
               "value": {
-                "lit": "implementer"
+                "var": "?viewer"
               },
               "phrase": "role",
               "many": false
+            },
+            {
+              "type": "compare",
+              "op": "not=",
+              "args": [
+                {
+                  "var": "?viewer"
+                },
+                {
+                  "lit": "human"
+                }
+              ]
             }
           ],
           "source": {
             "file": "policy/rules.edn",
             "index": 93
           }
-        },
-        {
-          "params": ["?t"],
-          "clauses": [
-            {
-              "type": "fact",
-              "scope": "viewer",
-              "entity": {
-                "lit": 1
-              },
-              "attribute": "role",
-              "value": {
-                "lit": "designer"
-              },
-              "phrase": "role",
-              "many": false
-            },
-            {
-              "type": "call",
-              "predicate": "design-pr",
-              "args": [
-                {
-                  "var": "?t"
-                }
-              ]
-            },
-            {
-              "type": "call",
-              "predicate": "mine-linked",
-              "args": [
-                {
-                  "var": "?t"
-                }
-              ]
-            }
-          ],
-          "source": {
-            "file": "policy/rules.edn",
-            "index": 94
-          }
         }
       ],
-      "calls": ["pr", "design-pr", "mine-linked"],
+      "calls": ["pr"],
       "set": "rules"
     },
     {
@@ -8201,7 +8438,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 95
+            "index": 94
           }
         }
       ],
@@ -8244,7 +8481,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 96
+            "index": 95
           }
         }
       ],
@@ -8287,7 +8524,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 97
+            "index": 96
           }
         }
       ],
@@ -8317,7 +8554,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 98
+            "index": 97
           }
         },
         {
@@ -8348,7 +8585,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 99
+            "index": 98
           }
         },
         {
@@ -8398,7 +8635,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 100
+            "index": 99
           }
         }
       ],
@@ -8454,7 +8691,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 101
+            "index": 100
           }
         }
       ],
@@ -8483,7 +8720,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 102
+            "index": 101
           }
         }
       ],
@@ -8527,7 +8764,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 103
+            "index": 102
           }
         }
       ],
@@ -8586,7 +8823,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 104
+            "index": 103
           }
         }
       ],
@@ -8641,7 +8878,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 105
+            "index": 104
           }
         }
       ],
@@ -8671,7 +8908,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 106
+            "index": 105
           }
         }
       ],
@@ -8701,7 +8938,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 107
+            "index": 106
           }
         },
         {
@@ -8723,7 +8960,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 108
+            "index": 107
           }
         }
       ],
@@ -8795,7 +9032,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 109
+            "index": 108
           }
         }
       ],
@@ -8867,7 +9104,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 110
+            "index": 109
           }
         },
         {
@@ -8962,7 +9199,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 111
+            "index": 110
           }
         }
       ],
@@ -8998,7 +9235,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 112
+            "index": 111
           }
         }
       ],
@@ -9027,7 +9264,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 113
+            "index": 112
           }
         }
       ],
@@ -9053,7 +9290,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 114
+            "index": 113
           }
         },
         {
@@ -9071,7 +9308,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 115
+            "index": 114
           }
         }
       ],
@@ -9126,7 +9363,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 116
+            "index": 115
           }
         }
       ],
@@ -9165,7 +9402,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 117
+            "index": 116
           }
         }
       ],
@@ -9221,7 +9458,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 118
+            "index": 117
           }
         },
         {
@@ -9301,7 +9538,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 119
+            "index": 118
           }
         }
       ],
@@ -9331,7 +9568,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 120
+            "index": 119
           }
         },
         {
@@ -9353,7 +9590,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 121
+            "index": 120
           }
         }
       ],
@@ -9392,7 +9629,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 122
+            "index": 121
           }
         }
       ],
@@ -9442,7 +9679,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 123
+            "index": 122
           }
         },
         {
@@ -9466,7 +9703,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 124
+            "index": 123
           }
         },
         {
@@ -9565,7 +9802,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 125
+            "index": 124
           }
         },
         {
@@ -9652,7 +9889,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 126
+            "index": 125
           }
         },
         {
@@ -9739,7 +9976,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 127
+            "index": 126
           }
         },
         {
@@ -9796,7 +10033,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 128
+            "index": 127
           }
         },
         {
@@ -9838,7 +10075,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 129
+            "index": 128
           }
         },
         {
@@ -9880,7 +10117,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 130
+            "index": 129
           }
         },
         {
@@ -9941,7 +10178,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 131
+            "index": 130
           }
         },
         {
@@ -10047,7 +10284,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 135
+            "index": 134
           }
         },
         {
@@ -10089,7 +10326,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 136
+            "index": 135
           }
         },
         {
@@ -10131,7 +10368,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 137
+            "index": 136
           }
         },
         {
@@ -10188,7 +10425,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 138
+            "index": 137
           }
         },
         {
@@ -10264,7 +10501,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 139
+            "index": 138
           }
         },
         {
@@ -10321,7 +10558,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 140
+            "index": 139
           }
         },
         {
@@ -10404,7 +10641,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 141
+            "index": 140
           }
         },
         {
@@ -10491,7 +10728,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 142
+            "index": 141
           }
         },
         {
@@ -10593,7 +10830,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 143
+            "index": 142
           }
         },
         {
@@ -10654,7 +10891,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 144
+            "index": 143
           }
         },
         {
@@ -10711,7 +10948,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 145
+            "index": 144
           }
         },
         {
@@ -10798,7 +11035,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 146
+            "index": 145
           }
         },
         {
@@ -10880,7 +11117,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 147
+            "index": 146
           }
         }
       ],
@@ -10928,7 +11165,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 132
+            "index": 131
           }
         },
         {
@@ -10963,7 +11200,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 133
+            "index": 132
           }
         },
         {
@@ -10998,7 +11235,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 134
+            "index": 133
           }
         }
       ],
@@ -11030,7 +11267,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 148
+            "index": 147
           }
         }
       ],
@@ -11102,7 +11339,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 149
+            "index": 148
           }
         },
         {
@@ -11139,7 +11376,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 150
+            "index": 149
           }
         },
         {
@@ -11209,7 +11446,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 151
+            "index": 150
           }
         }
       ],
@@ -12186,6 +12423,887 @@
       ],
       "calls": [],
       "set": "ordering"
+    },
+    {
+      "name": "owned",
+      "params": ["?t", "?r"],
+      "alternatives": [
+        {
+          "params": ["?t", "?r"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?r"
+              },
+              "attribute": "owned",
+              "value": {
+                "lit": true
+              },
+              "phrase": "whether the duty is an owned obligation",
+              "many": false
+            }
+          ],
+          "source": {
+            "file": "policy/ordering.edn :rules",
+            "index": 10
+          }
+        },
+        {
+          "params": ["?t", "?r"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?r"
+              },
+              "attribute": "kind",
+              "value": {
+                "lit": "pr-follow-up"
+              },
+              "phrase": "kind",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "linked-key",
+              "value": {
+                "lit": -1
+              },
+              "phrase": "linked-to-viewer sort key",
+              "many": false
+            }
+          ],
+          "source": {
+            "file": "policy/ordering.edn :rules",
+            "index": 11
+          }
+        },
+        {
+          "params": ["?t", "?r"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?r"
+              },
+              "attribute": "kind",
+              "value": {
+                "lit": "decide"
+              },
+              "phrase": "kind",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "linked-key",
+              "value": {
+                "lit": -1
+              },
+              "phrase": "linked-to-viewer sort key",
+              "many": false
+            }
+          ],
+          "source": {
+            "file": "policy/ordering.edn :rules",
+            "index": 12
+          }
+        },
+        {
+          "params": ["?t", "?r"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?r"
+              },
+              "attribute": "kind",
+              "value": {
+                "lit": "document"
+              },
+              "phrase": "kind",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "linked-key",
+              "value": {
+                "lit": -1
+              },
+              "phrase": "linked-to-viewer sort key",
+              "many": false
+            }
+          ],
+          "source": {
+            "file": "policy/ordering.edn :rules",
+            "index": 13
+          }
+        },
+        {
+          "params": ["?t", "?r"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?r"
+              },
+              "attribute": "kind",
+              "value": {
+                "lit": "design"
+              },
+              "phrase": "kind",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "linked-key",
+              "value": {
+                "lit": -1
+              },
+              "phrase": "linked-to-viewer sort key",
+              "many": false
+            }
+          ],
+          "source": {
+            "file": "policy/ordering.edn :rules",
+            "index": 14
+          }
+        },
+        {
+          "params": ["?t", "?r"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?r"
+              },
+              "attribute": "kind",
+              "value": {
+                "lit": "design-review"
+              },
+              "phrase": "kind",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "linked-key",
+              "value": {
+                "lit": -1
+              },
+              "phrase": "linked-to-viewer sort key",
+              "many": false
+            }
+          ],
+          "source": {
+            "file": "policy/ordering.edn :rules",
+            "index": 15
+          }
+        }
+      ],
+      "calls": [],
+      "set": "ordering"
+    },
+    {
+      "name": "ownership-key",
+      "params": ["?t", "?r", "?o"],
+      "alternatives": [
+        {
+          "params": ["?t", "?r", "?o"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "viewer",
+              "entity": {
+                "lit": 1
+              },
+              "attribute": "role",
+              "value": {
+                "lit": "human"
+              },
+              "phrase": "role",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?r"
+              },
+              "attribute": "rule",
+              "value": {
+                "wild": true
+              },
+              "phrase": "rule ID",
+              "many": false
+            },
+            {
+              "type": "bind",
+              "fn": "+",
+              "args": [
+                {
+                  "lit": 0
+                },
+                {
+                  "lit": 0
+                }
+              ],
+              "result": "?o"
+            }
+          ],
+          "source": {
+            "file": "policy/ordering.edn :rules",
+            "index": 16
+          }
+        },
+        {
+          "params": ["?t", "?r", "?o"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "viewer",
+              "entity": {
+                "lit": 1
+              },
+              "attribute": "role",
+              "value": {
+                "var": "?vr"
+              },
+              "phrase": "role",
+              "many": false
+            },
+            {
+              "type": "compare",
+              "op": "not=",
+              "args": [
+                {
+                  "var": "?vr"
+                },
+                {
+                  "lit": "human"
+                }
+              ]
+            },
+            {
+              "type": "call",
+              "predicate": "owned",
+              "args": [
+                {
+                  "var": "?t"
+                },
+                {
+                  "var": "?r"
+                }
+              ]
+            },
+            {
+              "type": "bind",
+              "fn": "+",
+              "args": [
+                {
+                  "lit": 0
+                },
+                {
+                  "lit": 0
+                }
+              ],
+              "result": "?o"
+            }
+          ],
+          "source": {
+            "file": "policy/ordering.edn :rules",
+            "index": 17
+          }
+        },
+        {
+          "params": ["?t", "?r", "?o"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "viewer",
+              "entity": {
+                "lit": 1
+              },
+              "attribute": "role",
+              "value": {
+                "var": "?vr"
+              },
+              "phrase": "role",
+              "many": false
+            },
+            {
+              "type": "compare",
+              "op": "not=",
+              "args": [
+                {
+                  "var": "?vr"
+                },
+                {
+                  "lit": "human"
+                }
+              ]
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?r"
+              },
+              "attribute": "rule",
+              "value": {
+                "wild": true
+              },
+              "phrase": "rule ID",
+              "many": false
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "call",
+                  "predicate": "owned",
+                  "args": [
+                    {
+                      "var": "?t"
+                    },
+                    {
+                      "var": "?r"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "bind",
+              "fn": "+",
+              "args": [
+                {
+                  "lit": 0
+                },
+                {
+                  "lit": 1
+                }
+              ],
+              "result": "?o"
+            }
+          ],
+          "source": {
+            "file": "policy/ordering.edn :rules",
+            "index": 18
+          }
+        }
+      ],
+      "calls": ["owned"],
+      "set": "ordering"
+    },
+    {
+      "name": "attention-key",
+      "params": ["?r", "?a"],
+      "alternatives": [
+        {
+          "params": ["?r", "?a"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "viewer",
+              "entity": {
+                "lit": 1
+              },
+              "attribute": "role",
+              "value": {
+                "lit": "human"
+              },
+              "phrase": "role",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?r"
+              },
+              "attribute": "rule",
+              "value": {
+                "wild": true
+              },
+              "phrase": "rule ID",
+              "many": false
+            },
+            {
+              "type": "bind",
+              "fn": "+",
+              "args": [
+                {
+                  "lit": 0
+                },
+                {
+                  "lit": 0
+                }
+              ],
+              "result": "?a"
+            }
+          ],
+          "source": {
+            "file": "policy/ordering.edn :rules",
+            "index": 19
+          }
+        },
+        {
+          "params": ["?r", "?a"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "viewer",
+              "entity": {
+                "lit": 1
+              },
+              "attribute": "role",
+              "value": {
+                "var": "?vr"
+              },
+              "phrase": "role",
+              "many": false
+            },
+            {
+              "type": "compare",
+              "op": "not=",
+              "args": [
+                {
+                  "var": "?vr"
+                },
+                {
+                  "lit": "human"
+                }
+              ]
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?r"
+              },
+              "attribute": "kind",
+              "value": {
+                "lit": "addressed-response"
+              },
+              "phrase": "kind",
+              "many": false
+            },
+            {
+              "type": "bind",
+              "fn": "+",
+              "args": [
+                {
+                  "lit": 0
+                },
+                {
+                  "lit": 0
+                }
+              ],
+              "result": "?a"
+            }
+          ],
+          "source": {
+            "file": "policy/ordering.edn :rules",
+            "index": 20
+          }
+        },
+        {
+          "params": ["?r", "?a"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "viewer",
+              "entity": {
+                "lit": 1
+              },
+              "attribute": "role",
+              "value": {
+                "var": "?vr"
+              },
+              "phrase": "role",
+              "many": false
+            },
+            {
+              "type": "compare",
+              "op": "not=",
+              "args": [
+                {
+                  "var": "?vr"
+                },
+                {
+                  "lit": "human"
+                }
+              ]
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?r"
+              },
+              "attribute": "kind",
+              "value": {
+                "var": "?k"
+              },
+              "phrase": "kind",
+              "many": false
+            },
+            {
+              "type": "compare",
+              "op": "not=",
+              "args": [
+                {
+                  "var": "?k"
+                },
+                {
+                  "lit": "addressed-response"
+                }
+              ]
+            },
+            {
+              "type": "bind",
+              "fn": "+",
+              "args": [
+                {
+                  "lit": 0
+                },
+                {
+                  "lit": 1
+                }
+              ],
+              "result": "?a"
+            }
+          ],
+          "source": {
+            "file": "policy/ordering.edn :rules",
+            "index": 21
+          }
+        }
+      ],
+      "calls": [],
+      "set": "ordering"
+    },
+    {
+      "name": "affinity-key",
+      "params": ["?r", "?f"],
+      "alternatives": [
+        {
+          "params": ["?r", "?f"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?r"
+              },
+              "attribute": "affinity",
+              "value": {
+                "var": "?x"
+              },
+              "phrase": "role affinity",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "viewer",
+              "entity": {
+                "lit": 1
+              },
+              "attribute": "role",
+              "value": {
+                "var": "?v"
+              },
+              "phrase": "role",
+              "many": false
+            },
+            {
+              "type": "compare",
+              "op": "=",
+              "args": [
+                {
+                  "var": "?x"
+                },
+                {
+                  "var": "?v"
+                }
+              ]
+            },
+            {
+              "type": "bind",
+              "fn": "+",
+              "args": [
+                {
+                  "lit": 0
+                },
+                {
+                  "lit": 0
+                }
+              ],
+              "result": "?f"
+            }
+          ],
+          "source": {
+            "file": "policy/ordering.edn :rules",
+            "index": 22
+          }
+        },
+        {
+          "params": ["?r", "?f"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?r"
+              },
+              "attribute": "affinity",
+              "value": {
+                "lit": "shared"
+              },
+              "phrase": "role affinity",
+              "many": false
+            },
+            {
+              "type": "bind",
+              "fn": "+",
+              "args": [
+                {
+                  "lit": 0
+                },
+                {
+                  "lit": 0
+                }
+              ],
+              "result": "?f"
+            }
+          ],
+          "source": {
+            "file": "policy/ordering.edn :rules",
+            "index": 23
+          }
+        },
+        {
+          "params": ["?r", "?f"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?r"
+              },
+              "attribute": "affinity",
+              "value": {
+                "var": "?x"
+              },
+              "phrase": "role affinity",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "viewer",
+              "entity": {
+                "lit": 1
+              },
+              "attribute": "role",
+              "value": {
+                "var": "?v"
+              },
+              "phrase": "role",
+              "many": false
+            },
+            {
+              "type": "compare",
+              "op": "not=",
+              "args": [
+                {
+                  "var": "?x"
+                },
+                {
+                  "var": "?v"
+                }
+              ]
+            },
+            {
+              "type": "compare",
+              "op": "not=",
+              "args": [
+                {
+                  "var": "?x"
+                },
+                {
+                  "lit": "shared"
+                }
+              ]
+            },
+            {
+              "type": "bind",
+              "fn": "+",
+              "args": [
+                {
+                  "lit": 0
+                },
+                {
+                  "lit": 1
+                }
+              ],
+              "result": "?f"
+            }
+          ],
+          "source": {
+            "file": "policy/ordering.edn :rules",
+            "index": 24
+          }
+        }
+      ],
+      "calls": [],
+      "set": "ordering"
+    },
+    {
+      "name": "ranked",
+      "params": [
+        "?t",
+        "?r",
+        "?o",
+        "?a",
+        "?f",
+        "?b",
+        "?g",
+        "?p",
+        "?u",
+        "?un",
+        "?own",
+        "?inc",
+        "?created"
+      ],
+      "alternatives": [
+        {
+          "params": [
+            "?t",
+            "?r",
+            "?o",
+            "?a",
+            "?f",
+            "?b",
+            "?g",
+            "?p",
+            "?u",
+            "?un",
+            "?own",
+            "?inc",
+            "?created"
+          ],
+          "clauses": [
+            {
+              "type": "call",
+              "predicate": "keys",
+              "args": [
+                {
+                  "var": "?t"
+                },
+                {
+                  "var": "?r"
+                },
+                {
+                  "var": "?b"
+                },
+                {
+                  "var": "?g"
+                },
+                {
+                  "var": "?p"
+                },
+                {
+                  "var": "?u"
+                },
+                {
+                  "var": "?un"
+                },
+                {
+                  "var": "?own"
+                },
+                {
+                  "var": "?inc"
+                },
+                {
+                  "var": "?created"
+                }
+              ]
+            },
+            {
+              "type": "call",
+              "predicate": "ownership-key",
+              "args": [
+                {
+                  "var": "?t"
+                },
+                {
+                  "var": "?r"
+                },
+                {
+                  "var": "?o"
+                }
+              ]
+            },
+            {
+              "type": "call",
+              "predicate": "attention-key",
+              "args": [
+                {
+                  "var": "?r"
+                },
+                {
+                  "var": "?a"
+                }
+              ]
+            },
+            {
+              "type": "call",
+              "predicate": "affinity-key",
+              "args": [
+                {
+                  "var": "?r"
+                },
+                {
+                  "var": "?f"
+                }
+              ]
+            }
+          ],
+          "source": {
+            "file": "policy/ordering.edn :rules",
+            "index": 25
+          }
+        }
+      ],
+      "calls": ["keys", "ownership-key", "attention-key", "affinity-key"],
+      "set": "ordering"
     }
   ],
   "denials": [
@@ -12483,6 +13601,9 @@
   ],
   "ordering": {
     "comparison": [
+      "ownership",
+      "attention",
+      "affinity",
       "band",
       "group",
       "primary",
@@ -12806,6 +13927,9 @@
       "find": [
         "?t",
         "?r",
+        "?o",
+        "?a",
+        "?f",
         "?b",
         "?g",
         "?p",
@@ -12822,13 +13946,22 @@
       "clauses": [
         {
           "type": "call",
-          "predicate": "keys",
+          "predicate": "ranked",
           "args": [
             {
               "var": "?t"
             },
             {
               "var": "?r"
+            },
+            {
+              "var": "?o"
+            },
+            {
+              "var": "?a"
+            },
+            {
+              "var": "?f"
             },
             {
               "var": "?b"
@@ -12896,7 +14029,7 @@
           "many": false
         }
       ],
-      "calls": ["keys"],
+      "calls": ["ranked"],
       "ruleSet": "ordering"
     },
     "keyQueries": [
@@ -14112,15 +15245,15 @@
   ],
   "coverage": {
     "decisions": 38,
-    "predicates": 83,
-    "alternatives": 162,
+    "predicates": 88,
+    "alternatives": 177,
     "denials": 9,
     "queries": 19,
     "keyQueries": 4,
     "evidence": 39,
     "overrides": 4,
     "constants": 14,
-    "attributes": 94,
-    "clauses": 847
+    "attributes": 96,
+    "clauses": 918
   }
 }

@@ -80,8 +80,8 @@ describe("rules page rendering (#392)", () => {
   });
 
   it("changes on the page and in the CLI text together when a compiler fixture changes", () => {
-    const before = '[1 "role" "implementer"] (eligible ?t) (easy ?t) [1 "order" "impact"]';
-    const after = '[1 "role" "implementer"] (eligible ?t) (unfavorable ?t) [1 "order" "oldest"]';
+    const before = '[(not= ?role "human")] (eligible ?t) (easy ?t) [1 "order" "impact"]';
+    const after = '[(not= ?role "human")] (eligible ?t) (unfavorable ?t) [1 "order" "oldest"]';
     const model = editedModel("decisions.edn", (t) => t.replace(before, after));
     expect(model.rulesHash).not.toBe(shippedModel().rulesHash);
     const doc = rulesDocument({ ...declaredRulesContext(), effective: unknown }, {}, model);
