@@ -114,3 +114,55 @@ export async function resolveReference(
           })(),
   };
 }
+
+/** One validated page of an issue's closing pull-request references (closed ones included). */
+export interface ClosingReferencesPage {
+  nodes: { number: number; url: string; state: string }[];
+  pageInfo: { hasNextPage: boolean; endCursor: string | null };
+}
+
+/**
+ * Read one page of an issue's closing references, closed pull requests included (#951). Throws
+ * when the issue or page is unreadable or malformed, so the caller records the source as failed
+ * rather than as an empty, complete list.
+ */
+export async function closingReferencesPage(
+  query: Query,
+  repository: string,
+  number: number,
+  perPage: number,
+  cursor: string | null,
+): Promise<ClosingReferencesPage> {
+  const [owner, name] = repository.split("/");
+  const data = await query(
+    `query($owner:String!,$name:String!,$number:Int!,$cursor:String){repository(owner:$owner,name:$name){issue(number:$number){closedByPullRequestsReferences(first:${perPage},includeClosedPrs:true,after:$cursor){nodes{number url state} pageInfo{hasNextPage endCursor}}}}}`,
+    { owner: owner!, name: name!, number, ...(cursor ? { cursor } : {}) },
+  );
+  const repo = isRecord(data) ? data.repository : null;
+  const issue = isRecord(repo) ? repo.issue : null;
+  const page = isRecord(issue) ? issue.closedByPullRequestsReferences : null;
+  const info = isRecord(page) && isRecord(page.pageInfo) ? page.pageInfo : null;
+  if (
+    !isRecord(page) ||
+    !Array.isArray(page.nodes) ||
+    !page.nodes.every(
+      (n) =>
+        isRecord(n) &&
+        typeof n.number === "number" &&
+        Number.isSafeInteger(n.number) &&
+        typeof n.url === "string" &&
+        typeof n.state === "string",
+    ) ||
+    !info ||
+    typeof info.hasNextPage !== "boolean" ||
+    (info.endCursor !== null && typeof info.endCursor !== "string")
+  )
+    throw new Error("closing references not readable");
+  return {
+    nodes: page.nodes as ClosingReferencesPage["nodes"],
+    pageInfo: {
+      hasNextPage: info.hasNextPage,
+      endCursor: (info.endCursor as string | null) ?? null,
+    },
+  };
+}

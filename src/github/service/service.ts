@@ -34,6 +34,8 @@ import { checkReads } from "./checks.js";
 import { readRateLimits } from "./ratelimits.js";
 import { resolveLabels } from "./labels.js";
 import { ticketReads } from "./tickets.js";
+import { closingReferencesPage } from "./references.js";
+import type { ClosingReferencesPage } from "./references.js";
 import type { TicketReads } from "./tickets.js";
 import { deliveryIssue } from "./delivery.js";
 import type { DeliveryIssue } from "./delivery.js";
@@ -110,6 +112,16 @@ export interface GhService {
   };
   /** Claim-workflow guard and pull-request state reads (#942). */
   tickets: TicketReads;
+  /** Issue reference reads (#951). */
+  references: {
+    /** One validated page of an issue's closing references, closed pull requests included. */
+    closingPage(
+      repository: string,
+      number: number,
+      perPage: number,
+      cursor: string | null,
+    ): Promise<ClosingReferencesPage>;
+  };
   /** Repository label resolution (#921). */
   labels: {
     /** Resolve normalized names to canonical labels; unresolved on any failed or partial read. */
@@ -260,6 +272,10 @@ export function createGhService(options: GhServiceOptions = {}): GhService {
     },
     history: historyReads(query),
     tickets: ticketReads(query),
+    references: {
+      closingPage: (repository, number, perPage, cursor) =>
+        closingReferencesPage(query as Query, repository, number, perPage, cursor),
+    },
     estimation: estimationCapabilities(graphqlApiOverTransport(transport, env)),
     delivery: {
       issue: (repository, number) => deliveryIssue(query as Query, repository, number),
