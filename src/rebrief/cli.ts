@@ -6,9 +6,7 @@ import { codexResponse } from "./codex.js";
 /** Opt-in process-per-hook wrapper. No native hooks or repository configuration are written. */
 import { parseArgs } from "node:util";
 import { isAbsolute } from "node:path";
-import { collect } from "../github/github.js";
 import { createGhService, type GhService } from "../github/service/service.js";
-import { collectShortlist } from "../github/shortlist.js";
 import { dependencyReport } from "../github/dependencies.js";
 import { resolveIdentityTarget } from "../config/identity.js";
 import { validateHarness } from "../config/harness.js";
@@ -310,8 +308,9 @@ export async function runRebrief(
             ? httpMcpTransport
             : (runtime.transport?.(input) ??
               serviceTransport({
-                collect,
-                collectShortlist,
+                collect: (repo, opts, _injected, now) => gh.snapshot.collect(repo, opts, now),
+                collectShortlist: (repo, opts, _injected, now) =>
+                  gh.snapshot.collectShortlist(repo, opts, now),
                 dependencyReport,
                 gh,
                 ...runtime.read,
