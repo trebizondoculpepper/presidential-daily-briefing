@@ -367,3 +367,13 @@ export function timingView(
     groups: Object.fromEntries(groupedDurations(samples)),
   };
 }
+
+export {
+  assessmentQueueView,
+  type AssessmentMetricName,
+  type AssessmentMetricQueue,
+  type AssessmentQueueResult,
+  type AssessmentQueueSeriesFigure,
+  type AssessmentQueueTicket,
+  type AssessmentStateCount,
+} from "./assessmentqueue.js";
