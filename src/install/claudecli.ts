@@ -12,13 +12,8 @@ import { parseArgs } from "node:util";
 import { homedir } from "node:os";
 import { ConfigError, nodeFileSystem, type GitRunner } from "../config/config.js";
 import type { ConfigRuntime } from "../config/configcli.js";
-import {
-  readIdentity,
-  resolveIdentityTarget,
-  setIdentity,
-  type IdentityTarget,
-} from "../config/identity.js";
-import { resolveEntry, type Environment } from "../config/harness.js";
+import { prepareEffectiveIdentity, type EffectiveHuman } from "../config/effectiveidentity.js";
+import { resolveIdentityTarget } from "../config/identity.js";
 import { createGitService, type GitService } from "../git/service.js";
 import { manifestPath, resolveProjectGitCommonDir, type InstallScope } from "./manifest.js";
 import type { InstallEditErrorCode, InstallEditOutcome, InstallItemKind } from "./manifest.js";
@@ -201,56 +196,66 @@ async function prepareIdentity(
 ): Promise<IdentityPrepareOutcome> {
   if (args.operation !== "install" || scope.kind !== "project")
     return { entry: null, created: false, refused: null, retry: null };
-  const env: Environment = runtime.env ?? process.env;
-  const fs = runtime.fs ?? nodeFileSystem;
-  const root = scope.root;
-  const resolution = await resolveEntry({
-    entry: args.entry ?? undefined,
-    harness: args.harness ?? undefined,
-    env,
-    root,
-    fs,
-  });
-  if (resolution.status === "unresolved") {
-    const flags = `--entry KEY${args.repo ? ` --repo ${args.repo}` : ""}`;
+  const prepared = await prepareEffectiveIdentity(
+    {
+      project: scope.root,
+      repository: scope.repository,
+      entry: args.entry ?? undefined,
+      harness: args.harness ?? undefined,
+      role: args.role ?? undefined,
+      intent: dryRun ? "dry-run" : "normal",
+    },
+    {
+      cwd: scope.root,
+      env: runtime.env ?? process.env,
+      fs: runtime.fs ?? nodeFileSystem,
+      git: runtime.git,
+      random: runtime.random,
+      human: async (): Promise<EffectiveHuman> => ({
+        context: {
+          state: "unresolved",
+          host: "github.com",
+          login: null,
+          source: "none",
+          reason: "Installer identity preparation",
+        },
+        authenticationFailed: false,
+      }),
+    },
+  );
+  if (prepared.state === "unresolved" || prepared.state === "failed") {
+    const diagnostic = prepared.diagnostic;
     return {
       entry: null,
       created: false,
-      refused: resolution.message,
-      retry: `pdb setup identity --role implementer|designer ${flags.trim()}`,
+      refused:
+        diagnostic?.code === "identity-unresolved" || diagnostic?.code === "invalid-value"
+          ? diagnostic.message
+          : (diagnostic?.message ?? "IDENTITY_REQUIRED: identity could not be prepared."),
+      retry: diagnostic?.recovery ?? null,
     };
   }
-  const entry = resolution.entry;
-  const target: IdentityTarget = { root, repository: scope.repository };
-  // A valid existing identity is preserved unchanged: read the record first and only require a
-  // role (or write) when setup is actually needed (attended-installer identity contract).
-  const existing = await readIdentity(root, entry, fs);
-  if (existing.entryExists && existing.name && existing.triageRole !== null)
-    return { entry, created: false, refused: null, retry: null };
-  if (!args.role) {
+  // A refused/failed setup leaves the entry unverified: report it, do not continue.
+  if (prepared.setup.state === "failed")
     return {
       entry: null,
       created: false,
-      refused: "IDENTITY_REQUIRED: a role is needed to set up a missing identity.",
-      retry: `pdb install claude --role implementer|designer --entry ${entry}${args.repo ? ` --repo ${args.repo}` : ""}`,
+      refused: prepared.diagnostic?.message ?? "IDENTITY_REQUIRED",
+      retry: prepared.diagnostic?.recovery ?? null,
     };
-  }
-  // Dry-run previews identity setup without writing (setIdentity is the same locked writer
-  // `pdb setup identity` uses; it must never run during a --dry-run preview).
-  if (dryRun) return { entry, created: false, refused: null, retry: null };
-  const write = await setIdentity(target, entry, "identity.triage_role", args.role, {
-    fs,
-    git: runtime.git,
-    requireName: true,
-  });
-  if (!write.record.name)
-    return {
-      entry: null,
-      created: false,
-      refused: `IDENTITY_REQUIRED: entry [agents.${entry}] has no valid name.`,
-      retry: `pdb config set identity.name NAME --entry ${entry}`,
-    };
-  return { entry, created: write.createdEntry || write.changed, refused: null, retry: null };
+  return {
+    entry: prepared.entry,
+    created: prepared.setup.state === "created" || prepared.setup.state === "imported",
+    refused:
+      prepared.setup.state === "persisted-with-error"
+        ? prepared.setup.notices.join("; ") ||
+          "The identity was persisted but its lock cleanup failed."
+        : null,
+    retry:
+      prepared.setup.state === "persisted-with-error"
+        ? "pdb config set identity.triage_role implementer --entry <KEY>"
+        : null,
+  };
 }
 
 /** Resolve the installer scope: project root (default) or user-wide Claude config (--global). */
@@ -315,6 +320,64 @@ export async function runClaudeInstall(
   const scope = await resolveClaudeInstallScope(args, runtime);
   const manifestPathForScope = manifestPath(scope, "claude");
   const mcpFile = mcpFileFor(scope);
+  // HTTP transport needs a valid explicit endpoint: this CLI has no running-server context that
+  // could establish a default, and an unverified address cannot be claimed as applied (#970).
+  if (
+    args.operation === "install" &&
+    args.transport === "http" &&
+    (args.url === null || !/^https?:\/\/\S+$/i.test(args.url))
+  ) {
+    const refused: ClaudeInstallResult = {
+      schemaVersion: 1,
+      kind: "install-result",
+      client: args.client,
+      operation: args.operation,
+      scope,
+      dryRun: true,
+      items: [
+        {
+          kind: "mcp",
+          file: mcpFile,
+          action: "kept",
+          outcome: "refused",
+          code: "UNSUPPORTED_SCOPE",
+          message:
+            "HTTP transport requires a valid explicit --url (http(s) endpoint); this command cannot invent a server address.",
+          diff: null,
+          retry: `pdb install claude --transport http --url http://127.0.0.1:4372/mcp${args.repo ? ` --repo ${args.repo}` : ""}`,
+        },
+        {
+          kind: "hook",
+          file:
+            scope.kind === "project"
+              ? `${scope.root}/.claude/settings.local.json`
+              : `${scope.homeDir}/.claude/settings.json`,
+          action: "skipped",
+          outcome: "not-attempted",
+          code: "HOOK_NOT_AVAILABLE",
+          message:
+            "Installed hook adapter is a separate slice; withheld until it can bind a session.",
+          diff: null,
+          retry: null,
+        },
+      ],
+      status: {
+        configured: false,
+        trusted: "unknown",
+        executed: "unknown",
+        receiptVerified: "unknown",
+      },
+      next: ["Supply a valid --url with --transport http, then re-run."],
+    };
+    if (args.json) await output(JSON.stringify(refused, null, 2) + "\n");
+    else
+      await output(
+        `pdb install claude: refused (UNSUPPORTED_SCOPE).\n${refused.items
+          .map((i) => `  ${i.kind} (${i.outcome}, ${i.code}): ${i.message}`)
+          .join("\n")}\nNext:\n  ${refused.next.join("\n  ")}\n`,
+      );
+    return 2;
+  }
   // Confirmation contract: --dry-run always previews; --yes applies directly; otherwise a TTY
   // shows the preview and asks for confirmation, and a non-TTY without --yes behaves as a dry
   // run (never writes identity, MCP config or ownership records unconfirmed).
@@ -393,7 +456,10 @@ export async function runClaudeInstall(
   const identity = await prepareIdentity(args, scope, runtime, dryRun);
   const identityEntry = identity.entry;
   let identityItem: ClaudeInstallItem | null = null;
-  if (identity.refused !== null && !dryRun) {
+  // Refusals (ambiguous identity, needed setup without a role, or lock-cleanup failure) must
+  // appear in dry-run and non-interactive previews too, so the result always says whether
+  // installation can actually proceed (#970).
+  if (identity.refused !== null) {
     identityItem = {
       kind: "identity",
       file: null,
