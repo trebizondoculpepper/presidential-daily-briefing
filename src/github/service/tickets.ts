@@ -165,8 +165,11 @@ async function readTicketSnapshot(
   );
   const repo = isRecord(data) ? (data.repository as Record<string, unknown> | null) : null;
   if (!repo) throw new Error(`Repository unavailable: ${repository}`);
+  if (repo.claims != null && (!isRecord(repo.claims) || !Array.isArray(repo.claims.nodes))) {
+    throw new Error("GitHub returned a malformed claims list.");
+  }
   const claims = isRecord(repo.claims) ? repo.claims : null;
-  const claimNodes = Array.isArray(claims?.nodes)
+  const claimNodes = claims
     ? (claims.nodes as { number: number; title: string; url: string }[])
     : [];
   const claimsPage = isRecord(claims?.pageInfo) ? claims.pageInfo : null;
