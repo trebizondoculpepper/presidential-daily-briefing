@@ -12,6 +12,8 @@ import { execFileTransport } from "./transport.js";
 import type { GhTransport } from "./transport.js";
 import { repositoryFromCheckout, throwIfCancelled } from "./repository.js";
 import { historyReads } from "./history.js";
+import { checkReads } from "./checks.js";
+import type { CheckReads } from "./checks.js";
 import type { HistoryReads } from "./history.js";
 import type { GraphQuery } from "../../workflow/claims.js";
 
@@ -39,6 +41,8 @@ export interface GhService {
   };
   /** Validated ticket-history reads for bounded history consumers (#931). */
   history: HistoryReads;
+  /** Required-check evidence: branch rules and protection, head requiredness (#926). */
+  checks: CheckReads;
 }
 
 export interface GhServiceOptions {
@@ -103,6 +107,10 @@ export function createGhService(options: GhServiceOptions = {}): GhService {
       },
     },
     history: historyReads(query),
+    checks: checkReads(async (q, vars) => {
+      const data = await query(q, vars);
+      return typeof data === "object" && data !== null ? (data as Record<string, unknown>) : {};
+    }, rest),
   };
 }
 
