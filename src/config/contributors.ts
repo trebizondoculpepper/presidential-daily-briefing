@@ -21,7 +21,8 @@ import { createHash } from "node:crypto";
 import { lstat, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
-import { nodeGit, resolveRepositoryTarget, type GitRunner } from "./config.js";
+import { createGitService, type GitService } from "../git/service.js";
+import { resolveRepositoryTarget, type GitRunner } from "./config.js";
 
 export const contributorsFile = "CONTRIBUTORS.md";
 /** Guidance is a short document; anything larger is reported truncated rather than half-read. */
@@ -220,7 +221,7 @@ export const contributorsUsage = "Usage: pdb contributors [--repo owner/name] [-
 export async function runContributors(
   args: string[],
   output: (text: string) => Promise<void>,
-  runtime: { git?: GitRunner; cwd?: string } = {},
+  runtime: { git?: GitService | GitRunner; cwd?: string } = {},
   read: ContributorsRuntime = {},
 ): Promise<number> {
   let values: { repo?: string; json?: boolean; help?: boolean };
@@ -239,7 +240,10 @@ export async function runContributors(
     );
     return 0;
   }
-  const git = runtime.git ?? nodeGit;
+  const git =
+    typeof runtime.git === "object"
+      ? runtime.git
+      : createGitService(typeof runtime.git === "function" ? { git: runtime.git } : {});
   let target: { root: string; repository: string };
   try {
     target = await resolveRepositoryTarget(runtime.cwd ?? process.cwd(), values.repo, git);
@@ -250,7 +254,7 @@ export async function runContributors(
     return 2;
   }
   const guidance = await readContributors(target.repository, target.root, {
-    revision: async (root) => (await git(["rev-parse", "HEAD"], root)).trim() || null,
+    revision: (root) => git.revision({ cwd: root }),
     ...read,
   });
   await output(
