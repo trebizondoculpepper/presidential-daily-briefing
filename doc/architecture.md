@@ -191,6 +191,27 @@ report material correctness, data-loss, security and compatibility defects.
 Avoid style-only noise. Follow the [shared review prompt](../.github/review-guidelines.md)
 and unchanged [merge gate](design/review-gate.md).
 
+## 10. Policy before integration and ticket types
+
+When a change affects native workflow decisions, normally deliver a dedicated
+`type:policy` ticket first: decision inputs/outputs, native rules, decision-matrix
+scenarios and only the minimal fact-adapter work needed to validate them. Once it
+passes required checks/review and merges, a dependent `type:engineering` ticket
+integrates the decision into TypeScript mechanics, writes, transports or UI.
+Policy tests alone do not complete the overall feature. Native dependencies enforce
+ordering; ticket types do not create a second workflow engine.
+
+Use `type:policy`, `type:documentation` or `type:engineering` on new tickets going
+forward, according to their primary scope. Roles remain separate: an implementer
+may deliver policy or engineering. Do not relabel the historical backlog or require
+extra slices for a routine change with no decision-policy impact. Documentation
+contracts still precede behavior changes; a policy implementation is not a substitute
+for reviewing the changed architectural contract.
+
+Logging and overrides follow the [local logging](design/local-logging.md),
+[force override](design/human-force-overrides.md) and
+[human responsibility release](design/human-responsibility-release.md) contracts.
+
 ## Reading map
 
 - [Research index and evidence](research/README.md): reasons, experiments and limits.

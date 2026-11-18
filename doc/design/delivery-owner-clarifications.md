@@ -33,3 +33,12 @@ Injected scenarios must cover PR/commit selectors and ambiguous IDs; commit deta
 ## Related decisions
 
 Impact estimation defaults on with explicit opt-out, confirmed on #245 and the merged impact contract; complexity-history author trust is separate #269 and current size labels remain authoritative. Signing is deferred: future developers may each authorize an agent group with a dedicated automation key. If explicitly enabled in a future approved version, bootstrap can reuse an approved key or generate one and offer public-key publication. The private key stays local/outside Git; key discoverability is not repository trust. No key operations or signing implementation are authorized now (#240/#241). These decisions must not block current lifecycle work.
+
+## Explicit human-directed responsibility release addendum
+
+[Human responsibility release](human-responsibility-release.md) (#1014/#1018/#1019)
+defines the separate operation that also clears selected-agent delivery
+responsibility while preserving useful open PRs and readiness. It refines the
+earlier claim-only/removal and open-PR reset limits for that operation; ordinary
+reset and existing UI/permission safeguards remain unchanged. Implementation
+requires the policy slice followed by its engineering integration.
