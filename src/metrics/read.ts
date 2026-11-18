@@ -13,7 +13,7 @@
  */
 
 import { ticketHistory } from "../workflow/claims.js";
-import type { Comment, GraphQuery } from "../workflow/claims.js";
+import type { GraphQuery } from "../workflow/claims.js";
 import {
   collectDeliveryFacts,
   deliveryMemberCap,
@@ -28,6 +28,8 @@ import type { CompletionVerdict } from "./aggregate.js";
 import { ticketLedger } from "./ledger.js";
 import type { LedgerFacts, LedgerPullRequest, LedgerTrust } from "./ledger.js";
 import type { HistoryCoverage, MetricTicket } from "./views.js";
+import { createGhService } from "../github/service/service.js";
+import type { HistoryIssue } from "../github/service/history.js";
 
 export interface MetricsReadBounds {
   /** Pages of 50 issues walked back from now. */
@@ -59,44 +61,6 @@ export interface MetricsRead {
   limitations: string[];
 }
 
-interface WalkPr {
-  number: number;
-  updatedAt: string;
-  mergedAt: string | null;
-  closingIssuesReferences?: {
-    nodes: { number: number; repository: { nameWithOwner: string } }[];
-    pageInfo?: { hasNextPage?: boolean };
-  };
-}
-
-interface WalkIssue {
-  number: number;
-  createdAt: string;
-  updatedAt: string;
-  state: string;
-  closedAt: string | null;
-  stateReason: string | null;
-  lastEditedAt?: string | null;
-  labels?: { nodes: { name: string }[]; pageInfo?: { hasNextPage?: boolean } };
-  comments: { totalCount: number; nodes: Comment[] };
-}
-
-const commentFields =
-  "databaseId url body createdAt author{__typename login} lastEditedAt includesCreatedEdit editor{__typename login}";
-const issueFields =
-  "number createdAt updatedAt lastEditedAt state closedAt stateReason labels(first:100){nodes{name} pageInfo{hasNextPage}} comments(first:100){totalCount nodes{" +
-  commentFields +
-  "}}";
-const openQuery = `query($owner:String!,$name:String!,$cursor:String){repository(owner:$owner,name:$name){issues(first:50,after:$cursor,states:[OPEN],orderBy:{field:CREATED_AT,direction:ASC}){nodes{${issueFields}} pageInfo{hasNextPage endCursor}}}}`;
-const walkQuery = `query($owner:String!,$name:String!,$cursor:String){repository(owner:$owner,name:$name){issues(first:50,after:$cursor,states:[OPEN,CLOSED],orderBy:{field:UPDATED_AT,direction:DESC}){nodes{${issueFields}} pageInfo{hasNextPage endCursor}}}}`;
-const prWalkQuery = `query($owner:String!,$name:String!,$cursor:String){repository(owner:$owner,name:$name){pullRequests(first:50,after:$cursor,states:[MERGED],orderBy:{field:UPDATED_AT,direction:DESC}){nodes{number updatedAt mergedAt closingIssuesReferences(first:50){nodes{number repository{nameWithOwner}} pageInfo{hasNextPage}}} pageInfo{hasNextPage endCursor}}}}`;
-const issueQuery = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){${issueFields}}}}`;
-const prQuery = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){number state mergedAt}}}`;
-
-function prop(v: unknown, k: string): unknown {
-  return v && typeof v === "object" ? (v as Record<string, unknown>)[k] : undefined;
-}
-
 /** The later of two instants; null (never complete) wins. */
 function latest(a: string, b: string | null): string | null {
   if (b === null) return null;
@@ -117,7 +81,6 @@ export async function readMetrics(
   rt: MetricsReadRuntime,
   bounds: MetricsReadBounds = DEFAULT_METRICS_BOUNDS,
 ): Promise<MetricsRead> {
-  const [owner, name] = repository.split("/") as [string, string];
   let requests = 0;
   const query: GraphQuery = (q, v) => {
     rt.signal?.throwIfAborted();
@@ -132,21 +95,20 @@ export async function readMetrics(
     return rt.rest(...args);
   };
   const counted: Pick<DeliverablesRuntime, "query" | "rest"> = { query, rest };
+  // Typed GH reads over the same counted, cancellable executors (#931): no GraphQL here.
+  const gh = createGhService({ query, rest }).history;
   const warnings: string[] = [];
   const fromMs = Date.parse(from);
   const nowDate = new Date(now);
 
   // 1. Walk all-state issues back to the window start.
-  const walked: WalkIssue[] = [];
+  const walked: HistoryIssue[] = [];
   let cursor: string | null = null;
   let reachedStart = false;
   let oldest: string | null = null;
   for (let page = 0; page < bounds.maxPages; page++) {
-    const data = await query(walkQuery, { owner, name, ...(cursor ? { cursor } : {}) });
-    const conn = prop(prop(data, "repository"), "issues");
-    if (!conn) throw new Error(`Repository unavailable: ${repository}`);
-    const nodes = (prop(conn, "nodes") as WalkIssue[] | undefined) ?? [];
-    for (const n of nodes) {
+    const result = await gh.issuesByUpdate(repository, cursor);
+    for (const n of result.nodes) {
       oldest = n.updatedAt;
       if (Date.parse(n.updatedAt) < fromMs) {
         reachedStart = true;
@@ -154,12 +116,11 @@ export async function readMetrics(
       }
       walked.push(n);
     }
-    const info = prop(conn, "pageInfo");
-    if (reachedStart || prop(info, "hasNextPage") !== true) {
+    if (reachedStart || !result.hasNextPage) {
       reachedStart = true;
       break;
     }
-    cursor = (prop(info, "endCursor") as string | null) ?? null;
+    cursor = result.endCursor;
   }
   const issueFrom = reachedStart ? from : oldest;
   if (!reachedStart) warnings.push(`issue walk stopped at ${bounds.maxPages} pages before ${from}`);
@@ -170,22 +131,14 @@ export async function readMetrics(
   let openComplete = false;
   let openCursor: string | null = null;
   for (let page = 0; page < bounds.maxPages; page++) {
-    const conn = prop(
-      prop(
-        await query(openQuery, { owner, name, ...(openCursor ? { cursor: openCursor } : {}) }),
-        "repository",
-      ),
-      "issues",
-    );
-    if (!conn) throw new Error(`Repository unavailable: ${repository}`);
-    for (const issue of (prop(conn, "nodes") as WalkIssue[] | undefined) ?? [])
+    const result = await gh.openIssues(repository, openCursor);
+    for (const issue of result.nodes)
       if (!walked.some((i) => i.number === issue.number)) walked.push(issue);
-    const info = prop(conn, "pageInfo");
-    if (prop(info, "hasNextPage") !== true) {
+    if (!result.hasNextPage) {
       openComplete = true;
       break;
     }
-    openCursor = (prop(info, "endCursor") as string | null) ?? null;
+    openCursor = result.endCursor;
   }
   if (!openComplete) warnings.push(`open inventory stopped at ${bounds.maxPages} pages`);
 
@@ -200,43 +153,27 @@ export async function readMetrics(
   let prReachedStart = false;
   let prOldest: string | null = null;
   for (let page = 0; page < bounds.maxPages; page++) {
-    const conn = prop(
-      prop(
-        await query(prWalkQuery, { owner, name, ...(prCursor ? { cursor: prCursor } : {}) }),
-        "repository",
-      ),
-      "pullRequests",
-    );
-    if (!conn) throw new Error(`Repository unavailable: ${repository}`);
-    for (const pr of (prop(conn, "nodes") as WalkPr[] | undefined) ?? []) {
+    const result = await gh.mergedPulls(repository, prCursor);
+    for (const pr of result.nodes) {
       prOldest = pr.updatedAt;
       if (Date.parse(pr.updatedAt) < fromMs) {
         prReachedStart = true;
         break;
       }
-      if (
-        pr.mergedAt &&
-        Date.parse(pr.mergedAt) >= fromMs &&
-        Date.parse(pr.mergedAt) < Date.parse(now)
-      )
-        merges.push({ at: pr.mergedAt, key: `${repository}#${pr.number}` });
-      if (
-        pr.mergedAt &&
-        Date.parse(pr.mergedAt) >= fromMs &&
-        pr.closingIssuesReferences?.pageInfo?.hasNextPage
-      )
+      const inWindow = pr.mergedAt !== null && Date.parse(pr.mergedAt) >= fromMs;
+      if (inWindow && Date.parse(pr.mergedAt!) < Date.parse(now))
+        merges.push({ at: pr.mergedAt!, key: `${repository}#${pr.number}` });
+      if (inWindow && pr.closesTruncated)
         unreadLinked.push(`${repository} PR #${pr.number}: closing references beyond 50`);
-      if (pr.mergedAt && Date.parse(pr.mergedAt) >= fromMs)
-        for (const ref of pr.closingIssuesReferences?.nodes ?? [])
-          if (ref.repository.nameWithOwner.toLowerCase() === repository.toLowerCase())
-            linked.add(ref.number);
+      if (inWindow)
+        for (const ref of pr.closes)
+          if (ref.repository.toLowerCase() === repository.toLowerCase()) linked.add(ref.number);
     }
-    const info = prop(conn, "pageInfo");
-    if (prReachedStart || prop(info, "hasNextPage") !== true) {
+    if (prReachedStart || !result.hasNextPage) {
       prReachedStart = true;
       break;
     }
-    prCursor = (prop(info, "endCursor") as string | null) ?? null;
+    prCursor = result.endCursor;
   }
   if (!prReachedStart)
     warnings.push(`pull request walk stopped at ${bounds.maxPages} pages before ${from}`);
@@ -252,12 +189,9 @@ export async function readMetrics(
       continue;
     }
     linkedBudget--;
-    let issue: WalkIssue | null | undefined;
+    let issue: HistoryIssue | null;
     try {
-      issue = prop(
-        prop(await query(issueQuery, { owner, name, number }), "repository"),
-        "issue",
-      ) as WalkIssue | null | undefined;
+      issue = await gh.issue(repository, number);
     } catch (error) {
       if (rt.signal?.aborted) throw error;
       issue = null;
@@ -309,13 +243,9 @@ export async function readMetrics(
       );
     }
     for (const pr of (required ?? []).slice(0, deliveryMemberCap)) {
-      const [o, nm] = pr.repository.split("/") as [string, string];
-      let node: { number: number; state: string; mergedAt: string | null } | null | undefined;
+      let node: { number: number; state: string; mergedAt: string | null } | null;
       try {
-        node = prop(
-          prop(await query(prQuery, { owner: o, name: nm, number: pr.number }), "repository"),
-          "pullRequest",
-        ) as { number: number; state: string; mergedAt: string | null } | null | undefined;
+        node = await gh.pullState(pr.repository, pr.number);
       } catch (error) {
         // An inaccessible deliverable is missing evidence for this ticket, not a failed read;
         // cancellation still propagates.
