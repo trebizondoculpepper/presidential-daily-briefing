@@ -176,10 +176,13 @@ export type GhRun = (args: string[], call?: CommentCallOptions) => Promise<unkno
 export function ticketGuard(
   repository: string,
   number: number,
-  query: GraphQuery | TicketReads,
+  query: GraphQuery | (Pick<TicketReads, "guardState"> & Partial<TicketReads>),
 ): () => Promise<string> {
   // The typed, validated guard read (#942): a malformed answer fails the guard.
-  return () => ticketsOver(query).guardState(repository, number);
+  return () =>
+    typeof query === "function"
+      ? ticketReads(query).guardState(repository, number)
+      : query.guardState(repository, number);
 }
 
 /**
@@ -279,26 +282,6 @@ export type Comment = {
 export type Actor = { __typename?: string; login?: string };
 type CommentPageInfo = { hasPreviousPage?: boolean; startCursor?: string | null };
 type LabelEvent = { __typename?: string; createdAt?: string; label?: { name: string } };
-type TicketItem = TicketIssue | { __typename: "PullRequest"; number: number; url: string };
-interface TicketResponse {
-  repository: {
-    issueOrPullRequest: TicketItem | null;
-    claims: {
-      nodes: { number: number; title: string; url: string }[];
-      pageInfo?: { hasNextPage?: boolean };
-    } | null;
-    ownerLabel: { name: string } | null;
-    questionLabel: { name: string } | null;
-    decisionLabel: { name: string } | null;
-    needsDesignLabel: { name: string } | null;
-    attentionLabel: { name: string } | null;
-    targetLabel?: { name: string } | null;
-  } | null;
-}
-
-/** Comment fields read wherever a marker may drive a write: body, author and edit evidence. */
-const commentFields =
-  "databaseId url body createdAt author{__typename login} lastEditedAt includesCreatedEdit editor{__typename login}";
 
 /**
  * Whether a marker comment may drive a write (#212, doc/design/triage-efficiency-and-trust.md
@@ -526,28 +509,6 @@ function labelSteps(
 
 /** Older label-event pages read at most, so a long label history costs a bounded number of requests. */
 const claimHistoryPages = 3;
-type TimelinePage<E> = {
-  nodes: E[];
-  pageInfo?: { hasPreviousPage?: boolean; startCursor?: string | null };
-};
-const labelEventFields =
-  "__typename ... on LabeledEvent{createdAt label{name}} ... on UnlabeledEvent{createdAt label{name}}";
-/** One page of an issue's timeline (newest `last:100` before `before`), or null when unreadable. */
-async function timelinePage<E>(
-  repository: string,
-  number: number,
-  itemTypes: string,
-  fields: string,
-  before: string | null,
-  query: GraphQuery,
-): Promise<TimelinePage<E> | null> {
-  const [owner, name] = repository.split("/");
-  const data = (await query(
-    `query($owner:String!,$name:String!,$number:Int!${before ? ",$before:String!" : ""}){repository(owner:$owner,name:$name){issue(number:$number){timelineItems(itemTypes:[${itemTypes}],last:100${before ? ",before:$before" : ""}){nodes{${fields}} pageInfo{hasPreviousPage startCursor}}}}}`,
-    { owner, name, number, ...(before ? { before } : {}) },
-  )) as { repository: { issue: { timelineItems: TimelinePage<E> } | null } | null };
-  return data.repository?.issue?.timelineItems ?? null;
-}
 /**
  * When `ownerLabel` was last added: the identity of the caller's current claim. Pages backwards
  * through label history (bounded) when the add event is not in `readTicket`'s window. `since` is
@@ -559,8 +520,9 @@ export async function claimStart(
   number: number,
   ownerLabel: string,
   item: TicketIssue,
-  query: GraphQuery,
+  query: GraphQuery | TicketReads,
 ): Promise<{ since: string | null; complete: boolean; events: LabelEvent[] }> {
+  const tickets = ticketsOver(query);
   const latestAdd = (events: LabelEvent[]): string | null =>
     events
       .filter(
@@ -577,14 +539,7 @@ export async function claimStart(
     !since && info?.hasPreviousPage && info.startCursor && pageNo < claimHistoryPages;
     pageNo++
   ) {
-    const older = await timelinePage<LabelEvent>(
-      repository,
-      number,
-      "LABELED_EVENT,UNLABELED_EVENT",
-      labelEventFields,
-      info.startCursor,
-      query,
-    );
+    const older = await tickets.labelTimelinePage(repository, number, info.startCursor);
     if (!older) break;
     events = [...older.nodes, ...events];
     info = older.pageInfo;
@@ -611,8 +566,6 @@ export type HistoryEvent =
       actor?: Actor | null;
     }
   | { __typename: "ReopenedEvent"; createdAt: string; actor?: Actor | null };
-const actorFields = "actor{__typename login}";
-const historyEventFields = `__typename ... on LabeledEvent{createdAt label{name} ${actorFields}} ... on UnlabeledEvent{createdAt label{name} ${actorFields}} ... on ClosedEvent{createdAt stateReason ${actorFields}} ... on ReopenedEvent{createdAt ${actorFields}}`;
 /** A bounded read of a ticket's label and closure timeline. */
 export interface TicketHistory {
   /** Oldest first. */
@@ -631,31 +584,17 @@ export interface TicketHistory {
 export async function ticketHistory(
   repository: string,
   number: number,
-  query: GraphQuery,
+  query: GraphQuery | TicketReads,
 ): Promise<TicketHistory> {
-  const types = "LABELED_EVENT,UNLABELED_EVENT,CLOSED_EVENT,REOPENED_EVENT";
-  const first = await timelinePage<HistoryEvent>(
-    repository,
-    number,
-    types,
-    historyEventFields,
-    null,
-    query,
-  );
+  const tickets = ticketsOver(query);
+  const first = await tickets.historyTimelinePage(repository, number, null);
   if (!first) return { events: [], complete: false, pages: 1 };
   let events = first.nodes;
   let info = first.pageInfo;
   let pages = 1;
   for (let pageNo = 0; info?.hasPreviousPage && pageNo < claimHistoryPages; pageNo++) {
     if (!info.startCursor) break;
-    const older = await timelinePage<HistoryEvent>(
-      repository,
-      number,
-      types,
-      historyEventFields,
-      info.startCursor,
-      query,
-    );
+    const older = await tickets.historyTimelinePage(repository, number, info.startCursor);
     pages++;
     if (!older) return { events, complete: false, pages };
     events = [...older.nodes, ...events];
@@ -677,18 +616,14 @@ export async function commentHistory(
   number: number,
   item: TicketIssue,
   enough: (comments: Comment[]) => boolean | Promise<boolean>,
-  query: GraphQuery,
+  query: GraphQuery | TicketReads,
 ): Promise<{ comments: Comment[]; complete: boolean }> {
+  const tickets = ticketsOver(query);
   let comments = item.comments.nodes;
   let info = item.comments.pageInfo;
-  const [owner, name] = repository.split("/");
   for (let pageNo = 0; info?.hasPreviousPage && !(await enough(comments)); pageNo++) {
     if (!info.startCursor || pageNo >= commentHistoryPages) return { comments, complete: false };
-    const data = (await query(
-      `query($owner:String!,$name:String!,$number:Int!,$before:String!){repository(owner:$owner,name:$name){issue(number:$number){comments(last:100,before:$before){nodes{${commentFields}} pageInfo{hasPreviousPage startCursor}}}}}`,
-      { owner, name, number, before: info.startCursor },
-    )) as { repository: { issue: { comments: TicketIssue["comments"] } | null } | null };
-    const older = data.repository?.issue?.comments;
+    const older = await tickets.commentPage(repository, number, info.startCursor);
     if (!older) return { comments, complete: false };
     comments = [...older.nodes, ...comments];
     info = older.pageInfo;
@@ -706,47 +641,18 @@ export async function readTicket(
   repository: string,
   number: number,
   agent: string,
-  query: GraphQuery,
+  query: GraphQuery | TicketReads,
   designer = "",
   target = "",
 ) {
-  const [owner, name] = repository.split("/");
-  const data = await query(
-    `query($owner:String!,$name:String!,$number:Int!,$label:String!,$question:String!,$decision:String!,$needsDesign:String!,$attention:String!${target ? ",$target:String!" : ""}){repository(owner:$owner,name:$name){issueOrPullRequest(number:$number){__typename ... on PullRequest{number url} ... on Issue{number title url state updatedAt labels(first:100){nodes{name} pageInfo{hasNextPage}} issueDependenciesSummary{blockedBy} blockedBy(first:20){nodes{number url state}} closedByPullRequestsReferences(first:10,includeClosedPrs:false){nodes{number url state} pageInfo{hasNextPage}} comments(last:100){nodes{${commentFields}} pageInfo{hasPreviousPage startCursor}} timelineItems(itemTypes:[LABELED_EVENT,UNLABELED_EVENT],last:50){nodes{__typename ... on LabeledEvent{createdAt label{name}} ... on UnlabeledEvent{createdAt label{name}}} pageInfo{hasPreviousPage startCursor}}}} claims:issues(first:20,states:OPEN,labels:[$label]){nodes{number title url} pageInfo{hasNextPage}} ownerLabel:label(name:$label){name} questionLabel:label(name:$question){name} decisionLabel:label(name:$decision){name} needsDesignLabel:label(name:$needsDesign){name} attentionLabel:label(name:$attention){name}${target ? " targetLabel:label(name:$target){name}" : ""}}}`,
-    {
-      owner,
-      name,
-      number,
-      label: claimPolicy.owner(agent),
-      question: claimPolicy.question,
-      decision: claimPolicy.decisionNeeded,
-      needsDesign: claimPolicy.needsDesign,
-      attention: designer ? claimPolicy.attention(designer) : "",
-      ...(target ? { target } : {}),
-    },
-  );
-  // The response shape is fixed by the query text above; GitHub's GraphQL schema guarantees
-  // it for a successful (non-error) response, which `ghQuery` has already established.
-  const repo = (data as TicketResponse).repository;
-  if (!repo) throw new Error(`Repository unavailable: ${repository}`);
-  return {
-    item: repo.issueOrPullRequest ?? null,
-    claims: repo.claims?.nodes ?? [],
-    claimsComplete: !!repo.claims && !repo.claims.pageInfo?.hasNextPage,
-    // Exact-name lookups, so a repository with many labels cannot hide an existing one.
-    repoLabels: new Set(
-      [
-        repo.ownerLabel,
-        repo.questionLabel,
-        repo.decisionLabel,
-        repo.needsDesignLabel,
-        repo.attentionLabel,
-        repo.targetLabel,
-      ]
-        .filter((l): l is { name: string } => !!l)
-        .map((l) => l.name),
-    ),
-  };
+  return ticketsOver(query).readTicket(repository, number, {
+    owner: claimPolicy.owner(agent),
+    question: claimPolicy.question,
+    decisionNeeded: claimPolicy.decisionNeeded,
+    needsDesign: claimPolicy.needsDesign,
+    attention: designer ? claimPolicy.attention(designer) : "",
+    ...(target ? { target } : {}),
+  });
 }
 
 /**
@@ -777,7 +683,7 @@ const owners = (item: { labels: Labels }): string[] =>
 export async function planClaim(
   repository: string,
   request: ClaimRequest,
-  query: GraphQuery = ghQuery,
+  query: GraphQuery | TicketReads = ghQuery,
   permission: PermissionLookup = permissionLookup(repository),
   reworkAuthority?: () => Promise<ReworkAuthority>,
   admission?: Admission,
@@ -803,7 +709,7 @@ export async function planClaim(
 async function planClaimFor(
   repository: string,
   request: ClaimRequest,
-  query: GraphQuery,
+  query: GraphQuery | TicketReads,
   permission: PermissionLookup,
   reworkAuthority: (() => Promise<ReworkAuthority>) | undefined,
   admission: Admission | undefined,
@@ -1223,7 +1129,7 @@ export function parseQuestionRecordBody(text: string): QuestionRecordParts | nul
 export async function planNeedsHuman(
   repository: string,
   request: NeedsHumanRequest,
-  query: GraphQuery = ghQuery,
+  query: GraphQuery | TicketReads = ghQuery,
   permission: PermissionLookup = permissionLookup(repository),
 ): Promise<ClaimPlan> {
   const { number, agent, designer, why, questions } = request;
@@ -1374,14 +1280,12 @@ async function readPullRequest(
  * appends a marker checks this first, or its record would be ignored by every reader.
  */
 export async function viewerAuthority(
-  query: GraphQuery,
+  query: GraphQuery | TicketReads,
   permission: PermissionLookup,
 ): Promise<{ viewer: Actor | null; authority: Authority }> {
   let viewer: Actor | null = null;
   try {
-    viewer =
-      ((await query("query{viewer{__typename login}}", {})) as { viewer?: Actor | null }).viewer ??
-      null;
+    viewer = await ticketsOver(query).viewer();
   } catch {
     viewer = null;
   }
@@ -1440,7 +1344,7 @@ export interface QuestionResolutionRequest {
 export async function planQuestionResolution(
   repository: string,
   request: QuestionResolutionRequest,
-  query: GraphQuery = ghQuery,
+  query: GraphQuery | TicketReads = ghQuery,
   permission: PermissionLookup = permissionLookup(repository),
 ): Promise<ClaimPlan> {
   const { number, agent, op, question, why } = request;
@@ -1629,7 +1533,7 @@ export async function planQuestionResolution(
 export async function planRelease(
   repository: string,
   request: ReleaseRequest,
-  query: GraphQuery = ghQuery,
+  query: GraphQuery | TicketReads = ghQuery,
   permission: PermissionLookup = permissionLookup(repository),
 ): Promise<ClaimPlan> {
   const { number, agent, outcome, note = null, pr = null, change = null } = request;
@@ -1915,7 +1819,7 @@ export async function applyPlan(
     stillWaiting,
   }: {
     run?: GhRun;
-    query?: GraphQuery;
+    query?: GraphQuery | TicketReads;
     /** Re-verify claims admitted as waiting (#412): the problems found, empty when all still wait. */
     stillWaiting?: (numbers: number[]) => Promise<string[]>;
   } = {},
