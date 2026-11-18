@@ -277,6 +277,7 @@ export function evaluatePolicy(input: PolicyFacts, options: PolicyOptions = {}):
         )
       : null;
   options.signal?.throwIfAborted();
+  const witnessCache = new Map<string, Value[]>();
   const decisions = rows
     .sort((a, b) => compareKeys(a.slice(2), b.slice(2)))
     .map((row): PolicyDecision => {
@@ -293,7 +294,14 @@ export function evaluatePolicy(input: PolicyFacts, options: PolicyOptions = {}):
         ...definition.witnesses,
       };
       for (const [key, witnessQuery] of Object.entries(selectedWitnesses)) {
-        const values = ds.q(witnessQuery, db, clauses, t).flat();
+        // A subject's witnesses are pure over this database: several decisions on one subject
+        // (one activity pool for both roles, #652) share the same answers, so read each once.
+        const cacheKey = `${witnessQuery}\u0000${String(t)}`;
+        let values = witnessCache.get(cacheKey);
+        if (!values) {
+          values = ds.q(witnessQuery, db, clauses, t).flat();
+          witnessCache.set(cacheKey, values);
+        }
         if (values.length === 1) bindings[key] = values[0];
         else if (values.length > 1) {
           const sorted = values.map(String).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
