@@ -105,6 +105,11 @@ describe("shared served-page shell (#605)", () => {
     // its account-wide labelling.
     expect(renderToolbar(context("quotas"))).toContain("Change project");
     expect(renderToolbar(context("quotas"))).toContain("Account-wide");
+    // #669: every page's toolbar carries the accessible, text-only "Working for" slot.
+    for (const page of ["work", "quotas", "rules"])
+      expect(renderToolbar(context(page))).toContain(
+        '<p class="working-for" data-working-for role="status" aria-live="polite">Working for: loading…</p>',
+      );
     for (const page of servedPages.filter((p) => p.shipped && !p.section))
       expect(html).toContain(page.label);
     expect(html).not.toContain('href="/settings');

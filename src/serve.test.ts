@@ -257,6 +257,11 @@ describe("pdb serve lifecycle (#373)", () => {
       repositories: [{ repository: "example/one", default: true, observedAt: null }],
       cache: { entries: 0, hits: 0, misses: 0, inflight: 0 },
     });
+    // #669: whose work the process does, with its source; never an agent name or role.
+    const human = status.human as { state: string };
+    expect(["current", "last-known", "unresolved", "disabled"]).toContain(human.state);
+    if (human.state === "current")
+      expect(human).toMatchObject({ login: "octo", host: "github.com", source: "gh-login" });
     // The dashboard (#374): page, stylesheet and script, same-origin under a strict CSP.
     const page = await call(port, "/");
     expect(page.status).toBe(200);

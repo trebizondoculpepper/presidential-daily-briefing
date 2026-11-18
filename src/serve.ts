@@ -5,9 +5,8 @@ import {
   withProcessIdentity,
 } from "./serve/process-footer.js";
 import { disabledEffectiveHuman } from "./config/effectiveidentity.js";
-import { humanContextEnabled } from "./config/humancontext.js";
 import { startLocalIdentity } from "./config/serveridentity.js";
-import { serverHumanContext } from "./config/humancontext.js";
+import { humanContextEnabled, serverHumanContext } from "./config/humancontext.js";
 import { servedPages, shellContext, selectionErrorPage } from "./serve/shell.js";
 /**
  * `pdb serve`: a foreground local HTTP server (doc/design/serve.md, #373).
@@ -337,6 +336,11 @@ export async function startServe(
     }),
     ttlSeconds: options.ttlMs / 1000,
     auth: { host: facts.auth.host, login: facts.auth.login },
+    // Whose work this process does (#669): the execution human, its source and freshness;
+    // separate from any agent name or role and from ticket assignees.
+    human: humanContextEnabled()
+      ? (facts.effectiveHuman?.context ?? serverHumanContext(facts.auth, facts.startedAt))
+      : { state: "disabled" },
     ...(facts.identitySession
       ? {
           identityStartup: { phase: "local-server-startup", result: facts.identitySession.startup },
