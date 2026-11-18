@@ -41,8 +41,8 @@ import type { PrStatusReads } from "./prstatus.js";
 import type { ReviewHistoryReads } from "./reviewhistory.js";
 import type { ReferenceReads } from "./references.js";
 import type { TicketReads } from "./tickets.js";
-import { deliveryIssue } from "./delivery.js";
-import type { DeliveryIssue } from "./delivery.js";
+import { deliveryReads } from "./delivery.js";
+import type { DeliveryReads } from "./delivery.js";
 import { estimationCapabilities, type EstimationCapabilities } from "./estimation.js";
 import { commentPostOver, ghCommentReceipt } from "../dependencies.js";
 import { withCommentRecovery } from "../commentwrite.js";
@@ -110,10 +110,7 @@ export interface GhService {
     ): Promise<CommentRecovery>;
   };
   /** Delivery-view issue reads (#945). */
-  delivery: {
-    /** One issue's state, closing PRs and validated newest comments; null only when absent. */
-    issue(repository: string, number: number): Promise<DeliveryIssue | null>;
-  };
+  delivery: DeliveryReads;
   /** Claim-workflow guard and pull-request state reads (#942). */
   tickets: TicketReads;
   /** Issue reference reads (#951). */
@@ -276,9 +273,7 @@ export function createGhService(options: GhServiceOptions = {}): GhService {
     reviewHistory: reviewHistoryReads(query as Query),
     prStatus: prStatusReads(query as Query),
     estimation: estimationCapabilities(graphqlApiOverTransport(transport, env)),
-    delivery: {
-      issue: (repository, number) => deliveryIssue(query as Query, repository, number),
-    },
+    delivery: deliveryReads(query as Query),
     comments: {
       async create(target, call) {
         // The write and its receipt read run over this service's own transport, environment and

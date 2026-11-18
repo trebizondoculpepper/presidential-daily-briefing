@@ -10,6 +10,8 @@
  * evaluator. Nothing is posted, closed, reopened, claimed or reassigned. Unknown evidence is
  * reported as unknown: it is never read as "no record", "nobody responsible" or "not delivered".
  */
+import type { Query } from "../github/github.js";
+import { deliveryReads } from "../github/service/delivery.js";
 import {
   collectDeliveryFacts,
   completionEffects,
@@ -17,12 +19,7 @@ import {
   evaluateDelivery,
 } from "./completion.js";
 import type { DeliveryEvaluation } from "./completion.js";
-import {
-  deliveryCommentFields,
-  legacyRelease,
-  prUrl,
-  readDeliveryComments,
-} from "./deliverables.js";
+import { legacyRelease, prUrl, readDeliveryComments } from "./deliverables.js";
 import type { DeliverablesRuntime } from "./deliverables.js";
 import { deliverableLabel, parseDeliveryComment, readDeliveryFold } from "./delivery.js";
 import type { DeliveryComment, TrustDecision } from "./delivery.js";
@@ -383,20 +380,16 @@ export async function diagnoseClosedDrift(
     warnings: [],
     tickets: [],
   };
-  const [owner, name] = repository.split("/");
   let nodes: ClosedIssueNode[];
   try {
-    const data = (await rt.live.query(
-      `query($owner:String!,$name:String!,$since:DateTime!,$first:Int!){repository(owner:$owner,name:$name){issues(states:CLOSED,first:$first,orderBy:{field:UPDATED_AT,direction:DESC},filterBy:{since:$since}){nodes{number title url state stateReason closedAt timelineItems(itemTypes:[CLOSED_EVENT],last:1){nodes{... on ClosedEvent{actor{login}}}} comments(last:100){nodes{${deliveryCommentFields}} pageInfo{hasPreviousPage startCursor}}} pageInfo{hasNextPage}}}}`,
-      { owner, name, since, first: closedDriftIssueCap },
-    )) as {
-      repository: {
-        issues: { nodes: ClosedIssueNode[]; pageInfo: { hasNextPage: boolean } };
-      } | null;
-    };
-    if (!data.repository) throw new Error(`repository ${repository} unavailable`);
-    nodes = data.repository.issues.nodes;
-    if (data.repository.issues.pageInfo.hasNextPage) {
+    // The typed, validated closed-issue read (#944).
+    const page = await deliveryReads(rt.live.query as unknown as Query).closedSince(
+      repository,
+      since,
+      closedDriftIssueCap,
+    );
+    nodes = page.nodes as unknown as ClosedIssueNode[];
+    if (page.hasNextPage) {
       scan.complete = false;
       scan.warnings.push(
         `more than ${closedDriftIssueCap} issues closed and updated since ${since}; drift beyond them is unknown (narrow --since)`,
