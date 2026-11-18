@@ -89,3 +89,9 @@ The [central architecture](../architecture.md#10-policy-before-integration-and-t
 
 - [Onboarding files and npm hint](onboarding-rules-files.md): two independent small features, preserving project file ownership.
 - [Generated action rules](action-rule-reminders.md): policy-first claim, unclaim and submission reminders, each in separate tickets.
+
+## Stable defaults and policy presentation
+
+- [Stable harness identity](stable-harness-identity.md): cross-session default reuse and safe legacy recovery (#1047).
+- [Native ranking only](native-ranking-only.md): remove the independent TypeScript scheduler and every selection knob (#1050).
+- [Markdown rules](markdown-rules.md): one shared presentation for CLI and generated rules files (#1049).
