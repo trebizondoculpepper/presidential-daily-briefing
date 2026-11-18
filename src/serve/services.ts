@@ -211,6 +211,15 @@ export function readServices(
                           }),
                       }
                     : {}),
+                  // #816: compare the saved value against the applied configuration snapshot
+                  // (exact, JSON-based), so acknowledgements are correct for unsupported-host
+                  // registrations, duplicates, and verification-reduced roots.
+                  ...(facts.applicationState
+                    ? {
+                        appliedValue: (key) =>
+                          facts.applicationState!.view().keys.find((k) => k.key === key)?.applied,
+                      }
+                    : {}),
                   // #816: record live-key application against the observed saved snapshot.
                   ...(facts.applicationState
                     ? {

@@ -75,6 +75,13 @@ export interface LiveApplicationBoundaries {
    */
   verifyProject?: (repository: string, localRoot: string) => Promise<VerifiedSavedRoot>;
   /**
+   * The currently applied value of a live key (#816), when the running server has application
+   * state. Absent without it: the module then falls back to comparing the served projection,
+   * which is lossy (an unsupported-host registration, a duplicate, or a verification-reduced
+   * root can change the saved value without changing the projection).
+   */
+  appliedValue?: (key: string) => unknown;
+  /**
    * Report the applied/failed live keys to #816 and return the resulting view. Absent when the
    * running server has no application state (no verified global configuration boundary): the
    * served set and cache are still updated, but nothing is recorded.
@@ -179,6 +186,10 @@ const sameValue = (left: readonly ServedEntry[], right: readonly ServedEntry[]):
     (entry, i) => sameEntry(entry, right[i]!) && entry.repository === right[i]!.repository,
   );
 
+/** The exact config-value comparison #816 uses (JSON string equality of a whole key value). */
+const sameConfigValue = (left: unknown, right: unknown): boolean =>
+  JSON.stringify(left) === JSON.stringify(right);
+
 /**
  * Apply a fresh saved configuration to the running serve (#808). The fresh snapshot is the
  * registered configuration service's `LoadedGlobalConfig` read after the saved change landed
@@ -230,9 +241,17 @@ export async function applyLiveApplication(
 
   // The write read succeeded (the caller passes an error instead when it did not), so the
   // `serve.projects` key applied — or was already current. Acknowledge it whenever its saved
-  // *value* took effect (any context change implies a value change, and so does a reorder or a
-  // case-only spelling change), so #816 never stays "pending-live" after a successful reload.
-  const valueChanged = !sameValue(current, served);
+  // *value* took effect. The precise comparison is against the applied configuration snapshot
+  // (#816, same JSON value compare it uses): an unsupported-host registration, a duplicate, or a
+  // verification-reduced root changes the saved value even when the served projection is
+  // unchanged, so projection equality alone would leave #816 pending-live forever. Without an
+  // application state getter, fall back to the (lossy) projection comparison.
+  const savedValue = stored;
+  const appliedValue = boundaries.appliedValue?.("serve.projects");
+  const valueChanged =
+    appliedValue !== undefined
+      ? !sameConfigValue(savedValue, appliedValue)
+      : !sameValue(current, served);
   boundaries.record?.({
     revision: revisionOf(saved),
     // A saved registration for a host this build cannot serve is a diagnostic, not a key

@@ -551,6 +551,8 @@ export function readApi(
 ): (facts: ServerFacts) => Routes {
   // The served set, known once listening.
   let servedSet: readonly ServedRepository[] = [];
+  // #808: per-repository context revisions, updated by live application (A -> B -> A guard).
+  let contextRevisions = new Map<string, number>();
   // #664: the one execution-human context of this process, known once listening.
   let serverHuman: (() => Promise<HumanContext>) | undefined;
   let identitySession: LocalIdentitySession | undefined;
@@ -629,6 +631,10 @@ export function readApi(
     values: Map<string, string>,
     served: ServedRepository,
   ): Promise<Selection> => {
+    // #808: the repository's context revision when this identity resolution began. If a live
+    // application changes the context while resolution is pending, the resolved identity may
+    // describe the old context even when the path eventually matches again (A -> B -> A).
+    const revisionAtStart = contextRevisions.get(served.repository.toLowerCase()) ?? 0;
     const agent = values.get("agent");
     if (agent !== undefined && !agentPattern.test(agent))
       throw invalid("agent must be an agent name such as kavya_sabbagh.");
@@ -678,11 +684,14 @@ export function readApi(
     // #808: the served context may have changed or been removed while identity resolution ran
     // (selection -> identity). A collection started now would capture the new cache epoch while
     // still using the old selected project and identity, returning old-context facts as fresh;
-    // reject instead of starting it.
+    // reject instead of starting it. The revision check also rejects an A -> B -> A transition
+    // whose restored path alone would pass equality.
     const still = servedSet.find(
       (s) => s.repository.toLowerCase() === served.repository.toLowerCase(),
     );
-    if (!still || (still.project ?? null) !== (served.project ?? null))
+    const revisionChanged =
+      (contextRevisions.get(served.repository.toLowerCase()) ?? 0) !== revisionAtStart;
+    if (revisionChanged || !still || (still.project ?? null) !== (served.project ?? null))
       throw new HttpFailure(
         409,
         "CONTEXT_CHANGED",
@@ -695,6 +704,7 @@ export function readApi(
   return (facts) => {
     servedSet = facts.served;
     identitySession = facts.identitySession;
+    contextRevisions = facts.contextRevisions ?? new Map();
     refreshKnown(facts.served);
     if (humanContextEnabled())
       serverHuman = async () =>
@@ -747,16 +757,21 @@ export function readApi(
         served = selectRepository(facts.served, values.get("repo"));
         selection = noIdentity(served.repository);
         const generation = facts.contextVersion?.value ?? 0;
+        const selectionRevision = facts.contextRevisions?.get(served.repository.toLowerCase()) ?? 0;
         const refresh = booleanParam(values, "refresh");
         const chosen = served;
         const { value, freshness } = await cache.track(refresh, () =>
           read(values, chosen, (s) => (selection = s)),
         );
         // #808 request-context guard across cache access and response delivery: if a live
-        // application replaced or removed this repository's context while the read ran, the
-        // collected facts describe the obsolete context. Reject rather than deliver them as
-        // fresh; an unchanged context (same repository and project) is still valid.
-        if ((facts.contextVersion?.value ?? 0) !== generation) {
+        // application replaced, removed, changed-and-restored (A -> B -> A) this repository's
+        // context while the read ran, the collected facts describe an obsolete context. Reject
+        // rather than deliver them as fresh; a repository untouched by any application since
+        // selection (same canonical repository and project) is still valid.
+        if (
+          (facts.contextVersion?.value ?? 0) !== generation ||
+          (facts.contextRevisions?.get(chosen.repository.toLowerCase()) ?? 0) !== selectionRevision
+        ) {
           let still: ServedRepository | undefined;
           try {
             still = selectRepository(facts.served, chosen.repository);
