@@ -28,6 +28,7 @@ import {
   servedOnlyRest,
 } from "./api.js";
 import { readServices } from "./services.js";
+import type { LoadedGlobalConfig } from "../config/globalconfig.js";
 import { ticketRenderers } from "./ticket-page.js";
 import type { ServeReadRuntime } from "./api.js";
 import { classifyFailure, ServeCache } from "./cache.js";
@@ -954,6 +955,71 @@ describe("pdb serve cache (#373)", () => {
     expect(cache.status().approxBytes).toBeLessThanOrEqual(1000);
     await cache.read(key(5), produce(5000)); // alone over the bound: served, not kept
     expect(cache.status().approxBytes).toBeLessThanOrEqual(1000);
+    cache.close();
+  });
+
+  it("collector-scoped refresh invalidates only that collector's flights and entries (#808 deps)", async () => {
+    const clock = new ManualClock();
+    const cache = new ServeCache({
+      ttlMs: 300_000,
+      clock,
+      authContext: async () => ({ host: "h", login: "l" }),
+      initialAuth: { host: "h", login: "l" },
+    });
+    const briefing = { repository: "o/r", collector: "briefing", coverage: { v: 1 } };
+    const deps = { repository: "o/r", collector: "deps", coverage: { v: 1 } };
+    const counts = { briefing: 0, deps: 0 };
+    const produce = (which: "briefing" | "deps") => async () => {
+      counts[which]++;
+      return `${which}#${counts[which]}`;
+    };
+    // Collect both collectors, then a collector-scoped refresh of exactly `deps`.
+    expect(await cache.read(briefing, produce("briefing"))).toBe("briefing#1");
+    expect(await cache.read(deps, produce("deps"))).toBe("deps#1");
+    // #414: a closed-question scan slot exists for the project/repository before the refresh.
+    const scan = cache.closedQuestions.slot("p", "o/r");
+    const dropped = cache.refresh("o/r", ["deps"]);
+    expect(dropped).toBe(1);
+    // The briefing entry survives its cache row; the deps row is gone and re-collected; and the
+    // closed-question scan state is preserved (dependency-only invalidation never discards scan
+    // progress of an unchanged context).
+    expect(await cache.read(briefing, produce("briefing"))).toBe("briefing#1");
+    expect(await cache.read(deps, produce("deps"))).toBe("deps#2");
+    expect(counts).toEqual({ briefing: 1, deps: 2 });
+    expect(scan.lost).toBeNull();
+    // An explicit briefing-scope refresh revalidates the scans (#414, human-briefing.md).
+    const scoped = cache.closedQuestions.slot("p3", "o/r");
+    (scoped as { state: unknown }).state = { overwritten: false } as never;
+    cache.refresh("o/r", ["collect", "discovery", "issue-facts"]);
+    expect(scoped.lost).not.toBeNull();
+    // A repository-wide refresh also discards the scan.
+    const scan2 = cache.closedQuestions.slot("p2", "o/r");
+    (scan2 as { state: unknown }).state = { overwritten: false } as never;
+    cache.refresh("o/r");
+    expect(scan2.lost).not.toBeNull();
+    cache.close();
+  });
+
+  it("a repository-scoped refresh invalidates every collector of the repository", async () => {
+    const clock = new ManualClock();
+    const cache = new ServeCache({
+      ttlMs: 300_000,
+      clock,
+      authContext: async () => ({ host: "h", login: "l" }),
+      initialAuth: { host: "h", login: "l" },
+    });
+    const briefing = { repository: "o/r", collector: "briefing", coverage: { v: 1 } };
+    const deps = { repository: "o/r", collector: "deps", coverage: { v: 1 } };
+    const counts = { briefing: 0, deps: 0 };
+    const produce = (which: "briefing" | "deps") => async () => {
+      counts[which]++;
+      return `${which}#${counts[which]}`;
+    };
+    expect(await cache.read(briefing, produce("briefing"))).toBe("briefing#1");
+    expect(await cache.read(deps, produce("deps"))).toBe("deps#1");
+    expect(cache.refresh("o/r")).toBe(2);
+    expect(await cache.read(briefing, produce("briefing"))).toBe("briefing#2");
+    expect(await cache.read(deps, produce("deps"))).toBe("deps#2");
     cache.close();
   });
 
@@ -2114,6 +2180,76 @@ describe("pipeline metrics endpoint (#573 slice 5b)", () => {
       expect(counter.n).toBeGreaterThan(before);
     } finally {
       await s.close();
+    }
+  });
+
+  it("applies a live saved configuration to the running server and repoints selection (#808)", async () => {
+    // A verified global configuration boundary: the config file starts with one registered
+    // repository; the live application adds and removes registrations.
+    const dir = resolve("/global");
+    const configText = (projects: string) =>
+      `schemaVersion = 1\n\n[serve]\nprojects = [${projects}]\n`;
+    const files = new Map<string, string>([
+      [join(dir, "config.toml"), configText('{ repository = "owner/a" }')],
+    ]);
+    const fs: ConfigFileSystem = {
+      readText: async (path) => files.get(path) ?? null,
+      writeText: async (path, text) => void files.set(path, text),
+      rename: async () => undefined,
+      remove: async () => undefined,
+      makeDirectory: async () => undefined,
+    };
+    const clock = new ManualClock();
+    const read: ServeReadRuntime = {
+      collect: (async () => {
+        throw new Error("no GitHub reader in this live-application test");
+      }) as never,
+      dependencyReport: (async () => {
+        throw new Error("no GitHub reader in this live-application test");
+      }) as never,
+      now: () => clock.now(),
+      env: {},
+    };
+    const serve: ServeRuntime = {
+      cwd: "/not/a/checkout",
+      currentRepository: async () => "",
+      authContext: async () => ({ host: "github.com", login: "octo" }),
+      clock,
+      stdout: () => undefined,
+      stderr: () => undefined,
+      signals: new EventEmitter(),
+      exit: () => undefined,
+      version: async () => "9.9.9",
+      platform: "linux",
+      globalConfig: { dir, fs },
+    };
+    const running = await startServe(
+      serveArguments(["--port", "0"]),
+      serve,
+      readServices(serveArguments(["--port", "0"]), serve, read),
+    );
+    try {
+      // Startup served the saved registration only.
+      expect(running.facts.served.map((s) => s.repository)).toEqual(["owner/a"]);
+
+      // A live saved change: drop owner/a, add owner/b. The served set repoints and the
+      // generation advances so reads for an obsolete context are rejected.
+      await running.applyLiveConfiguration!({
+        path: join(dir, "config.toml"),
+        storedVersion: 1,
+        explicit: new Map([["serve.projects", [{ host: "github.com", repository: "owner/b" }]]]),
+        settings: [],
+        raw: "schemaVersion = 1",
+      } satisfies LoadedGlobalConfig);
+      expect(running.facts.served.map((s) => s.repository)).toEqual(["owner/b"]);
+      expect(running.facts.contextVersion!.value).toBe(1);
+
+      // owner/a is no longer selectable: the API refuses it instead of serving stale facts.
+      const obsolete = await call(running.port, "/api/v1/team?repo=owner/a");
+      expect(obsolete.status).toBe(403);
+      expect(obsolete.json.error?.code).toBe("REPOSITORY_NOT_SERVED");
+    } finally {
+      await running.close();
     }
   });
 });

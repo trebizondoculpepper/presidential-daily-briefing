@@ -48,7 +48,13 @@ import {
 } from "./serve/options.js";
 import type { ServeOptions } from "./serve/options.js";
 import { RegistrationError, resolveServeProjects } from "./serve/registration.js";
-import { globalConfigDirectory } from "./config/globalconfig.js";
+import {
+  globalConfigDirectory,
+  loadGlobalConfig,
+  type GlobalValue,
+  type LoadedGlobalConfig,
+} from "./config/globalconfig.js";
+import { createApplicationState } from "./serve/appstate.js";
 import type {
   AuthContext,
   RequestContext,
@@ -61,6 +67,7 @@ import type {
   StatusSource,
 } from "./serve/types.js";
 import { defaultRulesPageRuntime, rulesPage } from "./serve/rules-page.js";
+import type { LiveApplicationResult } from "./serve/liveapp.js";
 import { setupPage, setupScript } from "./serve/setup-page.js";
 import {
   dashboardCss,
@@ -118,6 +125,10 @@ export const defaultServeRuntime = (services: AppServices = createAppServices())
   buildIdentity: readPackageBuildIdentity,
   platform: process.platform,
 });
+
+/** The `--ttl` text for the application-state override, from the accepted milliseconds. */
+const ttlText = (ttlMs: number): string =>
+  ttlMs % 60_000 === 0 ? `${ttlMs / 60_000}m` : `${ttlMs / 1000}s`;
 
 /** A startup failure with its exit status (2 usage, 3 port, 1 otherwise). */
 export class ServeStartupError extends Error {
@@ -276,6 +287,32 @@ export async function startServe(
     ttlMs: options.ttlMs,
     auth,
   };
+
+  // #816: the one application-state service of this process, when a verified global
+  // configuration boundary exists. Its startup snapshot is the configuration `serve` resolved
+  // from (the same boundary registration uses). The applied snapshot reports what this process
+  // actually runs for the launch-fixed settings (#459): the port and TTL always reflect the
+  // effective CLI values (given or built-in default), not the saved ones — a saved `serve.port`
+  // or `serve.ttl` that differs from the running value is reported as overridden, never wrongly
+  // in-sync. Live application (#808) records into it.
+  if (runtime.globalConfig) {
+    try {
+      const startup = await loadGlobalConfig(runtime.globalConfig.dir, runtime.globalConfig.fs);
+      const overrides = new Map<string, GlobalValue>([
+        ["serve.port", options.port],
+        ["serve.ttl", ttlText(options.ttlMs)],
+      ]);
+      facts.applicationState = createApplicationState(startup, overrides, () =>
+        runtime.clock.now(),
+      );
+    } catch {
+      // An unreadable startup configuration leaves application state unset (absent live
+      // application); the server itself still reports the refusal at first use (#804).
+    }
+  }
+  // #808: bumped on every successful live application; the read path guards on it.
+  facts.contextVersion = { value: 0 };
+  facts.contextRevisions = new Map();
 
   let buildIdentity = {};
   try {
@@ -665,6 +702,31 @@ export async function startServe(
   routes = services.routes ?? routes;
   status = services.status ?? status;
 
+  // #808: the one live-application entry point of the running server. It reconciles a fresh
+  // saved configuration against the served set (never re-adding startup targets) through the
+  // composition's live application service, which commits the new served set, per-repository
+  // context revisions, the request-context generation and the cache invalidation atomically in
+  // one synchronous step, so in-flight reads for an obsolete context are rejected.
+  //
+  // Applications are serialized: two callers applying successive revisions must not let the
+  // older verification complete later, re-read the then-current set and install an older
+  // configuration over a newer one.
+  let applyTail: Promise<unknown> = Promise.resolve();
+  const applyLiveConfiguration = (config: LoadedGlobalConfig): Promise<LiveApplicationResult> => {
+    if (!services.live)
+      throw new Error(
+        "this serve build has no live configuration application (no cache owner or global configuration boundary); restart the server instead.",
+      );
+    const run = applyTail.then(() => services.live!.apply(config));
+    // Keep only the success path on the chain: a rejected application must not wedge the next
+    // one, but its error still propagates to the caller.
+    applyTail = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  };
+
   let closing: Promise<void> | null = null;
   let finish!: () => void;
   const closed = new Promise<void>((resolve) => (finish = resolve));
@@ -690,7 +752,7 @@ export async function startServe(
     })();
     return closing;
   };
-  return { facts, port, close, closed, shuttingDown: () => shutting };
+  return { facts, port, close, closed, applyLiveConfiguration, shuttingDown: () => shutting };
 }
 
 /** The banner: one fact per line on stdout; the first line is stable and machine-parsable. */

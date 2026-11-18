@@ -175,4 +175,26 @@ describe("serve application state (#816)", () => {
     expect(stateOf(v, "serve.port")).toMatchObject({ status: "restart-required" });
     expect(v.keys.find((k) => k.key === "serve.port")!.applied).toBe(4372);
   });
+
+  it("reports launch-fixed settings as overridden by the actual running values", () => {
+    // Saved serve.port/serve.ttl differ from what the process actually runs (CLI defaults were
+    // supplied to serveArguments/startServe), so the applied snapshot must reflect the running
+    // values and report the setting overridden — never falsely in-sync.
+    const overrides = new Map<string, GlobalValue>([
+      ["serve.port", 4372],
+      ["serve.ttl", "5m"],
+    ]);
+    const s = createApplicationState(
+      loaded({ "serve.port": 5000, "serve.ttl": "10m" }),
+      overrides,
+      clock,
+    );
+    const v = s.view();
+    expect(v.keys.find((k) => k.key === "serve.port")!.applied).toBe(4372);
+    expect(stateOf(v, "serve.port")).toEqual({
+      status: "overridden",
+      source: "command-line override",
+    });
+    expect(v.keys.find((k) => k.key === "serve.ttl")!.applied).toBe("5m");
+  });
 });

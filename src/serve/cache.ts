@@ -256,6 +256,13 @@ export class ServeCache {
   private generation = 0;
   /** Bumped by refresh: collections that started before it never insert. */
   private readonly epochs = new Map<string, number>();
+  /**
+   * Bumped by a collector-scoped refresh (`refresh(repository, collectors)`): only flights of
+   * those collectors on that repository are invalidated, never an unrelated in-flight read of
+   * an unchanged context (e.g. conservative cross-repository dependency invalidation must not
+   * discard a briefing or ticket collection for the same repository).
+   */
+  private readonly collectorEpochs = new Map<string, number>();
   private auth: AuthContext;
   private authCheckedAt: number;
   private authVerified = true;
@@ -552,8 +559,15 @@ export class ServeCache {
    * many were dropped. Collections already running when this is called never insert.
    */
   refresh(repository?: string, collectors?: readonly string[]): number {
-    // A manual refresh restarts and revalidates closed-ticket scans (#414).
-    this.closedQuestions.reset(repository, "a manual refresh discarded the previous scan");
+    // A manual refresh restarts and revalidates closed-ticket scans (#414,
+    // doc/design/human-briefing.md). The conservative cross-repository dependency invalidation
+    // of exactly `deps` must not discard unrelated scan state: an unchanged context keeps its
+    // closed-question inventory, comment cursors and watermark. Any other collector set (or a
+    // repository-wide refresh) still resets the scans as documented.
+    const depsOnly =
+      collectors !== undefined && collectors.length === 1 && collectors[0] === "deps";
+    if (!depsOnly)
+      this.closedQuestions.reset(repository, "a manual refresh discarded the previous scan");
     let dropped = 0;
     for (const [key, entry] of this.entries)
       if (
@@ -565,7 +579,17 @@ export class ServeCache {
       }
     if (repository) {
       const lower = repository.toLowerCase();
-      this.epochs.set(lower, (this.epochs.get(lower) ?? 0) + 1);
+      if (collectors && collectors.length > 0) {
+        // Collector-scoped: invalidate only those collectors' flights (and stored entries
+        // above), so an unrelated in-flight read of an unchanged context survives (e.g.
+        // cross-repository dependency invalidation never discards a briefing or ticket
+        // collection for the same repository).
+        for (const collector of collectors)
+          this.collectorEpochs.set(
+            `${lower}\u0000${collector}`,
+            (this.collectorEpochs.get(`${lower}\u0000${collector}`) ?? 0) + 1,
+          );
+      } else this.epochs.set(lower, (this.epochs.get(lower) ?? 0) + 1);
     } else this.epochs.set("*", (this.epochs.get("*") ?? 0) + 1);
     return dropped;
   }
@@ -582,9 +606,12 @@ export class ServeCache {
     for (const release of this.queue.splice(0)) release();
   }
 
-  private epochOf(repository: string): string {
+  private epochOf(repository: string, collector?: string): string {
     const lower = repository.toLowerCase();
-    return `${this.epochs.get(lower) ?? 0}/${this.epochs.get("*") ?? 0}`;
+    const collectorEpoch = collector
+      ? (this.collectorEpochs.get(`${lower}\u0000${collector}`) ?? 0)
+      : 0;
+    return `${this.epochs.get(lower) ?? 0}/${this.epochs.get("*") ?? 0}/${collectorEpoch}`;
   }
 
   private remove(key: string): void {
@@ -761,7 +788,7 @@ export class ServeCache {
     const { repository, collector } = cacheKey;
     const controller = new AbortController();
     const generation = ++this.generation;
-    let epoch = this.epochOf(repository);
+    let epoch = this.epochOf(repository, collector);
     const flight = {
       id: `f${++this.nextId}`,
       auth: this.auth,
@@ -791,7 +818,7 @@ export class ServeCache {
         const beforeAuth = this.auth;
         const globalBefore = this.epochs.get("*") ?? 0;
         const repositoryBefore = this.epochs.get(repository.toLowerCase()) ?? 0;
-        const untouched = epoch === this.epochOf(repository);
+        const untouched = epoch === this.epochOf(repository, collector);
         await this.checkAuth();
         // A flight that itself discovers one login change before producing any facts can
         // adopt that admission context. Never adopt an invalidation while queued, a manual
@@ -802,7 +829,7 @@ export class ServeCache {
           (this.epochs.get("*") ?? 0) === globalBefore + 1 &&
           (this.epochs.get(repository.toLowerCase()) ?? 0) === repositoryBefore
         ) {
-          epoch = this.epochOf(repository);
+          epoch = this.epochOf(repository, collector);
           flight.epoch = epoch;
         }
         // The login these facts are collected under. If it changes before the collection
@@ -833,7 +860,7 @@ export class ServeCache {
           !controller.signal.aborted &&
           this.auth === collectedAs &&
           keep(value) &&
-          this.epochOf(repository) === epoch &&
+          this.epochOf(repository, collector) === epoch &&
           (!current || current.generation < generation)
         ) {
           this.remove(storeKey);
@@ -841,7 +868,7 @@ export class ServeCache {
           this.bytes += entry.bytes;
           this.enforceBounds(storeKey);
         }
-        if (this.epochOf(repository) === epoch)
+        if (this.epochOf(repository, collector) === epoch)
           this.lastSeen.set(repository.toLowerCase(), {
             observedAt: new Date(entry.observedAt).toISOString(),
             lastError: this.lastSeen.get(repository.toLowerCase())?.lastError ?? null,
@@ -950,7 +977,8 @@ export class ServeCache {
     // refresh=true never joins a collection that started before this request arrived, and no
     // read joins one that started before a refresh of its repository (POST /api/v1/refresh).
     let flight = refresh ? undefined : this.inflight.get(key);
-    if (flight && flight.epoch !== this.epochOf(cacheKey.repository)) flight = undefined;
+    if (flight && flight.epoch !== this.epochOf(cacheKey.repository, cacheKey.collector))
+      flight = undefined;
     if (flight) this.counters.coalesced++;
     try {
       if (!flight) {
@@ -960,7 +988,7 @@ export class ServeCache {
       const collected = await this.wait(key, flight, signal);
       // Invalidation also applies to the waiting response, not just cache insertion.
       // Never label pre-write facts current, even when their fetch completed afterward.
-      if (flight.epoch !== this.epochOf(cacheKey.repository))
+      if (flight.epoch !== this.epochOf(cacheKey.repository, cacheKey.collector))
         return served(
           collected,
           "stale",
