@@ -16,7 +16,28 @@ import { validateEntryKey } from "../config/identity.js";
 import type { ReadIdentity } from "../config/readidentity.js";
 import { resolveReadIdentity } from "../config/readidentity.js";
 import type { ConfigFileSystem, GitRunner } from "../config/config.js";
-import { createGitService, type GitService } from "../git/service.js";
+import { createGitService, type GitContext, type GitService } from "../git/service.js";
+
+const bindGitSignal = (svc: GitService, signal: AbortSignal): GitService => {
+  const withSignal = (ctx: GitContext): GitContext => {
+    signal.throwIfAborted();
+    return { ...ctx, signal: ctx.signal ? AbortSignal.any([signal, ctx.signal]) : signal };
+  };
+  return {
+    workingTreeRoot: (ctx) => svc.workingTreeRoot(withSignal(ctx)),
+    commonDirectory: (ctx) => svc.commonDirectory(withSignal(ctx)),
+    remotes: (ctx) => svc.remotes(withSignal(ctx)),
+    checkout: (ctx) => svc.checkout(withSignal(ctx)),
+    revision: (ctx) => svc.revision(withSignal(ctx)),
+    headRef: (ctx) => svc.headRef(withSignal(ctx)),
+    isAncestor: (ctx, ancestor, descendant) =>
+      svc.isAncestor(withSignal(ctx), ancestor, descendant),
+    divergence: (ctx, left, right) => svc.divergence(withSignal(ctx), left, right),
+    isIgnored: (ctx, path) => svc.isIgnored(withSignal(ctx), path),
+    isTracked: (ctx, path) => svc.isTracked(withSignal(ctx), path),
+    gitPath: (ctx, path) => svc.gitPath(withSignal(ctx), path),
+  };
+};
 import { noLocalProject } from "../serve/api.js";
 import { contextKey, defaults, initialize, RebriefSession, stopped } from "./core.js";
 import type { ReadRuntime } from "../briefing/service.js";
@@ -119,10 +140,12 @@ export async function runRebrief(
             throw new Error(`Unsupported git args in rebrief adapter: ${args.join(" ")}`);
           }
         : undefined;
-  const git: GitService =
+  const git: GitService = bindGitSignal(
     typeof runtime.git === "object"
       ? runtime.git
-      : createGitService(legacyGit ? { git: legacyGit } : {});
+      : createGitService(legacyGit ? { git: legacyGit } : {}),
+    controller.signal,
+  );
   const gh =
     runtime.gh ??
     runtime.read?.gh ??
