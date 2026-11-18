@@ -106,7 +106,7 @@ describe("English policy compiler (#416)", () => {
 
   it("names inputs only through the lexicon and keeps entity-1 viewer, constant and context facts apart", () => {
     expect(decisionText(model, "D-EASY")).toBe(
-      `foreground(?t) and the viewer's role is "implementer" and eligible(?t) and easy(?t) and the viewer's requested order is "impact"`,
+      `foreground(?t) and the viewer's role is ?role and ?role is not "human" and eligible(?t) and easy(?t) and the viewer's requested order is "impact"`,
     );
     const largeImpact = model.predicates.find((p) => p.name === "large-impact");
     expect(conjunctionText(largeImpact?.alternatives[0].clauses ?? [])).toBe(
@@ -279,14 +279,14 @@ describe("English policy compiler (#416)", () => {
       buildPolicy(
         editing("decisions.edn", (t) =>
           t.replace(
-            ':when [[1 "role" "implementer"] (eligible ?t) (easy ?t) [1 "order" "impact"]]',
-            ':when [[1 "role" "implementer"] (eligible ?t) (unfavorable ?t) [1 "order" "oldest"]]',
+            ':when [[1 "role" ?role] [(not= ?role "human")] (eligible ?t) (easy ?t) [1 "order" "impact"]]',
+            ':when [[1 "role" ?role] [(not= ?role "human")] (eligible ?t) (unfavorable ?t) [1 "order" "oldest"]]',
           ),
         ),
       ),
     );
     expect(decisionText(edited, "D-EASY")).toBe(
-      `foreground(?t) and the viewer's role is "implementer" and eligible(?t) and unfavorable(?t) and the viewer's requested order is "oldest"`,
+      `foreground(?t) and the viewer's role is ?role and ?role is not "human" and eligible(?t) and unfavorable(?t) and the viewer's requested order is "oldest"`,
     );
     expect(edited.rulesHash).not.toBe(model.rulesHash);
 

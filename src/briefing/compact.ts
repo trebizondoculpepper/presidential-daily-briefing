@@ -710,7 +710,7 @@ export function compactBriefing(
 }
 export type CompactBriefing = ReturnType<typeof compactBriefing>;
 
-function impactEstimationReport(
+export function impactEstimationReport(
   status: MetricAvailability,
   assessments: ReadonlyMap<string, SubjectAssessments>,
   ranked: RankedActions["items"],
@@ -720,6 +720,12 @@ function impactEstimationReport(
   const count = (...wanted: string[]) => states.filter((s) => wanted.includes(s)).length;
   const kind = (items: RankedActions["items"], k: string) =>
     items.filter((i) => i.kind === k).length;
+  const impactInspections = (items: RankedActions["items"]) =>
+    items.filter(
+      (i) =>
+        i.kind === "inspect-assessment" &&
+        (i.impact.state === "invalid" || i.impact.state === "conflict"),
+    ).length;
   const rankedCount = kind(ranked, "assess-impact");
   return {
     status,
@@ -728,9 +734,11 @@ function impactEstimationReport(
     ranked: rankedCount,
     shown: kind(shown, "assess-impact"),
     offered: rankedCount > 0,
+    // Only inspections involving unusable impact evidence (impact-only or combined, #652); a
+    // complexity-only inspection stays in the shared pool but is not an impact inspection.
     inspections: {
-      ranked: kind(ranked, "inspect-assessment"),
-      shown: kind(shown, "inspect-assessment"),
+      ranked: impactInspections(ranked),
+      shown: impactInspections(shown),
     },
     conflicts: count("conflict"),
     invalid: count("invalid"),

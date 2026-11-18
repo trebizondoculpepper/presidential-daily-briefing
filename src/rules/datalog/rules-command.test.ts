@@ -92,7 +92,7 @@ describe("pdb rules document (#416)", () => {
     expect(ids).toContain("D-DESIGN");
     expect(ids).toContain("D-INSPECT"); // role is a variable compared with not=: kept
     expect(ids).toContain("D-ATTENTION"); // names no role: kept
-    expect(ids).not.toContain("D-EASY");
+    expect(ids).toContain("D-EASY"); // #651: one agent pool, so implementer duties are kept too
     expect(ids).not.toContain("D-HUMAN-ASK");
     expect(designer.eligibility.denials).toHaveLength(model.denials.length);
     expect(designer.predicates).toHaveLength(model.predicates.length);
@@ -127,8 +127,8 @@ describe("pdb rules document (#416)", () => {
       /unknown rule or predicate "EASY"\. Did you mean: D-EASY, D-OWN-EASY, easy\?/,
     );
     expect(() => rulesDocument(context, { role: "human" })).toThrow(RulesArgumentError);
-    expect(() => rulesDocument(context, { rule: "D-DECIDE", role: "implementer" })).toThrow(
-      "D-DECIDE names role(s) designer, so --role implementer excludes it",
+    expect(() => rulesDocument(context, { rule: "D-HUMAN-ASK", role: "implementer" })).toThrow(
+      "D-HUMAN-ASK names role(s) human, so --role implementer excludes it",
     );
     expect(ruleIds(model)).toContain("D-DENY-PLATFORM");
   });

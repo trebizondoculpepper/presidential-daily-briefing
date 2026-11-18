@@ -272,6 +272,7 @@ export function readSources(
         "band",
         "preference",
         "affinity",
+        "owned",
         "when",
         "why",
         "codes",
@@ -287,6 +288,11 @@ export function readSources(
         band: integer(need(m, "band", where), `${where} :band`),
         preference: integer(need(m, "preference", where), `${where} :preference`),
         affinity: affinity(need(m, "affinity", where), `${where} :affinity`),
+        owned: (() => {
+          const v = need(m, "owned", where);
+          if (typeof v !== "boolean") throw new Error(`${where} :owned must be true or false.`);
+          return v;
+        })(),
         clauses: when.map((c) => printEdn(c, `${where} :when`)).join(" "),
         why: text(need(m, "why", where), `${where} :why`),
         codes: vector(need(m, "codes", where), `${where} :codes`).map((c) =>

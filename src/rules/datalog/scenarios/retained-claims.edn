@@ -20,9 +20,9 @@
   :facts [{:e 1 "forward-complete" true "owned-claims" 1 "owned-claims-complete" true "owned-review-subject" 100}
           {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "t1" "created" 1 "label" "status:ready" "labels-complete" true "native-complete" true "reverse-complete" true "blocking-complete" true "open-blockers" 0 "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "owner" "me" "claim-activity" "waiting" "wait-reason" "question on #1"}
           {:e 101 "kind" "issue" "state" "OPEN" "number" 2 "target" "t2" "created" 2 "label" "status:ready" "labels-complete" true "native-complete" true "reverse-complete" true "blocking-complete" true "open-blockers" 0 "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M"}]
-  :expect {:actions [{:subject 101 :rule "D-ORDINARY" :kind "implement" :band 6}
-                     {:subject 100 :rule "D-OWN-WAIT" :kind "wait-claim" :band 8
-                      :why "Waiting: question on #1. You keep this claim; nothing to do on it until that clears."}]
+  :expect {:actions [{:subject 100 :rule "D-OWN-WAIT" :kind "wait-claim" :band 8
+                      :why "Waiting: question on #1. You keep this claim; nothing to do on it until that clears."}
+            {:subject 101 :rule "D-ORDINARY" :kind "implement" :band 6}]
            :denials #{[100 "D-DENY-CLAIM"]}}}
 
  {:id "resume-required-precedes-assessments-and-new-work"
@@ -54,10 +54,10 @@
           {:e 110 "kind" "issue" "state" "OPEN" "number" 10 "target" "t10" "created" 10 "label" "status:ready" "labels-complete" true "native-complete" true "reverse-complete" true "blocking-complete" true "open-blockers" 0 "impact-state" "current" "impact-size" "L" "complexity-state" "unassessed" "complexity-size" "unknown"}]
   :expect {:actions [{:subject 100 :rule "D-REVIEW-OWNED" :kind "review-owned-work" :band 3
                       :why "You retain 2 implementation claims; review which to finish, justify as waiting, release or reassign before starting more work."}
-                     {:subject 110 :rule "D-COMPLEXITY-BOOST" :kind "estimate-complexity" :band 5}
-                     {:subject 101 :rule "D-OWN" :kind "continue-implementation" :band 6}
-                     {:subject 110 :rule "D-ORDINARY" :kind "implement" :band 6}
-                     {:subject 100 :rule "D-OWN-WAIT" :kind "wait-claim" :band 8}]
+            {:subject 101 :rule "D-OWN" :kind "continue-implementation" :band 6}
+            {:subject 100 :rule "D-OWN-WAIT" :kind "wait-claim" :band 8}
+            {:subject 110 :rule "D-COMPLEXITY-BOOST" :kind "estimate-complexity" :band 5}
+            {:subject 110 :rule "D-ORDINARY" :kind "implement" :band 6}]
            :denials #{[100 "D-DENY-CLAIM"] [101 "D-DENY-CLAIM"]}}}
 
  {:id "incomplete-inventory-reviews-the-observed-lower-bound"
@@ -72,15 +72,15 @@
                      {:subject 101 :rule "D-OWN" :kind "continue-implementation" :band 6}]
            :denials #{[100 "D-DENY-CLAIM"] [101 "D-DENY-CLAIM"]}}}
 
- {:id "one-mm-claim-keeps-the-378-assessment-first-order"
-  :doc "#378 preserved: with one active M/M claim and no review row, a boosted assessment still precedes own continuation."
+ {:id "one-mm-claim-precedes-a-boosted-assessment"
+  :doc "#651 supersedes #378: one owned M/M claim precedes a new boosted assessment; owned obligations come first."
   :viewer {:role "implementer" :agent "me"}
   :facts [{:e 1 "forward-complete" true "owned-claims" 1 "owned-claims-complete" true "owned-review-subject" 100}
           {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "t1" "created" 1 "label" "status:ready" "labels-complete" true "native-complete" true "reverse-complete" true "blocking-complete" true "open-blockers" 0 "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "owner" "me" "claim-activity" "active"}
           {:e 110 "kind" "issue" "state" "OPEN" "number" 10 "target" "t10" "created" 10 "label" "status:ready" "labels-complete" true "native-complete" true "reverse-complete" true "blocking-complete" true "open-blockers" 0 "impact-state" "current" "impact-size" "L" "complexity-state" "unassessed" "complexity-size" "unknown"}]
-  :expect {:actions [{:subject 110 :rule "D-COMPLEXITY-BOOST" :kind "estimate-complexity" :band 5}
-                     {:subject 100 :rule "D-OWN" :kind "continue-implementation" :band 6}
-                     {:subject 110 :rule "D-ORDINARY" :kind "implement" :band 6}]
+  :expect {:actions [{:subject 100 :rule "D-OWN" :kind "continue-implementation" :band 6}
+            {:subject 110 :rule "D-COMPLEXITY-BOOST" :kind "estimate-complexity" :band 5}
+            {:subject 110 :rule "D-ORDINARY" :kind "implement" :band 6}]
            :denials #{[100 "D-DENY-CLAIM"]}}}
 
  {:id "one-observed-claim-in-an-incomplete-inventory-is-inspected"
