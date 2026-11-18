@@ -1,0 +1,86 @@
+name: One-off owner release 2026-11-19
+
+# Explicit owner request, not a recurring release policy. See the dated contract.
+on:
+  schedule:
+    - cron: "0 5 19 11 *"
+
+permissions: {}
+
+concurrency:
+  group: one-off-owner-release-2026-11-19
+  cancel-in-progress: false
+
+jobs:
+  request:
+    if: github.repository == 'trebizondoculpepper/presidential-daily-briefing' && github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    permissions:
+      contents: write # canonical release helper fast-forwards the release branch
+      actions: write # existing explicit Publish dispatch and self-disable
+      checks: read # verify status for the selected immutable source
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SENTRY_DISABLED: "1"
+      EXPECTED_DATE: "2026-11-19"
+      CUTOFF: "2026-11-19T05:00:00Z"
+    steps:
+      - name: Admit only the requested UTC date
+        id: date
+        shell: bash
+        run: |
+          set -euo pipefail
+          now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          if [[ "${now:0:10}" == "$EXPECTED_DATE" ]] && [[ "$now" == "$CUTOFF" || "$now" > "$CUTOFF" ]]; then
+            echo "eligible=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "eligible=false" >> "$GITHUB_OUTPUT"
+            echo "No release requested: this is outside $EXPECTED_DATE UTC." >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/checkout@v4
+        if: steps.date.outputs.eligible == 'true'
+        with:
+          fetch-depth: 0
+          # The normal release helper needs authenticated, non-forced git push.
+          persist-credentials: true
+      - name: Select the fixed main cutoff
+        if: steps.date.outputs.eligible == 'true'
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main
+          selected=$(git rev-list --first-parent --max-count=1 --before="$CUTOFF" origin/main)
+          [[ "$selected" =~ ^[0-9a-f]{40}$ ]] || { echo "::error::No valid cutoff source."; exit 1; }
+          git merge-base --is-ancestor "$selected" origin/main
+          echo "sha=$selected" >> "$GITHUB_OUTPUT"
+          echo "Selected $selected from main at cutoff $CUTOFF; this is not a publication receipt." >> "$GITHUB_STEP_SUMMARY"
+          git checkout --detach "$selected"
+      - name: Require the selected main CI run to pass
+        if: steps.date.outputs.eligible == 'true'
+        env:
+          SELECTED_SHA: ${{ steps.source.outputs.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          run_id=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --branch main --commit "$SELECTED_SHA" --limit 1 --json databaseId --jq '.[0].databaseId // empty')
+          [[ "$run_id" =~ ^[0-9]+$ ]] || { echo "::error::No main CI evidence for $SELECTED_SHA."; exit 1; }
+          gh run watch "$run_id" --repo "$GITHUB_REPOSITORY" --exit-status --interval 30
+          passed=$(gh api "repos/$GITHUB_REPOSITORY/commits/$SELECTED_SHA/check-runs?check_name=verify&filter=latest&per_page=100" --jq 'any(.check_runs[]; .app.slug == "github-actions" and .status == "completed" and .conclusion == "success")')
+          [[ "$passed" == "true" ]] || { echo "::error::Required verify did not pass for $SELECTED_SHA."; exit 1; }
+      - uses: actions/setup-node@v4
+        if: steps.date.outputs.eligible == 'true'
+        with:
+          node-version: 26
+      - name: Install maintainer tooling
+        if: steps.date.outputs.eligible == 'true'
+        run: npm ci
+      - name: Request the canonical verified release
+        if: steps.date.outputs.eligible == 'true'
+        env:
+          SELECTED_SHA: ${{ steps.source.outputs.sha }}
+        run: npm run release -- --sha "$SELECTED_SHA"
+      - name: Disable this one-off controller
+        if: always()
+        run: gh workflow disable one-off-release-2026-11-19.yml --repo "$GITHUB_REPOSITORY"
