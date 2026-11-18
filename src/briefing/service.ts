@@ -944,43 +944,30 @@ export function shortlistLine(snapshot: Snapshot, maxChars: number): string {
 
 /** The URLs a presented briefing shows (its subjects), in order; the shortlist to hydrate. */
 /**
- * The subjects a bounded read hydrates (#652): the union of what either agent role could show
- * first. Each role's exact order is derived from the one ranked pool (ownership, attention, that
- * role's affinity preference, declared band, then the engine's role-independent tail rank), so a
- * role-only change hydrates exactly the same subjects and every row either role shows is read. A report without a pool (human, unranked) falls back
- * to its shown subjects.
+ * The subjects a bounded read hydrates (#652): the union of both agent roles' first `limit`
+ * activities, by the exact per-role ranks the native engine computed in its one evaluation, plus
+ * any activity a project preference matched and every subject the report itself shows. Nothing is
+ * re-ranked here, so a role-only change reads the same subjects and no shown row is unread. A
+ * report without a pool (human, unranked) falls back to its shown subjects.
  */
 export function hydrationSubjects(report: PresentedBriefing["report"], limit: number): string[] {
-  type Item = { target: string; band: number; [RANK_PARTITION]?: string };
+  type Item = { target: string; why?: { project?: unknown[] }; [RANK_PARTITION]?: string };
   const pool = (report as { [HYDRATION_POOL]?: Item[] })[HYDRATION_POOL];
   if (!pool?.length) return shownSubjects(report);
-  const parts = (item: Item) => String(item[RANK_PARTITION] ?? "").split("/");
+  // RANK_PARTITION: ownership/attention/affinity/declared affinity/implementer rank/designer rank.
+  const rank = (item: Item, field: 4 | 5) =>
+    Number(String(item[RANK_PARTITION] ?? "").split("/")[field] ?? 0) || 0;
   const subjects: string[] = [];
-  for (const role of ["implementer", "designer"]) {
-    const preferred = (item: Item) => {
-      const affinity = parts(item)[3];
-      return !affinity || affinity === "shared" || affinity === role ? 0 : 1;
-    };
-    const key = (item: Item) => {
-      const [ownership = "1", attention = "1", , , tail = "0"] = parts(item);
-      return [
-        Number(ownership) || 0,
-        Number(attention) || 0,
-        preferred(item),
-        item.band,
-        Number(tail) || 0,
-      ];
-    };
-    const compare = (x: number[], y: number[]) =>
-      x[0]! - y[0]! || x[1]! - y[1]! || x[2]! - y[2]! || x[3]! - y[3]! || x[4]! - y[4]!;
-    // This role's exact order: its leading keys, then the role-independent tail rank.
-    const ordered = [...pool].sort((a, b) => compare(key(a), key(b)));
-    for (const item of ordered.slice(0, Math.max(0, limit)))
-      if (!subjects.includes(item.target)) subjects.push(item.target);
-  }
-  // Every subject the report itself shows (legacy actions, sections) is read too: presentation
-  // never shows an unhydrated row.
-  for (const url of shownSubjects(report)) if (!subjects.includes(url)) subjects.push(url);
+  const add = (target: string) => {
+    if (!subjects.includes(target)) subjects.push(target);
+  };
+  for (const field of [4, 5] as const)
+    for (const item of [...pool]
+      .sort((a, b) => rank(a, field) - rank(b, field))
+      .slice(0, Math.max(0, limit)))
+      add(item.target);
+  for (const item of pool) if (item.why?.project?.length) add(item.target);
+  for (const url of shownSubjects(report)) add(url);
   return subjects;
 }
 

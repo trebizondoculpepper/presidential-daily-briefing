@@ -286,13 +286,26 @@ export function evaluatePolicy(input: PolicyFacts, options: PolicyOptions = {}):
       : null;
   options.signal?.throwIfAborted();
   const witnessCache = new Map<string, Value[]>();
-  // Every key after band is role-independent (#652): a decision's rank by those keys alone lets
-  // a host derive either role's exact order from this one evaluation.
-  const tailRank = new Map(
-    [...rows]
-      .sort((a, b) => compareKeys(a.slice(6), b.slice(6)))
-      .map((row, i) => [row, i] as const),
-  );
+  // Both agent roles' exact orders from this one evaluation (#652): the declared :comparison
+  // with the affinity key taken for each role from the rule's declared :affinity. A host uses
+  // these ranks to hydrate the same subjects for either role without re-running the policy.
+  const affinityAt = policy.comparison.indexOf("affinity");
+  const roleRank = (role: string) =>
+    new Map(
+      [...rows]
+        .map((row) => {
+          const keys = row.slice(2);
+          if (affinityAt >= 0) {
+            const declared = definitions[Number(row[1]) - 10]?.affinity;
+            keys[affinityAt] = declared === "shared" || declared === role ? 0 : 1;
+          }
+          return [row, keys] as const;
+        })
+        .sort((a, b) => compareKeys(a[1], b[1]))
+        .map(([row], i) => [row, i] as const),
+    );
+  const implementerRank = roleRank("implementer");
+  const designerRank = roleRank("designer");
   const decisions = rows
     .sort((a, b) => compareKeys(a.slice(2), b.slice(2)))
     .map((row): PolicyDecision => {
@@ -333,7 +346,7 @@ export function evaluatePolicy(input: PolicyFacts, options: PolicyOptions = {}):
       return {
         // ownership/attention/affinity keys, then the rule's raw affinity (so a host can derive
         // either role's order from one evaluation without re-running the policy).
-        [RANK_PARTITION]: `${String(ownershipKey)}/${String(attentionKey)}/${String(affinityKey)}/${definition.affinity}/${tailRank.get(row) ?? 0}`,
+        [RANK_PARTITION]: `${String(ownershipKey)}/${String(attentionKey)}/${String(affinityKey)}/${definition.affinity}/${implementerRank.get(row) ?? 0}/${designerRank.get(row) ?? 0}`,
         subject: Number(t),
         ruleId: definition.id,
         kind: definition.kind,

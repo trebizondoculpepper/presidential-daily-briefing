@@ -43,6 +43,25 @@ describe("role-neutral shortlist hydration (#652)", () => {
     const a = hydrationSubjects(implementer, limit);
     const b = hydrationSubjects(designer, limit);
     expect([...a].sort()).toEqual([...b].sort());
+    // The engine's per-role ranks reproduce each role's own displayed order exactly.
+    const { HYDRATION_POOL } = await import("./compact.js");
+    const { RANK_PARTITION } = await import("../rules/datalog/engine.js");
+    type Item = { id: string; [RANK_PARTITION]?: string };
+    const byRank = (report: unknown, field: number) =>
+      [...((report as Record<symbol, Item[]>)[HYDRATION_POOL] ?? [])]
+        .sort(
+          (x, y) =>
+            Number(String(x[RANK_PARTITION]).split("/")[field]) -
+            Number(String(y[RANK_PARTITION]).split("/")[field]),
+        )
+        .map((i) => i.id);
+    const ids = (report: unknown) =>
+      (report as { rankedActions: { items: { id: string }[] } }).rankedActions.items.map(
+        (i) => i.id,
+      );
+    expect(byRank(implementer, 4).slice(0, limit)).toEqual(ids(implementer));
+    expect(byRank(designer, 5).slice(0, limit)).toEqual(ids(designer));
+    expect(byRank(implementer, 5)).toEqual(byRank(designer, 5));
     for (const url of [...shownSubjects(implementer), ...shownSubjects(designer)])
       expect(a).toContain(url);
     // Bounded: at most each role's limit, never the whole pool.
