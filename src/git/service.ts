@@ -167,7 +167,7 @@ function classify(error: unknown, operation: string): GitError {
       exited,
     );
   if (
-    /unknown revision|bad revision|ambiguous argument|Needed a single revision|Not a valid object name/i.test(
+    /unknown revision|bad revision|ambiguous argument|Needed a single revision|Not a valid object name|Invalid symmetric difference expression/i.test(
       stderr,
     )
   )
