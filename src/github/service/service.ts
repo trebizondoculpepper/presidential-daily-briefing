@@ -16,7 +16,7 @@ import { checkReads } from "./checks.js";
 import { readRateLimits } from "./ratelimits.js";
 import { resolveLabels } from "./labels.js";
 import type { LabelResolution } from "./labels.js";
-import { ghPostWith, issueCapabilities } from "./issues.js";
+import { issueCapabilities, postOverTransport } from "./issues.js";
 import type { IssueCapabilities, RestPost } from "./issues.js";
 import { discoveryPage, issueCommentsPage, issuesByNumber } from "./snapshot.js";
 import type { Issue } from "./snapshot.js";
@@ -112,7 +112,7 @@ export function createGhService(options: GhServiceOptions = {}): GhService {
   // The default REST reader runs over this service's own transport and environment, so every
   // capability honours the same execution context (host, account, injected transport).
   const rest = options.rest ?? restOverTransport(transport, env);
-  const post = options.post ?? ghPostWith(undefined, env);
+  const post = options.post ?? postOverTransport(transport, env);
   const query: GraphQuery = options.query ?? ghQueryWith(undefined, {}, { transport, env });
   return {
     account: {

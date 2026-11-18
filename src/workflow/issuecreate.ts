@@ -10,13 +10,12 @@ import { isAgentName } from "../config/identity.js";
 import type { HumanContext } from "../config/humancontext.js";
 import { shellQuote } from "./claims.js";
 import type { FailureClassification } from "../github/evidence.js";
-import { isRecord, prop } from "../github/github.js";
 import type { Rest } from "../github/github.js";
 import { ghPost, issueCapabilities } from "../github/service/issues.js";
 import type {
   IssueCapabilities,
+  IssueCreateOutcome,
   IssueReadResult,
-  PostAnswer,
   RestPost,
 } from "../github/service/issues.js";
 
@@ -244,8 +243,6 @@ export function creationMarker(fields: {
 
 export const defaultOperationId = (): string => randomBytes(8).toString("hex");
 
-const httpsIssueUrl = /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/issues\/[1-9]\d*$/;
-
 /** Run one creation. Throws IssueCreateUsageError for invalid input (nothing requested). */
 export async function createIssue(
   input: IssueCreateRequest,
@@ -459,18 +456,18 @@ export async function createIssue(
     ...(effectiveLabels.length ? { labels: effectiveLabels } : {}),
     ...(effectiveAssignees.length ? { assignees: effectiveAssignees } : {}),
   };
-  let answer: PostAnswer;
+  let outcome: IssueCreateOutcome;
   try {
-    answer = await issues.create(fullName, payload);
+    outcome = await issues.create(fullName, payload);
   } catch {
-    answer = { dispatched: true, status: null, body: null };
+    outcome = { kind: "unknown", reason: "transport", status: null };
   }
-  const unknown = (message: string) => {
+  const unknown = (message: string, evidence?: FailureClassification) => {
     result.status = "unknown";
     result.error = {
       id: "OUTCOME_UNKNOWN",
       message,
-      ...(answer.evidence ? { evidence: answer.evidence } : {}),
+      ...(evidence ? { evidence } : {}),
     };
     result.recovery = [
       ...recovery,
@@ -478,83 +475,69 @@ export async function createIssue(
     ];
     return result;
   };
-  if (!answer.dispatched)
+  if (outcome.kind === "not-dispatched")
     return refuse("NOT_DISPATCHED", "The create request was not sent; nothing was created.");
-  if (answer.status === null || answer.timedOut || answer.status >= 500)
-    return unknown(
-      "The create request was sent but no definitive answer arrived (timeout, lost reply or server error); the issue may exist.",
-    );
-  if (answer.status !== 201) {
-    const category = answer.evidence?.category;
-    if (category === "rate-limited" || category === "secondary-rate-limit" || answer.status === 429)
-      return refuse(
-        "QUOTA",
-        "GitHub rate limited the create request; nothing was created. Retry after the reported reset.",
-        answer.evidence,
+  if (outcome.kind === "unknown") {
+    if (outcome.reason === "transport")
+      return unknown(
+        "The create request was sent but no definitive answer arrived (timeout, lost reply or server error); the issue may exist.",
+        outcome.evidence,
       );
-    if (answer.status === 401)
-      return refuse("AUTHENTICATION", "GitHub refused the gh login.", answer.evidence);
-    if (answer.status === 410)
-      return refuse("ISSUES_DISABLED", `Issues are disabled on ${fullName}.`, answer.evidence);
-    if (answer.status === 403 || answer.status === 404)
-      return refuse(
-        "PERMISSION",
-        `GitHub refused issue creation on ${fullName} for ${login}.`,
-        answer.evidence,
+    if (outcome.reason === "unexpected-status")
+      return unknown(
+        `GitHub answered HTTP ${outcome.status}, which does not prove creation.`,
+        outcome.evidence,
       );
-    if (answer.status === 422)
-      return refuse(
-        "REJECTED",
-        "GitHub rejected the issue content (validation failed).",
-        answer.evidence,
+    if (outcome.reason === "malformed")
+      return unknown(
+        "GitHub answered 201 without a verifiable issue identity; the issue may exist.",
       );
-    if (answer.status >= 400)
-      return refuse(
-        "REJECTED",
-        `GitHub refused the request (HTTP ${answer.status}).`,
-        answer.evidence,
+    if (outcome.mismatchedUrl)
+      result.warnings.push(
+        `GitHub reported an issue outside the intended target: ${outcome.mismatchedUrl}`,
       );
-    return unknown(`GitHub answered HTTP ${answer.status}, which does not prove creation.`);
-  }
-  // Verify the created issue's identity; never construct a URL from an unverified number.
-  const created = answer.body;
-  const number = prop(created, "number");
-  const issueNode = prop(created, "node_id");
-  const issueUrl = prop(created, "html_url");
-  const repositoryUrl = prop(created, "repository_url");
-  const expectedUrl = `https://github.com/${fullName}/issues/${String(number)}`;
-  if (
-    !isRecord(created) ||
-    "pull_request" in created ||
-    typeof number !== "number" ||
-    !Number.isInteger(number) ||
-    number < 1 ||
-    typeof issueNode !== "string" ||
-    !issueNode ||
-    typeof issueUrl !== "string"
-  )
-    return unknown("GitHub answered 201 without a verifiable issue identity; the issue may exist.");
-  if (
-    issueUrl.toLowerCase() !== expectedUrl.toLowerCase() ||
-    (typeof repositoryUrl === "string" &&
-      !repositoryUrl.toLowerCase().endsWith(`/repos/${fullName.toLowerCase()}`))
-  ) {
-    if (httpsIssueUrl.test(issueUrl))
-      result.warnings.push(`GitHub reported an issue outside the intended target: ${issueUrl}`);
     return unknown(
       "The created issue does not match the intended target; not reported as created.",
     );
   }
+  if (outcome.kind === "refused") {
+    const category = outcome.evidence?.category;
+    if (
+      category === "rate-limited" ||
+      category === "secondary-rate-limit" ||
+      outcome.status === 429
+    )
+      return refuse(
+        "QUOTA",
+        "GitHub rate limited the create request; nothing was created. Retry after the reported reset.",
+        outcome.evidence,
+      );
+    if (outcome.status === 401)
+      return refuse("AUTHENTICATION", "GitHub refused the gh login.", outcome.evidence);
+    if (outcome.status === 410)
+      return refuse("ISSUES_DISABLED", `Issues are disabled on ${fullName}.`, outcome.evidence);
+    if (outcome.status === 403 || outcome.status === 404)
+      return refuse(
+        "PERMISSION",
+        `GitHub refused issue creation on ${fullName} for ${login}.`,
+        outcome.evidence,
+      );
+    if (outcome.status === 422)
+      return refuse(
+        "REJECTED",
+        "GitHub rejected the issue content (validation failed).",
+        outcome.evidence,
+      );
+    return refuse(
+      "REJECTED",
+      `GitHub refused the request (HTTP ${outcome.status}).`,
+      outcome.evidence,
+    );
+  }
+  const { number, nodeId: issueNode, url: issueUrl } = outcome.issue;
   result.issue = { number, nodeId: issueNode, url: issueUrl };
-  const fieldStrings = (value: unknown, key: string): string[] | null =>
-    Array.isArray(value)
-      ? value.flatMap((entry) => {
-          const item = prop(entry, key);
-          return typeof item === "string" ? [item] : [];
-        })
-      : null;
-  let appliedLabels = fieldStrings(prop(created, "labels"), "name");
-  let appliedAssignees = fieldStrings(prop(created, "assignees"), "login");
+  let appliedLabels = outcome.issue.labels;
+  let appliedAssignees = outcome.issue.assignees;
   const missingFrom = (wanted: readonly string[], have: readonly string[]) =>
     wanted.filter((w) => !have.some((h) => h.toLowerCase() === w.toLowerCase()));
   const needsLabelRead =
