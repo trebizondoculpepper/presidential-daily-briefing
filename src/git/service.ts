@@ -13,7 +13,8 @@
  */
 import { promisify } from "node:util";
 import { execFile } from "node:child_process";
-import { resolve as resolvePath } from "node:path";
+import { basename, dirname, resolve as resolvePath, sep } from "node:path";
+import { realpath } from "node:fs/promises";
 import { githubRepositories, type GitRunner } from "./remotes.js";
 
 /** Why a Git read failed. Absence is a result, never an error code. */
@@ -307,6 +308,31 @@ export function createGitService(options: GitServiceOptions = {}): GitService {
     return found;
   };
 
+  /**
+   * Whether an index file belongs to this context's checkout: it lies inside the checkout's own
+   * Git directory or its common directory. A commit hook's index does; another checkout's never.
+   */
+  const ownsIndex = async (context: GitContext, file: string): Promise<boolean> => {
+    const dirs = await Promise.all([
+      maybePath(git, ["rev-parse", "--absolute-git-dir"], context, "git rev-parse"),
+      maybePath(git, ["rev-parse", "--git-common-dir"], context, "git rev-parse"),
+    ]);
+    // Compare real paths, so a symlinked temporary or home directory cannot hide ownership.
+    const real = async (path: string) => realpath(path).catch(() => path);
+    const target = await real(resolvePath(file)).then(async (t) =>
+      // A hook's index (index.lock) may not exist yet: resolve its directory instead.
+      t === resolvePath(file)
+        ? resolvePath(await real(dirname(resolvePath(file))), basename(file))
+        : t,
+    );
+    for (const dir of dirs) {
+      if (!dir) continue;
+      const base = await real(resolvePath(context.cwd, dir));
+      if (target === base || target.startsWith(base.endsWith(sep) ? base : base + sep)) return true;
+    }
+    return false;
+  };
+
   return {
     async workingTreeRoot(context) {
       return maybePath(git, ["rev-parse", "--show-toplevel"], context, "git rev-parse");
@@ -424,7 +450,8 @@ export function createGitService(options: GitServiceOptions = {}): GitService {
       // An inherited alternate index (a commit hook's) may track what the checkout's own index
       // does not: tracked in either is tracked, and an alternate that cannot answer is a failure,
       // so a tracked-file guard refuses rather than writing.
-      return alternate ? ask(alternate.runner) : false;
+      if (!alternate || !(await ownsIndex(context, alternate.file))) return false;
+      return ask(alternate.runner);
     },
   };
 }
