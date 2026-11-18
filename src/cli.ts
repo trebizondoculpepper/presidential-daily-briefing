@@ -111,6 +111,11 @@ import { impactGuidanceJson, impactGuidanceText } from "./estimation/impact.js";
 import { declaredRulesContext } from "./rules/declared-context.js";
 import { runConfig, runSetup } from "./config/configcli.js";
 import { runContributors } from "./config/contributors.js";
+import {
+  claudeInstallArgumentsFor,
+  claudeInstallHelp,
+  runClaudeInstall,
+} from "./install/claudecli.js";
 import { quotaRefusal } from "./github/readplan.js";
 import {
   humanContextEnabled,
@@ -388,6 +393,14 @@ ${crashDisclosure()}
   contributors [--repo owner/name] [--json]  Read-only: the verified checkout's CONTRIBUTORS.md
                         routing guidance (accounts, areas, an explicit "Default: @login"),
                         with its digest and revision; missing or unsafe guidance exits 2
+  install claude|later [--global] [--transport stdio|http] [--url URL] [--role implementer|designer]
+                        [--entry KEY | --harness NAME] [--repo owner/name] [--dry-run] [--json] [--yes]
+                        Configure the PDB MCP connection for a native client (Claude: project
+                        .mcp.json default, --global user-wide; identity reused/created; the hook
+                        item is withheld until an installed adapter exists) (install claude --help)
+  uninstall claude      [--global] [--dry-run] [--json] [--yes]
+                        Remove only PDB-managed entries for the client in the selected scope;
+                        identity, project settings and unrelated entries survive
   --repo owner/name     Repository (default: current gh checkout)
   --json                Versioned structured output (from a checkout: npm run --silent pdb)
   --issue N             Include full issue body/history, even if closed; diagnoses
@@ -1675,6 +1688,24 @@ async function run(
       ...runtime.quotas,
     });
   if (args[0] === "config") return runConfig(args.slice(1), output, runtime.config);
+  if (args[0] === "install" || args[0] === "uninstall") {
+    try {
+      const parsed = claudeInstallArgumentsFor(args.slice(1), args[0]);
+      if (parsed.help) {
+        await output(claudeInstallHelp(parsed.operation));
+        return 0;
+      }
+      return await runClaudeInstall(parsed, runtime.config ?? {}, output);
+    } catch (error) {
+      if (error instanceof Error && error.message.startsWith("Unsupported installer client"))
+        throw error;
+      const message = error instanceof Error ? error.message : String(error);
+      const json = args.includes("--json");
+      if (!json) throw new Error(message);
+      await output(JSON.stringify({ kind: "install-error", message }, null, 2) + "\n");
+      return 1;
+    }
+  }
   if (args[0] === "setup") return runSetup(args.slice(1), output, runtime.config);
   if (args[0] === "onboard") return runOnboard(args.slice(1), output, runtime.config);
   if (args[0] === "contributors") return runContributors(args.slice(1), output, runtime.config);
