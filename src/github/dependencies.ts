@@ -703,16 +703,17 @@ export function dependencyText(report: DependencyReport): string {
 export type GhRun = (args: string[], call?: CommentCallOptions) => Promise<void>;
 /** Build a guarded `gh` runner over an explicit GH transport, environment and query (#919). */
 export const ghRunOver =
-  (transport: GhTransport, env?: NodeJS.ProcessEnv, query: Query = ghQuery): GhRun =>
+  (transport: GhTransport, env?: NodeJS.ProcessEnv, query?: Query): GhRun =>
   async (args, call) => {
     // Workflow comments go through the shared bounded recovery boundary (#345).
     if (commentCommand(args)) {
+      const resolvedQuery = query ?? ghQuery;
       const runComment =
-        transport === execFileTransport && !env && query === ghQuery
+        transport === execFileTransport && !env && resolvedQuery === ghQuery
           ? ghCommentRun
           : withCommentRecovery({
               dispatch: commentPostOver(transport, env),
-              readBack: (target, since) => ghCommentReceipt(target, since, query),
+              readBack: (target, since) => ghCommentReceipt(target, since, resolvedQuery),
             });
       await runComment(args, call);
       return;
