@@ -47,7 +47,16 @@ describe("typed GH service: completion (#889)", () => {
         return { repository: { defaultBranchRef: { name: "main" } } };
       }
       if (gql.includes("issue(") && gql.includes("state")) {
-        return { repository: { issue: { state: "OPEN", labels: { nodes: [] } } } };
+        return {
+          repository: {
+            issue: {
+              state: "OPEN",
+              labels: { totalCount: 0, nodes: [] },
+              assignees: { nodes: [] },
+              comments: { totalCount: 0 },
+            },
+          },
+        };
       }
       throw new Error(`Unexpected query: ${JSON.stringify(vars)}`);
     };
@@ -145,7 +154,16 @@ describe("typed GH service: completion (#889)", () => {
           return {
             ok: true,
             stdout: JSON.stringify({
-              data: { repository: { issue: { state: "OPEN", labels: { nodes: [] } } } },
+              data: {
+                repository: {
+                  issue: {
+                    state: "OPEN",
+                    labels: { totalCount: 0, nodes: [] },
+                    assignees: { nodes: [] },
+                    comments: { totalCount: 0 },
+                  },
+                },
+              },
             }),
           };
         }
