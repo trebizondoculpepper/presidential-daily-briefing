@@ -46,6 +46,9 @@ export function createGhService(options: GhServiceOptions = {}): GhService {
       async current(signal) {
         const outcome = await transport({
           args: ["api", "user"],
+          // gh runs with the same environment that names the host below, so the account
+          // queried and the host reported can never disagree.
+          env,
           timeoutMs: 30_000,
           maxBufferBytes: 1024 * 1024,
           signal,
@@ -74,7 +77,7 @@ export function createGhService(options: GhServiceOptions = {}): GhService {
     },
     repos: {
       fromCheckout(cwd, signal) {
-        return repositoryFromCheckout(transport, cwd, signal);
+        return repositoryFromCheckout(transport, cwd, signal, env);
       },
     },
   };

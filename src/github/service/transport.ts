@@ -11,6 +11,8 @@ export interface GhCall {
   /** Literal arguments after `gh`; never joined into a shell command. */
   args: readonly string[];
   cwd?: string;
+  /** The environment gh runs with (GH_HOST, GH_TOKEN selection); the process's when omitted. */
+  env?: NodeJS.ProcessEnv;
   timeoutMs: number;
   maxBufferBytes: number;
   signal?: AbortSignal;
@@ -51,6 +53,7 @@ export const execFileTransport: GhTransport = (call) =>
         [...call.args],
         {
           cwd: call.cwd,
+          env: call.env,
           timeout: call.timeoutMs,
           maxBuffer: call.maxBufferBytes,
           signal: call.signal,

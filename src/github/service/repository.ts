@@ -24,10 +24,12 @@ export async function repositoryFromCheckout(
   transport: GhTransport,
   cwd?: string,
   signal?: AbortSignal,
+  env?: NodeJS.ProcessEnv,
 ): Promise<string> {
   const outcome = await transport({
     args: ["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"],
     cwd,
+    env,
     timeoutMs: 30_000,
     maxBufferBytes: 64 * 1024,
     signal,
