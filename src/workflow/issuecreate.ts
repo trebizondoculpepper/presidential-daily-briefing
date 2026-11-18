@@ -4,16 +4,22 @@
  * GitHub, clock, ID and input boundary is injected. One POST per invocation at most; never an
  * automatic retry, cleanup or label creation.
  */
-import { spawn } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { open } from "node:fs/promises";
 import { isAgentName } from "../config/identity.js";
 import type { HumanContext } from "../config/humancontext.js";
 import { shellQuote } from "./claims.js";
-import { classifyGhFailure, parseGhResponse } from "../github/evidence.js";
 import type { FailureClassification } from "../github/evidence.js";
-import { isRecord, prop } from "../github/github.js";
-import type { Rest, RestAnswer } from "../github/github.js";
+import type { Rest } from "../github/github.js";
+import { ghPost, issueCapabilities } from "../github/service/issues.js";
+import type {
+  IssueCapabilities,
+  IssueCreateOutcome,
+  IssueReadResult,
+  RestPost,
+} from "../github/service/issues.js";
+
+export type { PostAnswer, RestPost } from "../github/service/issues.js";
 
 export const ISSUE_CREATE_MARKER = "github-triage:issue-create v1";
 export const MAX_TITLE_CODE_POINTS = 256;
@@ -57,23 +63,17 @@ as a label is missing), unknown (the request may have been committed), refused (
 Exit: 0 planned/created; 2 partial/unknown; 1 invalid input or refused.
 `;
 
-/** One injected create (POST) answer. `dispatched` false proves the request never left. */
-export interface PostAnswer {
-  dispatched: boolean;
-  status: number | null;
-  body: unknown;
-  evidence?: FailureClassification;
-  timedOut?: boolean;
-}
-export type RestPost = (path: string, payload: unknown) => Promise<PostAnswer>;
-
 export type TargetCreationContext =
   | { verified: true; repository: string; defaultLabels?: readonly string[] }
   | { verified: false; reason: string };
 
 export interface IssueCreateRuntime {
-  rest: Rest;
-  post: RestPost;
+  /** Typed GH issue creation and read-back capabilities (#887). */
+  issues?: IssueCapabilities;
+  /** Legacy REST boundary (preserved while callers migrate to `issues`). */
+  rest?: Rest;
+  /** Legacy POST boundary (preserved while callers migrate to `issues`). */
+  post?: RestPost;
   currentRepository: () => Promise<string>;
   now: () => Date;
   operationId: () => string;
@@ -243,8 +243,6 @@ export function creationMarker(fields: {
 
 export const defaultOperationId = (): string => randomBytes(8).toString("hex");
 
-const httpsIssueUrl = /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/issues\/[1-9]\d*$/;
-
 /** Run one creation. Throws IssueCreateUsageError for invalid input (nothing requested). */
 export async function createIssue(
   input: IssueCreateRequest,
@@ -283,15 +281,13 @@ export async function createIssue(
   if (!REPO.test(requested)) return refuse("TARGET_INVALID", "The target must be owner/name.");
   result.requestedRepository = requested;
 
-  const read = async (path: string): Promise<RestAnswer | null> => {
-    try {
-      return await rt.rest(path);
-    } catch {
-      return null;
-    }
-  };
-  const readRefusal = (answer: RestAnswer | null, what: string) => {
-    const evidence = answer?.evidence;
+  const issues: IssueCapabilities =
+    rt.issues ??
+    issueCapabilities(rt.rest ?? (async () => ({ status: 500, body: null })), rt.post ?? ghPost);
+  const readRefusal = (answer: Extract<IssueReadResult<unknown>, { ok: false }>, what: string) => {
+    if (answer.unverified)
+      return refuse("TARGET_UNVERIFIED", "GitHub returned no verifiable repository identity.");
+    const evidence = answer.evidence;
     const category = evidence?.category;
     if (category === "rate-limited" || category === "secondary-rate-limit")
       return refuse(
@@ -299,13 +295,13 @@ export async function createIssue(
         `GitHub rate limited the ${what} read; nothing was created. Retry after the reported reset.`,
         evidence,
       );
-    if (answer?.status === 401 || category === "authentication")
+    if (answer.status === 401 || category === "authentication")
       return refuse(
         "AUTHENTICATION",
         "GitHub refused the gh login. Run gh auth status, then retry.",
         evidence,
       );
-    if (answer?.status === 404 || answer?.status === 403 || category === "access")
+    if (answer.status === 404 || answer.status === 403 || category === "access")
       return refuse(
         "INACCESSIBLE",
         `${requested} is not accessible to this gh login (missing, private or forbidden); nothing was created.`,
@@ -318,21 +314,17 @@ export async function createIssue(
     );
   };
 
-  const repository = await read(`repos/${requested}`);
-  if (repository?.status !== 200 || !isRecord(repository.body))
-    return readRefusal(repository, "repository");
-  const fullName = prop(repository.body, "full_name");
-  const id = prop(repository.body, "id");
-  const nodeId = prop(repository.body, "node_id");
-  const htmlUrl = prop(repository.body, "html_url");
-  if (
-    typeof fullName !== "string" ||
-    !REPO.test(fullName) ||
-    typeof id !== "number" ||
-    typeof nodeId !== "string" ||
-    !nodeId
-  )
-    return refuse("TARGET_UNVERIFIED", "GitHub returned no verifiable repository identity.");
+  const repoResult = await issues.readRepository(requested);
+  if (!repoResult.ok) return readRefusal(repoResult, "repository");
+  const {
+    fullName,
+    id,
+    nodeId,
+    url: htmlUrl,
+    archived,
+    hasIssues,
+    pushPermission,
+  } = repoResult.value;
   // gh follows rename/transfer redirects; a different canonical name is never accepted silently.
   if (fullName.toLowerCase() !== requested.toLowerCase())
     return refuse(
@@ -343,17 +335,14 @@ export async function createIssue(
     repository: fullName,
     id,
     nodeId,
-    url: typeof htmlUrl === "string" ? htmlUrl : `https://github.com/${fullName}`,
+    url: htmlUrl,
   };
-  if (prop(repository.body, "archived") === true)
-    return refuse("ARCHIVED", `${fullName} is archived; issues cannot be created.`);
-  if (prop(repository.body, "has_issues") === false)
-    return refuse("ISSUES_DISABLED", `Issues are disabled on ${fullName}.`);
+  if (archived) return refuse("ARCHIVED", `${fullName} is archived; issues cannot be created.`);
+  if (!hasIssues) return refuse("ISSUES_DISABLED", `Issues are disabled on ${fullName}.`);
 
-  const user = await read("user");
-  const login = user?.status === 200 ? prop(user.body, "login") : null;
-  if (typeof login !== "string" || !GITHUB_LOGIN.test(login))
-    return readRefusal(user, "authenticated user");
+  const viewerResult = await issues.readViewer();
+  if (!viewerResult.ok) return readRefusal(viewerResult, "authenticated user");
+  const login = viewerResult.value;
   result.viewer = login;
 
   // Require verified target checkout/policy context (#666); unfamiliar/unmanaged/no-checkout
@@ -412,18 +401,17 @@ export async function createIssue(
   // Labels: each must exist (this command never creates one). Setting labels needs push access;
   // GitHub otherwise drops them, which is disclosed now and verified after creation.
   for (const label of effectiveLabels) {
-    const answer = await read(`repos/${fullName}/labels/${encodeURIComponent(label)}`);
-    if (answer?.status === 404)
+    const labelResult = await issues.hasLabel(fullName, label);
+    if (!labelResult.ok) return readRefusal(labelResult, "label");
+    if (!labelResult.value)
       return refuse(
         "LABEL_MISSING",
         `Label ${JSON.stringify(label)} does not exist on ${fullName}; this command never creates labels.`,
       );
-    if (answer?.status !== 200) return readRefusal(answer, "label");
   }
-  const push = prop(repository.body, "permissions", "push");
-  if ((effectiveLabels.length || effectiveAssignees.length) && push !== true)
+  if ((effectiveLabels.length || effectiveAssignees.length) && pushPermission !== true)
     result.warnings.push(
-      push === false
+      pushPermission === false
         ? `${login} lacks push access to ${fullName}; GitHub may create the issue without the requested labels or assignees.`
         : `Could not confirm label/assignee permission on ${fullName}; labels and assignees are verified after creation.`,
     );
@@ -468,18 +456,18 @@ export async function createIssue(
     ...(effectiveLabels.length ? { labels: effectiveLabels } : {}),
     ...(effectiveAssignees.length ? { assignees: effectiveAssignees } : {}),
   };
-  let answer: PostAnswer;
+  let outcome: IssueCreateOutcome;
   try {
-    answer = await rt.post(`repos/${fullName}/issues`, payload);
+    outcome = await issues.create(fullName, payload);
   } catch {
-    answer = { dispatched: true, status: null, body: null };
+    outcome = { kind: "unknown", reason: "transport", status: null };
   }
-  const unknown = (message: string) => {
+  const unknown = (message: string, evidence?: FailureClassification) => {
     result.status = "unknown";
     result.error = {
       id: "OUTCOME_UNKNOWN",
       message,
-      ...(answer.evidence ? { evidence: answer.evidence } : {}),
+      ...(evidence ? { evidence } : {}),
     };
     result.recovery = [
       ...recovery,
@@ -487,83 +475,69 @@ export async function createIssue(
     ];
     return result;
   };
-  if (!answer.dispatched)
+  if (outcome.kind === "not-dispatched")
     return refuse("NOT_DISPATCHED", "The create request was not sent; nothing was created.");
-  if (answer.status === null || answer.timedOut || answer.status >= 500)
-    return unknown(
-      "The create request was sent but no definitive answer arrived (timeout, lost reply or server error); the issue may exist.",
-    );
-  if (answer.status !== 201) {
-    const category = answer.evidence?.category;
-    if (category === "rate-limited" || category === "secondary-rate-limit" || answer.status === 429)
-      return refuse(
-        "QUOTA",
-        "GitHub rate limited the create request; nothing was created. Retry after the reported reset.",
-        answer.evidence,
+  if (outcome.kind === "unknown") {
+    if (outcome.reason === "transport")
+      return unknown(
+        "The create request was sent but no definitive answer arrived (timeout, lost reply or server error); the issue may exist.",
+        outcome.evidence,
       );
-    if (answer.status === 401)
-      return refuse("AUTHENTICATION", "GitHub refused the gh login.", answer.evidence);
-    if (answer.status === 410)
-      return refuse("ISSUES_DISABLED", `Issues are disabled on ${fullName}.`, answer.evidence);
-    if (answer.status === 403 || answer.status === 404)
-      return refuse(
-        "PERMISSION",
-        `GitHub refused issue creation on ${fullName} for ${login}.`,
-        answer.evidence,
+    if (outcome.reason === "unexpected-status")
+      return unknown(
+        `GitHub answered HTTP ${outcome.status}, which does not prove creation.`,
+        outcome.evidence,
       );
-    if (answer.status === 422)
-      return refuse(
-        "REJECTED",
-        "GitHub rejected the issue content (validation failed).",
-        answer.evidence,
+    if (outcome.reason === "malformed")
+      return unknown(
+        "GitHub answered 201 without a verifiable issue identity; the issue may exist.",
       );
-    if (answer.status >= 400)
-      return refuse(
-        "REJECTED",
-        `GitHub refused the request (HTTP ${answer.status}).`,
-        answer.evidence,
+    if (outcome.mismatchedUrl)
+      result.warnings.push(
+        `GitHub reported an issue outside the intended target: ${outcome.mismatchedUrl}`,
       );
-    return unknown(`GitHub answered HTTP ${answer.status}, which does not prove creation.`);
-  }
-  // Verify the created issue's identity; never construct a URL from an unverified number.
-  const created = answer.body;
-  const number = prop(created, "number");
-  const issueNode = prop(created, "node_id");
-  const issueUrl = prop(created, "html_url");
-  const repositoryUrl = prop(created, "repository_url");
-  const expectedUrl = `https://github.com/${fullName}/issues/${String(number)}`;
-  if (
-    !isRecord(created) ||
-    "pull_request" in created ||
-    typeof number !== "number" ||
-    !Number.isInteger(number) ||
-    number < 1 ||
-    typeof issueNode !== "string" ||
-    !issueNode ||
-    typeof issueUrl !== "string"
-  )
-    return unknown("GitHub answered 201 without a verifiable issue identity; the issue may exist.");
-  if (
-    issueUrl.toLowerCase() !== expectedUrl.toLowerCase() ||
-    (typeof repositoryUrl === "string" &&
-      !repositoryUrl.toLowerCase().endsWith(`/repos/${fullName.toLowerCase()}`))
-  ) {
-    if (httpsIssueUrl.test(issueUrl))
-      result.warnings.push(`GitHub reported an issue outside the intended target: ${issueUrl}`);
     return unknown(
       "The created issue does not match the intended target; not reported as created.",
     );
   }
+  if (outcome.kind === "refused") {
+    const category = outcome.evidence?.category;
+    if (
+      category === "rate-limited" ||
+      category === "secondary-rate-limit" ||
+      outcome.status === 429
+    )
+      return refuse(
+        "QUOTA",
+        "GitHub rate limited the create request; nothing was created. Retry after the reported reset.",
+        outcome.evidence,
+      );
+    if (outcome.status === 401)
+      return refuse("AUTHENTICATION", "GitHub refused the gh login.", outcome.evidence);
+    if (outcome.status === 410)
+      return refuse("ISSUES_DISABLED", `Issues are disabled on ${fullName}.`, outcome.evidence);
+    if (outcome.status === 403 || outcome.status === 404)
+      return refuse(
+        "PERMISSION",
+        `GitHub refused issue creation on ${fullName} for ${login}.`,
+        outcome.evidence,
+      );
+    if (outcome.status === 422)
+      return refuse(
+        "REJECTED",
+        "GitHub rejected the issue content (validation failed).",
+        outcome.evidence,
+      );
+    return refuse(
+      "REJECTED",
+      `GitHub refused the request (HTTP ${outcome.status}).`,
+      outcome.evidence,
+    );
+  }
+  const { number, nodeId: issueNode, url: issueUrl } = outcome.issue;
   result.issue = { number, nodeId: issueNode, url: issueUrl };
-  const fieldStrings = (value: unknown, key: string): string[] | null =>
-    Array.isArray(value)
-      ? value.flatMap((entry) => {
-          const item = prop(entry, key);
-          return typeof item === "string" ? [item] : [];
-        })
-      : null;
-  let appliedLabels = fieldStrings(prop(created, "labels"), "name");
-  let appliedAssignees = fieldStrings(prop(created, "assignees"), "login");
+  let appliedLabels = outcome.issue.labels;
+  let appliedAssignees = outcome.issue.assignees;
   const missingFrom = (wanted: readonly string[], have: readonly string[]) =>
     wanted.filter((w) => !have.some((h) => h.toLowerCase() === w.toLowerCase()));
   const needsLabelRead =
@@ -574,14 +548,11 @@ export async function createIssue(
     (appliedAssignees === null || missingFrom(effectiveAssignees, appliedAssignees).length > 0);
   if (needsLabelRead || needsAssigneeRead) {
     // One bounded read-back before reporting labels or assignees missing.
-    const back = await read(`repos/${fullName}/issues/${number}`);
-    const backValid = back?.status === 200 && prop(back.body, "node_id") === issueNode;
-    const backLabels = backValid ? fieldStrings(prop(back.body, "labels"), "name") : null;
-    const backAssignees = backValid ? fieldStrings(prop(back.body, "assignees"), "login") : null;
-    if (backLabels) appliedLabels = backLabels;
+    const back = await issues.readBack(fullName, number, issueNode);
+    if (back?.labels) appliedLabels = back.labels;
     else if (needsLabelRead)
       result.warnings.push("Read-back of the created issue failed; label state is unverified.");
-    if (backAssignees) appliedAssignees = backAssignees;
+    if (back?.assignees) appliedAssignees = back.assignees;
     else if (needsAssigneeRead)
       result.warnings.push("Read-back of the created issue failed; assignee state is unverified.");
   }
@@ -683,80 +654,6 @@ export function issueCreateText(result: IssueCreateResult): string {
   for (const r of result.recovery) lines.push(`Recovery: ${r}`);
   return lines.join("\n") + "\n";
 }
-
-/**
- * Production create boundary: `gh api --include -X POST PATH --input -` with the JSON payload on
- * stdin, no shell. A spawn failure proves no dispatch; anything after is treated as dispatched.
- */
-type Spawn = typeof spawn;
-/**
- * Production create boundary over an injectable spawn (tests pass a fake child). A stdin error
- * (EPIPE when gh exits before reading) never crashes: the close handler decides the outcome,
- * which without a 201 response is never "created".
- */
-export const ghPostWith =
-  (spawnChild: Spawn = spawn): RestPost =>
-  (path, payload) =>
-    new Promise<PostAnswer>((resolve) => {
-      let child;
-      try {
-        child = spawnChild("gh", ["api", "--include", "--method", "POST", path, "--input", "-"], {
-          stdio: ["pipe", "pipe", "ignore"],
-          shell: false,
-        });
-      } catch {
-        resolve({ dispatched: false, status: null, body: null });
-        return;
-      }
-      let spawned = false;
-      let timedOut = false;
-      let stdout = "";
-      child.stdin.on("error", () => {
-        // EPIPE/ECONNRESET: gh exited without reading; the exit decides refused vs unknown.
-      });
-      child.once("spawn", () => {
-        spawned = true;
-        child.stdin.end(JSON.stringify(payload));
-      });
-      child.stdout.setEncoding("utf8").on("data", (t: string) => (stdout += t));
-      const timer = setTimeout(() => {
-        timedOut = true;
-        child.kill("SIGTERM");
-      }, 60_000);
-      child.once("error", () => {
-        clearTimeout(timer);
-        resolve({ dispatched: spawned, status: null, body: null });
-      });
-      child.once("close", (code) => {
-        clearTimeout(timer);
-        if (timedOut) {
-          resolve({ dispatched: true, status: null, body: null, timedOut: true });
-          return;
-        }
-        try {
-          const response = parseGhResponse(stdout);
-          let body: unknown = null;
-          try {
-            body = JSON.parse(response.body);
-          } catch {
-            body = null;
-          }
-          const status = response.status;
-          resolve({
-            dispatched: true,
-            status,
-            body,
-            ...(status !== 201
-              ? { evidence: classifyGhFailure({ response, exitCode: code }) }
-              : {}),
-          });
-        } catch {
-          resolve({ dispatched: true, status: null, body: null });
-        }
-      });
-    });
-
-export const ghPost: RestPost = ghPostWith();
 
 /** Bounded stdin read: stops reading just past the body limit. */
 export async function readStdinBounded(

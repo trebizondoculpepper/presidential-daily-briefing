@@ -13,6 +13,8 @@ export interface GhCall {
   cwd?: string;
   /** The environment gh runs with (GH_HOST, GH_TOKEN selection); the process's when omitted. */
   env?: NodeJS.ProcessEnv;
+  /** Optional stdin payload (e.g. for `--input -`); written without failing on EPIPE. */
+  stdin?: string;
   timeoutMs: number;
   maxBufferBytes: number;
   signal?: AbortSignal;
@@ -48,7 +50,7 @@ export const execFileTransport: GhTransport = (call) =>
       return;
     }
     try {
-      execFile(
+      const child = execFile(
         "gh",
         [...call.args],
         {
@@ -84,6 +86,12 @@ export const execFileTransport: GhTransport = (call) =>
           });
         },
       );
+      if (call.stdin !== undefined && child.stdin) {
+        child.stdin.on("error", () => {
+          // EPIPE/ECONNRESET: gh exited without reading; the exit outcome decides refused vs unknown.
+        });
+        child.stdin.end(call.stdin);
+      }
     } catch {
       resolve({ ok: false, kind: "spawn", exitCode: null, stdout: "", stderr: "" });
     }

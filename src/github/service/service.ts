@@ -16,6 +16,8 @@ import { checkReads } from "./checks.js";
 import { readRateLimits } from "./ratelimits.js";
 import { resolveLabels } from "./labels.js";
 import type { LabelResolution } from "./labels.js";
+import { issueCapabilities, postOverTransport } from "./issues.js";
+import type { IssueCapabilities, RestPost } from "./issues.js";
 import { discoveryPage, issueCommentsPage, issuesByNumber } from "./snapshot.js";
 import type { Issue } from "./snapshot.js";
 import type { Query } from "../github.js";
@@ -60,6 +62,8 @@ export interface GhService {
     /** Resolve normalized names to canonical labels; unresolved on any failed or partial read. */
     resolve(repository: string, names: readonly string[]): Promise<LabelResolution>;
   };
+  /** Issue creation and bounded read-back capabilities (#887). */
+  issues: IssueCapabilities;
   /** Open-work snapshot reads behind the shortlist briefing (#927). */
   snapshot: {
     discoveryPage(
@@ -92,6 +96,8 @@ export interface GhServiceOptions {
   env?: NodeJS.ProcessEnv;
   /** The REST reader behind REST capabilities; by default one over this service's transport and env. */
   rest?: Rest;
+  /** One-attempt POST boundary for issue creation; by default gh --input - over env. */
+  post?: RestPost;
   /** The GraphQL executor behind query capabilities; by default one over this transport and env. */
   query?: GraphQuery;
   /** Clock for observation times. */
@@ -106,6 +112,7 @@ export function createGhService(options: GhServiceOptions = {}): GhService {
   // The default REST reader runs over this service's own transport and environment, so every
   // capability honours the same execution context (host, account, injected transport).
   const rest = options.rest ?? restOverTransport(transport, env);
+  const post = options.post ?? postOverTransport(transport, env);
   const query: GraphQuery = options.query ?? ghQueryWith(undefined, {}, { transport, env });
   return {
     account: {
@@ -160,6 +167,7 @@ export function createGhService(options: GhServiceOptions = {}): GhService {
     labels: {
       resolve: (repository, names) => resolveLabels(repository, names, query as Query),
     },
+    issues: issueCapabilities(rest, post),
     snapshot: {
       discoveryPage: (...args) => discoveryPage(query as Query, ...args),
       issuesByNumber: (...args) => issuesByNumber(query as Query, ...args),
