@@ -61,6 +61,7 @@ import {
 import type { Clock } from "./polling.js";
 import type { ReadRuntime } from "../briefing/service.js";
 import type { ConfigFileSystem, GitRunner } from "../config/config.js";
+import type { GitService } from "../git/service.js";
 import { detectClientEntry, validateHarness } from "../config/harness.js";
 import type { Environment } from "../config/harness.js";
 import { TRIAGE_ROLES, validateEntryKey, type TriageRole } from "../config/identity.js";
@@ -120,7 +121,8 @@ export interface McpRuntime extends ReadRuntime {
   /** Environment for harness detection; absent means no environment signals. */
   env?: Environment;
   /** Git and filesystem boundaries for the read-only identity lookup. */
-  git?: GitRunner;
+  /** The shared typed Git service, or a legacy runner as its transport. */
+  git?: GitService | GitRunner;
   fs?: ConfigFileSystem;
   /** The process's watcher when polling is enabled; absent means polling is disabled. */
   watcher?: Watcher;
