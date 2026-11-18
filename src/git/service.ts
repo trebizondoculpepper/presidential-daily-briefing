@@ -261,8 +261,10 @@ export function createGitService(options: GitServiceOptions = {}): GitService {
     const found: GitRemote[] = [];
     for (const line of output.split(/\r?\n/)) {
       // `git remote -v` prints "<name>\t<url> (fetch|push)". Split on the first separator and
-      // keep the rest verbatim: a local-path URL may itself contain spaces.
-      const parsed = /^(\S+)\s+(.*?)\s+\((?:fetch|push)\)$/.exec(line.trim());
+      // keep the rest verbatim: a local-path URL may itself contain spaces. A partial-clone
+      // remote may append a trailing annotation after the (fetch) entry, e.g.
+      // "origin <url> (fetch) [blob:none]"; accept and ignore anything after the direction.
+      const parsed = /^(\S+)\s+(.*?)\s+\((?:fetch|push)\)(?:\s+.*)?$/.exec(line.trim());
       if (!parsed) continue;
       const [, name, url] = parsed as unknown as [string, string, string];
       // A remote may fetch from one repository and push to another; both URLs are facts, so
