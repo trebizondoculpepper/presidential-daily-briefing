@@ -25,6 +25,8 @@ import type {
 import type { LabelResolution } from "./labels.js";
 import { issueCapabilities, postOverTransport } from "./issues.js";
 import type { IssueCapabilities, RestPost } from "./issues.js";
+import { closedQuestionsCapabilities } from "./closedquestions.js";
+import type { ClosedQuestionCapabilities } from "./closedquestions.js";
 import { discoveryPage, issueCommentsPage, issuesByNumber } from "./snapshot.js";
 import type { Issue } from "./snapshot.js";
 import type { Query } from "../github.js";
@@ -85,6 +87,8 @@ export interface GhService {
   };
   /** Issue creation and bounded read-back capabilities (#887). */
   issues: IssueCapabilities;
+  /** Closed-question discovery and comment pagination (#899). */
+  closedQuestions: ClosedQuestionCapabilities;
   /** Open-work snapshot reads behind the shortlist briefing (#927). */
   snapshot: {
     discoveryPage(
@@ -242,6 +246,7 @@ export function createGhService(options: GhServiceOptions = {}): GhService {
       return typeof data === "object" && data !== null ? (data as Record<string, unknown>) : {};
     }, rest),
     completion: completionCapabilities(query, rest, run),
+    closedQuestions: closedQuestionsCapabilities(query as Query, rest),
   };
 }
 

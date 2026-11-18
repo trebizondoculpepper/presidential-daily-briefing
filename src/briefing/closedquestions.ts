@@ -11,9 +11,12 @@
  */
 import { createHash, randomUUID } from "node:crypto";
 import type { Comment, Issue } from "../github/types.js";
-import { comment as commentFields, common, info, prop } from "../github/github.js";
-import type { Query, QueryVariables, Rest } from "../github/github.js";
+import { ghRest } from "../github/github.js";
+import type { Query, Rest } from "../github/github.js";
+import { closedQuestionsCapabilities } from "../github/service/closedquestions.js";
+import type { ClosedQuestionCapabilities } from "../github/service/closedquestions.js";
 import type { QuestionRecordFact } from "../rules/datalog/datalog.js";
+import { markerTrust } from "../workflow/delivery.js";
 import type { TrustDecision } from "../workflow/delivery.js";
 import { questionMarkerPrefix } from "../workflow/claims.js";
 import type { HumanRecord } from "./questionrecord.js";
@@ -107,7 +110,10 @@ export interface ClosedQuestions {
 }
 
 export interface ClosedQuestionRuntime {
-  query: Query;
+  /** Typed closed-question capabilities from GhService (#899). */
+  closedQuestions?: ClosedQuestionCapabilities;
+  /** Legacy GraphQL boundary retained for existing callers/tests during migration. */
+  query?: Query;
   /** Permission REST boundary; each lookup consumes the same budget. */
   rest?: Rest;
   /** Builds the #212 trust rule over a (budgeted) REST boundary. */
@@ -124,24 +130,14 @@ export interface ClosedQuestionRuntime {
   slot?: ClosedScanSlot;
 }
 
-const inventorySource = (size: number) =>
-  `query($owner:String!,$name:String!,$cursor:String){repository(owner:$owner,name:$name){issues(first:${size},after:$cursor,states:CLOSED,orderBy:{field:UPDATED_AT,direction:DESC}){nodes{${common}} ${info}}} rateLimit{remaining resetAt}}`;
-const sinceSource = (size: number) =>
-  `query($owner:String!,$name:String!,$cursor:String,$since:DateTime!){repository(owner:$owner,name:$name){issues(first:${size},after:$cursor,states:CLOSED,filterBy:{since:$since},orderBy:{field:UPDATED_AT,direction:DESC}){nodes{${common}} ${info}}} rateLimit{remaining resetAt}}`;
-const commentsSource = (size: number) =>
-  `query($owner:String!,$name:String!,$number:Int!,$cursor:String){repository(owner:$owner,name:$name){issueOrPullRequest(number:$number){... on Issue{comments(first:${size},after:$cursor){nodes{${commentFields}} ${info}}}}}}`;
-
 class BudgetExhausted extends Error {}
 
-const pageOf = (value: unknown): { nodes: unknown[]; more: boolean; cursor: string | null } => {
-  const nodes = prop(value, "nodes");
-  const cursor = prop(value, "pageInfo", "endCursor");
-  if (!Array.isArray(nodes)) throw new Error("the response has no page of nodes");
-  return {
-    nodes,
-    more: prop(value, "pageInfo", "hasNextPage") === true,
-    cursor: typeof cursor === "string" ? cursor : null,
-  };
+const closedCapabilitiesFromRuntime = (
+  runtime: ClosedQuestionRuntime,
+): ClosedQuestionCapabilities => {
+  if (runtime.closedQuestions) return runtime.closedQuestions;
+  if (!runtime.query) throw new Error("ClosedQuestionRuntime requires closedQuestions or query.");
+  return closedQuestionsCapabilities(runtime.query, runtime.rest ?? ghRest);
 };
 
 const failureText = (error: unknown): string =>
@@ -281,7 +277,7 @@ async function scan(
   const bounds: ClosedQuestionBounds = { ...closedQuestionPolicy, ...runtime.bounds };
   const now = runtime.now ?? (() => new Date());
   const signal = runtime.signal;
-  const [owner, name] = repository.split("/");
+  const capabilities = closedCapabilitiesFromRuntime(runtime);
   const requestStart = now();
   const warnings: string[] = [];
 
@@ -312,17 +308,6 @@ async function scan(
     if (used >= bounds.requests) throw new BudgetExhausted();
     used++;
   };
-  const request = async (source: string, variables: QueryVariables) => {
-    take();
-    const data = await runtime.query(source, {
-      owner: owner ?? "",
-      name: name ?? "",
-      ...variables,
-    });
-    const repo = prop(data, "repository");
-    if (!repo) throw new Error(`Repository unavailable: ${repository}`);
-    return repo;
-  };
   // Permission lookups spend the same budget; past it they answer nothing, which the #212 rule
   // reads as unknown authority (missing evidence), never as trusted or untrusted.
   const budgetedRest: Rest | undefined = runtime.rest
@@ -335,7 +320,23 @@ async function scan(
         return runtime.rest!(path, options);
       }
     : undefined;
-  const trust = budgetedRest && runtime.trustWith ? runtime.trustWith(budgetedRest) : runtime.trust;
+  const lookup = capabilities.permissionOf(repository, signal);
+  const checked = new Set<string>();
+  const trust =
+    budgetedRest && runtime.trustWith
+      ? runtime.trustWith(budgetedRest)
+      : (runtime.trust ??
+        markerTrust(async (login) => {
+          if (!checked.has(login)) {
+            checked.add(login);
+            if (used >= bounds.requests) {
+              permissionGaps++;
+              return "unknown";
+            }
+            used++;
+          }
+          return lookup(login);
+        }));
 
   /** A listed issue replaces what the scan knew of it: its comments are reread from page one. */
   const observe = (node: Issue) => {
@@ -369,24 +370,21 @@ async function scan(
     if (phase === "baseline" && !s.inventoryDone)
       while (pages < bounds.inventoryPages) {
         signal?.throwIfAborted();
-        const page = pageOf(
-          prop(
-            await request(
-              inventorySource(bounds.pageSize),
-              s.inventoryCursor ? { cursor: s.inventoryCursor } : {},
-            ),
-            "issues",
-          ),
-        );
+        take();
+        const page = await capabilities.listClosedIssues(repository, {
+          pageSize: bounds.pageSize,
+          cursor: s.inventoryCursor,
+          signal,
+        });
         pages++;
-        rows += page.nodes.length;
+        rows += page.issues.length;
         // Pages of a mutable list can shift: the first observation of an issue in a scan stays.
-        for (const node of page.nodes as Issue[]) if (!s.seen.has(node.url)) observe(node);
-        if (!page.more || !page.cursor) {
+        for (const node of page.issues) if (!s.seen.has(node.url)) observe(node);
+        if (!page.hasNextPage || !page.endCursor) {
           s.inventoryDone = true;
           break;
         }
-        s.inventoryCursor = page.cursor;
+        s.inventoryCursor = page.endCursor;
       }
     if (phase === "refresh") {
       if (!s.refresh) {
@@ -401,21 +399,19 @@ async function scan(
       const r = s.refresh;
       while (!r.listed && pages < bounds.inventoryPages) {
         signal?.throwIfAborted();
-        const page = pageOf(
-          prop(
-            await request(sinceSource(bounds.pageSize), {
-              since: r.since,
-              ...(r.cursor ? { cursor: r.cursor } : {}),
-            }),
-            "issues",
-          ),
-        );
+        take();
+        const page = await capabilities.listClosedIssues(repository, {
+          pageSize: bounds.pageSize,
+          since: r.since,
+          cursor: r.cursor,
+          signal,
+        });
         pages++;
-        rows += page.nodes.length;
+        rows += page.issues.length;
         // A changed issue is refolded from its current state.
-        for (const node of page.nodes as Issue[]) observe(node);
-        if (!page.more || !page.cursor) r.listed = true;
-        else r.cursor = page.cursor;
+        for (const node of page.issues) observe(node);
+        if (!page.hasNextPage || !page.endCursor) r.listed = true;
+        else r.cursor = page.endCursor;
       }
     }
   } catch (error) {
@@ -433,15 +429,14 @@ async function scan(
     signal?.throwIfAborted();
     const url = queue.shift()!;
     const entry = s.entries.get(url)!;
-    let target: unknown;
+    let page: Awaited<ReturnType<ClosedQuestionCapabilities["listIssueComments"]>>;
     try {
-      target = prop(
-        await request(commentsSource(bounds.pageSize), {
-          number: entry.issue.number,
-          ...(entry.next ? { cursor: entry.next } : {}),
-        }),
-        "issueOrPullRequest",
-      );
+      take();
+      page = await capabilities.listIssueComments(repository, entry.issue.number, {
+        pageSize: bounds.pageSize,
+        cursor: entry.next,
+        signal,
+      });
     } catch (error) {
       signal?.throwIfAborted();
       if (error instanceof BudgetExhausted) break;
@@ -449,23 +444,16 @@ async function scan(
       continue;
     }
     commentPages++;
-    if (target === null || target === undefined || prop(target, "comments") === undefined) {
+    if (!page) {
       entry.next = null;
       entry.unavailable =
         "GitHub no longer returns this issue (deleted, transferred or inaccessible)";
       // Questions known before stay visible with an unknown outcome (Codex, #609).
       continue;
     }
-    let page: ReturnType<typeof pageOf>;
-    try {
-      page = pageOf(prop(target, "comments"));
-    } catch (error) {
-      failed.push(`${url}: ${failureText(error)}`);
-      continue;
-    }
-    entry.comments.push(...(page.nodes as Comment[]));
-    if (page.more && page.cursor) {
-      entry.next = page.cursor;
+    entry.comments.push(...page.comments);
+    if (page.hasNextPage && page.endCursor) {
+      entry.next = page.endCursor;
       queue.push(url);
     } else {
       entry.next = null;
