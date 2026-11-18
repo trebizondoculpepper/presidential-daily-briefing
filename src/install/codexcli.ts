@@ -12,10 +12,10 @@
  */
 import { parseArgs } from "node:util";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import { ConfigError, nodeFileSystem } from "../config/config.js";
 import type { ConfigRuntime } from "../config/configcli.js";
-import { readIdentity } from "../config/identity.js";
+import { isAgentName, readIdentity } from "../config/identity.js";
 import { resolveEntry, type Environment } from "../config/harness.js";
 import { createGitService } from "../git/service.js";
 import type { InstallItemKind } from "./manifest.js";
@@ -151,7 +151,10 @@ export function installArgumentsFor(
   if (values.url !== undefined) {
     if (values.transport !== "http") throw new Error("--url requires --transport http.");
     if (!HTTP_URL.test(values.url))
-      throw new Error(`--url must be an http(s) endpoint, got ${JSON.stringify(values.url)}.`);
+      // #844/CodeRabbit: never echo the rejected operand; it may carry credentials.
+      throw new Error(
+        "--url must be an http(s) endpoint without whitespace; the value is not echoed.",
+      );
   }
   if (values.entry !== undefined && values.harness !== undefined)
     throw new Error("Give --entry or --harness, not both.");
@@ -181,9 +184,11 @@ export const installHelp = (operation: "install" | "uninstall"): string =>
     ? `Usage: pdb install codex [--global] [--transport stdio|http] [--url URL] [--role implementer|designer]
                     [--entry KEY | --harness NAME] [--repo owner/name] [--dry-run] [--json] [--yes]
 Configure the PDB MCP connection for Codex (identity decision and hook follow in later slices).
-Default scope is the current repository; --global uses the user-wide Codex home. STDIO is the
-default; --transport http with --url is explicit. --dry-run previews planned items and writes
-nothing. This slice performs no file writes: the exact per-transport diff is not shown.`
+Default scope is the current repository; --global uses the user-wide Codex home. Without an
+explicit --entry/--harness, the Codex identity entry is targeted (never the invoking agent).
+STDIO is the default; --transport http with --url is explicit. --dry-run previews planned items
+and writes nothing. This slice performs no file writes: the exact per-transport diff is not
+shown.`
     : `Usage: pdb uninstall codex [--global] [--dry-run] [--json] [--yes]
 Preview/record removal intent for PDB-managed Codex entries in the selected scope. This slice
 performs no file writes: entries are not removed yet, and identity/project settings are never
@@ -206,11 +211,15 @@ export async function resolveInstallScope(
   try {
     const cwd = runtime.cwd ?? process.cwd();
     const svc = createGitService(runtime.git === undefined ? {} : { git: runtime.git });
+    // The typed service returns null for an absent checkout and throws for a failed Git read;
+    // absence is NO_PROJECT, a rejection is a redacted execution failure (never conflated).
     let root: string | null = null;
     try {
       root = await svc.workingTreeRoot({ cwd });
-    } catch {
-      root = null;
+    } catch (error) {
+      throw new Error(
+        "NO_PROJECT: Git could not be executed in the selected directory; check the Git installation. Nothing was written.",
+      );
     }
     if (!root)
       throw new Error(
@@ -242,11 +251,14 @@ export async function resolveInstallScope(
       throw new Error(
         `NO_PROJECT: the repository could not be resolved; run from a checkout with a single GitHub remote or pass --repo owner/name. Next: ${args.dryRun ? "pdb" : "pdb"} install codex --global --dry-run${args.json ? " --json" : ""} for a user-wide preview.`,
       );
-    const gitCommonDir = (await svc.commonDirectory({ cwd: root })) ?? "";
-    if (!gitCommonDir)
+    const rawCommonDir = (await svc.commonDirectory({ cwd: root })) ?? "";
+    if (!rawCommonDir)
       throw new Error(
         `NO_PROJECT: the checkout's common directory could not be resolved. Next: ${args.dryRun ? "pdb" : "pdb"} install codex --global --dry-run${args.json ? " --json" : ""} for a user-wide preview.`,
       );
+    // The internal scope promises absolute paths: resolve a relative common directory against
+    // the root passed to the Git call, so a nested call sites addresses the right directory.
+    const gitCommonDir = isAbsolute(rawCommonDir) ? rawCommonDir : resolve(root, rawCommonDir);
     return { kind: "project", root, repository, gitCommonDir };
   } catch (error) {
     if (error instanceof ConfigError) throw new Error(`NO_PROJECT: ${error.message}`);
@@ -268,9 +280,11 @@ async function identityDecision(
   if (args.operation !== "install" || scope.kind !== "project") return null;
   const env: Environment = runtime.env ?? process.env;
   const fs = runtime.fs ?? nodeFileSystem;
+  // The Codex install must target the Codex identity: without an explicit --entry/--harness,
+  // resolve the `codex` entry, never the invoking runtime's harness (e.g. CLAUDECODE).
   const resolution = await resolveEntry({
     entry: args.entry ?? undefined,
-    harness: args.harness ?? undefined,
+    harness: args.harness ?? "codex",
     env,
     root: scope.root,
     fs,
@@ -282,13 +296,35 @@ async function identityDecision(
       action: "kept",
       outcome: "refused",
       code: "IDENTITY_AMBIGUOUS",
-      message: resolution.message,
+      message: `${resolution.message} No identity was borrowed: the Codex install resolves the Codex entry.`,
       diff: null,
-      retry: `pdb setup identity --role implementer|designer --entry KEY${args.repo ? ` --repo ${args.repo}` : ""}`,
+      // A role choice is still required; never emit a literal `implementer|designer` template.
+      retry: null,
     };
   const entry = resolution.entry;
-  const record = await readIdentity(scope.root, entry, fs);
-  const ready = record.entryExists && record.name !== null && record.triageRole !== null;
+  let record;
+  try {
+    record = await readIdentity(scope.root, entry, fs);
+  } catch (error) {
+    // #844/CodeRabbit: never leak the checkout path or raw error; name only pdb.toml.
+    return {
+      kind: "identity",
+      file: null,
+      action: "kept",
+      outcome: "refused",
+      code: "IDENTITY_REQUIRED",
+      message: "The repository identity file (pdb.toml) could not be read; check access and retry.",
+      diff: null,
+      retry: "pdb config get identity.name --entry " + entry,
+    };
+  }
+  // Validate the name with the canonical validator (pattern + 100-character limit), not just
+  // non-null: an over-long or malformed name must not be reported as valid.
+  const ready =
+    record.entryExists &&
+    record.name !== null &&
+    isAgentName(record.name) &&
+    record.triageRole !== null;
   if (ready)
     return {
       kind: "identity",
@@ -300,15 +336,16 @@ async function identityDecision(
       diff: null,
       retry: null,
     };
+  // Setup is needed; the supported setup command is a separate action, never a re-run of install.
   return {
     kind: "identity",
     file: null,
     action: "kept",
     outcome: "planned",
     code: "IDENTITY_REQUIRED",
-    message: `Identity entry [agents.${entry}] needs setup; pass --role implementer|designer.`,
+    message: `Identity entry [agents.${entry}] needs setup; run pdb setup identity with a role.`,
     diff: null,
-    retry: `pdb install codex --role implementer|designer --entry ${entry}${args.repo ? ` --repo ${args.repo}` : ""}`,
+    retry: "pdb setup identity --role implementer --entry " + entry,
   };
 }
 
@@ -390,11 +427,16 @@ export async function runCodexInstallSurface(
         : "Re-run once the write slices ship.",
     ],
   };
-  // Exit 2 (partial/unfulfilled) when an identity decision needs setup; 0 otherwise.
+  // Exit status per the installer contract: 2 when an item is refused or setup is required;
+  // 1 when a non-preview request applied nothing (nothing is written in this slice); 0 for a
+  // clean explicit --dry-run preview.
+  const nothingApplied = !args.dryRun;
   const exitCode =
     items.some((i) => i.outcome === "refused") || items.some((i) => i.code === "IDENTITY_REQUIRED")
       ? 2
-      : 0;
+      : nothingApplied
+        ? 1
+        : 0;
   if (args.json) {
     await output(JSON.stringify(result, null, 2) + "\n");
     return exitCode;

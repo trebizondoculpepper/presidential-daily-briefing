@@ -225,12 +225,13 @@ describe("runCodexInstallSurface (#768 slice 2a)", () => {
     expect(result.schemaVersion).toBe(1);
     expect(result.kind).toBe("install-result");
     expect(result.operation).toBe("install");
-    // With no --entry/--harness and no detected harness, identity is ambiguous: reported, not guessed.
+    // Without an explicit --entry/--harness the Codex identity is targeted; it needs setup here,
+    // so the result is partial with exit 2.
     expect(code).toBe(2);
     expect(result.items.map((i) => i.kind)).toEqual(["identity", "mcp", "hook"]);
     expect(result.items[0]).toMatchObject({
-      outcome: "refused",
-      code: "IDENTITY_AMBIGUOUS",
+      outcome: "planned",
+      code: "IDENTITY_REQUIRED",
     });
     // Absolute paths stay out of output: the scope and item files are scope-relative.
     expect(result.scope.kind).toBe("project");
@@ -271,5 +272,34 @@ describe("runCodexInstallSurface (#768 slice 2a)", () => {
     // Uninstall previews describe removal intent; identity is not reported for uninstall.
     expect(result.items.map((i) => i.kind)).toEqual(["mcp", "hook"]);
     expect(result.items[0]).toMatchObject({ kind: "mcp", action: "remove", outcome: "planned" });
+  });
+
+  it("exits 1 when a non-preview request applies nothing (#844 finding)", async () => {
+    const out: string[] = [];
+    const home = await mkdtemp(join(tmpdir(), "pdb-install-exit1-"));
+    const savedHome = process.env.HOME;
+    const savedCodexHome = process.env.CODEX_HOME;
+    const envRuntime: ConfigRuntime = {
+      cwd: SYNTHETIC_ROOT,
+      fs: { ...emptyFileSystem },
+      env: process.env,
+    };
+    try {
+      process.env.HOME = home;
+      process.env.CODEX_HOME = join(home, ".codex");
+      const code = await runCodexInstallSurface(
+        installArgumentsFor(["codex", "--global", "--json"], "install"),
+        envRuntime,
+        async (text) => void out.push(text),
+      );
+      // Global scope has no identity item and nothing is applied in this slice: exit 1.
+      expect(code).toBe(1);
+    } finally {
+      if (savedHome === undefined) delete process.env.HOME;
+      else process.env.HOME = savedHome;
+      if (savedCodexHome === undefined) delete process.env.CODEX_HOME;
+      else process.env.CODEX_HOME = savedCodexHome;
+      await rm(home, { recursive: true, force: true });
+    }
   });
 });
