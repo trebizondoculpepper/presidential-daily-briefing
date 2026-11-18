@@ -118,6 +118,34 @@ printed examples and user-run recovery commands are not utility execution sites.
 Keep the audit's standalone GH tooling exclusions explicit rather than broadening
 them to application modules.
 
+### Bounded offline probe capability (#940)
+
+The installation update probe (`src/updates/checkout.ts`) reads Git under guarantees the general service does not give, so it migrates to a dedicated probe facade, not to the general service with its guarantees dropped.
+
+A probe service is created with `createProbeGitService({ callTimeoutMs, callBudget, deadlineMs, clock })` and owns a private hardened transport. That transport:
+
+- refuses the network (`-c protocol.allow=never`) and disables lazy fetch (`GIT_NO_LAZY_FETCH=1`) and the file-system monitor (`-c core.fsmonitor=false`);
+- uses the same sanitized repository environment as the general service;
+- applies the per-call timeout, the call budget and the overall deadline.
+
+An exhausted budget or deadline is a typed `timeout` failure, and a missing executable is a typed `missing` failure. Neither is ever an empty answer, so the probe reports unknown, never current.
+
+The probe facade exposes only what the probe reads, each in one Git call so the eight-call budget holds:
+
+- `layout(ctx)`: the top level, Git directory, common directory and whether history is shallow (`true`, `false` or unknown), from one `rev-parse`.
+- `headRef(ctx)`: the attached branch ref, or detached, or unknown. Detached only on `symbolic-ref -q` exit 1.
+- `remoteNames(ctx)`: the configured remote names.
+- `refRows(ctx, patterns)`: for each existing ref, its symbolic target, upstream and upstream remote, from one `for-each-ref`.
+- `refSnapshot(ctx, refs)`: `HEAD` and each named ref that exists, mapped to its object ID, from one `show-ref --head`. Missing refs are omitted rather than failing the snapshot.
+- `headCommit(ctx)`: the `HEAD` commit, or unborn (`rev-parse --verify -q` exit 1), or unknown.
+- `divergence(ctx, left, right)`: behind and ahead counts between two object IDs.
+
+All of these validate their output inside the facade (40- or 64-hex object IDs, numeric counts) and distinguish absence, failure and unknown. They never fetch or update the checkout.
+
+The probe's own fold stays in `checkout.ts`: choosing the remote and default ref, staleness from `FETCH_HEAD` times, the comparisons, and the re-snapshot that detects refs moving during the read. Its private executor (`gitWith`, `gitInvocation`) moves behind the probe transport. The probe facade is constructed by the update-check composition, not per call. Tests inject the probe transport, as they inject the runner today.
+
+The general `GitService` gains none of these limits or batched reads; other modules keep its unbounded, cancellable contract.
+
 ## Controllers and construction scope
 
 One application composition root constructs **one Git service and one GH service
