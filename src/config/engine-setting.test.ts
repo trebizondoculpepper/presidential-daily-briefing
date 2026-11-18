@@ -159,9 +159,10 @@ describe("repository-scoped experimental engine selection", () => {
     );
     expect(result.kind).toBe("report");
     if (result.kind !== "report") throw new Error("expected report");
-    expect("rankedActions" in result.report && result.report.rankedActions).toEqual(
-      cli.rankedActions,
-    );
+    // Compared as wire JSON: the in-process rank partition (#652) is a symbol, never output.
+    expect(
+      JSON.parse(JSON.stringify("rankedActions" in result.report && result.report.rankedActions)),
+    ).toEqual(cli.rankedActions);
     expect(result.text).toContain(cli.rankedActions.items[0].why.text);
     expect(result.text).toContain("Decision engine: Datalog");
   });
