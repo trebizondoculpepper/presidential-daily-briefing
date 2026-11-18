@@ -15,6 +15,8 @@ import { historyReads } from "./history.js";
 import { checkReads } from "./checks.js";
 import { readRateLimits } from "./ratelimits.js";
 import { resolveLabels } from "./labels.js";
+import { deliveryIssue } from "./delivery.js";
+import type { DeliveryIssue } from "./delivery.js";
 import { commentPostOver, ghCommentReceipt } from "../dependencies.js";
 import { withCommentRecovery } from "../commentwrite.js";
 import type {
@@ -77,6 +79,11 @@ export interface GhService {
       target: { repository: string; number: number; body: string },
       call?: CommentCallOptions,
     ): Promise<CommentRecovery>;
+  };
+  /** Delivery-view issue reads (#945). */
+  delivery: {
+    /** One issue's state, closing PRs and validated newest comments; null only when absent. */
+    issue(repository: string, number: number): Promise<DeliveryIssue | null>;
   };
   /** Repository label resolution (#921). */
   labels: {
@@ -197,6 +204,9 @@ export function createGhService(options: GhServiceOptions = {}): GhService {
       },
     },
     history: historyReads(query),
+    delivery: {
+      issue: (repository, number) => deliveryIssue(query as Query, repository, number),
+    },
     comments: {
       async create(target, call) {
         // The write and its receipt read run over this service's own transport, environment and
