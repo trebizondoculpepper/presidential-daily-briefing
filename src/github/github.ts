@@ -93,16 +93,17 @@ export interface QueryTelemetry {
 }
 
 export const ghQueryWith =
-  (signal?: AbortSignal, telemetry: QueryTelemetry = {}): Query =>
+  (signal?: AbortSignal, telemetry: QueryTelemetry = {}, context?: GhContext): Query =>
   async (query, variables) => {
-    if (!telemetry.observer) return ghQueryAttempt(signal, query, variables).then((r) => r.data);
+    if (!telemetry.observer)
+      return ghQueryAttempt(signal, query, variables, context).then((r) => r.data);
     const monotonic = telemetry.monotonic ?? (() => performance.now());
     const startedAt = (telemetry.now?.() ?? new Date()).toISOString();
     const started = monotonic();
     let outcome: Awaited<ReturnType<typeof ghQueryAttempt>> | null = null;
     let failure: unknown = null;
     try {
-      outcome = await ghQueryAttempt(signal, query, variables);
+      outcome = await ghQueryAttempt(signal, query, variables, context);
       return outcome.data;
     } catch (error) {
       failure = error;
@@ -179,10 +180,18 @@ function sizeAndCost(response: GhResponse): { bodyBytes: number; cost: number | 
 }
 
 /** One gh GraphQL attempt: the data plus its same-response evidence for telemetry. */
+/** The execution context a gh query runs in: its transport and environment (#869). */
+export interface GhContext {
+  transport: GhTransport;
+  env?: NodeJS.ProcessEnv;
+}
+const defaultContext: GhContext = { transport: execFileTransport };
+
 async function ghQueryAttempt(
   signal: AbortSignal | undefined,
   query: string,
   variables: QueryVariables,
+  context: GhContext = defaultContext,
 ): Promise<{
   data: JsonObject;
   status: number | null;
@@ -199,26 +208,32 @@ async function ghQueryAttempt(
   // value starting with @ as a local file. Only numbers use -F, so Int variables stay typed.
   for (const [key, value] of Object.entries(variables))
     args.push(typeof value === "number" ? "-F" : "-f", `${key}=${value}`);
+  const outcome = await context.transport({
+    args,
+    ...(context.env ? { env: context.env } : {}),
+    maxBufferBytes: 32 * 1024 * 1024,
+    timeoutMs: 60_000,
+    signal,
+  });
   let stdout: string;
-  try {
-    ({ stdout } = await execute("gh", args, {
-      maxBuffer: 32 * 1024 * 1024,
-      timeout: 60_000,
-      signal,
-    }));
-  } catch (error) {
+  if (outcome.ok) stdout = outcome.stdout;
+  else {
     signal?.throwIfAborted();
-    const response = responseOf(prop(error, "stdout"));
+    if (outcome.kind === "cancelled")
+      throw new DOMException("The operation was aborted.", "AbortError");
+    // The same fields an execFile error carried, for the shared classifiers.
+    const error = { code: outcome.exitCode, stdout: outcome.stdout, stderr: outcome.stderr };
+    const response = responseOf(error.stdout);
     // gh exits non-zero on any GraphQL error but still prints the response. A response whose
     // only errors are NOT_FOUND is a valid answer ("no such issue"): callers see null fields.
     const answer = graphqlAnswer(response?.body);
     if (answer) return attemptResult(answer, response!);
     const failure = ghQueryFailure(error, response);
-    // execFile's timeout kills gh with SIGTERM; that is a timeout, not a GitHub answer.
-    const timedOut = prop(error, "killed") === true && prop(error, "signal") === "SIGTERM";
+    // A transport timeout is a timeout, not a GitHub answer.
+    const timedOut = outcome.kind === "timeout";
     throw withEvidence(
       failure,
-      classifyGhFailure({ response, exitCode: prop(error, "code"), timedOut }),
+      classifyGhFailure({ response, exitCode: error.code, timedOut }),
       response,
     );
   }
