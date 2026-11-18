@@ -139,6 +139,7 @@ import {
 import { advanceCheckpoint, overwriteJson, writeSnapshotCache } from "./config/safejson.js";
 import type { WriteOutcome } from "./config/safejson.js";
 import type { ConfigRuntime } from "./config/configcli.js";
+import { installArgumentsFor, installHelp, runCodexInstallSurface } from "./install/codexcli.js";
 import { estimateUsage, runEstimate } from "./estimation/estimate.js";
 import {
   applyDeliverables,
@@ -387,6 +388,11 @@ ${crashDisclosure()}
                         How a new agent gets its own identity: a locally unique generated name
                         kept in local pdb.toml (a rerun keeps it; another harness's entry is
                         never reused; nothing is reserved remotely), then the --agent to use
+  install codex [--global] [--transport stdio|http] [--url URL] [--role R]
+                        Configure the PDB MCP connection for Codex (project default, explicit
+                        --global); current slice establishes the command surface only, no writes (install codex --help)
+  uninstall codex [--global]  Preview removal intent for PDB-managed Codex entries; this slice
+                        performs no writes and removes nothing (uninstall codex --help)
   onboard [--repo owner/name] [--role implementer|designer] [--server URL] [--install] [--json]
                         New here? How an agent starts with pdb: rules, identity, commands and
                         a prompt to give it; --install adds the pdb section to AGENTS.md
@@ -1708,6 +1714,15 @@ async function run(
     }
   }
   if (args[0] === "setup") return runSetup(args.slice(1), output, runtime.config);
+  if (args[0] === "install" || args[0] === "uninstall") {
+    const operation = args[0] === "install" ? "install" : "uninstall";
+    const parsed = installArgumentsFor(args.slice(1), operation);
+    if (parsed.help) {
+      await output(installHelp(operation));
+      return 0;
+    }
+    return runCodexInstallSurface(parsed, runtime.config ?? {}, output);
+  }
   if (args[0] === "onboard") return runOnboard(args.slice(1), output, runtime.config);
   if (args[0] === "contributors") return runContributors(args.slice(1), output, runtime.config);
   if (args[0] === "doctor") {
