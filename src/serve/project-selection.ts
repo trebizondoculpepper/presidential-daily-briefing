@@ -17,7 +17,7 @@ export async function restoreProjectSelection(): Promise<void> {
     const h = human ?? undefined;
     slot.textContent =
       h?.state === "current" && h.login
-        ? `Working for GitHub user ${h.login} (${h.host ?? "github.com"}, the signed-in gh account)`
+        ? `Working for GitHub user ${h.login} (${h.host ?? "github.com"}, the signed-in gh account${h.observedAt ? `, verified ${h.observedAt}` : ""})`
         : h?.state === "last-known" && h.login
           ? `Working for GitHub user ${h.login} (last known at ${h.observedAt ?? "an earlier time"}; ${h.reason ?? "the current login could not be read"})`
           : h?.state === "unresolved"
@@ -27,24 +27,30 @@ export async function restoreProjectSelection(): Promise<void> {
               : "Working for: unavailable";
     slot.setAttribute("data-state", h?.state ?? "unavailable");
   };
+  // Only the latest read may change the header: a slower, older read never replaces a newer one.
+  let generation = 0;
   const readStatus = async (): Promise<{
     repositories: { repository: string }[];
     human?: Human;
   } | null> => {
+    const mine = ++generation;
+    const latest = (human: Human | undefined | null) => {
+      if (mine === generation) fill(human);
+    };
     try {
       const response = await fetch("/api/v1/status");
       if (!response.ok) {
-        fill(null);
+        latest(null);
         return null;
       }
       const status = (await response.json()) as {
         repositories: { repository: string }[];
         human?: Human;
       };
-      fill(status.human);
+      latest(status.human);
       return status;
     } catch {
-      fill(null);
+      latest(null);
       return null;
     }
   };
