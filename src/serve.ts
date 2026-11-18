@@ -61,6 +61,8 @@ import type {
 } from "./serve/types.js";
 import { defaultRulesPageRuntime, rulesPage } from "./serve/rules-page.js";
 import { setupPage, setupScript } from "./serve/setup-page.js";
+import { configurationPage, configurationScript } from "./serve/configuration-page.js";
+import { globalConfiguration, projectConfiguration } from "./serve/configuration.js";
 import {
   dashboardCss,
   dashboardPage,
@@ -221,6 +223,8 @@ const dashboardFiles = (): Map<string, { type: string; body: string }> =>
     ["/ticket.js", { type: "text/javascript; charset=utf-8", body: ticketScript() }],
     // Copy buttons of the agent setup page (#391); the page works without it.
     ["/setup.js", { type: "text/javascript; charset=utf-8", body: setupScript() }],
+    // The read-only Configuration page (#818): its data comes from /api/v1/configuration.
+    ["/configuration.js", { type: "text/javascript; charset=utf-8", body: configurationScript() }],
     // The human attention view (#458): its page is rendered per request, its script is static.
     ["/human.js", { type: "text/javascript; charset=utf-8", body: humanScript() }],
     // The read-only Activity view (#456): its page is rendered per request, its script is static.
@@ -400,6 +404,68 @@ export async function startServe(
         sendJson(response, 200, statusDocument());
         return;
       }
+      if (path === "/api/v1/configuration") {
+        // Facts only (#818): the shared configuration services decide what a row says.
+        getOnly();
+        const wanted = context.url.searchParams.get("repo");
+        try {
+          if (!wanted) {
+            sendJson(
+              response,
+              200,
+              await globalConfiguration({
+                ...(runtime.configEnv ? { env: runtime.configEnv } : {}),
+                ...(runtime.configFs ? { globalFs: runtime.configFs } : {}),
+              }),
+            );
+          } else {
+            const entry = served.find(
+              (candidate) => candidate.repository.toLowerCase() === wanted.toLowerCase(),
+            );
+            if (!entry)
+              throw new HttpFailure(
+                404,
+                "REPOSITORY_NOT_SERVED",
+                "This server does not serve that repository.",
+                [
+                  `Served: ${served.map((candidate) => candidate.repository).join(", ") || "none"}.`,
+                ],
+              );
+            if (!entry.project) {
+              sendJson(response, 200, {
+                schemaVersion: 1,
+                kind: "configuration",
+                scope: "project",
+                repository: entry.repository,
+                path: "",
+                storedVersion: null,
+                rows: [],
+                warnings: [
+                  `${entry.repository} was registered without a local checkout, so its repository settings were not read.`,
+                ],
+              });
+            } else {
+              sendJson(
+                response,
+                200,
+                await projectConfiguration(
+                  entry.project,
+                  entry.repository,
+                  runtime.configFs ? { repositoryFs: runtime.configFs } : {},
+                ),
+              );
+            }
+          }
+        } catch (error) {
+          if (!(error instanceof HttpFailure)) throw error;
+          sendJson(response, error.status, {
+            kind: "serve-error",
+            status: "error",
+            error: { code: error.code, message: error.message, next: error.next },
+          });
+        }
+        return;
+      }
       const registeredPage = servedPages.find((p) => p.shipped && p.path === path);
       const selectedPage = registeredPage
         ? shellContext(registeredPage.id, served, context.url.searchParams)
@@ -460,6 +526,28 @@ export async function startServe(
           "content-security-policy": dashboardSecurityPolicy,
         });
         response.end(request.method === "HEAD" ? undefined : file.body);
+        return;
+      }
+      if (path === "/configuration") {
+        // Read-only configuration view (#818): global by default, or the selected project's
+        // repository scope. Local only: no GitHub request, nothing written.
+        if (request.method !== "GET" && request.method !== "HEAD")
+          throw new HttpFailure(405, "METHOD_NOT_ALLOWED", "Use GET.", [], {
+            allow: "GET, HEAD",
+          });
+        const html = configurationPage(selectedPage ?? shellContext("configuration", served));
+        response.writeHead(200, {
+          "content-type": "text/html; charset=utf-8",
+          "cache-control": "no-store",
+          "x-content-type-options": "nosniff",
+          "referrer-policy": "no-referrer",
+          "content-security-policy": dashboardSecurityPolicy,
+        });
+        response.end(
+          request.method === "HEAD"
+            ? undefined
+            : withProcessIdentity(html, processIdentity, selectedPage ?? undefined),
+        );
         return;
       }
       if (path === "/setup") {

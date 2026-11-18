@@ -86,6 +86,15 @@ export const servedPages: readonly ServedPage[] = [
     carries: ["role", "agent"],
     shipped: true,
   },
+  {
+    id: "configuration",
+    path: "/configuration",
+    label: "Configuration",
+    scope: "global-or-project",
+    parameters: ["repo"],
+    carries: ["repo"],
+    shipped: true,
+  },
 ];
 export type ServedProject = { repository: string; project?: string };
 export interface PageSelection {
