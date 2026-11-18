@@ -166,3 +166,21 @@ export async function closingReferencesPage(
     },
   };
 }
+
+/** The reference reads as one capability object: the facade's `references` group (#951). */
+export interface ReferenceReads {
+  closingPage(
+    repository: string,
+    number: number,
+    perPage: number,
+    cursor: string | null,
+  ): Promise<ClosingReferencesPage>;
+}
+
+/** Reference reads over one executor: the facade's own, or a read's metered one. */
+export function referenceReads(query: Query): ReferenceReads {
+  return {
+    closingPage: (repository, number, perPage, cursor) =>
+      closingReferencesPage(query, repository, number, perPage, cursor),
+  };
+}
