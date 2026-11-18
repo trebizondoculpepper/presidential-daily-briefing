@@ -11,9 +11,13 @@ import { identitySelection, identitySelectionOptions } from "../config/commandid
  * Before every write the issue is read and folded again and the plan recomputed, so a write is
  * only ever made on fresh evidence and a retry completes only what is missing.
  */
+import { deliverableIssue, olderCommentsPage, pullByUrl } from "../github/service/delivery.js";
+import { issueWrites, WRITE } from "../github/service/issuewrites.js";
+import type { LivePr } from "../github/service/delivery.js";
 import { parseArgs } from "node:util";
 import { workflow } from "./definition.js";
-import { claimPolicy, failStep, retryLine, shellQuote, ticketGuard } from "./claims.js";
+import { claimPolicy, failStep, retryLine, shellQuote, ticketGuard, writeStep } from "./claims.js";
+import type { Query } from "../github/github.js";
 import type { Comment, GhRun, GraphQuery, PlanStep, ReworkAuthority } from "./claims.js";
 import {
   attestApplicability,
@@ -171,15 +175,16 @@ export async function readDeliveryComments(
   let comments = first.nodes;
   let info = first.pageInfo;
   let pages = 1;
-  const [owner, name] = repository.split("/");
   while (info?.hasPreviousPage) {
     if (await enough(comments)) return { comments, complete: true, pages };
     if (!info.startCursor || pages >= bound) return { comments, complete: false, pages };
-    const data = (await query(
-      `query($owner:String!,$name:String!,$number:Int!,$before:String!){repository(owner:$owner,name:$name){issue(number:$number){comments(last:100,before:$before){nodes{${deliveryCommentFields}} pageInfo{hasPreviousPage startCursor}}}}}`,
-      { owner, name, number, before: info.startCursor },
-    )) as { repository: { issue: { comments: CommentPage } | null } | null };
-    const older = data.repository?.issue?.comments;
+    // The typed, validated older page (#943): unreadable is null, malformed throws.
+    const older = (await olderCommentsPage(
+      query as unknown as Query,
+      repository,
+      number,
+      info.startCursor,
+    )) as CommentPage | null;
     if (!older) return { comments, complete: false, pages };
     comments = [...older.nodes, ...comments];
     info = older.pageInfo;
@@ -190,48 +195,22 @@ export async function readDeliveryComments(
 }
 
 async function readIssue(repository: string, number: number, query: GraphQuery) {
-  const [owner, name] = repository.split("/");
-  const data = (await query(
-    `query($owner:String!,$name:String!,$number:Int!){viewer{__typename login} repository(owner:$owner,name:$name){issueOrPullRequest(number:$number){__typename ... on PullRequest{url} ... on Issue{number title url state labels(first:100){nodes{name} pageInfo{hasNextPage}} closedByPullRequestsReferences(first:20,includeClosedPrs:false){nodes{number url state} pageInfo{hasNextPage}} comments(last:100){nodes{${deliveryCommentFields}} pageInfo{hasPreviousPage startCursor}}}}}}`,
-    { owner, name, number },
-  )) as IssueResponse;
-  if (!data.repository) throw new Error(`Repository unavailable: ${repository}`);
-  return { viewer: data.viewer ?? null, item: data.repository.issueOrPullRequest };
+  // The typed, validated deliverables issue read (#943).
+  return (await deliverableIssue(query as unknown as Query, repository, number)) as unknown as {
+    viewer: IssueResponse["viewer"] | null;
+    item: NonNullable<IssueResponse["repository"]>["issueOrPullRequest"];
+  };
 }
 
 export const prUrl = /^https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/pull\/(\d+)\/?$/;
 const commitRef = /^([\w.-]+\/[\w.-]+)@([0-9a-f]{7,40})$/i;
 const sameRepo = (a: string, b: string): boolean => a.toLowerCase() === b.toLowerCase();
 
-export interface LivePr {
-  id: string;
-  number: number;
-  url: string;
-  state: string;
-  isDraft?: boolean;
-  merged: boolean;
-  mergeCommit: { oid: string } | null;
-  headRefOid: string;
-  baseRefName: string;
-  baseRepository: { nameWithOwner: string; defaultBranchRef: { name: string } | null } | null;
-  closingIssuesReferences?: {
-    nodes: { number: number; repository: { nameWithOwner: string } }[];
-  };
-}
+/** A pull request by URL (#943): the typed, validated read; null when not a readable PR. */
 export async function readPr(url: string, query: GraphQuery): Promise<LivePr | null> {
-  try {
-    const data = (await query(
-      `query($url:URI!){resource(url:$url){__typename ... on PullRequest{id number url state isDraft merged mergeCommit{oid} headRefOid baseRefName baseRepository{nameWithOwner defaultBranchRef{name}} closingIssuesReferences(first:50){nodes{number repository{nameWithOwner}}}}}}`,
-      { url },
-    )) as { resource: ({ __typename: string } & Partial<LivePr>) | null };
-    const r = data.resource;
-    if (r?.__typename !== "PullRequest" || !r.id || !r.state || !r.baseRefName || !r.baseRepository)
-      return null;
-    return r as LivePr;
-  } catch {
-    return null;
-  }
+  return pullByUrl(query as unknown as Query, url);
 }
+export type { LivePr } from "../github/service/delivery.js";
 // Commit containment reads live with the typed GH service (#943, #890); re-exported for importers.
 export { defaultBranch, targetContainment } from "../github/service/containment.js";
 export type { Containment } from "../github/service/containment.js";
@@ -822,10 +801,7 @@ export async function planDeliverables(
       deliveryMarker(record),
     ].join("\n");
     const changes: PlanStep[] = [
-      {
-        step: "record",
-        command: ["issue", "comment", String(number), "--repo", repository, "--body", body],
-      },
+      writeStep("record", { kind: "comment", repository, number, body }),
     ];
     if (labelPlan) changes.push(...labelStep(labelPlan));
     return { ok: true, noop: false, facts, record, changes, notes, retry };
@@ -834,20 +810,7 @@ export async function planDeliverables(
     const add = plan.add.filter((l) => !labels.includes(l));
     const remove = plan.remove.filter((l) => labels.includes(l));
     return add.length || remove.length
-      ? [
-          {
-            step: "labels",
-            command: [
-              "issue",
-              "edit",
-              String(number),
-              "--repo",
-              repository,
-              ...add.flatMap((l) => ["--add-label", l]),
-              ...remove.flatMap((l) => ["--remove-label", l]),
-            ],
-          },
-        ]
+      ? [writeStep("labels", { kind: "labels-edit", repository, number, add, remove })]
       : [];
   };
   /**
@@ -1552,7 +1515,7 @@ export async function applyDeliverables(
     const step: PlanStep = { ...next, status: "pending" };
     steps.push(step);
     try {
-      await rt.run(step.command, {
+      const call = {
         guard: ticketGuard(repository, request.number, rt.query),
         // After a throttle wait, re-run this command's own prerequisite reads (PR states, the
         // delivery fold, readiness): retry only if the fresh plan still makes this exact write.
@@ -1565,7 +1528,12 @@ export async function applyDeliverables(
             ? null
             : "the delivery prerequisites changed during the wait";
         },
-      });
+      };
+      // The typed write (#943) through the shared gh write boundary; a caller-built step without
+      // one still dispatches its command.
+      const op = step[WRITE];
+      if (op) await issueWrites(rt.run).apply(op, call);
+      else await rt.run(step.command, call);
       step.status = "done";
       if (step.step === "record" && plan.record) posted = { plan, record: plan.record };
     } catch (error) {
