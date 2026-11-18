@@ -28,6 +28,7 @@ import {
   servedOnlyRest,
 } from "./api.js";
 import { readServices } from "./services.js";
+import type { LoadedGlobalConfig } from "../config/globalconfig.js";
 import { ticketRenderers } from "./ticket-page.js";
 import type { ServeReadRuntime } from "./api.js";
 import { classifyFailure, ServeCache } from "./cache.js";
@@ -2092,6 +2093,76 @@ describe("pipeline metrics endpoint (#573 slice 5b)", () => {
       expect(counter.n).toBeGreaterThan(before);
     } finally {
       await s.close();
+    }
+  });
+
+  it("applies a live saved configuration to the running server and repoints selection (#808)", async () => {
+    // A verified global configuration boundary: the config file starts with one registered
+    // repository; the live application adds and removes registrations.
+    const dir = resolve("/global");
+    const configText = (projects: string) =>
+      `schemaVersion = 1\n\n[serve]\nprojects = [${projects}]\n`;
+    const files = new Map<string, string>([
+      [join(dir, "config.toml"), configText('{ repository = "owner/a" }')],
+    ]);
+    const fs: ConfigFileSystem = {
+      readText: async (path) => files.get(path) ?? null,
+      writeText: async (path, text) => void files.set(path, text),
+      rename: async () => undefined,
+      remove: async () => undefined,
+      makeDirectory: async () => undefined,
+    };
+    const clock = new ManualClock();
+    const read: ServeReadRuntime = {
+      collect: (async () => {
+        throw new Error("no GitHub reader in this live-application test");
+      }) as never,
+      dependencyReport: (async () => {
+        throw new Error("no GitHub reader in this live-application test");
+      }) as never,
+      now: () => clock.now(),
+      env: {},
+    };
+    const serve: ServeRuntime = {
+      cwd: "/not/a/checkout",
+      currentRepository: async () => "",
+      authContext: async () => ({ host: "github.com", login: "octo" }),
+      clock,
+      stdout: () => undefined,
+      stderr: () => undefined,
+      signals: new EventEmitter(),
+      exit: () => undefined,
+      version: async () => "9.9.9",
+      platform: "linux",
+      globalConfig: { dir, fs },
+    };
+    const running = await startServe(
+      serveArguments(["--port", "0"]),
+      serve,
+      readServices(serveArguments(["--port", "0"]), serve, read),
+    );
+    try {
+      // Startup served the saved registration only.
+      expect(running.facts.served.map((s) => s.repository)).toEqual(["owner/a"]);
+
+      // A live saved change: drop owner/a, add owner/b. The served set repoints and the
+      // generation advances so reads for an obsolete context are rejected.
+      await running.applyLiveConfiguration!({
+        path: join(dir, "config.toml"),
+        storedVersion: 1,
+        explicit: new Map([["serve.projects", [{ host: "github.com", repository: "owner/b" }]]]),
+        settings: [],
+        raw: "schemaVersion = 1",
+      } satisfies LoadedGlobalConfig);
+      expect(running.facts.served.map((s) => s.repository)).toEqual(["owner/b"]);
+      expect(running.facts.contextVersion!.value).toBe(1);
+
+      // owner/a is no longer selectable: the API refuses it instead of serving stale facts.
+      const obsolete = await call(running.port, "/api/v1/team?repo=owner/a");
+      expect(obsolete.status).toBe(403);
+      expect(obsolete.json.error?.code).toBe("REPOSITORY_NOT_SERVED");
+    } finally {
+      await running.close();
     }
   });
 });

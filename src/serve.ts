@@ -49,7 +49,13 @@ import {
 } from "./serve/options.js";
 import type { ServeOptions } from "./serve/options.js";
 import { RegistrationError, resolveServeProjects } from "./serve/registration.js";
-import { globalConfigDirectory } from "./config/globalconfig.js";
+import {
+  globalConfigDirectory,
+  loadGlobalConfig,
+  type GlobalValue,
+  type LoadedGlobalConfig,
+} from "./config/globalconfig.js";
+import { createApplicationState } from "./serve/appstate.js";
 import type {
   AuthContext,
   RequestContext,
@@ -62,6 +68,7 @@ import type {
   StatusSource,
 } from "./serve/types.js";
 import { defaultRulesPageRuntime, rulesPage } from "./serve/rules-page.js";
+import type { LiveApplicationResult } from "./serve/liveapp.js";
 import { setupPage, setupScript } from "./serve/setup-page.js";
 import {
   dashboardCss,
@@ -119,6 +126,10 @@ export const defaultServeRuntime = (services: AppServices = createAppServices())
   buildIdentity: readPackageBuildIdentity,
   platform: process.platform,
 });
+
+/** The `--ttl` text for the application-state override, from the accepted milliseconds. */
+const ttlText = (ttlMs: number): string =>
+  ttlMs % 60_000 === 0 ? `${ttlMs / 60_000}m` : `${ttlMs / 1000}s`;
 
 /** A startup failure with its exit status (2 usage, 3 port, 1 otherwise). */
 export class ServeStartupError extends Error {
@@ -277,6 +288,27 @@ export async function startServe(
     ttlMs: options.ttlMs,
     auth,
   };
+
+  // #816: the one application-state service of this process, when a verified global
+  // configuration boundary exists. Its startup snapshot is the configuration `serve` resolved
+  // from (the same boundary registration uses); overrides are the command-line values that
+  // take precedence over saved ones (#459 sources). Live application (#808) records into it.
+  if (runtime.globalConfig) {
+    try {
+      const startup = await loadGlobalConfig(runtime.globalConfig.dir, runtime.globalConfig.fs);
+      const overrides = new Map<string, GlobalValue>();
+      if (options.given?.port) overrides.set("serve.port", options.port);
+      if (options.given?.ttl) overrides.set("serve.ttl", ttlText(options.ttlMs));
+      facts.applicationState = createApplicationState(startup, overrides, () =>
+        runtime.clock.now(),
+      );
+    } catch {
+      // An unreadable startup configuration leaves application state unset (absent live
+      // application); the server itself still reports the refusal at first use (#804).
+    }
+  }
+  // #808: bumped on every successful live application; the read path guards on it.
+  facts.contextVersion = { value: 0 };
 
   let buildIdentity = {};
   try {
@@ -661,6 +693,26 @@ export async function startServe(
   routes = services.routes ?? routes;
   status = services.status ?? status;
 
+  // #808: the one live-application entry point of the running server. It reconciles a fresh
+  // saved configuration against the served set (never re-adding startup targets), invalidates
+  // changed/removed contexts and cross-repository dependency trees through the cache ownership
+  // in `services.live`, and, on success, applies the new served set and bumps the
+  // request-context generation so in-flight reads for an obsolete context are rejected.
+  const applyLiveConfiguration = async (
+    config: LoadedGlobalConfig,
+  ): Promise<LiveApplicationResult> => {
+    if (!services.live)
+      throw new Error(
+        "this serve build has no live configuration application (no cache owner or global configuration boundary); restart the server instead.",
+      );
+    const result = await services.live.apply(config);
+    // Apply the new served set in place so the read API, pages and status see it atomically;
+    // facts.served is the same array the routes and page handlers read per request.
+    served.splice(0, served.length, ...result.served);
+    facts.contextVersion!.value += 1;
+    return result;
+  };
+
   let closing: Promise<void> | null = null;
   let finish!: () => void;
   const closed = new Promise<void>((resolve) => (finish = resolve));
@@ -686,7 +738,7 @@ export async function startServe(
     })();
     return closing;
   };
-  return { facts, port, close, closed, shuttingDown: () => shutting };
+  return { facts, port, close, closed, applyLiveConfiguration, shuttingDown: () => shutting };
 }
 
 /** The banner: one fact per line on stdout; the first line is stable and machine-parsable. */
