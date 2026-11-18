@@ -24,7 +24,7 @@ import { QuotaService } from "../github/quotas.js";
 import { createGhService } from "../github/service/service.js";
 import { quotasApi } from "./quotas-page.js";
 import type { ServeOptions } from "./options.js";
-import { applyLiveApplication } from "./liveapp.js";
+import { applyLiveApplication, invalidationPlan } from "./liveapp.js";
 import { verifySavedRoot } from "./registration.js";
 import { revisionOf } from "./appstate.js";
 
@@ -190,14 +190,8 @@ export function readServices(
               // the applied values and revision instead of the startup ones.
               facts.applicationState?.observe(saved);
               try {
-                return await applyLiveApplication(saved, {
+                const result = await applyLiveApplication(saved, {
                   currentServed: () => facts.served,
-                  // Bump the repository epoch and drop its entries so reads started before the
-                  // change cannot insert as fresh facts.
-                  invalidate: (repository) => cache.refresh(repository),
-                  // Conservative cross-repository invalidation: cache.read drops the collector
-                  // `deps` entries of this repository (see #808 doc).
-                  invalidateDependencies: (repository) => cache.refresh(repository, ["deps"]),
                   // The verified-checkout boundary registration reuses: a moved or reassigned
                   // saved root serves the repository repo-only, exactly as at startup.
                   ...(serve.git || serve.currentRepository
@@ -227,6 +221,29 @@ export function readServices(
                       }
                     : {}),
                 });
+                // Commit atomically, in one synchronous step with no await between, so an
+                // in-flight request that resolves identity during the application can never
+                // observe the new cache epoch together with the old served context: the served
+                // set is replaced, the per-repository revisions advance, then the changed and
+                // cross-repository dependency caches are invalidated. A request resuming after
+                // this block sees the new context everywhere and is either valid or rejected.
+                const plan = invalidationPlan(result.changes, result.served);
+                facts.served.splice(0, facts.served.length, ...result.served);
+                facts.contextVersion!.value += 1;
+                for (const change of result.changes) {
+                  if (change.change === "changed" || change.change === "removed") {
+                    const lower = change.repository.toLowerCase();
+                    facts.contextRevisions!.set(
+                      lower,
+                      (facts.contextRevisions!.get(lower) ?? 0) + 1,
+                    );
+                  }
+                }
+                // Bump the epoch and drop entries of changed/removed repositories.
+                for (const repository of plan.repositories) cache.refresh(repository);
+                // Conservatively drop the dependency trees of the retained served set.
+                for (const repository of plan.dependencies) cache.refresh(repository, ["deps"]);
+                return result;
               } catch (error) {
                 // #816: a rejected application (e.g. conflicting saved roots) must be reported as
                 // failed-live for the already-observed revision, never left pending-live forever,

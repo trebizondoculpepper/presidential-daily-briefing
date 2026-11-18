@@ -42,6 +42,31 @@ export interface LiveApplicationResult {
   readonly revision: Revision;
 }
 
+/** What a change plan requires from the cache: which repositories to invalidate fully and whose
+ * dependency trees (collector `deps`) to drop conservatively. Pure, so the caller can commit
+ * these synchronously together with the served-set replacement (no request can interleave). */
+export interface InvalidationPlan {
+  /** Changed or removed repositories: their whole cache (every collector) is invalidated. */
+  readonly repositories: readonly string[];
+  /**
+   * Retained served repositories whose cached dependency trees may reference a changed/removed
+   * context; their `deps` collector is dropped conservatively (re-computation is cheap).
+   */
+  readonly dependencies: readonly string[];
+}
+
+/** The pure invalidation plan for a reconcile result (#808). */
+export function invalidationPlan(
+  changes: readonly ContextChange[],
+  served: readonly ServedEntry[],
+): InvalidationPlan {
+  const changedOrRemoved = changes.filter((c) => c.change === "changed" || c.change === "removed");
+  return {
+    repositories: changedOrRemoved.map((c) => c.repository),
+    dependencies: changedOrRemoved.length > 0 ? served.map((entry) => entry.repository) : [],
+  };
+}
+
 /** Outcome of verifying one saved local root against its repository before serving it. */
 export interface VerifiedSavedRoot {
   /**
@@ -53,21 +78,10 @@ export interface VerifiedSavedRoot {
   readonly diagnostic?: string;
 }
 
-/** Boundaries the live-application step needs; the cache and appstate are injected. */
+/** Boundaries the live-application step needs; the appstate is injected. */
 export interface LiveApplicationBoundaries {
   /** The served set the server is currently running with. */
   currentServed: () => readonly ServedEntry[];
-  /**
-   * Invalidate one repository's cache: bump its refresh epoch and drop its entries so reads
-   * started before the change cannot insert. Returns the number of entries dropped.
-   */
-  invalidate: (repository: string) => number;
-  /**
-   * Drop the cached dependency trees (`collector "deps"`) of one repository. Called
-   * conservatively across the retained served set whenever any context changed/removed, because
-   * any retained tree may reference a changed/removed context.
-   */
-  invalidateDependencies?: (repository: string) => number;
   /**
    * Verify a saved local root belongs to its repository before serving it. Mirrors the startup
    * verified-checkout boundary (registration.ts); absent only in pure environments where no Git
@@ -230,14 +244,6 @@ export async function applyLiveApplication(
   const served = dedupeSaved(verified);
   const current = boundaries.currentServed();
   const changes = reconcileContexts(current, served);
-
-  const changedOrRemoved = changes.filter((c) => c.change === "changed" || c.change === "removed");
-  for (const change of changedOrRemoved) boundaries.invalidate(change.repository);
-  if (changedOrRemoved.length > 0 && boundaries.invalidateDependencies) {
-    // Conservative cross-repository invalidation: any retained served repository's cached
-    // dependency tree may reference a changed/removed context, and re-computation is cheap.
-    for (const entry of served) boundaries.invalidateDependencies(entry.repository);
-  }
 
   // The write read succeeded (the caller passes an error instead when it did not), so the
   // `serve.projects` key applied — or was already current. Acknowledge it whenever its saved

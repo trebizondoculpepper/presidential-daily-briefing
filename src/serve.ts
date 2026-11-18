@@ -699,39 +699,21 @@ export async function startServe(
   status = services.status ?? status;
 
   // #808: the one live-application entry point of the running server. It reconciles a fresh
-  // saved configuration against the served set (never re-adding startup targets), invalidates
-  // changed/removed contexts and cross-repository dependency trees through the cache ownership
-  // in `services.live`, and, on success, applies the new served set and bumps the
-  // request-context generation so in-flight reads for an obsolete context are rejected.
+  // saved configuration against the served set (never re-adding startup targets) through the
+  // composition's live application service, which commits the new served set, per-repository
+  // context revisions, the request-context generation and the cache invalidation atomically in
+  // one synchronous step, so in-flight reads for an obsolete context are rejected.
   //
-  // Applications are serialized: `applyLiveConfiguration` reads the current served set only
-  // after its fresh-configuration verification resolves, so two callers applying successive
-  // revisions must not let the older verification complete later, re-read the then-current set
-  // and splice an older configuration over a newer one.
+  // Applications are serialized: two callers applying successive revisions must not let the
+  // older verification complete later, re-read the then-current set and install an older
+  // configuration over a newer one.
   let applyTail: Promise<unknown> = Promise.resolve();
   const applyLiveConfiguration = (config: LoadedGlobalConfig): Promise<LiveApplicationResult> => {
     if (!services.live)
       throw new Error(
         "this serve build has no live configuration application (no cache owner or global configuration boundary); restart the server instead.",
       );
-    const run = applyTail
-      .then(() => services.live!.apply(config))
-      .then((result) => {
-        // Apply the new served set in place so the read API, pages and status see it atomically;
-        // facts.served is the same array the routes and page handlers read per request.
-        served.splice(0, served.length, ...result.served);
-        facts.contextVersion!.value += 1;
-        // Per-repository context revision: an A -> B -> A transition still increments the
-        // repository's revision, so an in-flight read that resolved identity during the B
-        // window is rejected on delivery even though the restored path matches again.
-        for (const change of result.changes) {
-          if (change.change === "changed" || change.change === "removed") {
-            const lower = change.repository.toLowerCase();
-            facts.contextRevisions!.set(lower, (facts.contextRevisions!.get(lower) ?? 0) + 1);
-          }
-        }
-        return result;
-      });
+    const run = applyTail.then(() => services.live!.apply(config));
     // Keep only the success path on the chain: a rejected application must not wedge the next
     // one, but its error still propagates to the caller.
     applyTail = run.then(

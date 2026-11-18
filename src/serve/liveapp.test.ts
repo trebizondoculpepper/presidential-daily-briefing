@@ -2,6 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   applyLiveApplication,
   entriesFromSaved,
+  invalidationPlan,
   reconcileContexts,
   type LiveApplicationBoundaries,
   type ServedEntry,
@@ -25,11 +26,9 @@ function savedConfig(
 
 function boundaries(overrides: {
   current?: ServedEntry[];
-  invalidated?: string[];
   recorded?: { applied: string[]; failed: { key: string; error: string }[] }[];
 }) {
   const current = overrides.current ?? [];
-  const invalidated: string[] = [];
   const recorded: {
     revision: string;
     applied: string[];
@@ -37,21 +36,17 @@ function boundaries(overrides: {
   }[] = [];
   const b: LiveApplicationBoundaries = {
     currentServed: () => current,
-    invalidate: (repository) => {
-      invalidated.push(repository.toLowerCase());
-      return 0;
-    },
     record: (r) => {
       recorded.push(r);
       return {} as never;
     },
   };
-  return { b, invalidated, recorded };
+  return { b, recorded };
 }
 
 describe("live application with request-context isolation (#808)", () => {
   it("serves the saved registrations only: added contexts invalidate nothing; changed/removed invalidate the cache", async () => {
-    const { b, invalidated, recorded } = boundaries({
+    const { b, recorded } = boundaries({
       current: [{ repository: "a/b", project: "/a" }, { repository: "c/d" }],
     });
     const result = await applyLiveApplication(
@@ -67,8 +62,11 @@ describe("live application with request-context isolation (#808)", () => {
       { repository: "e/f", change: "added" },
       { repository: "c/d", change: "removed" },
     ]);
-    // Only the removed context is invalidated; a/b (unchanged) and e/f (added) are not.
-    expect(invalidated).toEqual(["c/d"]);
+    // Only the removed context is invalidated (its whole cache) plus the retained set's
+    // dependency trees conservatively; a/b (unchanged) and e/f (added) entries are not dropped.
+    const plan = invalidationPlan(result.changes, result.served);
+    expect(plan.repositories).toEqual(["c/d"]);
+    expect(plan.dependencies).toEqual(["a/b", "e/f"]);
     expect(recorded).toEqual([
       { revision: expect.any(String), applied: ["serve.projects"], failed: [] },
     ]);
@@ -76,13 +74,8 @@ describe("live application with request-context isolation (#808)", () => {
 
   it("invalidates a changed context (same repository, different verified root) and reports A->B->A consistently", async () => {
     let served: ServedEntry[] = [{ repository: "a/b", project: "/a" }];
-    const invalidated: string[] = [];
     const b: LiveApplicationBoundaries = {
       currentServed: () => served,
-      invalidate: (repository) => {
-        invalidated.push(repository.toLowerCase());
-        return 0;
-      },
       record: () => ({}) as never,
     };
     // Change a/b's root: /a -> /b.
@@ -91,7 +84,10 @@ describe("live application with request-context isolation (#808)", () => {
       b,
     );
     expect(first.changes).toEqual([{ repository: "a/b", change: "changed", project: "/b" }]);
-    expect(invalidated).toEqual(["a/b"]);
+    expect(invalidationPlan(first.changes, first.served)).toEqual({
+      repositories: ["a/b"],
+      dependencies: ["a/b"],
+    });
     served = [{ repository: "a/b", project: "/b" }];
     // Revert /b -> /a: again a change (there is no stale-old-epoch resurrection).
     const second = await applyLiveApplication(
@@ -99,11 +95,11 @@ describe("live application with request-context isolation (#808)", () => {
       b,
     );
     expect(second.changes).toEqual([{ repository: "a/b", change: "changed", project: "/a" }]);
-    expect(invalidated).toEqual(["a/b", "a/b"]);
+    expect(invalidationPlan(second.changes, second.served).repositories).toEqual(["a/b"]);
   });
 
   it("treats a no-op reload as applied-none and does not invalidate", async () => {
-    const { b, invalidated, recorded } = boundaries({
+    const { b, recorded } = boundaries({
       current: [{ repository: "a/b", project: "/a" }],
     });
     const result = await applyLiveApplication(
@@ -111,13 +107,16 @@ describe("live application with request-context isolation (#808)", () => {
       b,
     );
     expect(result.changes).toEqual([{ repository: "a/b", change: "unchanged" }]);
-    expect(invalidated).toEqual([]);
+    expect(invalidationPlan(result.changes, result.served)).toEqual({
+      repositories: [],
+      dependencies: [],
+    });
     expect(recorded[0]!.applied).toEqual([]);
     expect(recorded[0]!.failed).toEqual([]);
   });
 
   it("reports diagnostics for a registered host this build cannot serve, keeping it saved", async () => {
-    const { b, invalidated } = boundaries({ current: [] });
+    const { b } = boundaries({ current: [] });
     const result = await applyLiveApplication(
       savedConfig([
         { host: "ghe.example.com", repository: "a/b" },
@@ -128,12 +127,12 @@ describe("live application with request-context isolation (#808)", () => {
     expect(result.served).toEqual([{ repository: "c/d" }]);
     expect(result.diagnostics).toHaveLength(1);
     expect(result.diagnostics[0]).toContain("ghe.example.com");
-    expect(invalidated).toEqual([]);
+    expect(invalidationPlan(result.changes, result.served).repositories).toEqual([]);
   });
 
   it("derives membership from the saved registrations only, never the current served superset", async () => {
     // The running set is a superset (startup inputs) that a removal must be able to drop.
-    const { b, invalidated } = boundaries({
+    const { b } = boundaries({
       current: [{ repository: "cwd/repo", project: "/cwd" }, { repository: "a/b" }],
     });
     const result = await applyLiveApplication(
@@ -142,7 +141,7 @@ describe("live application with request-context isolation (#808)", () => {
     );
     // cwd/repo is not in the saved set, so it is removed, not re-added from startup context.
     expect(result.changes).toContainEqual({ repository: "cwd/repo", change: "removed" });
-    expect(invalidated).toContain("cwd/repo");
+    expect(invalidationPlan(result.changes, result.served).repositories).toContain("cwd/repo");
   });
 
   it("projects the saved set with entriesFromSaved (pure)", () => {
@@ -172,31 +171,33 @@ describe("live application with request-context isolation (#808)", () => {
 
   it("invalidates cross-repository dependency trees when a context is changed or removed", async () => {
     let served: ServedEntry[] = [{ repository: "a/b" }, { repository: "c/d" }];
-    const deps: string[] = [];
     const b: LiveApplicationBoundaries = {
       currentServed: () => served,
-      invalidate: () => 0,
-      invalidateDependencies: (repository) => {
-        deps.push(repository.toLowerCase());
-        return 0;
-      },
       record: () => ({}) as never,
     };
-    await applyLiveApplication(savedConfig([{ host: "github.com", repository: "a/b" }]), b);
     // c/d removed: a/b's cached dependency tree is invalidated conservatively (it may reference
-    // c/d).
-    expect(deps).toEqual(["a/b"]);
+    // c/d), and the removed repository's whole cache too.
+    const first = await applyLiveApplication(
+      savedConfig([{ host: "github.com", repository: "a/b" }]),
+      b,
+    );
+    expect(invalidationPlan(first.changes, first.served)).toEqual({
+      repositories: ["c/d"],
+      dependencies: ["a/b"],
+    });
     // No change means no conservative cross-repo refresh.
     served = [{ repository: "a/b" }, { repository: "c/d" }];
-    const deps2: string[] = [];
-    await applyLiveApplication(
+    const noop = await applyLiveApplication(
       savedConfig([
         { host: "github.com", repository: "a/b" },
         { host: "github.com", repository: "c/d" },
       ]),
-      { ...b, invalidateDependencies: (repository) => (deps2.push(repository.toLowerCase()), 0) },
+      b,
     );
-    expect(deps2).toEqual([]);
+    expect(invalidationPlan(noop.changes, noop.served)).toEqual({
+      repositories: [],
+      dependencies: [],
+    });
   });
 
   it("verifies saved roots before serving them, falling back to repo-only on a moved checkout", async () => {
@@ -228,7 +229,7 @@ describe("live application with request-context isolation (#808)", () => {
   });
 
   it("deduplicates saved registrations by canonical repository before reconciling", async () => {
-    const { b, invalidated } = boundaries({ current: [] });
+    const { b } = boundaries({ current: [] });
     // Same repository twice: first repo-only, then with a verified root — refined once.
     const result = await applyLiveApplication(
       savedConfig([
@@ -250,8 +251,6 @@ describe("live application with request-context isolation (#808)", () => {
         b,
       ),
     ).rejects.toThrow(/two saved local projects/);
-    // Nothing was invalidated by a rejected dedupe.
-    expect(invalidated).toEqual([]);
   });
 
   it("reconcileContexts is pure and order-preserving", () => {
