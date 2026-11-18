@@ -84,3 +84,8 @@ The owner accepts a recent Node requirement: [the current Node LTS](runtime.md),
 - [Human responsibility release](human-responsibility-release.md): preserve open PRs, release selected agent responsibility and allow adoption (#1014, #1018, #1019).
 
 The [central architecture](../architecture.md#10-policy-before-integration-and-ticket-types) defines policy-first delivery and prospective ticket types (#1020).
+
+## Onboarding and point-of-action guidance
+
+- [Onboarding files and npm hint](onboarding-rules-files.md): two independent small features, preserving project file ownership.
+- [Generated action rules](action-rule-reminders.md): policy-first claim, unclaim and submission reminders, each in separate tickets.

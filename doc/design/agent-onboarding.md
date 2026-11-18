@@ -4,6 +4,15 @@ Contract for #351 and #391, based on #350 research and the owner's 2026-11-15
 copyable-prompt decisions. This is planned interface behavior, not a claim that
 `pdb onboard` is already installed. Existing accurate commands remain available.
 
+## New owner-approved onboarding-file direction
+
+[Onboarding rules files](onboarding-rules-files.md) supersedes the default read-only
+local CLI behavior and earlier no-snapshot/optional-section requirements for the
+new delivery: normal verified-project `pdb onboard` generates managed `rules.md`
+and its AGENTS.md reference. Existing safe-write, identity and read-only transport
+boundaries remain. Until that implementation lands, current CLI behavior still
+applies. The npm postinstall hint is a separate small ticket.
+
 ## Shared document
 
 Create one typed pure document builder with verified project context, available
