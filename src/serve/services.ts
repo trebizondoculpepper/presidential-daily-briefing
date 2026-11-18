@@ -183,8 +183,12 @@ export function readServices(
       },
       live: serve.globalConfig
         ? {
-            apply: (saved) =>
-              applyLiveApplication(saved, {
+            apply: (saved) => {
+              // #816: observe the fresh saved snapshot before recording its application, so
+              // the acknowledgement is accepted for the observed revision and the view reports
+              // the applied values and revision instead of the startup ones.
+              facts.applicationState?.observe(saved);
+              return applyLiveApplication(saved, {
                 currentServed: () => facts.served,
                 // Bump the repository epoch and drop its entries so reads started before the
                 // change cannot insert as fresh facts.
@@ -211,7 +215,8 @@ export function readServices(
                       record: (result) => facts.applicationState!.recordApplication(result),
                     }
                   : {}),
-              }),
+              });
+            },
           }
         : undefined,
       // Sessions first, then in-flight collections; dropping sessions never drops entries.

@@ -576,6 +576,24 @@ export function createServer(
             fs: runtime.fs,
           });
     if (signal.aborted) throw new Failure("cancelled");
+    // #808: re-validate the selected context after identity resolution. A live configuration
+    // application may have changed or removed the repository while identity resolved; starting
+    // a collection under the old project and identity must be refused (same guard as the JSON
+    // API), so obsolete facts are never returned as fresh.
+    if (runtime.served) {
+      let still: { repository: string; project?: string } | undefined;
+      try {
+        still = runtime.served(args.repo);
+      } catch {
+        // Removed or unresolvable: treated as not served below.
+      }
+      if (
+        !still ||
+        still.repository.toLowerCase() !== repository.toLowerCase() ||
+        (still.project ?? null) !== (project ?? null)
+      )
+        throw new Failure("repository-not-served");
+    }
     if (effectiveIdentity)
       callReader = {
         ...callReader,
