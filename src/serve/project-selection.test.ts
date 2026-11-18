@@ -138,8 +138,72 @@ describe("Working for header (#669)", () => {
     ).toBe("Working for: unknown (not signed in)");
     expect((await header(undefined)).textContent).toBe("Working for: unavailable");
     expect((await header(undefined, false)).attrs["data-state"]).toBe("unavailable");
+    for (const failure of ["reject", "json"] as const) {
+      const slot = { textContent: "Working for: loading…", attrs: {} as Record<string, string> };
+      await runInNewContext(projectSelectionScript(), {
+        URL,
+        window: {
+          location: { href: "http://localhost/", replace: () => undefined },
+          localStorage: { getItem: () => null, setItem: () => undefined },
+        },
+        document: {
+          querySelector: () => ({
+            set textContent(v: string) {
+              slot.textContent = v;
+            },
+            setAttribute: (k: string, v: string) => (slot.attrs[k] = v),
+          }),
+        },
+        fetch: async () => {
+          if (failure === "reject") throw new Error("connection lost");
+          return {
+            ok: true,
+            json: async () => {
+              throw new Error("bad json");
+            },
+          };
+        },
+      });
+      expect(slot.textContent).toBe("Working for: unavailable");
+    }
     expect(
       (await header({ state: "current", login: "<b>x</b>", host: "github.com" })).textContent,
     ).toContain("<b>x</b>");
   });
+});
+
+it("re-reads whose work this is after a page announces a refresh (#669)", async () => {
+  let listener: (() => void) | undefined;
+  let login = "first";
+  let text = "";
+  await runInNewContext(projectSelectionScript(), {
+    URL,
+    window: {
+      location: { href: "http://localhost/?repo=a%2Fb", replace: () => undefined },
+      localStorage: { getItem: () => null, setItem: () => undefined },
+    },
+    document: {
+      addEventListener: (name: string, fn: () => void) => {
+        if (name === "pdb:refreshed") listener = fn;
+      },
+      querySelector: () => ({
+        set textContent(v: string) {
+          text = v;
+        },
+        setAttribute: () => undefined,
+      }),
+    },
+    fetch: async () => ({
+      ok: true,
+      json: async () => ({
+        repositories: [{ repository: "a/b" }],
+        human: { state: "current", login, host: "github.com" },
+      }),
+    }),
+  });
+  expect(text).toContain("first");
+  login = "second";
+  listener!();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(text).toContain("second");
 });
