@@ -13,7 +13,7 @@ import { requiredCheckEvidence } from "../github/requiredchecks.js";
  * never "not delivered". Read-only: `next` lists supported commands, never runs them.
  */
 import { closureOf, diagnoseDelivery } from "./deliverydoctor.js";
-import { deliveryCommentFields, readDeliveryComments } from "./deliverables.js";
+import { readDeliveryComments } from "./deliverables.js";
 import type { TrustDecision } from "./delivery.js";
 import type { Query, Rest } from "../github/github.js";
 import type { Closure, DeliveryDiagnosis, IssueDeliveryDiagnosis } from "./deliverydoctor.js";
@@ -21,6 +21,7 @@ import type { MemberState, TicketDelivery } from "./completion.js";
 import type { Issue, PullRequest, Snapshot } from "../github/types.js";
 import { prChecks } from "../briefing/briefing.js";
 import { prEvidenceGaps } from "../github/previdence.js";
+import { createGhService } from "../github/service/service.js";
 import { classifyChecks } from "../github/requiredchecks.js";
 import { workflow } from "./definition.js";
 import type { PrStatusReport } from "./prstatus.js";
@@ -476,26 +477,21 @@ export async function readIssuesDelivery(
   numbers: number[],
   rt: { query: Query; rest: Rest; trust: TrustDecision; signal?: AbortSignal },
 ): Promise<DeliveryRead & { closures: { number: number; closure: Closure }[] }> {
-  const [owner, name] = repository.split("/");
+  // The shared GH facade over this read's own (metered, cancellable) executor.
+  const gh = createGhService({ query: rt.query });
   const issues: Issue[] = [];
   const omissions: string[] = [];
   for (const number of numbers) {
     try {
-      const data = (await rt.query(
-        `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issue(number:$number){number title url state stateReason closedByPullRequestsReferences(first:10,includeClosedPrs:false){nodes{number url state} pageInfo{hasNextPage}} comments(last:100){nodes{${deliveryCommentFields}} pageInfo{hasPreviousPage startCursor}}}}}`,
-        { owner, name, number },
-      )) as {
-        repository: {
-          issue:
-            | (Omit<Issue, "comments"> & {
-                comments: Parameters<typeof readDeliveryComments>[2];
-              })
-            | null;
-        } | null;
-      };
-      const node = data.repository?.issue;
+      // The typed delivery-issue read (#945): no GraphQL composed in this module.
+      const node = await gh.delivery.issue(repository, number);
       if (!node) throw new Error("not readable");
-      const history = await readDeliveryComments(repository, number, node.comments, rt.query);
+      const history = await readDeliveryComments(
+        repository,
+        number,
+        node.comments as Parameters<typeof readDeliveryComments>[2],
+        rt.query,
+      );
       // A history cut at the page bound reaches deliveryRead's coverage omissions below.
       issues.push({
         ...node,
