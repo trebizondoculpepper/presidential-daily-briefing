@@ -22,8 +22,9 @@ import type { DeclaredReviewPolicy } from "../workflow/reviewpolicy.js";
  * parses terminal text. Only read operations live here: mutation planning and application stay
  * in their own modules and are never reachable through this service.
  */
-import { collect, ghQuery, IssueUnavailable, permissionLookup } from "../github/github.js";
+import { collect, IssueUnavailable } from "../github/github.js";
 import { createGhService } from "../github/service/service.js";
+import type { GhService } from "../github/service/service.js";
 import { classifyChecks, requiredCheckEvidence } from "../github/requiredchecks.js";
 import type { IssueDiagnosis, Query, Rest } from "../github/github.js";
 import type { GraphQuery } from "../workflow/claims.js";
@@ -51,7 +52,7 @@ import {
   compactText,
   LabelFilterUnresolved,
 } from "./compact.js";
-import { normalizeLabelRequest, resolveLabels } from "../github/labels.js";
+import { normalizeLabelRequest } from "../github/labels.js";
 import { briefing, textReport } from "./briefing.js";
 import type { BriefingOptions } from "./briefing.js";
 import { readSnapshotAssessments, unknownTrust } from "./assessments.js";
@@ -173,6 +174,7 @@ async function presentBriefingFor(
   > = () => import("../rules/datalog/datalog.js"),
   /** #192: live PR and compare reads for delivery; absent (offline) means not evaluated. */
   live?: {
+    gh?: GhService;
     query: Query;
     rest: Rest;
     /** Rebuilds `trust` over a metered REST boundary, so an intake counts its lookups (#367). */
@@ -271,7 +273,9 @@ async function presentBriefingFor(
           live
             ? {
                 query: live.query as GraphQuery,
-                permission: permissionLookup(snapshot.repository, live.rest, signal),
+                permission: (
+                  live.gh ?? createGhService({ query: live.query, rest: live.rest })
+                ).repos.permissionOf(snapshot.repository, signal),
               }
             : undefined,
         )
@@ -485,6 +489,7 @@ async function presentHuman(
   signal: AbortSignal | undefined,
   loadEngine: () => Promise<Pick<typeof import("../rules/datalog/datalog.js"), "evaluateDatalog">>,
   live?: {
+    gh?: GhService;
     query: Query;
     rest: Rest;
     trustWith?: (rest: Rest) => TrustDecision;
@@ -499,10 +504,13 @@ async function presentHuman(
     ? await discoverClosedQuestions(
         snapshot.repository,
         {
-          closedQuestions: createGhService({
-            query: live.closedQuery ?? live.query,
-            rest: live.rest,
-          }).closedQuestions,
+          closedQuestions: (
+            live.gh ??
+            createGhService({
+              query: live.closedQuery ?? live.query,
+              rest: live.rest,
+            })
+          ).closedQuestions,
           rest: live.rest,
           ...(live.trustWith ? { trustWith: live.trustWith } : {}),
           ...(live.closedQuestions ? { slot: live.closedQuestions } : {}),
@@ -614,6 +622,10 @@ export interface ReadRuntime {
   loadEngine?: () => Promise<Pick<typeof import("../rules/datalog/datalog.js"), "evaluateDatalog">>;
   dependencyReport: typeof dependencyReport;
   estimation?: LabelEstimationRuntime;
+  /** Typed GH service (#902); optional during migration while callers inject `query`/`rest`. */
+  gh?: GhService;
+  /** Typed GH service bound to a request's cancellation signal (#902). */
+  ghWith?: (signal?: AbortSignal) => GhService;
   /**
    * Read-only REST boundary for provenance authors' permissions (#212, #247), cached per run.
    * Absent means no permission requests: trusted provenance is then reported as unknown.
@@ -698,11 +710,12 @@ export function unavailableText(d: IssueDiagnosis): string {
 export async function resolveLabelFilter(
   repository: string,
   labels: readonly string[],
-  query: Query,
+  query: Query | GhService,
 ): Promise<string[]> {
   const normalized = normalizeLabelRequest(labels);
   if (!normalized.ok) throw new BriefingArgumentError(normalized.why);
-  const resolution = await resolveLabels(repository, normalized.labels, query);
+  const service = typeof query === "function" ? createGhService({ query }) : query;
+  const resolution = await service.labels.resolve(repository, normalized.labels);
   if (resolution.status === "unknown")
     throw new BriefingArgumentError(
       `Unknown label(s) in ${repository}: ${resolution.missing.join(", ")}. No label is created; check the name with gh label list --repo ${repository}.`,
@@ -743,7 +756,14 @@ export async function readBriefing(
     ? await resolveLabelFilter(
         request.repository,
         request.labels,
-        runtime.queryWith?.(request.signal) ?? runtime.query ?? ghQuery,
+        runtime.ghWith?.(request.signal) ??
+          runtime.gh ??
+          createGhService({
+            ...(runtime.queryWith || runtime.query
+              ? { query: runtime.queryWith?.(request.signal) ?? runtime.query }
+              : {}),
+            ...(runtime.rest ? { rest: runtime.rest } : {}),
+          }),
       )
     : undefined;
   const engineSetting = request.issue
@@ -796,7 +816,7 @@ export async function readBriefing(
     meter && baseQuery ? meter.query(baseQuery, "delivery-records", request.repository) : baseQuery;
   // One permission cache for every ranking pass and the final presentation.
   const trust = rest
-    ? markerTrust(permissionLookup(request.repository, rest, request.signal))
+    ? markerTrust(createGhService({ rest }).repos.permissionOf(request.repository, request.signal))
     : undefined;
   // #413: claim activity is read live, before the first shortlist ranking, so every selection
   // pass and the final presentation rank the same retained-claim rows: hydration then covers
@@ -815,7 +835,10 @@ export async function readBriefing(
         request.agent,
         {
           query: liveQuery as GraphQuery,
-          permission: permissionLookup(request.repository, rest, request.signal),
+          permission: createGhService({ rest }).repos.permissionOf(
+            request.repository,
+            request.signal,
+          ),
         },
         runtime.claimActivityReader,
       );
@@ -851,7 +874,12 @@ export async function readBriefing(
             rest: (path, options) =>
               rest(path, { ...options, signal: options?.signal ?? request.signal }),
             trustWith: (other: Rest) =>
-              markerTrust(permissionLookup(request.repository, other, request.signal)),
+              markerTrust(
+                createGhService({ rest: other }).repos.permissionOf(
+                  request.repository,
+                  request.signal,
+                ),
+              ),
             ...(runtime.closedQuestions ? { closedQuestions: runtime.closedQuestions } : {}),
             ...(runtime.closedQueryWith
               ? { closedQuery: runtime.closedQueryWith(request.signal) }
