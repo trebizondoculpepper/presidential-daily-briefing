@@ -14,6 +14,8 @@ import { repositoryFromCheckout, throwIfCancelled } from "./repository.js";
 import { historyReads } from "./history.js";
 import { checkReads } from "./checks.js";
 import { readRateLimits } from "./ratelimits.js";
+import { resolveLabels } from "./labels.js";
+import type { LabelResolution } from "./labels.js";
 import { discoveryPage, issueCommentsPage, issuesByNumber } from "./snapshot.js";
 import type { Issue } from "./snapshot.js";
 import type { Query } from "../github.js";
@@ -53,6 +55,11 @@ export interface GhService {
   history: HistoryReads;
   /** Required-check evidence: branch rules and protection, head requiredness (#926). */
   checks: CheckReads;
+  /** Repository label resolution (#921). */
+  labels: {
+    /** Resolve normalized names to canonical labels; unresolved on any failed or partial read. */
+    resolve(repository: string, names: readonly string[]): Promise<LabelResolution>;
+  };
   /** Open-work snapshot reads behind the shortlist briefing (#927). */
   snapshot: {
     discoveryPage(
@@ -150,6 +157,9 @@ export function createGhService(options: GhServiceOptions = {}): GhService {
       },
     },
     history: historyReads(query),
+    labels: {
+      resolve: (repository, names) => resolveLabels(repository, names, query as Query),
+    },
     snapshot: {
       discoveryPage: (...args) => discoveryPage(query as Query, ...args),
       issuesByNumber: (...args) => issuesByNumber(query as Query, ...args),
