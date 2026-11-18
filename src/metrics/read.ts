@@ -445,6 +445,7 @@ export async function readMetrics(
         blocked,
         waiting,
         claimed: ownerLabels.length > 0,
+        labelsComplete,
       };
     }
     tickets.push({

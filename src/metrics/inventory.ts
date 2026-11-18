@@ -40,6 +40,8 @@ export interface InventoryFacts {
   waiting?: boolean | null;
   /** Whether the ticket currently has an agent claim, independent of its exclusive display stage. */
   claimed?: boolean;
+  /** Whether the issue's label list was read completely (so absence of an `agent:` label proves unclaimed). */
+  labelsComplete?: boolean;
 }
 
 export interface StageAgeStats {
