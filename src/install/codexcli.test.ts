@@ -3,7 +3,7 @@
  * Injected git/fs/clock only; no real client configuration or trust is touched.
  */
 import { describe, expect, it } from "vite-plus/test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { emptyFileSystem, fakeGit, SYNTHETIC_ROOT } from "../../scripts/benchmark-isolation.js";
@@ -230,13 +230,17 @@ describe("runCodexInstallSurface (#768 slice 2a)", () => {
     expect(code).toBe(2);
     expect(result.items.map((i) => i.kind)).toEqual(["identity", "mcp", "hook"]);
     expect(result.items[0]).toMatchObject({
-      outcome: "planned",
+      outcome: "refused",
       code: "IDENTITY_REQUIRED",
     });
     // Absolute paths stay out of output: the scope and item files are scope-relative.
     expect(result.scope.kind).toBe("project");
     expect(result.scope.targets.config).toBe(".codex/config.toml");
-    expect(result.items[1]).toMatchObject({ kind: "mcp", outcome: "planned", code: null });
+    expect(result.items[1]).toMatchObject({
+      kind: "mcp",
+      outcome: "not-attempted",
+      code: "IDENTITY_REQUIRED",
+    });
     expect(result.items[1].file).toBe(".codex/config.toml");
     expect(result.items[2]).toMatchObject({ outcome: "not-attempted", code: "HOOK_NOT_AVAILABLE" });
     expect(result.status).toEqual({
@@ -321,12 +325,14 @@ describe("runCodexInstallSurface (#768 slice 2a)", () => {
       runtime(git),
       async (text) => void out.push(text),
     );
-    expect(code).toBe(2);
+    expect(code).toBe(0);
     const result = JSON.parse(out.join("")) as {
-      items: { kind: string; retry: string | null }[];
+      items: { kind: string; outcome: string; diff: string | null; retry: string | null }[];
     };
     const identity = result.items.find((i) => i.kind === "identity");
     expect(identity).toBeDefined();
+    expect(identity!.outcome).toBe("planned");
+    expect(identity!.diff).toContain("designer");
     expect(identity!.retry).toContain("--role designer");
     expect(identity!.retry).not.toContain("implementer");
   });
@@ -357,5 +363,135 @@ describe("runCodexInstallSurface (#768 slice 2a)", () => {
     const identity = result.items.find((i) => i.kind === "identity");
     expect(identity?.outcome).toBe("refused");
     expect(identity?.message).toContain("pdb.toml");
+  });
+
+  it("creates repository identity on apply, reuses on rerun, and prints Here's what to do next (#800)", async () => {
+    const dir = await realpath(await mkdtemp(join(tmpdir(), "pdb-codex-800-")));
+    try {
+      const { execFile } = await import("node:child_process");
+      const { promisify } = await import("node:util");
+      const exec = promisify(execFile);
+      await exec("git", ["init"], { cwd: dir });
+      await exec("git", ["remote", "add", "origin", "https://github.com/example/project.git"], {
+        cwd: dir,
+      });
+      const out1: string[] = [];
+      const code1 = await runCodexInstallSurface(
+        installArgumentsFor(
+          [
+            "codex",
+            "--repo",
+            "example/project",
+            "--role",
+            "implementer",
+            "--transport",
+            "http",
+            "--yes",
+          ],
+          "install",
+        ),
+        { cwd: dir, env: {} },
+        async (text) => void out1.push(text),
+      );
+      expect(code1, out1.join("")).toBe(0);
+      const text1 = out1.join("");
+      expect(text1).toContain("Here's what to do next:");
+      expect(text1).toContain("unverified for Codex (#397)");
+
+      const out2: string[] = [];
+      const code2 = await runCodexInstallSurface(
+        installArgumentsFor(
+          ["codex", "--repo", "example/project", "--transport", "http", "--yes", "--json"],
+          "install",
+        ),
+        { cwd: dir, env: {} },
+        async (text) => void out2.push(text),
+      );
+      expect(code2).toBe(0);
+      const res2 = JSON.parse(out2.join("")) as {
+        status: { configured: boolean; trusted: string; executed: string; receiptVerified: string };
+        items: { kind: string; action: string; outcome: string }[];
+      };
+      expect(res2.status).toEqual({
+        configured: true,
+        trusted: "unknown",
+        executed: "unknown",
+        receiptVerified: "unknown",
+      });
+      expect(res2.items[0]).toMatchObject({ kind: "identity", action: "kept", outcome: "applied" });
+      expect(res2.items[1]).toMatchObject({ kind: "mcp", action: "kept", outcome: "kept" });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses ambiguous identity with IDENTITY_AMBIGUOUS and withholds MCP (#800)", async () => {
+    const git: GitRunner = async (args, _cwd) => {
+      if (args[0] === "rev-parse" && args[1] === "--show-toplevel") return SYNTHETIC_ROOT + "\n";
+      if (args[0] === "remote") return "origin\thttps://github.com/example/project.git (fetch)\n";
+      if (args[0] === "rev-parse" && args[1] === "--git-common-dir") return ".git\n";
+      throw new Error(`unexpected git ${args.join(" ")}`);
+    };
+    const fsWithTwoCodexEntries = {
+      ...emptyFileSystem,
+      readText: async (path: string) => {
+        if (path.endsWith("pdb.toml")) {
+          return [
+            '[agents."codex.a"]',
+            'harness = "codex"',
+            'identity = { name = "agent_a", triage_role = "implementer" }',
+            '[agents."codex.b"]',
+            'harness = "codex"',
+            'identity = { name = "agent_b", triage_role = "implementer" }',
+          ].join("\n");
+        }
+        return null;
+      },
+    };
+    const out: string[] = [];
+    const code = await runCodexInstallSurface(
+      installArgumentsFor(["codex", "--repo", "example/project", "--yes", "--json"], "install"),
+      { ...runtime(git), fs: fsWithTwoCodexEntries },
+      async (text) => void out.push(text),
+    );
+    expect(code).toBe(2);
+    const res = JSON.parse(out.join("")) as {
+      items: { kind: string; outcome: string; code: string | null }[];
+    };
+    expect(res.items[0]).toMatchObject({
+      kind: "identity",
+      outcome: "refused",
+      code: "IDENTITY_AMBIGUOUS",
+    });
+    expect(res.items[1]).toMatchObject({
+      kind: "mcp",
+      outcome: "not-attempted",
+      code: "IDENTITY_REQUIRED",
+    });
+  });
+
+  it("respects confirmation prompt and falls back to dry-run when declined (#800)", async () => {
+    const git: GitRunner = async (args, _cwd) => {
+      if (args[0] === "rev-parse" && args[1] === "--show-toplevel") return SYNTHETIC_ROOT + "\n";
+      if (args[0] === "remote") return "origin\thttps://github.com/example/project.git (fetch)\n";
+      if (args[0] === "rev-parse" && args[1] === "--git-common-dir") return ".git\n";
+      throw new Error(`unexpected git ${args.join(" ")}`);
+    };
+    const out: string[] = [];
+    const code = await runCodexInstallSurface(
+      installArgumentsFor(
+        ["codex", "--repo", "example/project", "--role", "implementer", "--json"],
+        "install",
+      ),
+      { ...runtime(git), confirm: async () => false },
+      async (text) => void out.push(text),
+    );
+    expect(code).toBe(1);
+    const res = JSON.parse(out.join("")) as {
+      dryRun: boolean;
+      items: { kind: string; outcome: string }[];
+    };
+    expect(res.dryRun).toBe(true);
+    expect(res.items[0]).toMatchObject({ kind: "identity", outcome: "planned" });
   });
 });
