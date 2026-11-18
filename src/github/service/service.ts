@@ -6,8 +6,24 @@
  * remaining capability groups arrive with their migration tickets (#878-#891).
  */
 
-import { ghQueryFailure, ghQueryWith, permissionLookup, restOverTransport } from "../github.js";
-import type { PermissionLookup, Rest } from "../github.js";
+import {
+  collect,
+  collectIssueFocus,
+  ghQueryFailure,
+  ghQueryWith,
+  hydratePullRequests,
+  locateIssue,
+  permissionLookup,
+  restOverTransport,
+} from "../github.js";
+import type {
+  CollectOptions,
+  FocusOptions,
+  IssueDiagnosis,
+  PermissionLookup,
+  Rest,
+} from "../github.js";
+import type { PullRequest, Snapshot } from "../types.js";
 import { execFileTransport } from "./transport.js";
 import type { GhTransport } from "./transport.js";
 import { repositoryFromCheckout, throwIfCancelled } from "./repository.js";
@@ -92,8 +108,10 @@ export interface GhService {
     /** Resolve normalized names to canonical labels; unresolved on any failed or partial read. */
     resolve(repository: string, names: readonly string[]): Promise<LabelResolution>;
   };
-  /** Issue creation and bounded read-back capabilities (#887). */
-  issues: IssueCapabilities;
+  /** Issue creation, locate, and bounded read-back capabilities (#887, #920). */
+  issues: IssueCapabilities & {
+    locate(repository: string, number: number, signal?: AbortSignal): Promise<IssueDiagnosis>;
+  };
   /** Closed-question discovery and comment pagination (#899). */
   closedQuestions: ClosedQuestionCapabilities;
   /** Open-work snapshot reads behind the shortlist briefing (#927). */
@@ -119,6 +137,18 @@ export interface GhService {
       cursor: string,
       signal?: AbortSignal,
     ): Promise<unknown>;
+    collect(repository: string, options?: CollectOptions, now?: () => Date): Promise<Snapshot>;
+    collectIssueFocus(
+      repository: string,
+      number: number,
+      options: FocusOptions,
+      now?: () => Date,
+    ): Promise<Snapshot>;
+    hydratePullRequests(
+      repository: string,
+      targets: readonly { number: number; url: string }[],
+      options: Parameters<typeof hydratePullRequests>[2],
+    ): Promise<PullRequest[]>;
   };
   completion: CompletionCapabilities;
 }
@@ -158,6 +188,13 @@ export function createGhService(options: GhServiceOptions = {}): GhService {
   const post = options.post ?? postOverTransport(transport, env);
   const query: GraphQuery = options.query ?? ghQueryWith(undefined, {}, { transport, env });
   const run: GhRun = options.run ?? runOverTransport(transport, query as Query, env);
+  const queryForSignal = (signal?: AbortSignal): GraphQuery =>
+    options.query
+      ? (q, vars) => {
+          signal?.throwIfAborted();
+          return options.query!(q, vars);
+        }
+      : ghQueryWith(signal, {}, { transport, env });
   return {
     account: {
       async current(signal) {
@@ -245,11 +282,44 @@ export function createGhService(options: GhServiceOptions = {}): GhService {
     labels: {
       resolve: (repository, names) => resolveLabels(repository, names, query as Query),
     },
-    issues: issueCapabilities(rest, post),
+    issues: {
+      ...issueCapabilities(rest, post),
+      locate: (repository, number, signal) => locateIssue(repository, number, rest, signal),
+    },
     snapshot: {
       discoveryPage: (...args) => discoveryPage(query as Query, ...args),
       issuesByNumber: (...args) => issuesByNumber(query as Query, ...args),
       issueCommentsPage: (...args) => issueCommentsPage(query as Query, ...args),
+      collect: (repository, collectOptions = {}, now) =>
+        collect(
+          repository,
+          {
+            rest,
+            locate: (repo, num) => locateIssue(repo, num, rest, collectOptions.signal),
+            ...collectOptions,
+          },
+          queryForSignal(collectOptions.signal) as Query,
+          now ?? options.now,
+        ),
+      collectIssueFocus: (repository, number, focusOptions, now) =>
+        collectIssueFocus(
+          repository,
+          number,
+          {
+            rest,
+            locate: (repo, num) => locateIssue(repo, num, rest, focusOptions.signal),
+            ...focusOptions,
+          },
+          queryForSignal(focusOptions.signal) as Query,
+          now ?? options.now,
+        ),
+      hydratePullRequests: (repository, targets, hydrateOptions) =>
+        hydratePullRequests(
+          repository,
+          targets,
+          hydrateOptions,
+          queryForSignal(hydrateOptions.signal) as Query,
+        ),
     },
     checks: checkReads(async (q, vars) => {
       const data = await query(q, vars);
