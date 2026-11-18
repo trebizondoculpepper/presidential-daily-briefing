@@ -6,9 +6,11 @@
  * validated `deps add` / `deps remove` commands or deliberate manual edits.
  */
 import { workflow } from "../workflow/definition.js";
-import { collect, declaredDependencyContexts, ghQuery, prop, selected } from "./github.js";
+import { collect, declaredDependencyContexts, ghQuery } from "./github.js";
 import type { Query } from "./github.js";
 import { nativeKnown } from "./dependencies.js";
+import { resolveReference } from "./service/references.js";
+import type { Resolved } from "./service/references.js";
 
 /** Wording that must never become a blocker without review. */
 export const hedged = /\b(?:optional(?:ly)?|coordinat\w*|nice[- ]to[- ]have|ideally|after)\b/i;
@@ -64,38 +66,6 @@ export function listWideHedge(context: string): boolean {
 const isHedged = (context: string, ref: Mention): boolean =>
   listWideHedge(context) || hedged.test(clauseFor(context, ref));
 
-/** Resolve a referenced number to an issue, a pull request, or null (missing). */
-type Resolved =
-  | { __typename: "Issue"; number: number; url: string; state: string; stateReason: string | null }
-  | {
-      __typename: "PullRequest";
-      number: number;
-      url: string;
-      state: string;
-      merged: boolean;
-      closingIssuesReferences?: {
-        nodes: {
-          number: number;
-          url: string;
-          state: string;
-          repository: { nameWithOwner: string };
-        }[];
-        pageInfo?: { hasNextPage: boolean };
-      } | null;
-    };
-async function resolveReference(
-  repository: string,
-  number: number,
-  query: Query,
-): Promise<Resolved | null> {
-  const [owner, name] = repository.split("/");
-  const data = await query(
-    `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){issueOrPullRequest(number:$number){__typename ... on Issue{number url state stateReason} ... on PullRequest{number url state merged closingIssuesReferences(first:100){nodes{number url state repository{nameWithOwner}} pageInfo{hasNextPage}}}}}}`,
-    { owner, name, number },
-  );
-  return selected<Resolved>(prop(data, "repository", "issueOrPullRequest"));
-}
-
 export type RowStatus = "apply" | "review" | "satisfied";
 export interface MigrationEdge {
   blocker: number;
@@ -148,7 +118,7 @@ export async function planMigration(
   const resolve = (n: number): Promise<Resolved | null> => {
     let resolved = cache.get(n);
     if (!resolved) {
-      resolved = resolveReference(repository, n, query);
+      resolved = resolveReference(query, repository, n);
       cache.set(n, resolved);
     }
     return resolved;
