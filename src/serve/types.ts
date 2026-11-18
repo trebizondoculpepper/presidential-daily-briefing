@@ -12,7 +12,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { ReadRuntime } from "../briefing/service.js";
 import type { ConfigFileSystem, GitRunner } from "../config/config.js";
 import type { GitService } from "../git/service.js";
-import type { GlobalConfigFileSystem } from "../config/globalconfig.js";
+import type { GlobalConfigFileSystem, LoadedGlobalConfig } from "../config/globalconfig.js";
 import type { Environment } from "../config/harness.js";
 import type { dependencyReport as DependencyReportFn } from "../github/dependencies.js";
 import type {
@@ -135,6 +135,12 @@ export interface ServerFacts {
   served: ServedRepository[];
   ttlMs: number;
   auth: AuthContext;
+  /**
+   * Request-context generation (#808): bumped once per successful live configuration
+   * application, and read at selection and again before responding so a read that started for
+   * one context can never deliver facts collected for an obsolete one.
+   */
+  contextVersion?: { value: number };
 }
 
 /** Per-request context handed to routes. */
@@ -174,6 +180,13 @@ export type ServeExtensions = (facts: ServerFacts) => ServeServices;
 export interface RunningServer {
   facts: ServerFacts;
   port: number;
+  /**
+   * Apply a fresh saved global configuration to the running server (#808): reconcile the served
+   * set from the saved registrations, invalidate changed/removed contexts and request-context
+   * generations, and record the applied keys in the application state. Resolves with the applied
+   * result. Absent (or rejecting) when live application is not available in this build.
+   */
+  applyLiveConfiguration?(config: LoadedGlobalConfig): Promise<unknown>;
   /** Graceful shutdown; resolves once every connection is closed. Idempotent. */
   close(): Promise<void>;
   /** Resolves when shutdown completes. */
