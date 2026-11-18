@@ -15,6 +15,13 @@
 import { ticketHistory } from "../workflow/claims.js";
 import type { GraphQuery } from "../workflow/claims.js";
 import {
+  classifyMarkers,
+  foldClaimActivity,
+  parseActivityComment,
+  type ActivityComment,
+} from "../workflow/claimactivity.js";
+import { workflow } from "../workflow/definition.js";
+import {
   collectDeliveryFacts,
   deliveryMemberCap,
   evaluateDelivery,
@@ -300,11 +307,9 @@ export async function readMetrics(
       const labelNames = new Set((issue.labels?.nodes ?? []).map((l) => l.name));
       const blocked: boolean | null =
         issue.openBlockers !== null && issue.openBlockers !== undefined
-          ? issue.openBlockers > 0 || labelNames.has("status:blocked")
-          : labelNames.has("status:blocked")
-            ? true
-            : null;
-      const hasOwner = [...labelNames].some((l) => l.startsWith("owner:"));
+          ? issue.openBlockers > 0
+          : null;
+      const ownerLabels = [...labelNames].filter((l) => l.startsWith(workflow.ownerPrefix));
       let stage: InventoryStage = "unknown";
       if (labelsComplete) {
         if (
@@ -314,7 +319,7 @@ export async function readMetrics(
           stage = "unassessed";
         } else if (labelNames.has("status:awaiting-review")) {
           stage = "in-review";
-        } else if (hasOwner) {
+        } else if (ownerLabels.length > 0) {
           stage = "claimed";
         } else if (blocked === true) {
           stage = "blocked";
@@ -322,10 +327,34 @@ export async function readMetrics(
           stage = "ready";
         }
       }
-      const waiting: boolean | null =
-        commentsComplete && !comments.some((c) => c.body.includes("github-triage:claim-activity"))
-          ? false
-          : null;
+      let waiting: boolean | null = null;
+      if (ownerLabels.length === 1 && commentsComplete) {
+        const ownerLabel = ownerLabels[0]!;
+        const ownerAgent = ownerLabel.slice(workflow.ownerPrefix.length);
+        const latestClaimAdd =
+          history.events
+            .filter((e) => e.__typename === "LabeledEvent" && e.label.name === ownerLabel)
+            .map((e) => e.createdAt)
+            .sort((a, b) => a.localeCompare(b))
+            .at(-1) ?? null;
+        const classifiedActivity = await classifyMarkers(
+          comments as ActivityComment[],
+          { repository, issue: issue.number },
+          rt.trust.comment,
+          parseActivityComment,
+        );
+        const activity = foldClaimActivity(classifiedActivity, {
+          agent: ownerAgent,
+          claimStartedAt: latestClaimAdd,
+          historyComplete: commentsComplete,
+        });
+        waiting = activity.state === "waiting" ? true : activity.state === "active" ? false : null;
+      } else if (
+        commentsComplete &&
+        !comments.some((c) => c.body.includes("github-triage:claim-activity"))
+      ) {
+        waiting = false;
+      }
       inventory = { stage, createdAt: issue.createdAt, blocked, waiting };
     }
     tickets.push({
