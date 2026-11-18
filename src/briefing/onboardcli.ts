@@ -9,11 +9,21 @@
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { resolveRepositoryTarget } from "../config/config.js";
+import type { GitRunner } from "../config/config.js";
 import type { ConfigRuntime } from "../config/configcli.js";
 import { installCoordinationSection } from "../config/agentsguide.js";
 import { updateJsonFile, type SafeFs } from "../config/safejson.js";
+import { createGitService } from "../git/service.js";
+import type { GitService } from "../git/service.js";
 import { defaultCacheDir } from "../updates/updatecache.js";
 import { onboardingDocument, onboardingText, validServerOrigin } from "./onboarding.js";
+
+export interface OnboardRuntime extends Omit<ConfigRuntime, "git"> {
+  /** Typed Git service (#900), or legacy `GitRunner` during migration. */
+  readonly git?: GitService | GitRunner;
+  /** Optional typed Git service overriding `git`. */
+  readonly gitService?: GitService;
+}
 
 const isRecord = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
@@ -24,7 +34,7 @@ export const onboardUsage =
 export async function runOnboard(
   args: string[],
   output: (text: string) => Promise<void>,
-  runtime: ConfigRuntime = {},
+  runtime: OnboardRuntime = {},
   stderr: (text: string) => void = (text) => void process.stderr.write(text),
 ): Promise<number> {
   let values: {
@@ -73,11 +83,8 @@ export async function runOnboard(
   let repository = values.repo ?? null;
   let root: string | null = null;
   try {
-    const target = await resolveRepositoryTarget(
-      runtime.cwd ?? process.cwd(),
-      values.repo,
-      runtime.git,
-    );
+    const git = runtime.gitService ?? runtime.git ?? createGitService();
+    const target = await resolveRepositoryTarget(runtime.cwd ?? process.cwd(), values.repo, git);
     repository = target.repository;
     root = target.root;
   } catch {
