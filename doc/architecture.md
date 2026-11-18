@@ -227,6 +227,19 @@ refreshable rules.md snapshot and its AGENTS.md reference in a verified project;
 that snapshot is not a competing policy authority. npm installation only hints at
 onboarding and never edits the user's project or configures an agent automatically.
 
+## 12. Stable identity and one ranking implementation
+
+A supported harness reuses its saved default identity in a project across sessions;
+session markers do not become new permanent agents or prove live presence. Keep
+explicit legacy entries safe and conflicts visible. See
+[stable harness identity](design/stable-harness-identity.md).
+
+The [native-only retirement contract](design/native-ranking-only.md) requires
+removing the independent TypeScript scheduler and all selection/rollback knobs,
+without aliases or silent fallback. Neutral TypeScript mechanics remain.
+[Markdown rules](design/markdown-rules.md) uses one generated English renderer for
+CLI and onboarding snapshots while preserving native policy and structured JSON.
+
 ## Reading map
 
 - [Research index and evidence](research/README.md): reasons, experiments and limits.
