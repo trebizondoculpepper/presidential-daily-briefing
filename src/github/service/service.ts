@@ -37,6 +37,8 @@ import { ticketReads } from "./tickets.js";
 import { referenceReads } from "./references.js";
 import { reviewHistoryReads } from "./reviewhistory.js";
 import { prStatusReads } from "./prstatus.js";
+import { containmentReads } from "./containment.js";
+import type { ContainmentReads } from "./containment.js";
 import type { PrStatusReads } from "./prstatus.js";
 import type { ReviewHistoryReads } from "./reviewhistory.js";
 import type { ReferenceReads } from "./references.js";
@@ -119,6 +121,8 @@ export interface GhService {
   reviewHistory: ReviewHistoryReads;
   /** Pull request status reads (#946). */
   prStatus: PrStatusReads;
+  /** Commit containment reads: default branch, commit identity, compare (#943, #890). */
+  containment: ContainmentReads;
   /** Repository label resolution (#921). */
   labels: {
     /** Resolve normalized names to canonical labels; unresolved on any failed or partial read. */
@@ -272,6 +276,7 @@ export function createGhService(options: GhServiceOptions = {}): GhService {
     references: referenceReads(query as Query),
     reviewHistory: reviewHistoryReads(query as Query),
     prStatus: prStatusReads(query as Query),
+    containment: containmentReads(query as Query, rest),
     estimation: estimationCapabilities(graphqlApiOverTransport(transport, env)),
     delivery: deliveryReads(query as Query),
     comments: {
