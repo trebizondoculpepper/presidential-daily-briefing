@@ -60,7 +60,15 @@ export interface HumanAttentionSection {
   ruleId: string;
   reason: string;
 }
+/**
+ * A decision's native rank partition (#652): its ownership, attention and affinity keys, which
+ * precede band. Kept under a symbol so result JSON is unchanged; hosts that regroup within a band
+ * (project preferences) must stay inside one partition.
+ */
+export const RANK_PARTITION: unique symbol = Symbol("pdb.rank-partition");
+
 export interface PolicyDecision {
+  [RANK_PARTITION]?: string;
   subject: number;
   ruleId: string;
   kind: string;
@@ -164,6 +172,7 @@ export function evaluatePolicy(input: PolicyFacts, options: PolicyOptions = {}):
       band: r.band,
       preference: r.preference,
       affinity: r.affinity,
+      owned: r.owned,
       why: r.why,
     }))
       facts.push([10 + i, k, v]);
@@ -276,11 +285,15 @@ export function evaluatePolicy(input: PolicyFacts, options: PolicyOptions = {}):
         )
       : null;
   options.signal?.throwIfAborted();
+  const witnessCache = new Map<string, Value[]>();
   const decisions = rows
     .sort((a, b) => compareKeys(a.slice(2), b.slice(2)))
     .map((row): PolicyDecision => {
-      const [t, r, b] = row;
+      const [t, r, ownershipKey, attentionKey, affinityKey] = row;
       const definition = definitions[Number(r) - 10];
+      // The row's keys follow :comparison (#652: ownership/attention/affinity precede band); the
+      // reported band is the rule's own declared lifecycle band.
+      const b = definition?.band;
       if (!definition) throw new DatalogError("invalid-inference", "unknown subject or rule");
       const bindings: Record<string, Value> = {};
       const selectedWitnesses = {
@@ -289,7 +302,14 @@ export function evaluatePolicy(input: PolicyFacts, options: PolicyOptions = {}):
         ...definition.witnesses,
       };
       for (const [key, witnessQuery] of Object.entries(selectedWitnesses)) {
-        const values = ds.q(witnessQuery, db, clauses, t).flat();
+        // A subject's witnesses are pure over this database: several decisions on one subject
+        // (one activity pool for both roles, #652) share the same answers, so read each once.
+        const cacheKey = `${witnessQuery}\u0000${String(t)}`;
+        let values = witnessCache.get(cacheKey);
+        if (!values) {
+          values = ds.q(witnessQuery, db, clauses, t).flat();
+          witnessCache.set(cacheKey, values);
+        }
         if (values.length === 1) bindings[key] = values[0];
         else if (values.length > 1) {
           const sorted = values.map(String).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
@@ -304,6 +324,7 @@ export function evaluatePolicy(input: PolicyFacts, options: PolicyOptions = {}):
       const ruleIds = [definition.id];
       const attentionSection = humanSections?.get(Number(t));
       return {
+        [RANK_PARTITION]: `${String(ownershipKey)}/${String(attentionKey)}/${String(affinityKey)}`,
         subject: Number(t),
         ruleId: definition.id,
         kind: definition.kind,

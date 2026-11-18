@@ -438,3 +438,39 @@ describe("immutable exact-action admission (#515)", () => {
     );
   });
 });
+
+describe("project preferences stay inside the native rank partition (#652)", () => {
+  it("never moves new work ahead of an owned obligation in the same band", async () => {
+    const { RANK_PARTITION } = await import("../engine.js");
+    const action = (id: string, partition: string) =>
+      ({
+        [RANK_PARTITION]: partition,
+        id,
+        role: "implementer",
+        kind: "implement",
+        target: `https://github.com/o/r/issues/${id}`,
+        band: 6,
+        ruleIds: ["D-ORDINARY"],
+        why: { text: "x", ruleIds: ["D-ORDINARY"], facts: {}, overriddenRuleIds: [] },
+      }) as never;
+    const owned = action("1", "0/1/0");
+    const fresh = action("2", "1/1/0");
+    const result = applyProjectPreferences([owned, fresh], {
+      generation: "g",
+      matches: new Map([
+        [
+          "2 implementer",
+          {
+            identity: "2 implementer",
+            priority: 100,
+            matchedIds: ["P-HOT"],
+            reasons: [],
+            reasonsOmitted: 0,
+          },
+        ],
+      ]),
+    });
+    // The prioritized new work keeps its place behind the owned obligation.
+    expect(result.map((a) => (a as { id: string }).id)).toEqual(["1", "2"]);
+  });
+});

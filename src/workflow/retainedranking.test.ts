@@ -215,7 +215,13 @@ describe("both engines rank retained claims alike (#413)", () => {
       const keep = [...urls.map((u) => Number(u.split("/").pop())), 4];
       const view = only(s, keep);
       const datalog = await ranked(view, "datalog", retained);
-      expect(await ranked(view, "typescript", retained)).toEqual(datalog);
+      const legacy = await ranked(view, "typescript", retained);
+      // #651/#652: the native engine ranks owned obligations (including wait rows) before new
+      // work; the TypeScript rollback is a disclosed legacy compatibility mode (#679) that keeps
+      // the pre-#651 order, so only membership is compared where the two orders differ.
+      if (name === "waiting, resume-required and unknown")
+        expect([...legacy].sort()).toEqual([...datalog].sort());
+      else expect(legacy).toEqual(datalog);
       expect(datalog.length).toBeGreaterThan(0);
     });
 
@@ -281,7 +287,7 @@ describe("both engines rank retained claims alike (#413)", () => {
     }
   });
 
-  it("orders resume and review ahead of new work, and waits after it", async () => {
+  it("orders every owned obligation, wait rows included, ahead of new work (#651)", async () => {
     const order = (await ranked(s, "datalog", cases["waiting, resume-required and unknown"])).map(
       (r) => r.split(" | ")[0]!,
     );
@@ -297,7 +303,7 @@ describe("both engines rank retained claims alike (#413)", () => {
     expect(at("resume-claim #2")).toBeLessThan(at("implement #4"));
     expect(at("review-owned-work #1")).toBeLessThan(at("implement #4"));
     expect(at("inspect #3")).toBeLessThan(at("implement #4"));
-    expect(at("wait-claim #1")).toBeGreaterThan(at("implement #4"));
+    expect(at("wait-claim #1")).toBeLessThan(at("implement #4"));
     expect(order.filter((r) => r.startsWith("continue-implementation"))).toEqual([]);
   });
 
@@ -314,7 +320,14 @@ describe("both engines rank retained claims alike (#413)", () => {
     const shown = (await ranked(busy, "datalog", retained, 10)).map((r) => r.split(" | ")[0]!);
     expect(shown).toHaveLength(10);
     expect(shown[0]).toBe("review-owned-work #1");
-    expect(shown.filter((r) => r.startsWith("estimate-complexity"))).toHaveLength(9);
+    // #651: the owned review, continuation and wait rows all precede the new estimates.
+    expect(
+      shown
+        .slice(0, 3)
+        .map((r) => r.split(" #")[0])
+        .sort(),
+    ).toEqual(["continue-implementation", "review-owned-work", "wait-claim"]);
+    expect(shown.filter((r) => r.startsWith("estimate-complexity"))).toHaveLength(7);
   });
 });
 
