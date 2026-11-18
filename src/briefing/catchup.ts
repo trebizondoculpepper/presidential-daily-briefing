@@ -9,10 +9,10 @@
  * attribution stays separate from the GitHub account actor; waiting is not failure; incomplete
  * or unavailable history is never presented as "no changes".
  */
-import { analysisRules, excerpt, owners, prChecks } from "./briefing.js";
+import { analysisRules, excerpt, owners } from "./briefing.js";
 import { workflow } from "../workflow/definition.js";
 import { snapshotPrReadiness } from "../workflow/prstatus.js";
-import { requiredCheckEvidence } from "../github/requiredchecks.js";
+import { requiredCheckEvidence, type Requiredness } from "../github/requiredchecks.js";
 import type { Bounded } from "./briefing.js";
 import { inWindow, parseOperationMarker, snapshotChangeEvidence } from "../github/changes.js";
 import type {
@@ -228,7 +228,10 @@ export function catchUp(snapshot: Snapshot, options: CatchUpOptions) {
       ? "required checks passing; no blocker found (not approval)"
       : result.blockers.join("; ");
   };
-  const prNext = (pr: PullRequest) => nativePr(pr).verdict;
+  const prNext = (pr: PullRequest) => {
+    const result = nativePr(pr);
+    return result.ready ? result.verdict : "Blocked: address every listed blocker.";
+  };
 
   const retained = snapshotChangeEvidence(snapshot);
   const evidence: ChangeEvidence | null = retained.available ? retained.evidence : null;
@@ -1043,15 +1046,29 @@ export type CatchUpReport = ReturnType<typeof catchUp>;
 
 /**
  * The one check classification shared by the blocker rows and current activity, so the two can
- * never disagree: a cancelled check is incomplete verification, not a failure.
+ * never disagree: a cancelled check is incomplete verification, not a failure. Requiredness is
+ * matched by run identity (name + databaseId), never by name alone, so two same-named runs from
+ * different apps cannot transfer requiredness between them.
  */
 function classifyChecks(pr: PullRequest) {
-  // The shared normalizer preserves observed context order. Keep each run's requiredness
-  // alongside its outcome; names alone cannot distinguish different apps/runs.
+  const contexts = pr.commits?.nodes?.[0]?.commit.statusCheckRollup?.contexts.nodes ?? [];
   const evidence = requiredCheckEvidence(pr);
-  const checks = prChecks(pr).map((check, index) => ({
-    ...check,
-    required: evidence.checks[index]!.required,
+  const keyOf = (c: (typeof contexts)[number]) => {
+    const name = c.name ?? c.context ?? "unnamed";
+    return c.databaseId != null ? `${name}\u0000${c.databaseId}` : name;
+  };
+  const requiredByIdentity = new Map<string, Requiredness>();
+  for (const run of evidence.checks) {
+    const key = run.databaseId != null ? `${run.name}\u0000${run.databaseId}` : run.name;
+    // A name with several database IDs is ambiguous; only store unambiguous single entries.
+    if (!requiredByIdentity.has(key)) requiredByIdentity.set(key, run.required);
+    else if (requiredByIdentity.get(key) !== run.required) requiredByIdentity.set(key, "unknown");
+  }
+  const checks = contexts.map((check) => ({
+    name: check.name ?? check.context ?? "unnamed",
+    outcome: check.conclusion ?? check.state ?? check.status ?? "UNKNOWN",
+    url: check.detailsUrl ?? check.targetUrl ?? pr.url,
+    required: requiredByIdentity.get(keyOf(check)) ?? "unknown",
   }));
   return {
     checks,
