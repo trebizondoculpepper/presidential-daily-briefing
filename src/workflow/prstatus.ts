@@ -35,85 +35,14 @@ import type { DeclaredReviewPolicy, ReviewPolicyDetail } from "./reviewpolicy.js
 import type { PullRequest } from "../github/types.js";
 export { codexMarker };
 export type { CodexMarker, CodexReviewState } from "./reviewevidence.js";
-import { ghQuery, ghRest, prop, selected, SubjectUnavailable } from "../github/github.js";
+import { ghQuery, ghRest, SubjectUnavailable } from "../github/github.js";
 import type { Query, Rest } from "../github/github.js";
 import type { ReadMeter } from "../github/readplan.js";
 
-type Login = { __typename?: string; login: string } | null;
-type PageInfo = { hasNextPage?: boolean; hasPreviousPage?: boolean };
-type CheckContext = {
-  databaseId?: number | null;
-  __typename?: string;
-  name?: string;
-  context?: string;
-  status?: string | null;
-  conclusion?: string | null;
-  state?: string | null;
-  detailsUrl?: string | null;
-  targetUrl?: string | null;
-  startedAt?: string | null;
-  completedAt?: string | null;
-  /** The GitHub App that published a check run: provider identity, never its display name. */
-  checkSuite?: { app: { slug: string; databaseId?: number } | null } | null;
-  /** Whether GitHub requires this check for this PR (#343); null/absent is unknown. */
-  isRequired?: boolean | null;
-};
-type ReviewNode = {
-  author: Login;
-  state: string;
-  submittedAt: string | null;
-  url: string;
-  commit: { oid: string } | null;
-};
-type ThreadComment = { author: Login; body?: string; createdAt: string | null; url: string };
-type ThreadNode = {
-  isResolved: boolean;
-  isOutdated?: boolean;
-  path?: string | null;
-  line?: number | null;
-  first?: { totalCount?: number; nodes: ThreadComment[] } | null;
-  latest?: { nodes: ThreadComment[] } | null;
-};
-type CommentNode = { author: Login; body: string | null; createdAt: string; url: string };
-type LinkedIssueNode = {
-  number: number;
-  url: string;
-  title: string;
-  state: string;
-  labels: { nodes: { name: string }[] };
-};
-/** The pull request as selected by `query` below. */
-export type PullRequestNode = {
-  requiredChecks?: RequiredChecks;
-  number: number;
-  title: string;
-  url: string;
-  state: string;
-  isDraft?: boolean;
-  merged?: boolean;
-  mergeable: string;
-  mergeStateStatus: string;
-  reviewDecision?: string | null;
-  headRefOid: string;
-  headRefName: string;
-  baseRefName: string;
-  updatedAt: string;
-  commits: {
-    nodes: {
-      commit: {
-        oid?: string;
-        statusCheckRollup: {
-          state?: string;
-          contexts: { nodes: CheckContext[]; pageInfo: PageInfo };
-        } | null;
-      };
-    }[];
-  };
-  reviews: { nodes: ReviewNode[]; pageInfo?: PageInfo };
-  reviewThreads: { nodes: ThreadNode[]; pageInfo: PageInfo };
-  comments: { nodes: CommentNode[]; pageInfo?: PageInfo };
-  closingIssuesReferences: { nodes: LinkedIssueNode[]; pageInfo?: PageInfo };
-};
+// The pull request node types and their document live with the typed GH read (#946).
+import type { CheckContext, PullRequestNode, ReviewNode } from "../github/service/prstatus.js";
+import { prStatusReads } from "../github/service/prstatus.js";
+export type { PullRequestNode } from "../github/service/prstatus.js";
 
 /**
  * `advisory-pending` (#343): still running, but GitHub reports it is not required for this PR;
@@ -218,13 +147,6 @@ export type PrStatusReport = {
   verdict: string;
   completeness: { complete: boolean; warnings: string[] };
 };
-
-const query = `query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,name:$name){pullRequest(number:$number){number title url state isDraft merged mergeable mergeStateStatus reviewDecision headRefOid headRefName baseRefName updatedAt
-commits(last:1){nodes{commit{oid committedDate statusCheckRollup{state contexts(first:100){nodes{__typename ... on CheckRun{name databaseId status conclusion detailsUrl startedAt completedAt isRequired(pullRequestNumber:$number) checkSuite{app{slug databaseId}}} ... on StatusContext{context state targetUrl isRequired(pullRequestNumber:$number)}} pageInfo{hasNextPage}}}}}}
-reviews(last:50){nodes{author{__typename login} state submittedAt url commit{oid}} pageInfo{hasPreviousPage}}
-reviewThreads(first:100){nodes{isResolved isOutdated path line first:comments(first:1){totalCount nodes{author{__typename login} body createdAt url}} latest:comments(last:1){nodes{author{login} createdAt url}}} pageInfo{hasNextPage}}
-comments(last:100){nodes{author{__typename login} body createdAt url} pageInfo{hasPreviousPage}}
-closingIssuesReferences(first:10){nodes{number url title state labels(first:50){nodes{name}}} pageInfo{hasNextPage}}}}}`;
 
 /** Bounds keep the report small; omitted counts are always reported. */
 export const limits = { failures: 5, threads: 8, receipts: 3, excerpt: 240 };
@@ -516,14 +438,12 @@ export async function pullRequestStatus(
   rest?: Rest,
 ): Promise<PrStatusReport> {
   const startedAt = now().toISOString();
-  const [owner, name] = repository.split("/");
   const subject = `${repository}#${number}`;
-  const data = await (meter ? meter.query(q, "pull-request", subject) : q)(query, {
-    owner,
-    name,
+  // The typed, validated status read (#946) over this read's (metered) executor.
+  const pr = await prStatusReads(meter ? meter.query(q, "pull-request", subject) : q).pullRequest(
+    repository,
     number,
-  });
-  const pr = selected<PullRequestNode>(prop(data, "repository", "pullRequest"));
+  );
   if (!pr) throw new SubjectUnavailable(`Pull request #${number} is unavailable in ${repository}.`);
   const restBoundary = rest ?? (q === ghQuery ? ghRest : undefined);
   if (restBoundary)
