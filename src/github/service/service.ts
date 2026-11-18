@@ -15,6 +15,13 @@ import { historyReads } from "./history.js";
 import { checkReads } from "./checks.js";
 import { readRateLimits } from "./ratelimits.js";
 import { resolveLabels } from "./labels.js";
+import { commentPostOver, ghCommentReceipt } from "../dependencies.js";
+import { withCommentRecovery } from "../commentwrite.js";
+import type {
+  CommentCallOptions,
+  CommentRecovery,
+  CommentRecoveryPolicy,
+} from "../commentwrite.js";
 import type { LabelResolution } from "./labels.js";
 import { discoveryPage, issueCommentsPage, issuesByNumber } from "./snapshot.js";
 import type { Issue } from "./snapshot.js";
@@ -55,6 +62,18 @@ export interface GhService {
   history: HistoryReads;
   /** Required-check evidence: branch rules and protection, head requiredness (#926). */
   checks: CheckReads;
+  /** Comment writes with the shared bounded recovery (#918, doc/design/comment-write-recovery.md). */
+  comments: {
+    /**
+     * Post one frozen comment: at most one guarded retry after a throttle, a receipt read-back
+     * by this write's own nonce, and never a blind re-POST. Resolves with the recovery record
+     * when posted; rejects with CommentWriteError otherwise (may-have-posted included).
+     */
+    create(
+      target: { repository: string; number: number; body: string },
+      call?: CommentCallOptions,
+    ): Promise<CommentRecovery>;
+  };
   /** Repository label resolution (#921). */
   labels: {
     /** Resolve normalized names to canonical labels; unresolved on any failed or partial read. */
@@ -96,6 +115,14 @@ export interface GhServiceOptions {
   query?: GraphQuery;
   /** Clock for observation times. */
   now?: () => Date;
+  /** Comment recovery overrides (policy, sleep, clock, nonce, cancellation); production defaults. */
+  commentRecovery?: {
+    policy?: Partial<CommentRecoveryPolicy>;
+    sleep?: (ms: number, signal?: AbortSignal) => Promise<void>;
+    now?: () => number;
+    nonce?: () => string;
+    signal?: AbortSignal;
+  };
 }
 
 const LOGIN = /^[\w.-]+$/;
@@ -157,6 +184,30 @@ export function createGhService(options: GhServiceOptions = {}): GhService {
       },
     },
     history: historyReads(query),
+    comments: {
+      async create(target, call) {
+        // The write and its receipt read run over this service's own transport, environment and
+        // query executor; the gh command is an internal detail of the capability.
+        const run = withCommentRecovery({
+          dispatch: commentPostOver(transport, env),
+          readBack: (t, since) => ghCommentReceipt(t, since, query as Query),
+          ...options.commentRecovery,
+        });
+        const result = await run(
+          [
+            "issue",
+            "comment",
+            String(target.number),
+            "--repo",
+            target.repository,
+            "--body",
+            target.body,
+          ],
+          call,
+        );
+        return result!;
+      },
+    },
     labels: {
       resolve: (repository, names) => resolveLabels(repository, names, query as Query),
     },

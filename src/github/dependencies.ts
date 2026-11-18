@@ -1,5 +1,7 @@
 /** Native dependency queries and pure facts. Contract: doc/issue-dependencies.md. */
 import { execFile } from "node:child_process";
+import { execFileTransport } from "./service/transport.js";
+import type { GhTransport } from "./service/transport.js";
 import { promisify } from "node:util";
 import {
   ghQuery,
@@ -721,13 +723,17 @@ export const ghRun: GhRun = async (args, call) => {
  * One REST comment POST through gh with `--include`, so the refusal is classified from that same
  * response's status, headers and error fields (#293, #345). Resolves with the created URL.
  */
-async function ghCommentPost(args: string[]): Promise<{ url: string | null }> {
-  const target = commentCommand(args)!;
-  let stdout: unknown;
-  try {
-    ({ stdout } = await execute(
-      "gh",
-      [
+/**
+ * One comment POST over a GH transport (#918): `POST /repos/{r}/issues/{n}/comments` with the
+ * frozen body, classified from this response. Runs with the given environment, so a service's
+ * host and transport are honoured for writes as for reads.
+ */
+export const commentPostOver =
+  (transport: GhTransport, env?: NodeJS.ProcessEnv) =>
+  async (args: string[]): Promise<{ url: string | null }> => {
+    const target = commentCommand(args)!;
+    const outcome = await transport({
+      args: [
         "api",
         "--include",
         "--method",
@@ -736,32 +742,34 @@ async function ghCommentPost(args: string[]): Promise<{ url: string | null }> {
         "-f",
         `body=${target.body}`,
       ],
-      { timeout: 60_000 },
-    ));
-  } catch (error) {
-    let response: GhResponse | null = null;
-    try {
-      const out = outputText(prop(error, "stdout"));
-      response = out ? parseGhResponse(out) : null;
-    } catch {
-      response = null;
-    }
-    const timedOut = prop(error, "killed") === true && prop(error, "signal") === "SIGTERM";
-    throw Object.assign(new Error("gh issue comment failed."), {
-      commentAttempt: classifyCommentResponse(response, {
-        exitCode: prop(error, "code"),
-        timedOut,
-      }),
+      ...(env ? { env } : {}),
+      timeoutMs: 60_000,
+      maxBufferBytes: 1024 * 1024,
     });
-  }
-  try {
-    const url = prop(JSON.parse(parseGhResponse(outputText(stdout)).body), "html_url");
-    return { url: typeof url === "string" ? url : null };
-  } catch {
-    // gh exited 0, so GitHub answered 2xx: posted, URL unknown.
-    return { url: null };
-  }
-}
+    if (!outcome.ok) {
+      let response: GhResponse | null = null;
+      try {
+        response = outcome.stdout ? parseGhResponse(outcome.stdout) : null;
+      } catch {
+        response = null;
+      }
+      throw Object.assign(new Error("gh issue comment failed."), {
+        commentAttempt: classifyCommentResponse(response, {
+          exitCode: outcome.exitCode,
+          timedOut: outcome.kind === "timeout",
+        }),
+      });
+    }
+    const stdout = outcome.stdout;
+    try {
+      const url = prop(JSON.parse(parseGhResponse(stdout).body), "html_url");
+      return { url: typeof url === "string" ? url : null };
+    } catch {
+      // gh exited 0, so GitHub answered 2xx: posted, URL unknown.
+      return { url: null };
+    }
+  };
+const ghCommentPost = commentPostOver(execFileTransport);
 
 /**
  * Read back the newest comments on the target for this exact frozen body written by the
