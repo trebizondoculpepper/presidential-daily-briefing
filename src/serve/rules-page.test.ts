@@ -13,7 +13,7 @@ import type { ConfigFileSystem, GitRunner } from "../config/config.js";
 import { systemClock } from "../mcp/polling.js";
 import { buildPolicy, policyDir } from "../rules/datalog/build.js";
 import { compileEnglish } from "../rules/datalog/english.js";
-import { rulesDocument, rulesText, shippedModel } from "../rules/datalog/rules-command.js";
+import { rulesDocument, rulesFormalText, shippedModel } from "../rules/datalog/rules-command.js";
 import type { EffectiveSettings } from "../rules/datalog/rules-command.js";
 import { declaredRulesContext } from "../rules/declared-context.js";
 import { startServe } from "../serve.js";
@@ -65,7 +65,7 @@ const editedModel = (file: string, edit: (text: string) => string) =>
 describe("rules page rendering (#392)", () => {
   it("retains every formal section and line beneath purpose-first controls", () => {
     const doc = rulesDocument({ ...declaredRulesContext(), effective: unknown });
-    const text = rulesText(doc);
+    const text = rulesFormalText(doc);
     const html = rulesPageHtml(doc, text, page);
     expect(pageSections(html)).toEqual(formalSections(text));
     // Nothing is lost by the split: every non-heading line of the text is on the page.
@@ -85,7 +85,7 @@ describe("rules page rendering (#392)", () => {
     const model = editedModel("decisions.edn", (t) => t.replace(before, after));
     expect(model.rulesHash).not.toBe(shippedModel().rulesHash);
     const doc = rulesDocument({ ...declaredRulesContext(), effective: unknown }, {}, model);
-    const text = rulesText(doc);
+    const text = rulesFormalText(doc);
     const html = rulesPageHtml(doc, text, page);
     expect(pageSections(html)).toEqual(formalSections(text));
     expect(text).toContain("unfavorable(?t)");
@@ -98,7 +98,7 @@ describe("rules page rendering (#392)", () => {
       t.replace('[1 "order" "impact"]', '[1 "order" "<img src=x onerror=alert(1)>"]'),
     );
     const doc = rulesDocument({ ...declaredRulesContext(), effective: unknown }, {}, model);
-    const html = rulesPageHtml(doc, rulesText(doc), page);
+    const html = rulesPageHtml(doc, rulesFormalText(doc), page);
     expect(html).toContain("&lt;img src=x onerror=alert(1)&gt;");
     expect(html.replace('<script src="/project-selection.js" defer></script>', "")).not.toMatch(
       /<img|<script/i,
@@ -112,10 +112,12 @@ describe("rules page rendering (#392)", () => {
       readFrom: ".github/triage.toml",
       settings: [{ name: "processGuide", value: true, source: "explicit" }],
     };
-    const shown = rulesText(rulesDocument({ ...declaredRulesContext(), effective: known }));
+    const shown = rulesFormalText(rulesDocument({ ...declaredRulesContext(), effective: known }));
     expect(shown).toContain("Effective settings of example/project (read from .github/triage.toml");
     expect(shown).toContain("processGuide = true  (stored in the settings file)");
-    const hidden = rulesText(rulesDocument({ ...declaredRulesContext(), effective: unknown }));
+    const hidden = rulesFormalText(
+      rulesDocument({ ...declaredRulesContext(), effective: unknown }),
+    );
     expect(hidden).toContain("This repository's effective settings: unknown. test: not read");
     expect(hidden).not.toContain("Effective settings of");
   });
@@ -294,7 +296,7 @@ describe("GET /rules (#392)", () => {
 describe("purpose-first rule presentation (#578)", () => {
   it("shows sample purposes before closed native formal controls and retains human rules", () => {
     const doc = rulesDocument(declaredRulesContext());
-    const html = rulesPageHtml(doc, rulesText(doc), page);
+    const html = rulesPageHtml(doc, rulesFormalText(doc), page);
     for (const id of [
       "D-ATTENTION",
       "D-PR-FAIL",
@@ -314,23 +316,23 @@ describe("purpose-first rule presentation (#578)", () => {
     expect(html).toContain("not evidence that a rule matched a ticket");
     expect(html).toContain("Mutation guards remain outside this listing");
     expect(html).toContain("Not formalized here");
-    expect(pageSections(html)).toEqual(formalSections(rulesText(doc)));
+    expect(pageSections(html)).toEqual(formalSections(rulesFormalText(doc)));
   });
 
   it("keeps missing older metadata and newly introduced rule IDs visible with formal fallback", () => {
     const older = structuredClone(shippedModel());
     for (const rule of [...older.decisions, ...older.denials]) delete rule.purpose;
     const oldDoc = rulesDocument(declaredRulesContext(), {}, older);
-    const oldPage = rulesPageHtml(oldDoc, rulesText(oldDoc), page);
+    const oldPage = rulesPageHtml(oldDoc, rulesFormalText(oldDoc), page);
     expect(oldPage).toContain("Authored purposes: 0 of 48 rules in this view");
     expect(oldPage).toContain("Purpose not supplied");
-    expect(pageSections(oldPage)).toEqual(formalSections(rulesText(oldDoc)));
+    expect(pageSections(oldPage)).toEqual(formalSections(rulesFormalText(oldDoc)));
 
     const future = editedModel("decisions.edn", (t) =>
       t.replace(':id "D-ATTENTION"', ':id "D-FUTURE"').replace(/\n   :purpose "[^"\n]*"/, ""),
     );
     const doc = rulesDocument(declaredRulesContext(), {}, future);
-    const html = rulesPageHtml(doc, rulesText(doc), page);
+    const html = rulesPageHtml(doc, rulesFormalText(doc), page);
     expect(doc.narration.missing).toContain("D-FUTURE");
     expect(html).toContain('data-rule-id="D-FUTURE"');
     expect(html).toContain("D-FUTURE: action addressed-response");
@@ -344,7 +346,7 @@ describe("purpose-first rule presentation (#578)", () => {
       t.replace(/:purpose "[^"\n]*"/, `:purpose ${JSON.stringify(literal)}`),
     );
     const doc = rulesDocument(declaredRulesContext(), {}, revised);
-    const html = rulesPageHtml(doc, rulesText(doc), page);
+    const html = rulesPageHtml(doc, rulesFormalText(doc), page);
     expect(revised.rulesHash).toBe(shippedModel().rulesHash);
     expect(revised.narrationHash).not.toBe(shippedModel().narrationHash);
     expect(html).toContain(`<code>${revised.rulesHash}</code>`);
@@ -362,14 +364,14 @@ describe("purpose-first rule presentation (#578)", () => {
     "reports purpose coverage for the actual %s filtered view",
     (role) => {
       const doc = rulesDocument(declaredRulesContext(), { role });
-      const html = rulesPageHtml(doc, rulesText(doc), { ...page, filters: { role } });
+      const html = rulesPageHtml(doc, rulesFormalText(doc), { ...page, filters: { role } });
       expect(html).toContain("Filtered subset");
       expect(html).toContain(
         `Authored purposes: ${doc.narration.supplied} of ${doc.narration.total}`,
       );
       expect(doc.narration.total).toBeLessThan(48);
       expect(doc.narration.missing).toEqual([]);
-      expect(pageSections(html)).toEqual(formalSections(rulesText(doc)));
+      expect(pageSections(html)).toEqual(formalSections(rulesFormalText(doc)));
     },
   );
 
@@ -387,7 +389,7 @@ describe("purpose-first rule presentation (#578)", () => {
       base,
     );
     const doc = rulesDocument({ ...declaredRulesContext(), project: { state: "active", policy } });
-    const html = rulesPageHtml(doc, rulesText(doc), page);
+    const html = rulesPageHtml(doc, rulesFormalText(doc), page);
     expect(html).toContain("Prefer the project priority label.");
     expect(html).toContain(policy.effectiveRulesHash);
     expect(html).toContain("<dt>Project source format</dt><dd>2 (projection 1)</dd>");
@@ -395,13 +397,15 @@ describe("purpose-first rule presentation (#578)", () => {
       `<dt>Project source revision</dt><dd><code>${policy.projectRulesHash}</code>`,
     );
     expect(doc.project?.preferences[0].purpose).toBe(policy.preferences[0].purpose);
-    expect(pageSections(html)).toEqual(formalSections(rulesText(doc)));
+    expect(pageSections(html)).toEqual(formalSections(rulesFormalText(doc)));
     const plain = compileProjectPolicy(fixture, base);
     const missing = rulesDocument({
       ...declaredRulesContext(),
       project: { state: "active", policy: plain },
     });
     expect(missing.narration.missing).toContain(plain.preferences[0].id);
-    expect(rulesPageHtml(missing, rulesText(missing), page)).toContain("Purpose not supplied");
+    expect(rulesPageHtml(missing, rulesFormalText(missing), page)).toContain(
+      "Purpose not supplied",
+    );
   });
 });

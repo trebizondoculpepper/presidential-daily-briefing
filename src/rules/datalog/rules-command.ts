@@ -23,6 +23,12 @@ import {
   denialQueryLines,
   preferenceFormalLines,
   decisionGroups,
+  mdCode,
+  mdEscape,
+  mdClauseLines,
+  mdDecisionLines,
+  mdDenialLines,
+  mdPreferenceLines,
 } from "./english-render.js";
 import type {
   Clause,
@@ -534,8 +540,233 @@ export function rulesDocument(
 }
 export type RulesDocument = ReturnType<typeof rulesDocument>;
 
-/** The complete formal CLI listing; purposes never replace or append conditions here. */
+/** Markdown formal CLI listing (#1049, doc/design/markdown-rules.md); purposes stay separate. */
 export function rulesText(doc: RulesDocument): string {
+  const out: string[] = [];
+  const push = (...lines: string[]) => out.push(...lines);
+  push(
+    `# ${mdCode(RULES_COMMAND)} — Compiled Policy`,
+    "",
+    "The represented policy, compiled to English from its Datalog clauses.",
+    "",
+    `- Policy: version ${mdCode(String(doc.policy.policyVersion))}, \`rulesHash\` ${mdCode(doc.policy.rulesHash)}`,
+    `- Sources: ${doc.policy.sources.map(mdCode).join(", ")} (bundled; English model ${mdCode(String(doc.policy.englishModelVersion))})`,
+  );
+  if (doc.scope.complete) {
+    push(`- Scope: ${mdEscape(doc.scope.note)}`);
+  } else {
+    const filterFlags = Object.entries(doc.scope.filters)
+      .map(([k, v]) => `--${k} ${v}`)
+      .join(" ");
+    push(`- Scope: FILTERED (${mdCode(filterFlags)}). ${mdEscape(doc.scope.note)}`);
+  }
+  const ep = doc.effectivePolicy;
+  if (ep.state === "active") {
+    push(
+      `- Effective policy: shipped default plus project preferences from ${mdCode(ep.source)} (\`effectiveRulesHash\` ${mdCode(ep.effectiveRulesHash ?? "")}; \`projectRulesHash\` ${mdCode(ep.projectRulesHash ?? "")})`,
+    );
+  } else if (ep.state === "disabled") {
+    push(
+      `- Effective policy: the shipped default only (project preferences disabled: ${mdEscape(ep.reason ?? "")})`,
+    );
+  } else if (ep.state === "error") {
+    push(
+      `- Effective policy: ERROR. ${mdEscape(ep.reason ?? "")}. The project preferences are enabled but not in force; briefings are incomplete until this is fixed. ${ep.next.map(mdEscape).join("; ")}`,
+    );
+  } else {
+    push(`- Effective policy: unknown. ${mdEscape(ep.reason ?? "")}`);
+  }
+  push(`- See also: ${mdEscape(doc.related.process)}`);
+  push(
+    '- Reading: `?t` is the ticket or pull request, `?r` a decision rule; `name(?x)` is a predicate defined in the glossary; `"no match for"` means no fact matches, which is not proof of the opposite.',
+  );
+
+  push(
+    "",
+    "## Defaults",
+    "",
+    "Bundled defaults (declared by `pdb`, not read from any repository):",
+    "",
+  );
+  for (const d of doc.defaults.declared) {
+    push(`- ${mdCode(d.name)} = ${mdCode(JSON.stringify(d.value))} (${mdEscape(d.declaredBy)})`);
+  }
+  const effective = doc.defaults.effective;
+  if (effective.status === "unknown") {
+    push("", `This repository's effective settings: unknown. ${mdEscape(effective.reason)}`);
+  } else {
+    push(
+      "",
+      `Effective settings of ${mdCode(effective.repository)} (read from ${mdCode(effective.readFrom)} in its verified local checkout):`,
+      "",
+    );
+    for (const s of effective.settings) {
+      push(
+        `- ${mdCode(s.name)} = ${mdCode(JSON.stringify(s.value))} (${s.source === "explicit" ? "stored in the settings file" : "not stored; the registry default applies"})`,
+      );
+    }
+  }
+
+  const show = (n: number) => doc.scope.complete || n > 0;
+  if (show(doc.decisions.length)) {
+    push(
+      "",
+      `## Decision rules (${doc.decisions.length})`,
+      "",
+      "Each rule proposes its action for every `?t` its conditions match.",
+    );
+    for (const { band, decisions } of decisionGroups(doc.decisions)) {
+      push("", `### Band ${band}`);
+      for (const d of decisions) push(...mdDecisionLines(d));
+    }
+  }
+
+  if (show(doc.eligibility.denials.length)) {
+    push("", `## Eligibility and denials (${doc.eligibility.denials.length})`);
+    if (doc.eligibility.denialQuery) {
+      const q = doc.eligibility.denialQuery;
+      push(
+        "",
+        "### Denials query",
+        "",
+        `- ${mdEscape(queryHeader(q))}`,
+        ...mdClauseLines(q.clauses, "  "),
+      );
+    }
+    for (const d of doc.eligibility.denials) push(...mdDenialLines(d));
+  }
+
+  push(
+    "",
+    "## Ordering",
+    "",
+    `Sort keys, compared in this sequence, smaller first: ${doc.ordering.comparison.map(mdCode).join(", ")}.`,
+  );
+  if (doc.ordering.overrides.length) {
+    push("", "Declared overrides (winner over loser, when both match the same `?t`):", "");
+    for (const o of doc.ordering.overrides) push(`- ${mdCode(o.winner)} over ${mdCode(o.loser)}`);
+  }
+  for (const q of doc.ordering.overrideQueries) {
+    push("", `### Override query: ${mdEscape(queryHeader(q))}`, "", ...mdClauseLines(q.clauses));
+  }
+  if (doc.ordering.sortQuery) {
+    push(
+      "",
+      `### Sort query: ${mdEscape(queryHeader(doc.ordering.sortQuery))}`,
+      "",
+      ...mdClauseLines(doc.ordering.sortQuery.clauses),
+    );
+  }
+  for (const q of doc.ordering.keyQueries) {
+    push("", `### Sort key query: ${mdEscape(queryHeader(q))}`, "", ...mdClauseLines(q.clauses));
+  }
+
+  if (doc.project) {
+    const p = doc.project;
+    push(
+      "",
+      `## Project preferences (${p.preferences.length})`,
+      "",
+      `From ${mdCode(p.source)}. ${p.statements.map(mdEscape).join(" ")}`,
+    );
+    for (const pref of p.preferences) push(...mdPreferenceLines(pref));
+    if (p.helpers.length) {
+      push("", "### Project helpers");
+      for (const h of p.helpers) {
+        push(
+          "",
+          `- ${mdCode(predicateHead(h.name, h.params))} all of:`,
+          ...mdClauseLines(h.clauses, "  "),
+        );
+      }
+    }
+    if (p.limits) {
+      push(
+        "",
+        `Limits: at most ${p.limits.actions} adjustable actions and ${p.limits.datoms} projected facts; evaluation within ${p.limits.evaluationMs} ms after a ${p.limits.startupMs} ms worker start. Excess is an error, never a partial ranking.`,
+        "",
+        "Project inputs (projection lexicon, read-only):",
+        "",
+        ...Object.entries(p.limits.lexicon.attributes).map(
+          ([k, v]) => `- ${mdCode(k)}: ${mdEscape(v)}`,
+        ),
+      );
+    }
+  }
+
+  if (doc.queries.length) {
+    push("", `## Other engine queries (${doc.queries.length})`);
+    for (const q of doc.queries) {
+      push("", `### ${mdEscape(queryHeader(q))}`, "", ...mdClauseLines(q.clauses));
+    }
+  }
+
+  push(
+    "",
+    `## Predicate glossary (${doc.predicates.length})`,
+    "",
+    "Each numbered definition is sufficient on its own; within one, every condition must hold.",
+  );
+  for (const p of doc.predicates) {
+    const tag = p.set === "ordering" ? " `[ordering rules]`" : "";
+    push("", `### ${mdCode(`${p.name}(${p.params.join(", ")})`)}${tag}`, "");
+    p.alternatives.forEach((a, i) => {
+      const own =
+        a.params.join(", ") === p.params.join(", ")
+          ? ""
+          : ` ${mdCode(predicateHead(p.name, a.params))}`;
+      const childIndent = " ".repeat(`${i + 1}. `.length);
+      push(`${i + 1}.${own} all of:`, ...mdClauseLines(a.clauses, childIndent));
+    });
+    const used = p.usedBy;
+    const parts = used
+      ? [
+          ...used.decisions.map(mdCode),
+          ...used.denials.map(mdCode),
+          ...used.predicates.map((x) => mdCode(`${x}()`)),
+          ...used.queries.map((x) => `query ${mdCode(x)}`),
+        ]
+      : [];
+    push(`- Used by: ${parts.length ? parts.join(", ") : "none"}`);
+  }
+
+  if (doc.evidence.length) {
+    push("", "## Evidence every rule may show", "");
+    for (const line of evidenceLines(doc.evidence, "")) {
+      push(`- ${mdEscape(line)}`);
+    }
+  }
+
+  push("", "## Constant sets", "");
+  for (const [name, values] of Object.entries(doc.constants)) {
+    push(`- ${mdCode(name)}: ${values.map((v) => mdCode(JSON.stringify(v))).join(", ")}`);
+  }
+
+  push("", "## Inputs (lexicon)", "", "### Viewer facts", "");
+  for (const [k, v] of Object.entries(doc.lexicon.viewer)) {
+    push(`- ${mdCode(k)}: ${mdEscape(v)}`);
+  }
+  push("", "### Attributes", "");
+  for (const [k, v] of Object.entries(doc.lexicon.attributes)) {
+    push(`- ${mdCode(k)}: ${mdEscape(v)}`);
+  }
+
+  push("", "## Not formalized here", "");
+  for (const s of doc.boundary.statements) push(`- ${mdEscape(s)}`);
+
+  const c = doc.coverage;
+  push(
+    "",
+    `Coverage of the full policy: ${c.decisions} decision rules, ${c.denials} denials, ${c.predicates} predicates (${c.alternatives} definitions), ${c.queries} queries, ${c.keyQueries} sort key queries, ${c.evidence} evidence bindings, ${c.overrides} declared overrides, ${c.constants} constant sets, ${c.attributes} attributes, ${c.clauses} clauses.`,
+  );
+  if (!doc.scope.complete) {
+    push("", "This output is a filtered subset; the counts above describe the full policy.");
+  }
+  return `${out.join("\n")}\n`;
+}
+
+/** Legacy plain-text formal listing kept for the web Rules page's `<pre class="rules">` cards. */
+export function rulesFormalText(doc: RulesDocument): string {
   const out: string[] = [];
   const push = (...lines: string[]) => out.push(...lines);
   push(
@@ -693,17 +924,17 @@ export function rulesText(doc: RulesDocument): string {
 }
 
 export const rulesHelp = `Usage: pdb rules [--json] [--rule ID] [--role implementer|designer]
-Prints the effective policy in English, compiled from the bundled Datalog clauses: policy
-identity, declared defaults, decision rules by band, eligibility and denials, ordering and
-declared overrides, the project's native preferences when they are enabled in this checkout
-(pdb config set rules.project.enabled true), other engine queries, the predicate glossary,
-constants, inputs and what is not formalized here. Local: no GitHub calls or credentials; it
-reads only this checkout's configuration and pdb.rules.edn.
+Prints the effective policy as readable Markdown in English, compiled from the bundled Datalog
+clauses: policy identity, declared defaults, decision rules by band, eligibility and denials,
+ordering and declared overrides, the project's native preferences when they are enabled in this
+checkout (pdb config set rules.project.enabled true), other engine queries, the predicate
+glossary, constants, inputs and what is not formalized here. Local: no GitHub calls or
+credentials; it reads only this checkout's configuration and pdb.rules.edn.
   --rule ID     One decision rule, denial or predicate, with the predicates it needs and its
                 precedence context (rules of the same kind and declared overrides), or one
                 project preference or helper of an active project policy
   --role R      Rules for implementer or designer; rules without a top-level role fact stay
-  --json        Versioned document (schemaVersion ${RULES_SCHEMA_VERSION}); the text is the same document
+  --json        Versioned document (schemaVersion ${RULES_SCHEMA_VERSION}); the Markdown is the same document
   --help        Show usage
 pdb rules init writes a starter pdb.rules.edn bound to the shipped policy into this checkout,
 never overwriting a file and enabling nothing.

@@ -18,6 +18,7 @@ export {
 export {
   rulesDocument,
   rulesText,
+  rulesFormalText,
   rulesHelp,
   RulesArgumentError,
   RulesArtifactError,

@@ -6,7 +6,7 @@ import { describe, it, expect } from "vite-plus/test";
 import { main } from "../../cli.js";
 import { buildPolicy } from "./build.js";
 import { compileEnglish } from "./english.js";
-import { clauseLines } from "./english-render.js";
+import { mdClauseLines } from "./english-render.js";
 import {
   RulesArgumentError,
   RulesArtifactError,
@@ -56,27 +56,34 @@ describe("pdb rules document (#416)", () => {
     expect(doc.eligibility.denials).toHaveLength(model.denials.length);
     expect(doc.predicates).toHaveLength(model.predicates.length);
     expect(doc.ordering.overrides).toEqual(model.ordering.overrides);
-    expect(text).toContain(`Policy: version ${model.policyVersion}, rulesHash ${model.rulesHash}`);
+    expect(text).toContain(
+      `- Policy: version \`${model.policyVersion}\`, \`rulesHash\` \`${model.rulesHash}\``,
+    );
     for (const d of doc.decisions) {
-      expect(text).toContain(`  ${d.id}: action ${d.kind}; preference ${d.preference};`);
-      for (const line of clauseLines(d.clauses, "      ")) expect(text).toContain(line);
+      expect(text).toContain(`#### \`${d.id}\``);
+      expect(text).toContain(`- Action: \`${d.kind}\` · Preference: \`${d.preference}\` ·`);
+      for (const line of mdClauseLines(d.clauses, "  ")) expect(text).toContain(line);
     }
-    for (const d of doc.eligibility.denials)
-      expect(text).toContain(`  ${d.id} (from ${d.predicate})`);
+    for (const d of doc.eligibility.denials) {
+      expect(text).toContain(`### \`${d.id}\``);
+      expect(text).toContain(`- Predicate: \`${d.predicate}\``);
+    }
     for (const p of doc.predicates) {
-      expect(text).toContain(`  ${p.name}(${p.params.join(", ")})`);
+      expect(text).toContain(`### \`${p.name}(${p.params.join(", ")})\``);
       for (const a of p.alternatives)
-        for (const line of clauseLines(a.clauses, "        ")) expect(text).toContain(line);
+        for (const line of mdClauseLines(a.clauses, "   ")) expect(text).toContain(line);
     }
     for (const q of [...doc.queries, ...doc.ordering.keyQueries, ...doc.ordering.overrideQueries])
       expect(text).toContain(`${q.name}: find ${q.find.join(", ")}`);
-    for (const o of doc.ordering.overrides) expect(text).toContain(`  ${o.winner} over ${o.loser}`);
+    for (const o of doc.ordering.overrides)
+      expect(text).toContain(`- \`${o.winner}\` over \`${o.loser}\``);
     expect(text).toContain(
-      `Sort keys, compared in this sequence, smaller first: ${model.ordering.comparison.join(", ")}.`,
+      `Sort keys, compared in this sequence, smaller first: ${model.ordering.comparison.map((c) => `\`${c}\``).join(", ")}.`,
     );
-    for (const name of Object.keys(model.lexicon.attributes)) expect(text).toContain(`  ${name}: `);
-    expect(text).toContain("== Not formalized here ==");
-    expect(text).toContain("Commands that change GitHub (claim, release) enforce their own guards");
+    for (const name of Object.keys(model.lexicon.attributes))
+      expect(text).toContain(`- \`${name}\`: `);
+    expect(text).toContain("## Not formalized here");
+    expect(text).toContain("Commands that change GitHub");
     expect(text).toContain("This repository's effective settings: unknown.");
     expect(text).toContain("pdb process prints the short workflow guide");
     expect(text).not.toContain("FILTERED");
@@ -97,7 +104,7 @@ describe("pdb rules document (#416)", () => {
     expect(designer.eligibility.denials).toHaveLength(model.denials.length);
     expect(designer.predicates).toHaveLength(model.predicates.length);
     const out = rulesText(designer);
-    expect(out).toContain("Scope: FILTERED (--role designer). Filtered subset of the policy");
+    expect(out).toContain("- Scope: FILTERED (`--role designer`). Filtered subset of the policy");
     expect(out).not.toContain("Scope: Complete");
     expect(out).toContain("This output is a filtered subset");
   });
@@ -119,7 +126,7 @@ describe("pdb rules document (#416)", () => {
 
     const denial = rulesDocument(context, { rule: "D-DENY-BLOCKER" });
     expect(denial.eligibility.denials.map((d) => d.id)).toEqual(["D-DENY-BLOCKER"]);
-    expect(rulesText(denial)).toContain("Scope: FILTERED (--rule D-DENY-BLOCKER)");
+    expect(rulesText(denial)).toContain("- Scope: FILTERED (`--rule D-DENY-BLOCKER`)");
   });
 
   it("rejects unknown rules and roles with a hint, before anything is printed", () => {
@@ -139,11 +146,9 @@ describe("pdb rules command (#416)", () => {
     const { code, stdout, stderr } = await cli(["rules"]);
     expect(code).toBe(0);
     expect(stderr).toBe("");
-    expect(stdout.split("\n")[0]).toBe(
-      "pdb rules: the represented policy, compiled to English from its Datalog clauses",
-    );
-    expect(stdout).toContain('  briefing.engine = "datalog"  (repository setting registry)');
-    expect(stdout).toContain('  --order = "impact"  (briefing, when --order is omitted)');
+    expect(stdout.split("\n")[0]).toBe("# `pdb rules` — Compiled Policy");
+    expect(stdout).toContain('- `briefing.engine` = `"datalog"` (repository setting registry)');
+    expect(stdout).toContain('- `--order` = `"impact"` (briefing, when --order is omitted)');
   });
 
   it("prints JSON projecting the same document", async () => {
@@ -201,8 +206,33 @@ describe("pdb rules command (#416)", () => {
       { ...base, predicates: base.predicates.map((p) => (p === blocked ? renamed : p)) },
     );
     const out = rulesText(doc);
-    expect(out).toContain("    (1) all of:");
-    expect(out).toContain("    (2) blocked(?x) all of:");
+    expect(out).toContain("1. all of:");
+    expect(out).toContain("2. `blocked(?x)` all of:");
+  });
+
+  it("renders Markdown safely by escaping injected headings, HTML, links, backticks and ANSI (#1049)", async () => {
+    const doc = rulesDocument({
+      ...context,
+      effective: {
+        status: "unknown",
+        reason:
+          "bad\n# Fake Heading\n[link](https://x) <img src=x> &lt;urgent&gt; \x1b[31mred\x1b[0m",
+      },
+    });
+    const out = rulesText(doc);
+    expect(out).not.toContain("\n# Fake Heading");
+    expect(out).not.toContain("\x1b[31m");
+    expect(out).toContain("\\[link\\]\\(https://x\\)");
+    expect(out).toContain("\\<img src=x\\>");
+    expect(out).toContain("\\&lt;urgent\\&gt;");
+    const help = await cli(["rules", "--help"]);
+    expect(help.stdout).toContain("Markdown");
+  });
+
+  it("indents children of multi-digit numbered alternatives to match their CommonMark marker width", () => {
+    const out = rulesText(rulesDocument(context, { rule: "pr-specific-blocker" }));
+    expect(out).toContain("\n10. all of:\n    - ");
+    expect(out).not.toContain("\n10. all of:\n   - ");
   });
 
   it("defines every predicate a filtered view names, context included (#480 review)", () => {
