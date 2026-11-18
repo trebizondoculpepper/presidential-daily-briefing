@@ -4,16 +4,21 @@ import type { ReadRuntime } from "../briefing/service.js";
 import type { Transport } from "./core.js";
 import { nodeGit } from "../config/config.js";
 import type { GitRunner } from "../config/config.js";
+import type { GitService } from "../git/service.js";
 
 export function serviceTransport(runtime: ReadRuntime): Transport {
   return {
     freshRead: true,
     read: async (input, signal) => {
-      const bind = <T extends { git?: GitRunner }>(readers: T | undefined): T | undefined => {
+      const bind = <T extends { git?: GitService | GitRunner }>(
+        readers: T | undefined,
+      ): T | undefined => {
         if (!readers) return readers;
+        if (typeof readers.git === "object") return readers;
+        const runner = readers.git ?? nodeGit;
         const git: GitRunner = (args, cwd) => {
           signal.throwIfAborted();
-          return (readers.git ?? nodeGit)(args, cwd, signal);
+          return runner(args, cwd, signal);
         };
         return { ...readers, git };
       };
