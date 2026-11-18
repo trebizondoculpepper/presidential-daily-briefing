@@ -1,4 +1,4 @@
-# Typed GitHub capabilities and application composition
+# Typed Git/GH services, controllers and application composition
 
 Owner decisions, 2026-11-17: audit #868, GH service foundation #869,
 PDB serve composition #870, and application state #816. This is a
@@ -84,27 +84,100 @@ instance. Preserve existing Host/Origin/CSP controls; new security infrastructur
 remains deferred. The extraction does not change normal `pdb serve` or mandate
 application composition for short-lived CLI config operations.
 
-## Separate Git boundary and research gate
+## Accepted Git implementation and script exception
 
-Git is distinct from GitHub. #872 compares mature typed Git libraries with the
-current injected `GitRunner` against actual PDB operations. A library wrapping the
-installed Git executable and a library implementing Git are different choices;
-neither is automatically safer merely because its interface is typed.
+Owner acceptance, 2026-11-18: use the installed Git executable behind a typed Git
+service, retaining the existing injectable runner internally. No new Git library
+is selected now. Research #872 / PR #895 inventories the current operations and
+records why this is the initial choice; a later library change needs its own
+evidence and contract, not a caller rewrite.
 
-The report inventories discovery, remotes, revisions, worktree/status and any
-actual write consumers, then checks typed results, response interpretation,
-worktrees, cancellation/errors, credentials/configuration, supported platforms,
-maintenance/license and packaging. Use bounded credential-free disposable probes;
-no user's checkout/global settings or live remote writes are research fixtures.
+Expose only needed typed operations: checkout/common directory, remotes,
+revision/ref identity, divergence, ignored/tracked status and Git-owned paths.
+Validate and interpret command output inside this boundary. Distinguish absence
+from execution failure and unknown evidence; preserve cancellation and explicit
+checkout context. Existing GitRunner injection remains an adapter/test seam,
+not the target application-facing API. Never let GH_REPO silently change the
+identity of a selected checkout. Compose repository-context features from typed
+Git/GH facts without circular service dependencies.
 
-Application callers should eventually use typed Git capabilities independent of
-that library choice. Do not adopt a library or migrate callers before the research
-recommendation and a focused follow-up contract are reviewed. The initial report
-must schedule small estimated service/migration follow-ups, carrying limitations
-explicitly; do not invent support for untested operations. Git research is a
-high-priority child of #875, but is not a blocker for independent GH audit or
-serve configuration/state work. Application composition receives both boundaries
-through explicit injection rather than mixing Git and GH into one raw executor.
+Every main PDB command and subcommand, and its CLI/MCP/HTTP feature modules,
+uses the typed Git and GH services. Only their private transport/adapter modules
+may execute the utilities or build raw executable arguments. Callers do not use
+arbitrary GitRunner/query/argv escape hatches as the final interface. Existing
+bypasses are tracked migration debt, not precedent for new direct calls. Shared
+services must remain usable directly without HTTP loopback.
+
+The owner explicitly excepted release scripts and standalone tooling from the
+**Git** migration. Such scripts may continue direct Git invocation with their
+current safeguards; do not migrate scripts/dispatch.ts or alter its ancestry,
+credential or non-forced-push behavior in this program. This is not an exception
+for a helper imported/invoked as part of the main PDB program merely because its
+file lives in scripts/. Tests may inject fakes or use disposable Git fixtures;
+printed examples and user-run recovery commands are not utility execution sites.
+Keep the audit's standalone GH tooling exclusions explicit rather than broadening
+them to application modules.
+
+## Controllers and construction scope
+
+One application composition root constructs **one Git service and one GH service
+per application lifetime**, and shares them with feature services/controllers.
+For a CLI invocation that lifetime is the invocation; for serve/MCP it is the
+running process/application. This is not one singleton across all processes and
+not a global mutable selected checkout/account/agent. Per-request context remains
+explicit and cached observations remain context-partitioned.
+
+```mermaid
+flowchart TD
+  Entry[CLI / serve / MCP entry point] --> App[Application composition root]
+  App --> Git[Typed Git service]
+  App --> GH[Typed GH service]
+  App --> Config[Configuration service]
+  App --> Cache[Shared read cache]
+  App --> State[Serve application state only]
+  App --> Controllers[Thin CLI / HTTP / MCP controllers]
+  Controllers --> Features[Briefing / configuration / diagnostics / delivery services]
+  Features --> Git
+  Features --> GH
+  Features --> Config
+  Features --> Cache
+  Features --> State
+  Browser[Browser components] --> Controllers
+  Features --> Rules[Native workflow rules]
+```
+
+The browser arrow denotes HTTP API controllers, not CLI/MCP or direct utility
+access. Controllers validate transport input, call feature services, and project
+results/errors; they do not construct Git/GH clients, parse utility output or
+implement workflow policy. Feature services coordinate domain operations and
+native-rule decisions, using shared typed dependencies.
+
+The application service owns wiring and bounded startup/shutdown, not every
+feature's domain behavior. The serve-only state service tracks saved/running/applied
+configuration and restart consequences; it is not the composition container.
+Config CLI operations still call configuration directly, without requiring serve
+state or an HTTP server. Pure service construction must not issue GitHub reads,
+allocate identities, watch files or prefetch tickets. Short-lived reads/help do
+not acquire unrelated long-running resources. Join/cancel shared reads using
+existing cache semantics so one request does not cancel another consumer.
+
+## Module-sized migration rule
+
+The owner requested one bounded migration per application module wherever
+practical. A module using both Git and GH has one ticket covering both interfaces.
+Inventory each call site, required typed methods, changed injection types and
+focused behavioral tests. A very large module may be split by its existing
+responsibility boundaries, named explicitly; do not create duplicate competing
+module edits or one repository-wide implementation PR.
+
+Use #868's GH audit and #872's Git inventory to maintain an exact module-to-ticket
+map. Existing broad capability tickets become coordination umbrellas when split,
+retaining active claims/PRs and original acceptance. Add real prerequisite edges
+for the service capabilities each module needs. The Git/GH foundations can ship
+incrementally; preserve compatibility adapters while callers migrate, but do not
+call a module migrated while it still supplies raw utility commands or parses
+raw transport JSON. Remove obsolete wrappers only after the last mapped caller
+moves. Release/standalone scripts are recorded exclusions, not migration tickets.
 
 ## Delivery order and focused acceptance
 
