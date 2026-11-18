@@ -19,7 +19,6 @@
  * claim or GitHub state.
  */
 import { join } from "node:path";
-import type { GhService } from "../github/service/service.js";
 import { defaultCacheDir } from "../updates/updatecache.js";
 import { updateJsonFile, type SafeFs } from "./safejson.js";
 
@@ -39,7 +38,11 @@ export type HumanContext =
 /** The authenticated login boundary: `ghService.account.current` in production. */
 export type AuthContextReader = (signal?: AbortSignal) => Promise<{ host: string; login: string }>;
 /** Typed GH account capability accepted by `resolveHumanContext` (#909). */
-export type HumanContextAccount = Pick<GhService, "account">;
+export interface HumanContextAccount {
+  readonly account: {
+    current(signal?: AbortSignal): Promise<{ host: string; login: string }>;
+  };
+}
 
 export interface HumanContextOptions {
   /** The GitHub host of the target repository; repositories pdb manages are on github.com. */
