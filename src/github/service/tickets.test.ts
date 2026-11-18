@@ -39,3 +39,19 @@ describe("typed claim guard and PR state reads (#942)", () => {
     expect(await svc({ resource: null }).tickets.pullStateByUrl("u")).toBeNull();
   });
 });
+
+describe("injected ticket capabilities (#942)", () => {
+  it("the claim guard uses an injected facade capability without composing a query", async () => {
+    const { ticketGuard } = await import("../../workflow/claims.js");
+    const asked: string[] = [];
+    const guard = ticketGuard("o/r", 3, {
+      guardState: async (repository, number) => {
+        asked.push(`${repository}#${number}`);
+        return "fingerprint";
+      },
+      pullStateByUrl: async () => null,
+    });
+    expect(await guard()).toBe("fingerprint");
+    expect(asked).toEqual(["o/r#3"]);
+  });
+});
