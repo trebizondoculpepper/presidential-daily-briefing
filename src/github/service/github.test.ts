@@ -1,56 +1,62 @@
 import { describe, expect, it } from "vite-plus/test";
 import { createGhService } from "./service.js";
+import { graphqlApiOverTransport } from "../github.js";
 import { ReadMeter } from "../readplan.js";
 
 describe("typed GH service: github capabilities (#920)", () => {
-  it("routes issues.locate, snapshot.hydratePullRequests, and graphql through transport and env", async () => {
+  it("routes issues.locate and graphqlApiOverTransport through transport and env", async () => {
     const calls: { args: readonly string[]; env?: NodeJS.ProcessEnv }[] = [];
     const customEnv = { GH_HOST: "ghe.example.com" };
-    const gh = createGhService({
-      env: customEnv,
-      transport: async (call) => {
-        calls.push({ args: call.args, env: call.env });
-        if (
-          call.args[0] === "api" &&
-          call.args[1] === "--include" &&
-          call.args[2] === "repos/o/r/issues/5"
-        ) {
-          return {
-            ok: true,
-            stdout:
-              "HTTP/2.0 200 OK\r\n\r\n" +
-              JSON.stringify({
-                number: 99,
-                html_url: "https://ghe.example.com/other/repo/issues/99",
-                repository_url: "https://ghe.example.com/api/v3/repos/other/repo",
-              }),
-          };
-        }
-        if (call.args.includes("graphql") && call.args.includes("--include")) {
-          return {
-            ok: true,
-            stdout:
-              "HTTP/2.0 200 OK\r\nx-github-request-id: req-1\r\n\r\n" +
-              JSON.stringify({ data: { ok: true } }),
-          };
-        }
-        if (call.args.includes("graphql")) {
-          return {
-            ok: true,
-            stdout: JSON.stringify({ data: { viewer: { login: "alice" } } }),
-          };
-        }
-        return { ok: false, kind: "exit", exitCode: 1, stdout: "", stderr: "unexpected" };
-      },
-    });
+    const transport = async (call: { args: readonly string[]; env?: NodeJS.ProcessEnv }) => {
+      calls.push({ args: call.args, env: call.env });
+      if (
+        call.args[0] === "api" &&
+        call.args[1] === "--include" &&
+        call.args[2] === "repos/o/r/issues/5"
+      ) {
+        return {
+          ok: true as const,
+          stdout:
+            "HTTP/2.0 200 OK\r\n\r\n" +
+            JSON.stringify({
+              number: 99,
+              html_url: "https://ghe.example.com/other/repo/issues/99",
+              repository_url: "https://ghe.example.com/api/v3/repos/other/repo",
+            }),
+        };
+      }
+      if (call.args.includes("graphql") && call.args.includes("--include")) {
+        return {
+          ok: true as const,
+          stdout:
+            "HTTP/2.0 200 OK\r\nx-github-request-id: req-1\r\n\r\n" +
+            JSON.stringify({ data: { ok: true } }),
+        };
+      }
+      if (call.args.includes("graphql")) {
+        return {
+          ok: true as const,
+          stdout: JSON.stringify({ data: { viewer: { login: "alice" } } }),
+        };
+      }
+      return {
+        ok: false as const,
+        kind: "exit" as const,
+        exitCode: 1,
+        stdout: "",
+        stderr: "unexpected",
+      };
+    };
+    const gh = createGhService({ env: customEnv, transport });
+    const graphql = graphqlApiOverTransport(transport, customEnv);
 
     const located = await gh.issues.locate("o/r", 5);
     expect(located.state).toBe("moved");
 
-    const q = await gh.graphql.query("query { viewer { login } }", {});
+    const q = await graphql.query("query { viewer { login } }", {});
     expect(q.data).toEqual({ viewer: { login: "alice" } });
 
-    const m = await gh.graphql.mutate("mutation { noop }", {});
+    const m = await graphql.mutate("mutation { noop }", {});
     expect(m.data).toEqual({ ok: true });
     expect(m.response?.requestId).toBe("req-1");
 

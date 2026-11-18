@@ -11,7 +11,6 @@ import {
   collectIssueFocus,
   ghQueryFailure,
   ghQueryWith,
-  graphqlApiOverTransport,
   hydratePullRequests,
   locateIssue,
   permissionLookup,
@@ -20,7 +19,6 @@ import {
 import type {
   CollectOptions,
   FocusOptions,
-  GraphqlApi,
   IssueDiagnosis,
   PermissionLookup,
   Rest,
@@ -152,8 +150,6 @@ export interface GhService {
       options: Parameters<typeof hydratePullRequests>[2],
     ): Promise<PullRequest[]>;
   };
-  /** Transport-backed GraphQL query/mutation boundary (#920). */
-  graphql: GraphqlApi;
   completion: CompletionCapabilities;
 }
 
@@ -192,6 +188,13 @@ export function createGhService(options: GhServiceOptions = {}): GhService {
   const post = options.post ?? postOverTransport(transport, env);
   const query: GraphQuery = options.query ?? ghQueryWith(undefined, {}, { transport, env });
   const run: GhRun = options.run ?? runOverTransport(transport, query as Query, env);
+  const queryForSignal = (signal?: AbortSignal): GraphQuery =>
+    options.query
+      ? (q, vars) => {
+          signal?.throwIfAborted();
+          return options.query!(q, vars);
+        }
+      : ghQueryWith(signal, {}, { transport, env });
   return {
     account: {
       async current(signal) {
@@ -288,13 +291,36 @@ export function createGhService(options: GhServiceOptions = {}): GhService {
       issuesByNumber: (...args) => issuesByNumber(query as Query, ...args),
       issueCommentsPage: (...args) => issueCommentsPage(query as Query, ...args),
       collect: (repository, collectOptions = {}, now) =>
-        collect(repository, { rest, ...collectOptions }, query as Query, now ?? options.now),
+        collect(
+          repository,
+          {
+            rest,
+            locate: (repo, num) => locateIssue(repo, num, rest, collectOptions.signal),
+            ...collectOptions,
+          },
+          queryForSignal(collectOptions.signal) as Query,
+          now ?? options.now,
+        ),
       collectIssueFocus: (repository, number, focusOptions, now) =>
-        collectIssueFocus(repository, number, focusOptions, query as Query, now ?? options.now),
+        collectIssueFocus(
+          repository,
+          number,
+          {
+            rest,
+            locate: (repo, num) => locateIssue(repo, num, rest, focusOptions.signal),
+            ...focusOptions,
+          },
+          queryForSignal(focusOptions.signal) as Query,
+          now ?? options.now,
+        ),
       hydratePullRequests: (repository, targets, hydrateOptions) =>
-        hydratePullRequests(repository, targets, hydrateOptions, query as Query),
+        hydratePullRequests(
+          repository,
+          targets,
+          hydrateOptions,
+          queryForSignal(hydrateOptions.signal) as Query,
+        ),
     },
-    graphql: graphqlApiOverTransport(transport, env),
     checks: checkReads(async (q, vars) => {
       const data = await query(q, vars);
       return typeof data === "object" && data !== null ? (data as Record<string, unknown>) : {};
