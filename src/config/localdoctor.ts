@@ -155,7 +155,7 @@ export interface LocalDoctorOptions {
 
 const gitRunner =
   (probe: Probe): GitRunner =>
-  async (args, cwd) => {
+  async (args, cwd, signal) => {
     const normalized =
       args[0] === "--literal-pathspecs"
         ? args.slice(1)
@@ -165,10 +165,16 @@ const gitRunner =
             args[3] === "--"
           ? ["check-ignore", "--quiet", "--no-index", ...args.slice(4)]
           : args;
-    const result = await probe("git", normalized, cwd);
+    const result = await probe("git", normalized, cwd, signal);
     if (result.code !== 0) {
-      const error = new Error(`git ${normalized[0]} failed`) as Error & { code?: number | null };
+      const error = new Error(`git ${normalized[0]} failed`) as Error & {
+        code?: number | null;
+        stderr?: string;
+      };
       error.code = result.code;
+      if (result.code === 128 && normalized[0] === "rev-parse") {
+        error.stderr = "fatal: not a git repository";
+      }
       throw error;
     }
     return result.stdout;
@@ -181,9 +187,11 @@ export async function localDoctor(
 ): Promise<LocalDoctorReport> {
   const signal = runtime.signal;
   signal?.throwIfAborted();
-  const probe: Probe = async (command, args, directory) => {
+  const probe: Probe = async (command, args, directory, opSignal = signal) => {
     signal?.throwIfAborted();
-    const result = await (runtime.probe ?? nodeProbe)(command, args, directory, signal);
+    const effective =
+      opSignal && signal && opSignal !== signal ? AbortSignal.any([signal, opSignal]) : opSignal;
+    const result = await (runtime.probe ?? nodeProbe)(command, args, directory, effective);
     signal?.throwIfAborted();
     return result;
   };
@@ -209,8 +217,15 @@ export async function localDoctor(
       throw error;
     }
   };
+  let workingTreeFailed = false;
   const gitService: GitService = {
-    workingTreeRoot: (ctx) => runGit(ctx, (timed) => baseGit.workingTreeRoot(timed)),
+    workingTreeRoot: (ctx) =>
+      runGit(ctx, (timed) => baseGit.workingTreeRoot(timed)).catch((error) => {
+        if (!(signal?.aborted || (error instanceof GitError && error.code === "cancelled"))) {
+          workingTreeFailed = true;
+        }
+        throw error;
+      }),
     commonDirectory: (ctx) => runGit(ctx, (timed) => baseGit.commonDirectory(timed)),
     remotes: (ctx) => runGit(ctx, (timed) => baseGit.remotes(timed)),
     checkout: (ctx) => runGit(ctx, (timed) => baseGit.checkout(timed)),
@@ -311,7 +326,22 @@ export async function localDoctor(
   step("gh", "running");
   // gh.available and gh.auth: exit codes only; gh output may contain account details.
   const ghVersion = await ghDiag.version(cwd, signal);
-  if (ghVersion.exitCode === null) {
+  if (ghVersion.timedOut) {
+    add({
+      id: "gh.available",
+      status: "unknown",
+      source: "gh --version timed out",
+      detail: "gh --version timed out before reporting a version.",
+      next: ["gh --version"],
+    });
+    add({
+      id: "gh.auth",
+      status: "unknown",
+      source: "gh unavailable",
+      detail: "Authentication cannot be checked without gh.",
+      next: ["gh auth status"],
+    });
+  } else if (ghVersion.exitCode === null) {
     add({
       id: "gh.available",
       status: "missing",
@@ -357,8 +387,9 @@ export async function localDoctor(
         : {
             id: "gh.auth",
             status: auth.exitCode === 1 ? "access" : "unknown",
-            source:
-              auth.exitCode === null
+            source: auth.timedOut
+              ? "gh auth status timed out"
+              : auth.exitCode === null
                 ? "gh auth status could not start"
                 : `gh auth status exit ${auth.exitCode}`,
             detail:
@@ -395,19 +426,23 @@ export async function localDoctor(
     });
   } catch (caught) {
     if (!(caught instanceof ConfigError)) throw caught;
-    const notRepo = caught.code === "not-a-repository";
+    const notRepo = caught.code === "not-a-repository" && !workingTreeFailed;
     add({
       id: "project.checkout",
       status: notRepo ? "missing" : "unknown",
-      source: notRepo ? "git rev-parse --show-toplevel" : "git remote -v",
-      detail: notRepo
-        ? "The working directory is not inside a Git checkout, so local configuration cannot be located."
-        : options.repo
-          ? `This checkout has no GitHub remote for ${options.repo}.`
-          : "This checkout does not have exactly one GitHub remote; the intended project is ambiguous.",
-      next: notRepo
-        ? ["cd <CHECKOUT_OF_INTENDED_REPOSITORY> && pdb doctor"]
-        : ["git remote -v", "pdb doctor --repo <OWNER/NAME>"],
+      source: notRepo || workingTreeFailed ? "git rev-parse --show-toplevel" : "git remote -v",
+      detail: workingTreeFailed
+        ? "Git checkout status could not be checked."
+        : notRepo
+          ? "The working directory is not inside a Git checkout, so local configuration cannot be located."
+          : options.repo
+            ? `This checkout has no GitHub remote for ${options.repo}.`
+            : "This checkout does not have exactly one GitHub remote; the intended project is ambiguous.",
+      next: workingTreeFailed
+        ? ["git rev-parse --show-toplevel"]
+        : notRepo
+          ? ["cd <CHECKOUT_OF_INTENDED_REPOSITORY> && pdb doctor"]
+          : ["git remote -v", "pdb doctor --repo <OWNER/NAME>"],
     });
   }
 
@@ -468,7 +503,7 @@ export async function localDoctor(
         ? "ok"
         : "missing";
     } catch (error) {
-      if (error instanceof GitError && error.code === "cancelled") throw error;
+      if (signal?.aborted || (error instanceof GitError && error.code === "cancelled")) throw error;
       ignoredState = "unknown";
     }
     add(
@@ -502,7 +537,7 @@ export async function localDoctor(
         ? "invalid"
         : "ok";
     } catch (error) {
-      if (error instanceof GitError && error.code === "cancelled") throw error;
+      if (signal?.aborted || (error instanceof GitError && error.code === "cancelled")) throw error;
       trackedState = "unknown";
     }
     add(

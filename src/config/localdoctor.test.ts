@@ -668,7 +668,7 @@ describe("Doctor run cancellation and observed progress (#585)", () => {
         },
       );
       expect(report.checks.find((c) => c.id === "gh.available")?.status).toBe("ok");
-      expect(report.checks.find((c) => c.id === "project.checkout")?.status).toBe("missing");
+      expect(report.checks.find((c) => c.id === "project.checkout")?.status).toBe("unknown");
       expect(report.checks.find((c) => c.id === "identity.git-ignored")?.status).toBe("unknown");
 
       // Also verify an internal timeout during identity.git-ignored does not abort Doctor.
