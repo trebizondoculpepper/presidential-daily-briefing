@@ -163,8 +163,9 @@ const runIsolatedGit = (
     child.once("close", () => {
       if (signal?.aborted) {
         reject(
-          signal.reason ??
-            Object.assign(new Error("The operation was aborted"), { name: "AbortError" }),
+          Object.assign(new Error("The operation was aborted", { cause: signal.reason }), {
+            name: "AbortError",
+          }),
         );
       } else if (outcome.ok) {
         resolve(outcome.stdout);
