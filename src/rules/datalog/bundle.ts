@@ -54,6 +54,8 @@ export interface DecisionRule {
   kind: string;
   band: number;
   preference: number;
+  /** The duty's role affinity (#651): an ordering key, never a membership gate. */
+  affinity: "implementer" | "designer" | "shared" | "human";
   /** The :when clauses as canonical EDN, for display and the English policy page (#392). */
   clauses: string;
   why: string;

@@ -163,6 +163,7 @@ export function evaluatePolicy(input: PolicyFacts, options: PolicyOptions = {}):
       kind: r.kind,
       band: r.band,
       preference: r.preference,
+      affinity: r.affinity,
       why: r.why,
     }))
       facts.push([10 + i, k, v]);
