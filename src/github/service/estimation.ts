@@ -1,11 +1,15 @@
 /**
  * Typed GitHub estimation capabilities (#916, doc/design/github-service-composition.md).
  *
- * Encapsulates issue/label-definition/comment GraphQL reads and label/comment writes so
- * `estimation/estimate.ts` does not compose GraphQL queries/mutations or parse raw GraphQL shapes.
+ * Encapsulates issue/label-definition/comment GraphQL reads, response validation, and
+ * label/comment writes so `estimation/estimate.ts` does not compose GraphQL queries/mutations
+ * or parse raw GraphQL shapes.
  */
+import { classifyAddComment } from "../commentwrite.js";
+import type { CommentAttempt } from "../commentwrite.js";
 import { isRecord, prop } from "../github.js";
 import type { GraphqlAnswer, GraphqlApi } from "../github.js";
+import type { Comment } from "../../workflow/claims.js";
 
 export interface EstimationLabelNode {
   readonly id: string;
@@ -13,9 +17,9 @@ export interface EstimationLabelNode {
 }
 
 export interface EstimationCommentPage {
-  readonly nodes: readonly unknown[] | null;
-  readonly hasPreviousPage: unknown;
-  readonly startCursor: unknown;
+  readonly nodes: readonly Comment[] | null;
+  readonly hasPreviousPage: boolean | null;
+  readonly startCursor: string | null;
   readonly errors: readonly { type?: string; message?: string }[];
 }
 
@@ -26,8 +30,9 @@ export interface EstimationIssueRead {
   readonly lastEditedAt?: string | null;
   readonly labelDefinition: EstimationLabelNode | null;
   readonly labels: {
-    readonly nodes: readonly unknown[] | null;
-    readonly hasNextPage: unknown;
+    readonly nodes: readonly EstimationLabelNode[] | null;
+    readonly hasNextPage: boolean | null;
+    readonly malformed: boolean;
   };
   readonly comments: EstimationCommentPage;
   readonly errors: readonly { type?: string; message?: string }[];
@@ -65,7 +70,7 @@ export interface EstimationCapabilities {
     issueId: string;
     labelId: string;
   }): Promise<{ ok: boolean; errors: readonly { type?: string; message?: string }[] }>;
-  addComment(input: { issueId: string; body: string }): Promise<GraphqlAnswer>;
+  addComment(input: { issueId: string; body: string }): Promise<CommentAttempt>;
 }
 
 const commentNode =
@@ -104,15 +109,39 @@ const labelNode = (value: unknown): EstimationLabelNode | null => {
   return typeof id === "string" && typeof name === "string" ? { id, name } : null;
 };
 
+const parseActor = (value: unknown): { __typename?: string; login?: string } | null => {
+  if (!isRecord(value)) return null;
+  return {
+    ...(typeof value.__typename === "string" ? { __typename: value.__typename } : {}),
+    ...(typeof value.login === "string" ? { login: value.login } : {}),
+  };
+};
+
+const parseCommentNode = (value: unknown): Comment => ({
+  body: typeof prop(value, "body") === "string" ? (prop(value, "body") as string) : "",
+  createdAt:
+    typeof prop(value, "createdAt") === "string" ? (prop(value, "createdAt") as string) : "",
+  author: parseActor(prop(value, "author")),
+  ...(typeof prop(value, "lastEditedAt") === "string" || prop(value, "lastEditedAt") === null
+    ? { lastEditedAt: prop(value, "lastEditedAt") as string | null }
+    : {}),
+  ...(typeof prop(value, "includesCreatedEdit") === "boolean"
+    ? { includesCreatedEdit: prop(value, "includesCreatedEdit") as boolean }
+    : {}),
+  ...(prop(value, "editor") !== undefined ? { editor: parseActor(prop(value, "editor")) } : {}),
+});
+
 const parseCommentPage = (
   comments: unknown,
   errors: readonly { type?: string; message?: string }[],
 ): EstimationCommentPage => {
   const rawNodes = prop(comments, "nodes");
+  const hasPrev = prop(comments, "pageInfo", "hasPreviousPage");
+  const startCursor = prop(comments, "pageInfo", "startCursor");
   return {
-    nodes: Array.isArray(rawNodes) ? rawNodes : null,
-    hasPreviousPage: prop(comments, "pageInfo", "hasPreviousPage"),
-    startCursor: prop(comments, "pageInfo", "startCursor"),
+    nodes: Array.isArray(rawNodes) ? rawNodes.map(parseCommentNode) : null,
+    hasPreviousPage: typeof hasPrev === "boolean" ? hasPrev : null,
+    startCursor: typeof startCursor === "string" && startCursor ? startCursor : null,
     errors,
   };
 };
@@ -128,7 +157,21 @@ export function estimationCapabilities(api: GraphqlApi): EstimationCapabilities 
       const issue = prop(repository, "issue");
       const repositoryId = prop(repository, "id");
       const rawLabels = prop(issue, "labels", "nodes");
+      const hasNext = prop(issue, "labels", "pageInfo", "hasNextPage");
       const edited = prop(issue, "lastEditedAt");
+      let parsedLabels: EstimationLabelNode[] | null = null;
+      let malformed = false;
+      if (Array.isArray(rawLabels)) {
+        parsedLabels = [];
+        for (const node of rawLabels) {
+          const parsed = labelNode(node);
+          if (!parsed) {
+            malformed = true;
+            break;
+          }
+          parsedLabels.push(parsed);
+        }
+      }
       return {
         repositoryId: typeof repositoryId === "string" ? repositoryId : null,
         issueId: isRecord(issue) && typeof issue.id === "string" ? issue.id : null,
@@ -136,8 +179,9 @@ export function estimationCapabilities(api: GraphqlApi): EstimationCapabilities 
         ...(includeEdited ? { lastEditedAt: typeof edited === "string" ? edited : null } : {}),
         labelDefinition: labelNode(prop(repository, "label")),
         labels: {
-          nodes: Array.isArray(rawLabels) ? rawLabels : null,
-          hasNextPage: prop(issue, "labels", "pageInfo", "hasNextPage"),
+          nodes: parsedLabels,
+          hasNextPage: typeof hasNext === "boolean" ? hasNext : null,
+          malformed,
         },
         comments: parseCommentPage(prop(issue, "comments"), answer.errors),
         errors: answer.errors,
@@ -176,7 +220,11 @@ export function estimationCapabilities(api: GraphqlApi): EstimationCapabilities 
     },
 
     async addComment({ issueId, body }) {
-      return safely(api.mutate(ADD_COMMENT, { issue: issueId, body }));
+      const comment = await safely(api.mutate(ADD_COMMENT, { issue: issueId, body }));
+      return classifyAddComment(
+        comment,
+        prop(comment.data, "addComment", "commentEdge", "node", "url"),
+      );
     },
   };
 }

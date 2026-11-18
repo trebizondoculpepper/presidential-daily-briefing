@@ -41,7 +41,7 @@ import {
 } from "../config/config.js";
 import type { ConfigFileSystem, GitRunner } from "../config/config.js";
 import { createGitService, type GitService } from "../git/service.js";
-import { isRecord, prop } from "../github/github.js";
+import { isRecord } from "../github/github.js";
 import type { GraphqlApi } from "../github/github.js";
 import {
   estimationCapabilities,
@@ -49,7 +49,7 @@ import {
   type EstimationIssueRead,
 } from "../github/service/estimation.js";
 import { createGhService, type GhService } from "../github/service/service.js";
-import { classifyAddComment, postCommentWithRecovery } from "../github/commentwrite.js";
+import { postCommentWithRecovery } from "../github/commentwrite.js";
 import type { CommentRecoveryPolicy } from "../github/commentwrite.js";
 
 export const estimateUsage = `Usage: pdb estimate N [--metric complexity|impact] --size SIZE --rationale TEXT
@@ -318,7 +318,11 @@ export async function scanProvenance<N>(
 ): Promise<ProvenanceScan<N>> {
   const ignored: string[] = [];
   for (const node of [...nodes].reverse()) {
-    const provenance = parseMetricProvenance(d, text(prop(node, "body")));
+    const body =
+      typeof (node as { body?: unknown } | null)?.body === "string"
+        ? (node as { body: string }).body
+        : "";
+    const provenance = parseMetricProvenance(d, body);
     if (!provenance) continue;
     const authority = await trust(node as unknown as Comment);
     if (authority.status === "trusted") return { status: "trusted", provenance, node, ignored };
@@ -340,12 +344,6 @@ function olderCursor(comments: EstimationCommentPage, number: number): string | 
     throw unknownProvenance(number, "comment pagination missing");
   return comments.startCursor;
 }
-
-const labelNode = (value: unknown): LabelNode | null => {
-  const id = prop(value, "id");
-  const name = prop(value, "name");
-  return typeof id === "string" && typeof name === "string" ? { id, name } : null;
-};
 
 /** Parse one issue read; incomplete or errored label evidence is unknown, never "no size". */
 function readIssue(
@@ -373,19 +371,15 @@ function readIssue(
     );
   if (answer.errors.length) throw unknown(denied(answer.errors) ?? "GitHub returned errors");
   if (!answer.labels.nodes) throw unknown("labels missing from the response");
+  if (answer.labels.malformed) throw unknown("a label without id or name");
   if (answer.labels.hasNextPage !== false)
     throw unknown("more than 100 labels, or label pagination missing");
-  const labels: LabelNode[] = [];
-  for (const node of answer.labels.nodes) {
-    const parsed = labelNode(node);
-    if (!parsed) throw unknown("a label without id or name");
-    labels.push(parsed);
-  }
+  const labels = answer.labels.nodes;
   const candidate = answer.labelDefinition;
   // GitHub label identity is case-insensitive; accept only a definition naming this size.
   const definition = candidate && metricLabelSize(d, candidate.name) === size ? candidate : null;
   const classification = classifyMetricLabels(d, {
-    labels: { nodes: labels, pageInfo: { hasNextPage: false, endCursor: null } },
+    labels: { nodes: [...labels], pageInfo: { hasNextPage: false, endCursor: null } },
   });
   if (classification.unrecognized.length && !replaceInvalid)
     throw new Refusal(
@@ -409,8 +403,6 @@ function readIssue(
   };
 }
 
-const text = (value: unknown, fallback = ""): string =>
-  typeof value === "string" ? value : fallback;
 const sameList = (a: readonly string[] | undefined, b: readonly string[]) =>
   Array.isArray(a) && a.length === b.length && a.every((item, i) => item === b[i]);
 
@@ -777,13 +769,7 @@ export async function runEstimate(
     // The description edit time this record was judged against (impact only).
     const editedBefore = final.edited;
     const written = await postCommentWithRecovery({
-      post: async () => {
-        const comment = await estimation.addComment({ issueId: latest.issueId, body });
-        return classifyAddComment(
-          comment,
-          prop(comment.data, "addComment", "commentEdge", "node", "url"),
-        );
-      },
+      post: () => estimation.addComment({ issueId: latest.issueId, body }),
       // The semantic receipt: a trusted record of this same assessment on this ticket.
       readBack: async () => {
         try {
