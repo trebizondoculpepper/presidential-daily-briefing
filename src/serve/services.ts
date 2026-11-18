@@ -22,6 +22,7 @@ import { briefingRoleNames } from "../briefing/roles.js";
 import { httpMcp } from "./mcp.js";
 import { QuotaService } from "../github/quotas.js";
 import { createGhService } from "../github/service/service.js";
+import { createGitService } from "../git/service.js";
 import { quotasApi } from "./quotas-page.js";
 import type { ServeOptions } from "./options.js";
 
@@ -158,7 +159,15 @@ export function readServices(
       instanceId: randomUUID(),
       now: () => serve.clock.now(),
     });
-    const activeDiagnostics = diagnosticRunServices(facts, serve, read, cache);
+    const activeDiagnostics = diagnosticRunServices(facts, serve, read, cache, {
+      git:
+        typeof serve.git === "object"
+          ? serve.git
+          : serve.git
+            ? createGitService({ git: serve.git })
+            : undefined,
+      gh,
+    });
     return {
       routes: async (context) => {
         if (context.url.pathname === "/mcp") {

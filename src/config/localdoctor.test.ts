@@ -1,9 +1,10 @@
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 import { mkdir, mkdtemp, rm, writeFile, readFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { main } from "../cli.js";
+import { GitError } from "../git/service.js";
 import { nodeFileSystem } from "./config.js";
 import { localDoctor, localDoctorExitCode, localDoctorText, nodeProbe } from "./localdoctor.js";
 import { configArgumentsFor } from "./configcli.js";
@@ -615,6 +616,114 @@ describe("Doctor run cancellation and observed progress (#585)", () => {
       controller.abort();
       await outcome;
       await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("reports unavailable evidence when a Git check hits the internal probe timeout", async () => {
+    const timeoutSpy = vi
+      .spyOn(AbortSignal, "timeout")
+      .mockImplementation(() => AbortSignal.abort(new DOMException("Timed out", "TimeoutError")));
+    try {
+      const report = await localDoctor(
+        {},
+        {
+          cwd: "/x",
+          fs: {
+            readText: async () => {
+              throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+            },
+            writeText: async () => expect.fail("doctor wrote a file"),
+            rename: async () => expect.fail("doctor renamed a file"),
+            remove: async () => expect.fail("doctor removed a file"),
+            makeDirectory: async () => expect.fail("doctor created a directory"),
+          },
+          git: {
+            workingTreeRoot: async (ctx) => {
+              if (ctx.signal?.aborted) throw new GitError("cancelled", "timed out");
+              return "/x";
+            },
+            commonDirectory: async () => null,
+            remotes: async () => [],
+            checkout: async () => null,
+            revision: async () => null,
+            headRef: async () => null,
+            isAncestor: async () => false,
+            divergence: async () => null,
+            isIgnored: async (ctx) => {
+              if (ctx.signal?.aborted) throw new GitError("cancelled", "timed out");
+              return false;
+            },
+            isTracked: async () => false,
+            gitPath: async () => null,
+          },
+          gh: {
+            diagnostics: {
+              version: async () => ({ exitCode: 0 }),
+              authStatus: async () => ({ exitCode: 0 }),
+            },
+          },
+          dependencies,
+          nodeVersion: "26.0.0",
+          env: {},
+        },
+      );
+      expect(report.checks.find((c) => c.id === "gh.available")?.status).toBe("ok");
+      expect(report.checks.find((c) => c.id === "project.checkout")?.status).toBe("unknown");
+      expect(report.checks.find((c) => c.id === "identity.git-ignored")?.status).toBe("unknown");
+
+      // Also verify an internal timeout during identity.git-ignored does not abort Doctor.
+      const identityReport = await localDoctor(
+        {},
+        {
+          cwd: "/x",
+          fs: {
+            readText: async () => '[agent]\nname = "a"\ntriage_role = "implementer"\n',
+            writeText: async () => expect.fail("doctor wrote a file"),
+            rename: async () => expect.fail("doctor renamed a file"),
+            remove: async () => expect.fail("doctor removed a file"),
+            makeDirectory: async () => expect.fail("doctor created a directory"),
+          },
+          git: {
+            workingTreeRoot: async () => "/x",
+            commonDirectory: async () => "/x/.git",
+            remotes: async () => [
+              {
+                name: "origin",
+                url: "https://github.com/owner/name.git",
+                host: "github.com",
+                repository: "owner/name",
+              },
+            ],
+            checkout: async () => null,
+            revision: async () => null,
+            headRef: async () => null,
+            isAncestor: async () => false,
+            divergence: async () => null,
+            isIgnored: async (ctx) => {
+              if (ctx.signal?.aborted) throw new GitError("cancelled", "timed out");
+              return false;
+            },
+            isTracked: async () => false,
+            gitPath: async () => null,
+          },
+          gh: {
+            diagnostics: {
+              version: async () => ({ exitCode: 0 }),
+              authStatus: async () => ({ exitCode: 0 }),
+            },
+          },
+          dependencies,
+          nodeVersion: "26.0.0",
+          env: {},
+        },
+      );
+      expect(identityReport.checks.find((c) => c.id === "project.checkout")?.status).toBe("ok");
+      expect(identityReport.checks.find((c) => c.id === "identity.git-ignored")?.status).toBe(
+        "unknown",
+      );
+      expect(identityReport.checks.find((c) => c.id === "identity.git-tracked")?.status).toBe("ok");
+    } finally {
+      timeoutSpy.mockRestore();
     }
   });
 });
