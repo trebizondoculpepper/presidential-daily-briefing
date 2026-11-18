@@ -10,7 +10,8 @@ import { createHash } from "node:crypto";
 import { lstat as fsLstat } from "node:fs/promises";
 import { isAbsolute, join, posix, relative, resolve, sep, win32 } from "node:path";
 import { parse as parseToml } from "smol-toml";
-import { nodeGit, type GitRunner } from "../config/config.js";
+import type { GitRunner } from "../config/config.js";
+import { createGitService, type GitService } from "../git/service.js";
 import { nodeSafeFs, updateJsonFile, updateTextFile } from "../config/safejson.js";
 import type { SafeFs, WriteOutcome } from "../config/safejson.js";
 
@@ -84,9 +85,11 @@ export const sha256Hex = (text: string): string =>
 /** Resolve `<git-common-dir>` for a verified project root. */
 export async function resolveProjectGitCommonDir(
   projectRoot: string,
-  git: GitRunner = nodeGit,
+  git?: GitService | GitRunner,
 ): Promise<string> {
-  const raw = (await git(["rev-parse", "--git-common-dir"], projectRoot)).trim();
+  const service =
+    typeof git === "object" ? git : createGitService(typeof git === "function" ? { git } : {});
+  const raw = await service.commonDirectory({ cwd: projectRoot });
   if (!raw) throw new Error(`Cannot resolve --git-common-dir for ${projectRoot}.`);
   return isAbsolute(raw) ? resolve(raw) : resolve(projectRoot, raw);
 }
