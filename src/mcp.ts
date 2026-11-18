@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { resolveEffectiveHuman, disabledEffectiveHuman } from "./config/effectiveidentity.js";
 import { humanContextEnabled } from "./config/humancontext.js";
-import { ghAuthContext } from "./github/ghauth.js";
+import { createAppServices } from "./composition.js";
 /**
  * The stdio `pdb-mcp` entry point (doc/design/mcp.md, #25). The server itself lives in
  * src/mcp/server.ts so that `pdb serve` can build the same server without loading this entry.
@@ -43,6 +43,8 @@ if (isEntryPoint(process.argv[1])) {
     if (options.help) process.stdout.write(mcpHelp);
     else {
       const { version } = await installedVersion();
+      // One shared typed Git and GH service for this process (#929, #870).
+      const services = createAppServices();
       const runtime = defaultRuntime(options);
       if (!process.env.PDB_NO_EFFECTIVE_IDENTITY)
         await prepareMcpIdentity(
@@ -51,10 +53,10 @@ if (isEntryPoint(process.argv[1])) {
           {
             env: process.env,
             fs: runtime.fs,
-            git: runtime.git,
+            git: runtime.git ?? services.git,
             human: () =>
               humanContextEnabled()
-                ? resolveEffectiveHuman(ghAuthContext)
+                ? resolveEffectiveHuman((signal) => services.gh.account.current(signal))
                 : Promise.resolve(disabledEffectiveHuman()),
           },
           (text) => {
