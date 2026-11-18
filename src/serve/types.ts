@@ -23,6 +23,7 @@ import type {
 } from "../github/github.js";
 import type { Clock } from "../mcp/polling.js";
 import type { RulesPageRuntime } from "./rules-page.js";
+import type { ApplicationState } from "./appstate.js";
 
 /** The gh account every collection runs as: host and login only, never a token. */
 export interface AuthContext {
@@ -136,6 +137,12 @@ export interface ServerFacts {
   ttlMs: number;
   auth: AuthContext;
   /**
+   * The application state (#816): startup/applied/saved snapshots and their live-versus-restart
+   * consequences. Created once when the server starts with a verified global configuration
+   * boundary; absent otherwise (live application is unavailable then).
+   */
+  applicationState?: ApplicationState;
+  /**
    * Request-context generation (#808): bumped once per successful live configuration
    * application, and read at selection and again before responding so a read that started for
    * one context can never deliver facts collected for an obsolete one.
@@ -171,6 +178,18 @@ export interface ServeServices {
   status?: StatusSource;
   /** Close long-lived resources (in-flight collections, MCP sessions) during shutdown. */
   close?: () => Promise<void>;
+  /**
+   * Live configuration application (#808). Present when this build owns the cache and can
+   * invalidate it; `startServe` uses it to implement `RunningServer.applyLiveConfiguration`.
+   */
+  live?: {
+    /**
+     * Reconcile and apply a fresh saved configuration against the served set and invalidate
+     * changed/removed contexts through the cache. The implementation owns cache invalidation per
+     * repository and per dependency collector, and records the outcome in the application state.
+     */
+    apply(saved: LoadedGlobalConfig): Promise<import("./liveapp.js").LiveApplicationResult>;
+  };
 }
 
 /** Builds the services from the startup facts (bound URL, served set, auth context). */

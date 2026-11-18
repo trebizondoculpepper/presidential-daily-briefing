@@ -74,8 +74,12 @@ export interface LiveApplicationBoundaries {
    * boundary exists, in which case the saved root is accepted as-is.
    */
   verifyProject?: (repository: string, localRoot: string) => Promise<VerifiedSavedRoot>;
-  /** Report the applied/failed live keys to #816 and return the resulting view. */
-  record: (result: {
+  /**
+   * Report the applied/failed live keys to #816 and return the resulting view. Absent when the
+   * running server has no application state (no verified global configuration boundary): the
+   * served set and cache are still updated, but nothing is recorded.
+   */
+  record?: (result: {
     revision: Revision;
     applied: string[];
     failed: { key: string; error: string }[];
@@ -197,7 +201,7 @@ export async function applyLiveApplication(
   // *value* took effect (any context change implies a value change, and so does a reorder or a
   // case-only spelling change), so #816 never stays "pending-live" after a successful reload.
   const valueChanged = !sameValue(current, served);
-  boundaries.record({
+  boundaries.record?.({
     revision: revisionOf(saved),
     // A saved registration for a host this build cannot serve is a diagnostic, not a key
     // failure: it remains saved and only narrows the served set.

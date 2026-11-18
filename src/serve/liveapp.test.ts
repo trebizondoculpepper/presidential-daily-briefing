@@ -153,6 +153,80 @@ describe("live application with request-context isolation (#808)", () => {
     expect(entriesFromSaved([{ host: "ghe.example.com", repository: "a/b" }]).served).toEqual([]);
   });
 
+  it("acknowledges a value change even when no individual context changed (reorder, case-only)", async () => {
+    // The saved list is reordered; every entry maps to an unchanged context, but the saved
+    // *value* (order, spelling) differs, so #816 must not stay pending-live forever.
+    const { b, recorded } = boundaries({
+      current: [{ repository: "Owner/Repo" }, { repository: "a/b" }],
+    });
+    await applyLiveApplication(
+      savedConfig([
+        { host: "github.com", repository: "a/b" },
+        { host: "github.com", repository: "Owner/Repo" },
+      ]),
+      b,
+    );
+    expect(recorded[0]!.applied).toEqual(["serve.projects"]);
+    expect(recorded[0]!.failed).toEqual([]);
+  });
+
+  it("invalidates cross-repository dependency trees when a context is changed or removed", async () => {
+    let served: ServedEntry[] = [{ repository: "a/b" }, { repository: "c/d" }];
+    const deps: string[] = [];
+    const b: LiveApplicationBoundaries = {
+      currentServed: () => served,
+      invalidate: () => 0,
+      invalidateDependencies: (repository) => {
+        deps.push(repository.toLowerCase());
+        return 0;
+      },
+      record: () => ({}) as never,
+    };
+    await applyLiveApplication(savedConfig([{ host: "github.com", repository: "a/b" }]), b);
+    // c/d removed: a/b's cached dependency tree is invalidated conservatively (it may reference
+    // c/d).
+    expect(deps).toEqual(["a/b"]);
+    // No change means no conservative cross-repo refresh.
+    served = [{ repository: "a/b" }, { repository: "c/d" }];
+    const deps2: string[] = [];
+    await applyLiveApplication(
+      savedConfig([
+        { host: "github.com", repository: "a/b" },
+        { host: "github.com", repository: "c/d" },
+      ]),
+      { ...b, invalidateDependencies: (repository) => (deps2.push(repository.toLowerCase()), 0) },
+    );
+    expect(deps2).toEqual([]);
+  });
+
+  it("verifies saved roots before serving them, falling back to repo-only on a moved checkout", async () => {
+    const { b } = boundaries({ current: [] });
+    const result = await applyLiveApplication(
+      savedConfig([{ host: "github.com", repository: "owner/a", localRoot: "/work/moved" }]),
+      {
+        ...b,
+        // The saved root now belongs to owner/b (reused registration boundary).
+        verifyProject: async (repository, _localRoot) => ({
+          project: undefined,
+          diagnostic: `saved project is now owner/b, not ${repository}; serving repo-only.`,
+        }),
+      },
+    );
+    expect(result.served).toEqual([{ repository: "owner/a" }]);
+    expect(result.diagnostics.join("\n")).toMatch(/owner\/b, not owner\/a/);
+
+    // A root that still verifies is served as saved.
+    const ok = await applyLiveApplication(
+      savedConfig([{ host: "github.com", repository: "owner/a", localRoot: "/work/a" }]),
+      {
+        ...b,
+        verifyProject: async (_repository, localRoot) => ({ project: localRoot }),
+      },
+    );
+    expect(ok.served).toEqual([{ repository: "owner/a", project: "/work/a" }]);
+    expect(ok.diagnostics).toEqual([]);
+  });
+
   it("reconcileContexts is pure and order-preserving", () => {
     const current: ServedEntry[] = [{ repository: "a/b" }, { repository: "z/y" }];
     const target: ServedEntry[] = [

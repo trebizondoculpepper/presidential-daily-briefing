@@ -24,6 +24,8 @@ import { QuotaService } from "../github/quotas.js";
 import { createGhService } from "../github/service/service.js";
 import { quotasApi } from "./quotas-page.js";
 import type { ServeOptions } from "./options.js";
+import { applyLiveApplication } from "./liveapp.js";
+import { verifySavedRoot } from "./registration.js";
 
 /** Production read boundaries: authenticated gh through the existing argument-array runners. */
 export const defaultReadRuntime = (serve: ServeRuntime): ServeReadRuntime => ({
@@ -179,6 +181,39 @@ export function readServices(
         repositories: () => cache.repositories(),
         diagnostics: () => diagnosticViews.map((v) => `/api/v1/diagnostics/${v}`),
       },
+      live: serve.globalConfig
+        ? {
+            apply: (saved) =>
+              applyLiveApplication(saved, {
+                currentServed: () => facts.served,
+                // Bump the repository epoch and drop its entries so reads started before the
+                // change cannot insert as fresh facts.
+                invalidate: (repository) => cache.refresh(repository),
+                // Conservative cross-repository invalidation: cache.read drops the collector
+                // `deps` entries of this repository (see #808 doc).
+                invalidateDependencies: (repository) => cache.refresh(repository, ["deps"]),
+                // The verified-checkout boundary registration reuses: a moved or reassigned
+                // saved root serves the repository repo-only, exactly as at startup.
+                ...(serve.git || serve.currentRepository
+                  ? {
+                      verifyProject: (repository, localRoot) =>
+                        verifySavedRoot(repository, localRoot, {
+                          cwd: serve.cwd,
+                          git: serve.git,
+                          currentRepository: serve.currentRepository,
+                          globalConfig: serve.globalConfig,
+                        }),
+                    }
+                  : {}),
+                // #816: record live-key application against the observed saved snapshot.
+                ...(facts.applicationState
+                  ? {
+                      record: (result) => facts.applicationState!.recordApplication(result),
+                    }
+                  : {}),
+              }),
+          }
+        : undefined,
       // Sessions first, then in-flight collections; dropping sessions never drops entries.
       close: async () => {
         activeDiagnostics.close();

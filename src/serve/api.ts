@@ -661,6 +661,19 @@ export function readApi(
       ...(resolved.store ? { identityStore: resolved.store } : {}),
       ...(effective?.role ? { effectiveRole: effective.role } : {}),
     };
+    // #808: the served context may have changed or been removed while identity resolution ran
+    // (selection -> identity). A collection started now would capture the new cache epoch while
+    // still using the old selected project and identity, returning old-context facts as fresh;
+    // reject instead of starting it.
+    const still = servedSet.find(
+      (s) => s.repository.toLowerCase() === served.repository.toLowerCase(),
+    );
+    if (!still || (still.project ?? null) !== (served.project ?? null))
+      throw new HttpFailure(
+        409,
+        "CONTEXT_CHANGED",
+        "The served configuration changed while this read was running; retry.",
+      );
     if (effective) identityContexts.set(selection, effective);
     return selection;
   };
@@ -722,11 +735,32 @@ export function readApi(
         const values = parameters(context.url, [...allowed, "repo", "refresh"]);
         served = selectRepository(facts.served, values.get("repo"));
         selection = noIdentity(served.repository);
+        const generation = facts.contextVersion?.value ?? 0;
         const refresh = booleanParam(values, "refresh");
         const chosen = served;
         const { value, freshness } = await cache.track(refresh, () =>
           read(values, chosen, (s) => (selection = s)),
         );
+        // #808 request-context guard across cache access and response delivery: if a live
+        // application replaced or removed this repository's context while the read ran, the
+        // collected facts describe the obsolete context. Reject rather than deliver them as
+        // fresh; an unchanged context (same repository and project) is still valid.
+        if ((facts.contextVersion?.value ?? 0) !== generation) {
+          let still: ServedRepository | undefined;
+          try {
+            still = selectRepository(facts.served, chosen.repository);
+          } catch {
+            still = undefined;
+          }
+          const current =
+            still !== undefined && (still.project ?? null) === (chosen.project ?? null);
+          if (!current)
+            throw new HttpFailure(
+              409,
+              "CONTEXT_CHANGED",
+              "The served configuration changed while this read was running; retry.",
+            );
+        }
         const primary = freshness[0] ?? liveNow(cache, runtime.now());
         const stale = freshness.find((f) => f.stale);
         const warnings = [
