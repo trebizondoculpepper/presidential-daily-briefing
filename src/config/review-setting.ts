@@ -8,7 +8,6 @@ import {
   settingFor,
   resolveRepositoryTarget,
   nodeFileSystem,
-  nodeGit,
 } from "./config.js";
 import type { GuideRuntime } from "../briefing/process.js";
 import { reviewPolicyIds } from "../workflow/reviewpolicy.js";
@@ -28,7 +27,8 @@ export async function resolveReviewPolicy(
     target = await resolveRepositoryTarget(
       runtime.cwd ?? process.cwd(),
       repository,
-      runtime.git ?? nodeGit,
+      // The runtime's runner, or none: the typed Git service's isolated default (#904).
+      runtime.git,
     );
   } catch (error) {
     if (
