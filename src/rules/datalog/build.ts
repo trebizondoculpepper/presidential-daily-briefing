@@ -248,6 +248,18 @@ export function readSources(
       "denials",
       "denial-purposes",
     ]);
+    // A duty's role affinity (#651): an ordering key, never a membership gate.
+    const affinity = (v: unknown, where: string): DecisionRule["affinity"] => {
+      const value = text(v, where);
+      if (
+        value !== "implementer" &&
+        value !== "designer" &&
+        value !== "shared" &&
+        value !== "human"
+      )
+        throw new Error(`${where} must be "implementer", "designer", "shared" or "human".`);
+      return value;
+    };
     const definitions: DecisionRule[] = vector(
       need(decisionsFile, "decisions", "policy/decisions.edn"),
       "policy/decisions.edn :decisions",
@@ -259,6 +271,7 @@ export function readSources(
         "kind",
         "band",
         "preference",
+        "affinity",
         "when",
         "why",
         "codes",
@@ -273,6 +286,7 @@ export function readSources(
         kind: text(need(m, "kind", where), `${where} :kind`),
         band: integer(need(m, "band", where), `${where} :band`),
         preference: integer(need(m, "preference", where), `${where} :preference`),
+        affinity: affinity(need(m, "affinity", where), `${where} :affinity`),
         clauses: when.map((c) => printEdn(c, `${where} :when`)).join(" "),
         why: text(need(m, "why", where), `${where} :why`),
         codes: vector(need(m, "codes", where), `${where} :codes`).map((c) =>
