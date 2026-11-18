@@ -355,6 +355,8 @@ export function dashboardClient(render: DashboardRenderers): void {
     actions.classList.remove("provisional");
     state.innerHTML = render.renderState(envelope, false);
     actions.innerHTML = render.renderActions(envelope);
+    // A live refresh may have revalidated whose work this is (#669): the shared header re-reads.
+    if (refresh) document.dispatchEvent(new CustomEvent("pdb:refreshed"));
   };
 
   const restore = () => {
