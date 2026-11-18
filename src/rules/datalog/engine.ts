@@ -60,7 +60,15 @@ export interface HumanAttentionSection {
   ruleId: string;
   reason: string;
 }
+/**
+ * A decision's native rank partition (#652): its ownership, attention and affinity keys, which
+ * precede band. Kept under a symbol so result JSON is unchanged; hosts that regroup within a band
+ * (project preferences) must stay inside one partition.
+ */
+export const RANK_PARTITION: unique symbol = Symbol("pdb.rank-partition");
+
 export interface PolicyDecision {
+  [RANK_PARTITION]?: string;
   subject: number;
   ruleId: string;
   kind: string;
@@ -281,7 +289,7 @@ export function evaluatePolicy(input: PolicyFacts, options: PolicyOptions = {}):
   const decisions = rows
     .sort((a, b) => compareKeys(a.slice(2), b.slice(2)))
     .map((row): PolicyDecision => {
-      const [t, r] = row;
+      const [t, r, ownershipKey, attentionKey, affinityKey] = row;
       const definition = definitions[Number(r) - 10];
       // The row's keys follow :comparison (#652: ownership/attention/affinity precede band); the
       // reported band is the rule's own declared lifecycle band.
@@ -316,6 +324,7 @@ export function evaluatePolicy(input: PolicyFacts, options: PolicyOptions = {}):
       const ruleIds = [definition.id];
       const attentionSection = humanSections?.get(Number(t));
       return {
+        [RANK_PARTITION]: `${String(ownershipKey)}/${String(attentionKey)}/${String(affinityKey)}`,
         subject: Number(t),
         ruleId: definition.id,
         kind: definition.kind,
