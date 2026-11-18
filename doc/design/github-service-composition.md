@@ -209,3 +209,10 @@ open until their own runtime acceptance is delivered.
 The [application module migration map](git-gh-module-migrations.md) records exact
 module ownership, Git/GH needs, estimates, native prerequisites and exclusions.
 Use it instead of picking a broad capability umbrella for duplicate work.
+
+## General shared-capability guardrail
+
+The [main architecture guidelines](../architecture.md)
+apply this architecture beyond Git/GH: one canonical capability owner, explicit
+scoped state-holders for retained mutable state, injected composition and no new
+consumer bypasses. Existing narrow script exceptions remain unchanged.
