@@ -17,3 +17,7 @@ Review correction: wait only for the selected source's required verify check,
 not the whole CI run, so the optional FreeBSD trial cannot become a publication
 gate or consume the controller timeout. Focused probes include pending-then-pass,
 failed required verification, API failure and bounded missing-evidence timeout.
+
+Review also identified token exposure during dependency installation. Checkout
+now avoids persisted credentials; only verification, release and cleanup receive
+the token, and Git authentication is configured after npm ci.
