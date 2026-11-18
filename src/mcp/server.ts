@@ -56,7 +56,6 @@ import {
 import type { Clock } from "./polling.js";
 import type { ReadRuntime } from "../briefing/service.js";
 import type { ConfigFileSystem, GitRunner } from "../config/config.js";
-import type { GitService } from "../git/service.js";
 import { detectClientEntry, validateHarness } from "../config/harness.js";
 import type { Environment } from "../config/harness.js";
 import { TRIAGE_ROLES, validateEntryKey, type TriageRole } from "../config/identity.js";
