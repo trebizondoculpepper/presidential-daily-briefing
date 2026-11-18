@@ -19,7 +19,8 @@ import { workflow } from "./definition.js";
 import { ghQuery, permissionLookup, writePermissions } from "../github/github.js";
 import type { PermissionLookup } from "../github/github.js";
 import { ghRun } from "../github/dependencies.js";
-import { pullStateByUrl, ticketGuardState } from "../github/service/tickets.js";
+import { ticketReads } from "../github/service/tickets.js";
+import type { TicketReads } from "../github/service/tickets.js";
 import { CommentWriteError } from "../github/commentwrite.js";
 import type { CommentCallOptions, CommentRecovery } from "../github/commentwrite.js";
 
@@ -163,11 +164,18 @@ export type GhRun = (args: string[], call?: CommentCallOptions) => Promise<unkno
 export function ticketGuard(
   repository: string,
   number: number,
-  query: GraphQuery,
+  query: GraphQuery | TicketReads,
 ): () => Promise<string> {
   // The typed, validated guard read (#942): a malformed answer fails the guard.
-  return () => ticketGuardState(query, repository, number);
+  return () => ticketsOver(query).guardState(repository, number);
 }
+
+/**
+ * The typed ticket capabilities (#942): the application facade's `tickets` group when injected,
+ * else the same capability over the caller's executor (compatibility while callers migrate).
+ */
+const ticketsOver = (source: GraphQuery | TicketReads): TicketReads =>
+  typeof source === "function" ? ticketReads(source) : source;
 
 export interface ClaimRequest {
   number: number;
@@ -1400,8 +1408,11 @@ export async function planNeedsHuman(
 }
 
 /** Live state of a supplied pull request URL; null when it cannot be verified. */
-async function readPullRequest(url: string, query: GraphQuery): Promise<string | null> {
-  return pullStateByUrl(query, url);
+async function readPullRequest(
+  url: string,
+  query: GraphQuery | TicketReads,
+): Promise<string | null> {
+  return ticketsOver(query).pullStateByUrl(url);
 }
 
 /**

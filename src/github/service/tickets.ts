@@ -71,3 +71,19 @@ export async function pullStateByUrl(query: GraphQuery, url: string): Promise<st
     return null;
   }
 }
+
+/** The ticket capabilities as one object: the facade's `tickets` group. */
+export interface TicketReads {
+  /** A fingerprint of the ticket's guarded state; throws when it cannot be read whole. */
+  guardState(repository: string, number: number): Promise<string>;
+  /** A pull request's live state by URL, or null when it is not a readable pull request. */
+  pullStateByUrl(url: string): Promise<string | null>;
+}
+
+/** Ticket capabilities over one GraphQL executor (the facade's own, or a caller's counted one). */
+export function ticketReads(query: GraphQuery): TicketReads {
+  return {
+    guardState: (repository, number) => ticketGuardState(query, repository, number),
+    pullStateByUrl: (url) => pullStateByUrl(query, url),
+  };
+}
