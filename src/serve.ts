@@ -406,7 +406,9 @@ export async function startServe(
       }
       if (path === "/api/v1/configuration") {
         // Facts only (#818): the shared configuration services decide what a row says.
-        getOnly();
+        // Not getOnly(): the repository selection is a query parameter, not a body.
+        if (request.method !== "GET" && request.method !== "HEAD")
+          throw new HttpFailure(405, "METHOD_NOT_ALLOWED", "Use GET.", [], { allow: "GET, HEAD" });
         const wanted = context.url.searchParams.get("repo");
         try {
           if (!wanted) {
