@@ -23,11 +23,12 @@ import {
   filesystemRefusal,
   loadConfig,
   nodeFileSystem,
-  nodeGit,
   resolveRepositoryTarget,
   settingFor,
 } from "../config/config.js";
 import type { ConfigFileSystem, GitRunner } from "../config/config.js";
+import { createGitService } from "../git/service.js";
+import type { GitService } from "../git/service.js";
 
 /** Version of the `process` object's own shape. */
 export const PROCESS_SCHEMA_VERSION = 1;
@@ -252,7 +253,10 @@ export interface GuideSetting {
 
 export interface GuideRuntime {
   readonly fs?: ConfigFileSystem;
+  /** Legacy `GitRunner` retained while callers/tests migrate to `gitService`. */
   readonly git?: GitRunner;
+  /** Typed Git service (#901). */
+  readonly gitService?: GitService;
   readonly cwd?: string;
 }
 
@@ -264,11 +268,8 @@ export async function resolveGuideSetting(
 ): Promise<GuideSetting> {
   if (flag !== undefined) return { enabled: flag, source: "cli", diagnostics: [] };
   try {
-    const target = await resolveRepositoryTarget(
-      runtime.cwd ?? process.cwd(),
-      repository,
-      runtime.git ?? nodeGit,
-    );
+    const git = runtime.gitService ?? runtime.git ?? createGitService();
+    const target = await resolveRepositoryTarget(runtime.cwd ?? process.cwd(), repository, git);
     const config = await loadConfig(target.root, runtime.fs ?? nodeFileSystem);
     const setting = settingFor(config, GUIDE_CONFIG_KEY);
     return setting.source === "explicit"
