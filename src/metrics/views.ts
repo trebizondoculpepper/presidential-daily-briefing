@@ -377,3 +377,11 @@ export {
   type AssessmentQueueTicket,
   type AssessmentStateCount,
 } from "./assessmentqueue.js";
+
+export {
+  waitingImpactView,
+  type WaitingImpactBucket,
+  type WaitingImpactGroup,
+  type WaitingImpactResult,
+  type WaitingImpactTicket,
+} from "./waitingimpact.js";

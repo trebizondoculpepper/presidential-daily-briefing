@@ -2124,6 +2124,15 @@ describe("pipeline metrics endpoint (#573 slice 5b)", () => {
       });
       expect(aq.json.result.metrics.complexity.unassessed.count).toBeTypeOf("number");
       expect(aq.json.result.metrics.impact.unassessed.count).toBeTypeOf("number");
+      // The waiting-impact view for the same 7-day cache entry also reuses the cached read.
+      const wi = await call(s.running.port, "/api/v1/metrics?view=waiting-impact");
+      expect(wi.status).toBe(200);
+      expect(wi.json.result).toMatchObject({
+        view: "waiting-impact",
+        cohort: "current-open-inventory",
+        groupBasis: "current-valid-impact",
+      });
+      expect(wi.json.result.totalUnclaimed).toBeTypeOf("number");
       expect(counter.n).toBe(before);
     } finally {
       await s.close();
