@@ -5,7 +5,7 @@
  */
 import { ticketDoctor, ticketDoctorText } from "./ticketdoctor.js";
 import type { DeclaredReviewPolicy } from "./reviewpolicy.js";
-import { collectIssueFocus, ghQueryWith, hydratePullRequests } from "../github/github.js";
+import { collectIssueFocus, hydratePullRequests } from "../github/github.js";
 import type { FocusOptions, Query, Rest } from "../github/github.js";
 import { permissionLookup } from "../github/github.js";
 import type { GraphQuery } from "./claims.js";
@@ -271,7 +271,8 @@ export async function readWhoLive(
     locate?: FocusOptions["locate"];
   },
   boundaries: DeliveryBoundaries,
-  query: Query = ghQueryWith(options.signal),
+  /** The composition's executor (#947): every caller supplies its shared, cancellable one. */
+  query: Query,
   clock: () => Date = () => new Date(),
   focus: typeof collectIssueFocus = collectIssueFocus,
 ) {
