@@ -6,12 +6,17 @@
  * re-adding startup inputs such as the working directory or explicit `--repo`/`--project`
  * targets. Unchanged contexts are reused as-is (their cache entries stay valid); added contexts
  * are served fresh; changed and removed contexts are invalidated through the cache's epoch
- * boundary so obsolete in-flight reads cannot escape. The outcome is reported to the
- * application-state service (#816) through `recordApplication`.
+ * boundary so obsolete in-flight reads cannot escape, and cross-repository dependency trees are
+ * invalidated conservatively (any retained served repository's cached tree may reference a
+ * changed/removed context, and re-computation is cheap). The outcome is reported to the
+ * application-state service (#816) through `recordApplication`, acknowledging the key whenever
+ * its saved *value* took effect — a reorder or case-only spelling change is a value change even
+ * when no individual context is classified as changed.
  *
- * The module is pure over injected boundaries (served set, cache invalidation, application-state
- * recording): no filesystem, GitHub or timers. Registration *at startup* stays in
- * registration.ts (#805); this is the runtime application of a later saved change.
+ * The module is pure over injected boundaries (served set, cache invalidation, optional saved
+ * checkout verification, application-state recording): no filesystem, GitHub or timers.
+ * Registration *at startup* and the verified-root check at startup stay in registration.ts
+ * (#805); this is the runtime application of a later saved change.
  */
 import type { GlobalProject, LoadedGlobalConfig } from "../config/globalconfig.js";
 import { revisionOf, type ApplicationStateView, type Revision } from "./appstate.js";
@@ -37,6 +42,17 @@ export interface LiveApplicationResult {
   readonly revision: Revision;
 }
 
+/** Outcome of verifying one saved local root against its repository before serving it. */
+export interface VerifiedSavedRoot {
+  /**
+   * The project to serve: the verified root, or undefined to serve this repository without a
+   * local project (its saved root is missing, or now belongs to another repository).
+   */
+  readonly project: string | undefined;
+  /** Non-fatal reason the saved root was not served as saved, when there is one. */
+  readonly diagnostic?: string;
+}
+
 /** Boundaries the live-application step needs; the cache and appstate are injected. */
 export interface LiveApplicationBoundaries {
   /** The served set the server is currently running with. */
@@ -46,6 +62,18 @@ export interface LiveApplicationBoundaries {
    * started before the change cannot insert. Returns the number of entries dropped.
    */
   invalidate: (repository: string) => number;
+  /**
+   * Drop the cached dependency trees (`collector "deps"`) of one repository. Called
+   * conservatively across the retained served set whenever any context changed/removed, because
+   * any retained tree may reference a changed/removed context.
+   */
+  invalidateDependencies?: (repository: string) => number;
+  /**
+   * Verify a saved local root belongs to its repository before serving it. Mirrors the startup
+   * verified-checkout boundary (registration.ts); absent only in pure environments where no Git
+   * boundary exists, in which case the saved root is accepted as-is.
+   */
+  verifyProject?: (repository: string, localRoot: string) => Promise<VerifiedSavedRoot>;
   /** Report the applied/failed live keys to #816 and return the resulting view. */
   record: (result: {
     revision: Revision;
@@ -108,35 +136,72 @@ export function reconcileContexts(
 }
 
 /**
+ * Two projections are the same *value* only when every entry matches in order, spelling and
+ * project — the same strict comparison #816 applies to a saved key's complete value, so a
+ * reorder or a case-only spelling change is a value change even though no individual per-repo
+ * classification sees it.
+ */
+const sameValue = (left: readonly ServedEntry[], right: readonly ServedEntry[]): boolean =>
+  left.length === right.length &&
+  left.every(
+    (entry, i) => sameEntry(entry, right[i]!) && entry.repository === right[i]!.repository,
+  );
+
+/**
  * Apply a fresh saved configuration to the running serve (#808). The fresh snapshot is the
  * registered configuration service's `LoadedGlobalConfig` read after the saved change landed
  * (config set, reload or page load). Reconciles the saved registrations against the current
- * served set, invalidates changed/removed contexts through the injected cache boundary, and
- * reports the applied `serve.projects` key to the application-state service.
+ * served set, verifies saved local roots when a verified-root boundary is injected, invalidates
+ * changed/removed contexts plus cross-repository dependency trees through the injected cache
+ * boundary, and reports the applied `serve.projects` key to the application-state service.
  */
 export async function applyLiveApplication(
   saved: LoadedGlobalConfig,
   boundaries: LiveApplicationBoundaries,
 ): Promise<LiveApplicationResult> {
   const stored = [...((saved.explicit.get("serve.projects") as GlobalProject[] | undefined) ?? [])];
-  const { served, diagnostics } = entriesFromSaved(stored);
+  const projected = entriesFromSaved(stored);
+  const diagnostics = [...projected.diagnostics];
+
+  // Verify saved local roots against their repositories before serving them (mirrors the
+  // startup boundary): a root that is missing or now belongs to another repository serves the
+  // repository without a local project, and reports why.
+  const served: ServedEntry[] = [];
+  for (const entry of projected.served) {
+    if (entry.project === undefined || !boundaries.verifyProject) {
+      served.push(entry);
+      continue;
+    }
+    const verified = await boundaries.verifyProject(entry.repository, entry.project);
+    if (verified.diagnostic !== undefined) diagnostics.push(verified.diagnostic);
+    served.push(
+      verified.project !== undefined
+        ? { ...entry, project: verified.project }
+        : { repository: entry.repository },
+    );
+  }
+
   const current = boundaries.currentServed();
   const changes = reconcileContexts(current, served);
 
-  for (const change of changes) {
-    if (change.change === "changed" || change.change === "removed") {
-      boundaries.invalidate(change.repository);
-    }
+  const changedOrRemoved = changes.filter((c) => c.change === "changed" || c.change === "removed");
+  for (const change of changedOrRemoved) boundaries.invalidate(change.repository);
+  if (changedOrRemoved.length > 0 && boundaries.invalidateDependencies) {
+    // Conservative cross-repository invalidation: any retained served repository's cached
+    // dependency tree may reference a changed/removed context, and re-computation is cheap.
+    for (const entry of served) boundaries.invalidateDependencies(entry.repository);
   }
 
   // The write read succeeded (the caller passes an error instead when it did not), so the
-  // `serve.projects` key applied — or was already current. A saved registration for a host this
-  // build cannot serve is a diagnostic, not a key failure: it remains saved and only narrows
-  // the served set.
-  const anyChanged = changes.some((c) => c.change !== "unchanged");
+  // `serve.projects` key applied — or was already current. Acknowledge it whenever its saved
+  // *value* took effect (any context change implies a value change, and so does a reorder or a
+  // case-only spelling change), so #816 never stays "pending-live" after a successful reload.
+  const valueChanged = !sameValue(current, served);
   boundaries.record({
     revision: revisionOf(saved),
-    applied: anyChanged ? ["serve.projects"] : [],
+    // A saved registration for a host this build cannot serve is a diagnostic, not a key
+    // failure: it remains saved and only narrows the served set.
+    applied: valueChanged ? ["serve.projects"] : [],
     failed: [],
   });
 
