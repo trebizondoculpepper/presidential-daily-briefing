@@ -81,7 +81,7 @@ export const CONFIG_KEYS: readonly ConfigKey[] = [
     defaultValue: "datalog",
     choices: ["typescript", "datalog"],
     description:
-      "Next-action decision engine: datalog (default) or explicit typescript rollback. Datalog uses --role implementer or designer, defaulting to the implementer view; rollback: pdb config set briefing.engine typescript.",
+      "Next-action decision engine: datalog (default) or explicit typescript rollback. Datalog ranks one activity pool for both roles, owned work first (#651), with --role implementer or designer setting the order (default implementer). The typescript rollback is a legacy compatibility mode that keeps the pre-#651 role-exclusive order; rollback: pdb config set briefing.engine typescript.",
   },
   {
     key: "complexity.enabled",

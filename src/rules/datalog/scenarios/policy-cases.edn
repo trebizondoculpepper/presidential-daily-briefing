@@ -66,7 +66,8 @@
   :expect {:actions [{:subject 100 :rule "D-COMPLEXITY" :kind "estimate-complexity" :band 5
               :why "Effort is unassessed; sizing improves the evidence for choosing work."
               :facts {"impact" "unknown" "complexity" "unknown" "impactState" "unassessed" "complexityState" "unassessed" "head" "not-a-pr" "labelsComplete" true "nativeComplete" true "openBlockers" 1 "readiness" "status:ready"}
-              :overridden [] :unlocks 0 :unknown [] :other-claims []}]
+              :overridden [] :unlocks 0 :unknown [] :other-claims []}
+            {:subject 100 :rule "D-IMPACT" :kind "assess-impact" :band 5}]
            :denials #{[100 "D-DENY-BLOCKER"]}}}
 
  {:id "unknown-native-label-and-closing-coverage-cannot-permit-implementation-1"
@@ -170,13 +171,13 @@
               :why "PR checks failed at head head3; inspect and repair before merge."
               :facts {"impact" "unknown" "complexity" "unknown" "impactState" "unknown" "complexityState" "unknown" "head" "head3" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "failedChecks" "verify:FAILURE"}
               :overridden [] :unlocks 0 :unknown [] :other-claims []}
-            {:subject 101 :rule "D-PR-FAIL" :kind "pr-follow-up" :band 2
-              :why "PR checks failed at head head2; inspect and repair before merge."
-              :facts {"impact" "unknown" "complexity" "unknown" "impactState" "unknown" "complexityState" "unknown" "head" "head2" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "failedChecks" "verify:FAILURE"}
-              :overridden [] :unlocks 0 :unknown [] :other-claims []}
             {:subject 100 :rule "D-OWN" :kind "continue-implementation" :band 6
               :why "Continue your active claim; impact unknown, complexity unknown."
               :facts {"impact" "unknown" "complexity" "unknown" "impactState" "unknown" "complexityState" "unknown" "head" "not-a-pr" "labelsComplete" true "nativeComplete" true "openBlockers" 0}
+              :overridden [] :unlocks 0 :unknown [] :other-claims []}
+            {:subject 101 :rule "D-PR-FAIL" :kind "pr-follow-up" :band 2
+              :why "PR checks failed at head head2; inspect and repair before merge."
+              :facts {"impact" "unknown" "complexity" "unknown" "impactState" "unknown" "complexityState" "unknown" "head" "head2" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "failedChecks" "verify:FAILURE"}
               :overridden [] :unlocks 0 :unknown [] :other-claims []}]
            :denials #{}}}
 
@@ -219,7 +220,10 @@
             {:subject 102 :rule "D-IMPACT" :kind "assess-impact" :band 5
               :why "Benefit is unassessed; assess it before comparing implementation value."
               :facts {"impact" "unknown" "complexity" "unknown" "impactState" "unassessed" "complexityState" "unassessed" "head" "not-a-pr" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "readiness" "status:ready"}
-              :overridden [] :unlocks 0 :unknown [] :other-claims []}]
+              :overridden [] :unlocks 0 :unknown [] :other-claims []}
+            {:subject 102 :rule "D-COMPLEXITY" :kind "estimate-complexity" :band 5}
+            {:subject 101 :rule "D-ORDINARY" :kind "implement" :band 6}
+            {:subject 102 :rule "D-ORDINARY" :kind "implement" :band 6}]
            :denials #{}}}
 
  {:id "explicit-age-order-coalesces-pickup-bands-and-ignores-urgency-value-we-1"
@@ -286,7 +290,8 @@
   :expect {:actions [{:subject 100 :rule "D-ORDINARY" :kind "implement" :band 6
               :why "Eligible implementation: impact unknown (unknown), complexity unknown (unknown)."
               :facts {"impact" "unknown" "complexity" "unknown" "impactState" "unknown" "complexityState" "unknown" "head" "not-a-pr" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "readiness" "status:ready"}
-              :overridden [] :unlocks 1 :unknown [] :other-claims []}]
+              :overridden [] :unlocks 1 :unknown [] :other-claims []}
+            {:subject 102 :rule "D-DESIGN" :kind "design" :band 6}]
            :denials #{[101 "D-DENY-BLOCKER"]}}}
 
  {:id "numeric-ties-are-stable-and-missing-bindings-never-fall-back-to-legacy-1"

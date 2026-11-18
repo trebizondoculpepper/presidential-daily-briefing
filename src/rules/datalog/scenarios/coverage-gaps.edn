@@ -51,7 +51,8 @@
   :expect {:actions [{:subject 100 :rule "D-DOCUMENT" :kind "document" :band 3
               :why "An agreed decision needs documentation before implementation."
               :facts {"impact" "M" "complexity" "M" "impactState" "current" "complexityState" "current" "head" "not-a-pr" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "readiness" "status:ready" "documentationLabel" "design:documentation-needed"}
-              :overridden [] :unlocks 0 :unknown [] :other-claims []}]
+              :overridden [] :unlocks 0 :unknown [] :other-claims []}
+            {:subject 100 :rule "D-ORDINARY" :kind "implement" :band 6}]
            :denials #{}}}
 
  {:id "designer-reviews-a-documentation-pr"
@@ -63,7 +64,8 @@
   :expect {:actions [{:subject 100 :rule "D-DESIGN-REVIEW" :kind "design-review" :band 3
               :why "Review the design/documentation PR at head head2."
               :facts {"impact" "unknown" "complexity" "unknown" "impactState" "unknown" "complexityState" "unknown" "head" "head2" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "designEvidence" "documentation"}
-              :overridden [] :unlocks 0 :unknown [] :other-claims []}]
+              :overridden [] :unlocks 0 :unknown [] :other-claims []}
+            {:subject 100 :rule "D-PR-MERGE" :kind "pr-follow-up" :band 2}]
            :denials #{}}}
 
  {:id "own-easy-win-is-continued-first"
@@ -100,7 +102,8 @@
   :expect {:actions [{:subject 100 :rule "D-BAD-IMPACT" :kind "inspect-assessment" :band 5
               :why "Impact evidence is invalid; inspect and correct the labels or provenance."
               :facts {"impact" "unknown" "complexity" "M" "impactState" "invalid" "complexityState" "current" "head" "not-a-pr" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "readiness" "status:ready"}
-              :overridden [] :unlocks 0 :unknown [] :other-claims []}]
+              :overridden [] :unlocks 0 :unknown [] :other-claims []}
+            {:subject 100 :rule "D-ORDINARY" :kind "implement" :band 6}]
            :denials #{}}}
 
  {:id "own-unfavorable-work-is-reconsidered-last"

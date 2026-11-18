@@ -164,6 +164,7 @@ export function evaluatePolicy(input: PolicyFacts, options: PolicyOptions = {}):
       band: r.band,
       preference: r.preference,
       affinity: r.affinity,
+      owned: r.owned,
       why: r.why,
     }))
       facts.push([10 + i, k, v]);
@@ -279,8 +280,11 @@ export function evaluatePolicy(input: PolicyFacts, options: PolicyOptions = {}):
   const decisions = rows
     .sort((a, b) => compareKeys(a.slice(2), b.slice(2)))
     .map((row): PolicyDecision => {
-      const [t, r, b] = row;
+      const [t, r] = row;
       const definition = definitions[Number(r) - 10];
+      // The row's keys follow :comparison (#652: ownership/attention/affinity precede band); the
+      // reported band is the rule's own declared lifecycle band.
+      const b = definition?.band;
       if (!definition) throw new DatalogError("invalid-inference", "unknown subject or rule");
       const bindings: Record<string, Value> = {};
       const selectedWitnesses = {

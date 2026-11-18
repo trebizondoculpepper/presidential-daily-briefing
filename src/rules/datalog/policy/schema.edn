@@ -46,6 +46,8 @@
    "active-dependent" "active dependent"
    "assessment-kind" "assessment action kind"
    "attention" "agent whose attention is requested"
+   "affinity" "role affinity"
+   "owned" "whether the duty is an owned obligation"
    "band" "band"
    "blocker" "native blocker"
    "blocking-complete" "completeness of dependent coverage"

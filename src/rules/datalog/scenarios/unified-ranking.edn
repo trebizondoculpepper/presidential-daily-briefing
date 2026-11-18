@@ -1,0 +1,31 @@
+;; #651/#652: one activity pool for both roles, ranked ownership first, then directed
+;; attention, then role affinity, then the existing lifecycle bands
+;; (doc/design/unified-activity-ranking.md). Membership never depends on the viewer role.
+{:suite "unified-ranking"
+ :scenarios
+ [
+ {:id "implementer-sees-the-whole-pool-own-duties-first"
+  :doc "An implementer sees design and impact duties too, ranked after its implementation duties."
+  :viewer {:role "implementer" :agent "me"}
+  :facts [{:e 1 "forward-complete" true}
+          {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600001 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "not-a-pr" "label" "status:ready"}
+          {:e 101 "kind" "issue" "state" "OPEN" "number" 2 "target" "https://github.com/o/r/issues/2" "created" 1767225600002 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "not-a-pr" "label" "status:ready" "label" "status:needs-design"}]
+  :expect {:actions [{:subject 100 :rule "D-ORDINARY" :kind "implement" :band 6}
+            {:subject 101 :rule "D-DESIGN" :kind "design" :band 6}] :denials #{[101 "D-DENY-PREREQUISITE"]}}}
+ {:id "designer-sees-the-same-pool-own-duties-first"
+  :doc "A designer sees the same activities, with design and impact duties ahead of implementation."
+  :viewer {:role "designer" :agent "me"}
+  :facts [{:e 1 "forward-complete" true}
+          {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600001 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "not-a-pr" "label" "status:ready"}
+          {:e 101 "kind" "issue" "state" "OPEN" "number" 2 "target" "https://github.com/o/r/issues/2" "created" 1767225600002 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "not-a-pr" "label" "status:ready" "label" "status:needs-design"}]
+  :expect {:actions [{:subject 101 :rule "D-DESIGN" :kind "design" :band 6}
+            {:subject 100 :rule "D-ORDINARY" :kind "implement" :band 6}] :denials #{[101 "D-DENY-PREREQUISITE"]}}}
+ {:id "owned-continuation-precedes-every-new-activity"
+  :doc "One owned claim precedes all new work, assessments included, for either role."
+  :viewer {:role "designer" :agent "me"}
+  :facts [{:e 1 "forward-complete" true}
+          {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600001 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "not-a-pr" "label" "status:ready" "label" "agent:me" "owner" "me"}
+          {:e 101 "kind" "issue" "state" "OPEN" "number" 2 "target" "https://github.com/o/r/issues/2" "created" 1767225600002 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "not-a-pr" "label" "status:ready"}]
+  :expect {:actions [{:subject 100 :rule "D-OWN" :kind "continue-implementation" :band 6}
+            {:subject 101 :rule "D-ORDINARY" :kind "implement" :band 6}] :denials #{[100 "D-DENY-CLAIM"]}}}
+]}

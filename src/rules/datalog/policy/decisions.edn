@@ -2,6 +2,7 @@
 ;; evidence bindings together. Vector order is the rule index (10 + position), so moving a rule is
 ;; a policy change. Each {placeholder} in :why must name a witness: common, eligibility or :witnesses.
 ;; :affinity is the duty's role affinity (implementer, designer, shared or human; #651), an ordering key.
+;; :owned marks a positively owned obligation (#651): it ranks before every new activity.
 ;; :denials documents every denial rule ID that rules.edn derives through implementation-deny.
 {:decisions
  [{:id "D-ATTENTION"
@@ -10,6 +11,7 @@
    :band 1
    :preference 0
    :affinity "shared"
+   :owned false
    :when [(open ?t) (addressed ?t)]
    :why "Explicitly addressed to you; respond before clearing attention."
    :codes ["addressed"]
@@ -21,6 +23,7 @@
    :band 2
    :preference 0
    :affinity "implementer"
+   :owned false
    :when [(pr-action ?t) (pr-failure ?t)]
    :why "PR checks failed at head {head}; inspect and repair before merge."
    :codes ["pr-follow-up" "pr-failed-checks"]
@@ -32,6 +35,7 @@
    :band 2
    :preference 0
    :affinity "implementer"
+   :owned false
    :when [(pr-action ?t) (pr-review ?t)]
    :why "PR has unresolved review findings at head {head}."
    :codes ["pr-follow-up" "pr-review-findings"]
@@ -44,6 +48,7 @@
    :band 2
    :preference 1
    :affinity "implementer"
+   :owned false
    :when [(pr-action ?t) [?t "mergeable" "CONFLICTING"]]
    :why "PR has merge conflicts at head {head}."
    :codes ["pr-follow-up" "pr-conflicts"]
@@ -55,6 +60,7 @@
    :band 2
    :preference 2
    :affinity "implementer"
+   :owned false
    :when [(pr-action ?t) (clean-pr ?t)]
    :why "Current required checks are satisfied at head {head}; inspect the diff and review evidence, then consider merge."
    :codes ["pr-follow-up" "pr-inspect-merge"]
@@ -69,6 +75,7 @@
    :band 2
    :preference 3
    :affinity "implementer"
+   :owned false
    :when [(pr-action ?t) (integrate-pr ?t)]
    :why "Accepted at head {head} (required checks satisfied, head reviewed, no fetched findings) but merge state is {mergeState}, mergeable {mergeable}; refresh mergeability or update the branch, then recheck before considering merge."
    :codes ["pr-follow-up" "pr-integrate"]
@@ -82,7 +89,8 @@
    :band 3
    :preference 0
    :affinity "designer"
-   :when [[1 "role" "designer"] [?t "label" "design:decision-needed"]]
+   :owned false
+   :when [[1 "role" ?role] [(not= ?role "human")] [?t "label" "design:decision-needed"]]
    :why "Resolve the recorded design decision before implementation proceeds."
    :codes ["designer-duty"]
    :witnesses {"decisionLabel" [[?t "label" "design:decision-needed"] [(str "design:decision-needed") ?value]]}}
@@ -93,7 +101,8 @@
    :band 3
    :preference 1
    :affinity "designer"
-   :when [[1 "role" "designer"] [?t "label" "design:documentation-needed"]]
+   :owned false
+   :when [[1 "role" ?role] [(not= ?role "human")] [?t "label" "design:documentation-needed"]]
    :why "An agreed decision needs documentation before implementation."
    :codes ["designer-duty"]
    :witnesses {"documentationLabel" [[?t "label" "design:documentation-needed"] [(str "design:documentation-needed") ?value]]}}
@@ -104,7 +113,8 @@
    :band 3
    :preference 2
    :affinity "designer"
-   :when [[1 "role" "designer"] (design-pr ?t) (not (own-follow-up ?t))]
+   :owned false
+   :when [[1 "role" ?role] [(not= ?role "human")] (design-pr ?t) (not (own-follow-up ?t))]
    :why "Review the design/documentation PR at head {head}."
    :codes ["designer-duty"]
    :witnesses {"designEvidence" [(or-join [?t ?value] (and [?t "label" ?value] [1 "design-label" ?value]) (and [?t "closes" ?i] [?i "label" ?value] [1 "design-label" ?value]))]}}
@@ -115,7 +125,8 @@
    :band 4
    :preference 0
    :affinity "implementer"
-   :when [[1 "role" "implementer"] (eligible ?t) (easy ?t) [1 "order" "impact"]]
+   :owned false
+   :when [[1 "role" ?role] [(not= ?role "human")] (eligible ?t) (easy ?t) [1 "order" "impact"]]
    :why "Known easy win: impact {impact}, complexity {complexity}."
    :codes ["easy-win"]}
 
@@ -125,7 +136,8 @@
    :band 4
    :preference 0
    :affinity "implementer"
-   :when [[1 "role" "implementer"] (own-active ?t) (easy ?t)]
+   :owned true
+   :when [[1 "role" ?role] [(not= ?role "human")] (own-active ?t) (easy ?t)]
    :why "Continue your known easy win: impact {impact}, complexity {complexity}."
    :codes ["easy-win" "own-claim"]}
 
@@ -135,7 +147,8 @@
    :band 5
    :preference 0
    :affinity "implementer"
-   :when [[1 "role" "implementer"] (issue ?t) (needs-complexity ?t) (large-impact ?t)]
+   :owned false
+   :when [[1 "role" ?role] [(not= ?role "human")] (issue ?t) (needs-complexity ?t) (large-impact ?t)]
    :why "High impact {impact}, but effort is {complexityState}; estimate it to test implementation value."
    :codes ["assessment" "cross-role-boost"]}
 
@@ -145,7 +158,8 @@
    :band 5
    :preference 1
    :affinity "implementer"
-   :when [[1 "role" "implementer"] (issue ?t) (needs-complexity ?t)]
+   :owned false
+   :when [[1 "role" ?role] [(not= ?role "human")] (issue ?t) (needs-complexity ?t)]
    :why "Effort is {complexityState}; sizing improves the evidence for choosing work."
    :codes ["assessment"]}
 
@@ -155,7 +169,8 @@
    :band 5
    :preference 0
    :affinity "designer"
-   :when [[1 "role" "designer"] (issue ?t) (needs-impact ?t) (small-complexity ?t)]
+   :owned false
+   :when [[1 "role" ?role] [(not= ?role "human")] (issue ?t) (needs-impact ?t) (small-complexity ?t)]
    :why "Complexity {complexity} is small, but benefit is {impactState}; assess impact to test for an easy win."
    :codes ["assessment" "cross-role-boost"]}
 
@@ -165,7 +180,8 @@
    :band 5
    :preference 1
    :affinity "designer"
-   :when [[1 "role" "designer"] (issue ?t) (needs-impact ?t)]
+   :owned false
+   :when [[1 "role" ?role] [(not= ?role "human")] (issue ?t) (needs-impact ?t)]
    :why "Benefit is {impactState}; assess it before comparing implementation value."
    :codes ["assessment"]}
 
@@ -175,7 +191,8 @@
    :band 5
    :preference 1
    :affinity "implementer"
-   :when [[1 "role" "implementer"] (issue ?t) (bad-complexity ?t)]
+   :owned false
+   :when [[1 "role" ?role] [(not= ?role "human")] (issue ?t) (bad-complexity ?t)]
    :why "Complexity evidence is {complexityState}; inspect and correct the labels or provenance."
    :codes ["assessment" "inspection"]}
 
@@ -185,7 +202,8 @@
    :band 5
    :preference 1
    :affinity "designer"
-   :when [[1 "role" "designer"] (issue ?t) (bad-impact ?t)]
+   :owned false
+   :when [[1 "role" ?role] [(not= ?role "human")] (issue ?t) (bad-impact ?t)]
    :why "Impact evidence is {impactState}; inspect and correct the labels or provenance."
    :codes ["assessment" "inspection"]}
 
@@ -195,7 +213,8 @@
    :band 6
    :preference 0
    :affinity "implementer"
-   :when [[1 "role" "implementer"] (eligible ?t)]
+   :owned false
+   :when [[1 "role" ?role] [(not= ?role "human")] (eligible ?t)]
    :why "Eligible implementation: impact {impact} ({impactState}), complexity {complexity} ({complexityState})."
    :codes ["ordinary"]}
 
@@ -205,7 +224,8 @@
    :band 6
    :preference 0
    :affinity "implementer"
-   :when [[1 "role" "implementer"] (own-active ?t)]
+   :owned true
+   :when [[1 "role" ?role] [(not= ?role "human")] (own-active ?t)]
    :why "Continue your active claim; impact {impact}, complexity {complexity}."
    :codes ["ordinary" "own-claim"]}
 
@@ -215,7 +235,8 @@
    :band 6
    :preference 0
    :affinity "designer"
-   :when [[1 "role" "designer"] (design-eligible ?t)]
+   :owned false
+   :when [[1 "role" ?role] [(not= ?role "human")] (design-eligible ?t)]
    :why "A design contract is missing. Impact {impact}, complexity {complexity}."
    :codes ["ordinary"]
    :witnesses {"designLabel" [[?t "label" "status:needs-design"] [(str "status:needs-design") ?value]]}}
@@ -226,7 +247,8 @@
    :band 7
    :preference 0
    :affinity "implementer"
-   :when [[1 "role" "implementer"] (eligible ?t) (unfavorable ?t) [1 "order" "impact"]]
+   :owned false
+   :when [[1 "role" ?role] [(not= ?role "human")] (eligible ?t) (unfavorable ?t) [1 "order" "impact"]]
    :why "High effort for limited benefit: impact {impact}, complexity {complexity}; reconsider or split."
    :codes ["unfavorable"]}
 
@@ -236,7 +258,8 @@
    :band 7
    :preference 0
    :affinity "implementer"
-   :when [[1 "role" "implementer"] (own-active ?t) (unfavorable ?t)]
+   :owned true
+   :when [[1 "role" ?role] [(not= ?role "human")] (own-active ?t) (unfavorable ?t)]
    :why "Your active work has impact {impact} and complexity {complexity}; reconsider or split before continuing."
    :codes ["unfavorable" "own-claim"]}
 
@@ -249,7 +272,8 @@
    :band 3
    :preference 0
    :affinity "shared"
-   :when [[1 "role" "implementer"] (own-issue ?t) [?t "claim-activity" "resume-required"]]
+   :owned true
+   :when [[1 "role" ?role] [(not= ?role "human")] (own-issue ?t) [?t "claim-activity" "resume-required"]]
    :why "What your claim waited on has cleared ({waitReason}); resume it explicitly before starting other work."
    :codes ["own-claim" "resume-required"]
    :witnesses {"waitReason" [[?t "wait-reason" ?value]]}}
@@ -260,7 +284,8 @@
    :band 3
    :preference 1
    :affinity "shared"
-   :when [[1 "role" "implementer"] [1 "owned-review-subject" ?t] (own-issue ?t) [1 "owned-claims" ?n] [(> ?n 1)] [1 "owned-claims-complete" true]]
+   :owned true
+   :when [[1 "role" ?role] [(not= ?role "human")] [1 "owned-review-subject" ?t] (own-issue ?t) [1 "owned-claims" ?n] [(> ?n 1)] [1 "owned-claims-complete" true]]
    :why "You retain {ownedClaims} implementation claims; review which to finish, justify as waiting, release or reassign before starting more work."
    :codes ["own-claim" "review-owned-work"]
    :witnesses {"ownedClaims" [[1 "owned-claims" ?value]]}}
@@ -271,7 +296,8 @@
    :band 3
    :preference 1
    :affinity "shared"
-   :when [[1 "role" "implementer"] [1 "owned-review-subject" ?t] (own-issue ?t) [1 "owned-claims" ?n] [(> ?n 1)] [1 "owned-claims-complete" false]]
+   :owned true
+   :when [[1 "role" ?role] [(not= ?role "human")] [1 "owned-review-subject" ?t] (own-issue ?t) [1 "owned-claims" ?n] [(> ?n 1)] [1 "owned-claims-complete" false]]
    :why "You retain at least {ownedClaims} implementation claims (the claim inventory is incomplete); review which to finish, justify as waiting, release or reassign before starting more work."
    :codes ["own-claim" "review-owned-work" "inspection"]
    :witnesses {"ownedClaims" [[1 "owned-claims" ?value]]}}
@@ -282,7 +308,8 @@
    :band 3
    :preference 3
    :affinity "shared"
-   :when [[1 "role" "implementer"] [?t "ownership-inventory" true] [1 "owned-claims" 0] [1 "owned-claims-complete" false]]
+   :owned true
+   :when [[1 "role" ?role] [(not= ?role "human")] [?t "ownership-inventory" true] [1 "owned-claims" 0] [1 "owned-claims-complete" false]]
    :why "Your claim inventory is incomplete and no claim was observed; inspect your ownership before claiming more work."
    :codes ["inspection" "inventory-unknown"]}
 
@@ -292,7 +319,8 @@
    :band 3
    :preference 3
    :affinity "shared"
-   :when [[1 "role" "implementer"] [1 "owned-review-subject" ?t] (own-issue ?t) [1 "owned-claims" 1] [1 "owned-claims-complete" false]]
+   :owned true
+   :when [[1 "role" ?role] [(not= ?role "human")] [1 "owned-review-subject" ?t] (own-issue ?t) [1 "owned-claims" 1] [1 "owned-claims-complete" false]]
    :why "Your claim inventory is incomplete and only this claim was observed; inspect your ownership before claiming more work."
    :codes ["own-claim" "inspection"]}
 
@@ -302,7 +330,8 @@
    :band 3
    :preference 2
    :affinity "shared"
-   :when [[1 "role" "implementer"] (own-issue ?t) [?t "claim-activity" "unknown"]]
+   :owned true
+   :when [[1 "role" ?role] [(not= ?role "human")] (own-issue ?t) [?t "claim-activity" "unknown"]]
    :why "Your claim's activity is unknown ({waitReason}); inspect its wait evidence. Unknown is never waiting, so no other claim is admitted."
    :codes ["own-claim" "inspection"]
    :witnesses {"waitReason" [[?t "wait-reason" ?value]]}}
@@ -313,7 +342,8 @@
    :band 8
    :preference 0
    :affinity "shared"
-   :when [[1 "role" "implementer"] (own-issue ?t) [?t "claim-activity" "waiting"]]
+   :owned true
+   :when [[1 "role" ?role] [(not= ?role "human")] (own-issue ?t) [?t "claim-activity" "waiting"]]
    :why "Waiting: {waitReason}. You keep this claim; nothing to do on it until that clears."
    :codes ["own-claim" "waiting"]
    :witnesses {"waitReason" [[?t "wait-reason" ?value]]}}
@@ -324,6 +354,7 @@
    :band 6
    :preference 0
    :affinity "shared"
+   :owned false
    :when [(issue ?t) (possible ?t) (uncertain ?t) [1 "role" ?role] [(not= ?role "human")]]
    :why "Eligibility is unproven: inspect incomplete evidence or state the required platform."
    :codes ["ordinary" "inspection"]
@@ -337,6 +368,7 @@
    :band 1
    :preference 0
    :affinity "human"
+   :owned false
    :when [[1 "role" "human"] (open-question ?t) (asks-viewer ?t)]
    :why "A trusted question record routed to you ({routedTo}) awaits answers on the ticket."
    :codes ["explicit" "addressed"]
@@ -348,6 +380,7 @@
    :band 3
    :preference 0
    :affinity "human"
+   :owned false
    :when [[1 "role" "human"] (open-question ?t) (not (asks-viewer ?t))]
    :why "A trusted question record routed to {routedTo} awaits answers on the ticket."
    :codes ["explicit"]
@@ -359,6 +392,7 @@
    :band 3
    :preference 1
    :affinity "human"
+   :owned false
    :when [[1 "role" "human"] (open-unrecorded ?t) (unverified-record ?t)]
    :why "Labelled {questionLabel}; a question record exists but its author's authority is unverified. Inferred: confirm the decision needed."
    :codes ["inferred"]
@@ -370,6 +404,7 @@
    :band 3
    :preference 2
    :affinity "human"
+   :owned false
    :when [[1 "role" "human"] (open-unrecorded ?t)]
    :why "Labelled {questionLabel} without a trusted question record. Inferred: a decision may be needed."
    :codes ["inferred"]
@@ -382,6 +417,7 @@
    :band 1
    :preference 1
    :affinity "human"
+   :owned false
    :when [[1 "role" "human"] (orphan-asks-viewer ?t)]
    :why "The ticket is closed but its trusted question routed to you ({routedTo}) has no recorded resolve or withdraw; closure is not an answer."
    :codes ["explicit" "addressed"]
@@ -393,6 +429,7 @@
    :band 3
    :preference 0
    :affinity "human"
+   :owned false
    :when [[1 "role" "human"] (has-orphaned ?t) (not (orphan-asks-viewer ?t))]
    :why "The ticket is closed but its trusted question routed to {routedTo} has no recorded resolve or withdraw; closure is not an answer."
    :codes ["explicit"]
@@ -404,6 +441,7 @@
    :band 3
    :preference 1
    :affinity "human"
+   :owned false
    :when [[1 "role" "human"] (has-orphan-unknown ?t)]
    :why "The ticket is closed and whether its trusted question routed to {routedTo} was resolved could not be established; it is not read as answered."
    :codes ["explicit" "resolution-unknown"]
@@ -415,6 +453,7 @@
    :band 3
    :preference 3
    :affinity "human"
+   :owned false
    :when [[1 "role" "human"] (open ?t) (accepted-pr ?t) (clean-pr ?t)]
    :why "Accepted at head {head}: required checks satisfied, head reviewed, no findings. Inferred: merge sign-off candidate; nobody asked explicitly."
    :codes ["inferred"]}]

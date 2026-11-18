@@ -56,6 +56,8 @@ export interface DecisionRule {
   preference: number;
   /** The duty's role affinity (#651): an ordering key, never a membership gate. */
   affinity: "implementer" | "designer" | "shared" | "human";
+  /** A positively owned obligation (#651): ranks before every new activity. */
+  owned: boolean;
   /** The :when clauses as canonical EDN, for display and the English policy page (#392). */
   clauses: string;
   why: string;

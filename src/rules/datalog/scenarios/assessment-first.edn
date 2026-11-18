@@ -59,7 +59,8 @@
             {:subject 101 :rule "D-DESIGN" :kind "design" :band 6
               :why "A design contract is missing. Impact M, complexity M."
               :facts {"impact" "M" "complexity" "M" "impactState" "current" "complexityState" "current" "head" "not-a-pr" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "designLabel" "status:needs-design"}
-              :overridden [] :unlocks 0 :unknown [] :other-claims []}]
+              :overridden [] :unlocks 0 :unknown [] :other-claims []}
+            {:subject 100 :rule "D-ORDINARY" :kind "implement" :band 6}]
            :denials #{}}}
 
  {:id "s4-known-easy-win-versus-unassessed-ticket"
@@ -79,7 +80,8 @@
             {:subject 101 :rule "D-ORDINARY" :kind "implement" :band 6
               :why "Eligible implementation: impact unknown (unassessed), complexity unknown (unassessed)."
               :facts {"impact" "unknown" "complexity" "unknown" "impactState" "unassessed" "complexityState" "unassessed" "head" "not-a-pr" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "readiness" "status:ready"}
-              :overridden [] :unlocks 0 :unknown [] :other-claims []}]
+              :overridden [] :unlocks 0 :unknown [] :other-claims []}
+            {:subject 101 :rule "D-IMPACT" :kind "assess-impact" :band 5}]
            :denials #{}}}
 
  {:id "s5-large-unassessed-backlog-versus-one-known-easy-win"
@@ -135,23 +137,28 @@
             {:subject 105 :rule "D-ORDINARY" :kind "implement" :band 6
               :why "Eligible implementation: impact unknown (unassessed), complexity unknown (unassessed)."
               :facts {"impact" "unknown" "complexity" "unknown" "impactState" "unassessed" "complexityState" "unassessed" "head" "not-a-pr" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "readiness" "status:ready"}
-              :overridden [] :unlocks 0 :unknown [] :other-claims []}]
+              :overridden [] :unlocks 0 :unknown [] :other-claims []}
+            {:subject 101 :rule "D-IMPACT" :kind "assess-impact" :band 5}
+            {:subject 102 :rule "D-IMPACT" :kind "assess-impact" :band 5}
+            {:subject 103 :rule "D-IMPACT" :kind "assess-impact" :band 5}
+            {:subject 104 :rule "D-IMPACT" :kind "assess-impact" :band 5}
+            {:subject 105 :rule "D-IMPACT" :kind "assess-impact" :band 5}]
            :denials #{}}}
 
  {:id "s6-already-active-implementation-versus-estimate"
-  :doc "S6 already active implementation versus estimate"
+  :doc "S6 (#651): own active implementation precedes a new boosted estimate; owned obligations come first."
   :viewer {:role "implementer" :agent "me"}
   :facts [{:e 1 "forward-complete" true}
           {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "agent:me" "owner" "me"}
           {:e 101 "kind" "issue" "state" "OPEN" "number" 2 "target" "https://github.com/o/r/issues/2" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "current" "impact-size" "L" "complexity-state" "unassessed" "complexity-size" "unknown" "head" "not-a-pr" "label" "status:ready"}]
-  :expect {:actions [{:subject 101 :rule "D-COMPLEXITY-BOOST" :kind "estimate-complexity" :band 5
-              :why "High impact L, but effort is unassessed; estimate it to test implementation value."
-              :facts {"impact" "L" "complexity" "unknown" "impactState" "current" "complexityState" "unassessed" "head" "not-a-pr" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "readiness" "status:ready"}
-              :overridden ["D-COMPLEXITY"] :unlocks 0 :unknown [] :other-claims []}
-            {:subject 100 :rule "D-OWN" :kind "continue-implementation" :band 6
+  :expect {:actions [{:subject 100 :rule "D-OWN" :kind "continue-implementation" :band 6
               :why "Continue your active claim; impact M, complexity M."
               :facts {"impact" "M" "complexity" "M" "impactState" "current" "complexityState" "current" "head" "not-a-pr" "labelsComplete" true "nativeComplete" true "openBlockers" 0}
               :overridden [] :unlocks 0 :unknown [] :other-claims []}
+            {:subject 101 :rule "D-COMPLEXITY-BOOST" :kind "estimate-complexity" :band 5
+              :why "High impact L, but effort is unassessed; estimate it to test implementation value."
+              :facts {"impact" "L" "complexity" "unknown" "impactState" "current" "complexityState" "unassessed" "head" "not-a-pr" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "readiness" "status:ready"}
+              :overridden ["D-COMPLEXITY"] :unlocks 0 :unknown [] :other-claims []}
             {:subject 101 :rule "D-ORDINARY" :kind "implement" :band 6
               :why "Eligible implementation: impact L (current), complexity unknown (unassessed)."
               :facts {"impact" "L" "complexity" "unknown" "impactState" "current" "complexityState" "unassessed" "head" "not-a-pr" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "readiness" "status:ready"}
