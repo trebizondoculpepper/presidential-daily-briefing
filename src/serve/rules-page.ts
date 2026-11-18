@@ -15,7 +15,6 @@ import {
   ConfigError,
   loadConfig,
   nodeFileSystem,
-  nodeGit,
   resolveRepositoryTarget,
 } from "../config/config.js";
 import type { ConfigFileSystem, GitRunner } from "../config/config.js";
@@ -32,12 +31,15 @@ import { HttpFailure } from "./http.js";
 
 /** Local, read-only boundaries for effective settings; tests inject fakes. */
 export interface RulesPageRuntime {
-  git: GitRunner;
+  /**
+   * A legacy runner for tests; when omitted (production) every checkout read goes through the
+   * typed Git service with its isolated runner (#938, #904).
+   */
+  git?: GitRunner;
   fs: ConfigFileSystem;
 }
 
 export const defaultRulesPageRuntime = (): RulesPageRuntime => ({
-  git: nodeGit,
   fs: nodeFileSystem,
 });
 
