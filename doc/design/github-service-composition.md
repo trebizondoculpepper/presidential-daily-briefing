@@ -203,3 +203,9 @@ Retain existing workflow/native tests without cloning their matrix into each
 capability. One packed CLI/MCP/serve smoke proves integration outside the checkout.
 The docs amendment itself requires formatting only. Implementation tickets remain
 open until their own runtime acceptance is delivered.
+
+## Module delivery index
+
+The [application module migration map](git-gh-module-migrations.md) records exact
+module ownership, Git/GH needs, estimates, native prerequisites and exclusions.
+Use it instead of picking a broad capability umbrella for duplicate work.
