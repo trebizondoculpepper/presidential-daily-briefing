@@ -496,6 +496,7 @@ describe("pdb serve without a local project (#271)", () => {
   it("presents an empty checkout of exactly that repository, read-only", async () => {
     const readers = noLocalProject("owner/name");
     const git = readers.estimation!.git!;
+    if (typeof git !== "function") throw new Error("expected legacy GitRunner in noLocalProject");
     expect(await git(["rev-parse", "--show-toplevel"], NO_PROJECT_ROOT)).toBe(
       `${NO_PROJECT_ROOT}\n`,
     );

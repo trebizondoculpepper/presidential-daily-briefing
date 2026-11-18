@@ -24,12 +24,12 @@ import {
   filesystemRefusal,
   loadConfig,
   nodeFileSystem,
-  nodeGit,
   resolveRepositoryTarget,
   retiredKeyNotices,
   settingFor,
 } from "../config/config.js";
 import type { ConfigFileSystem, GitRunner } from "../config/config.js";
+import type { GitService } from "../git/service.js";
 import { sizeReport } from "./estimation.js";
 import type {
   EstimationFinding,
@@ -164,7 +164,7 @@ export interface LabelEstimationInput {
 
 export interface LabelEstimationRuntime {
   readonly fs?: ConfigFileSystem;
-  readonly git?: GitRunner;
+  readonly git?: GitService | GitRunner;
   readonly cwd?: string;
 }
 
@@ -181,7 +181,7 @@ export async function collectLabelEstimationInput(
     const target = await resolveRepositoryTarget(
       runtime.cwd ?? process.cwd(),
       repository,
-      runtime.git ?? nodeGit,
+      runtime.git,
     );
     const config = await loadConfig(target.root, runtime.fs ?? nodeFileSystem);
     // Retired keys (complexity.fieldId, #153) are ignored with a finding, never a failure.
@@ -217,7 +217,7 @@ export async function metricStatus(
     const target = await resolveRepositoryTarget(
       runtime.cwd ?? process.cwd(),
       repository,
-      runtime.git ?? nodeGit,
+      runtime.git,
     );
     const config = await loadConfig(target.root, runtime.fs ?? nodeFileSystem);
     return settingFor(config, d.enabledKey).value === false ? "disabled" : "available";
