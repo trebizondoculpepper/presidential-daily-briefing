@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 import { resolveRepositoryTarget } from "./config.js";
 import type { GitRunner } from "./config.js";
+import { createGitService } from "../git/service.js";
 
 // Synthetic git answers only; no repository is read.
 const fake =
@@ -47,5 +48,19 @@ describe("resolveRepositoryTarget over the typed Git service (#904)", () => {
     await expect(
       resolveRepositoryTarget("/w", undefined, fake("/w\n", new Error("boom"))),
     ).rejects.toMatchObject({ code: "repository-mismatch" });
+  });
+  it("uses an injected shared Git service without building another", async () => {
+    const calls: string[] = [];
+    const shared = createGitService({
+      git: async (args) => {
+        calls.push(args[0]!);
+        return args[0] === "rev-parse" ? "/w\n" : "origin\thttps://github.com/o/r (fetch)\n";
+      },
+    });
+    expect(await resolveRepositoryTarget("/w", undefined, shared)).toEqual({
+      root: "/w",
+      repository: "o/r",
+    });
+    expect(calls).toEqual(["rev-parse", "remote"]);
   });
 });

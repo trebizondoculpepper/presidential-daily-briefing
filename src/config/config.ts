@@ -28,6 +28,7 @@ import {
 import { join, resolve } from "node:path";
 import { parse as parseToml, stringify as stringifyToml, TomlError } from "smol-toml";
 import { createGitService, GitError } from "../git/service.js";
+import type { GitService } from "../git/service.js";
 import type { GitRunner } from "../git/remotes.js";
 
 /** Repository-relative location of the shared TOML settings file (#160). */
@@ -674,11 +675,13 @@ export type { GitRunner } from "../git/remotes.js";
 export async function resolveRepositoryTarget(
   cwd: string,
   repository: string | undefined,
-  git?: GitRunner,
+  git?: GitService | GitRunner,
 ): Promise<RepositoryTarget> {
   // The typed Git service (#904): the checkout root and its remotes, parsed behind the facade.
-  // A caller's runner is its transport; by default the service's isolated runner is used.
-  const service = createGitService(git ? { git } : {});
+  // Composition injects its shared service; a legacy runner is adapted as a transport, and only
+  // then (or with nothing injected) is a service built here.
+  const service =
+    typeof git === "object" ? git : createGitService(typeof git === "function" ? { git } : {});
   const context = { cwd };
   let root: string;
   try {
