@@ -46,7 +46,18 @@ import type { TicketReads } from "./tickets.js";
 import { deliveryReads } from "./delivery.js";
 import type { DeliveryReads } from "./delivery.js";
 import { estimationCapabilities, type EstimationCapabilities } from "./estimation.js";
-import { commentPostOver, ghCommentReceipt } from "../dependencies.js";
+import {
+  applyDependencyChange,
+  commentPostOver,
+  completeNative,
+  dependencyReport,
+  ghCommentReceipt,
+  ghRunOver,
+  planDependencyChange,
+  readDependencyIssue,
+  type DependencyChangeResult,
+  type DependencyPlan,
+} from "../dependencies.js";
 import { withCommentRecovery } from "../commentwrite.js";
 import type {
   CommentCallOptions,
@@ -178,6 +189,26 @@ export interface GhService {
   completion: CompletionCapabilities;
   /** Typed estimation reads and guarded label/comment mutations (#916). */
   estimation: EstimationCapabilities;
+  /** Typed issue dependency reads and guarded mutations (#919). */
+  dependencies: {
+    completeNative: typeof completeNative;
+    readIssue(
+      repository: string,
+      number: number,
+      eligibility?: boolean,
+    ): ReturnType<typeof readDependencyIssue>;
+    report(
+      repository: string,
+      number: number,
+      depOptions?: Parameters<typeof dependencyReport>[2],
+      now?: () => Date,
+    ): ReturnType<typeof dependencyReport>;
+    planChange(
+      repository: string,
+      request: Parameters<typeof planDependencyChange>[1],
+    ): ReturnType<typeof planDependencyChange>;
+    applyChange(plan: DependencyPlan): Promise<DependencyChangeResult>;
+  };
 }
 
 export interface GhServiceOptions {
@@ -278,6 +309,30 @@ export function createGhService(options: GhServiceOptions = {}): GhService {
     prStatus: prStatusReads(query as Query),
     containment: containmentReads(query as Query, rest),
     estimation: estimationCapabilities(graphqlApiOverTransport(transport, env)),
+    dependencies: {
+      completeNative: (item, repository) => completeNative(item, repository, query as Query),
+      readIssue: (repository, number, eligibility) =>
+        readDependencyIssue(repository, number, query as Query, eligibility),
+      report: (repository, number, depOptions, now) =>
+        dependencyReport(
+          repository,
+          number,
+          depOptions,
+          queryForSignal(depOptions?.signal) as Query,
+          now ?? options.now,
+        ),
+      planChange: (repository, request) =>
+        planDependencyChange(repository, request, query as Query),
+      applyChange: (plan) =>
+        applyDependencyChange(
+          plan,
+          options.run
+            ? async (args, call) => {
+                await options.run!(args, call);
+              }
+            : ghRunOver(transport, env, query as Query),
+        ),
+    },
     delivery: deliveryReads(query as Query),
     comments: {
       async create(target, call) {

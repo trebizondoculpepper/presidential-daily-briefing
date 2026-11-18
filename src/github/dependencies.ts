@@ -1,8 +1,6 @@
 /** Native dependency queries and pure facts. Contract: doc/issue-dependencies.md. */
-import { execFile } from "node:child_process";
 import { execFileTransport } from "./service/transport.js";
 import type { GhTransport } from "./service/transport.js";
-import { promisify } from "node:util";
 import {
   ghQuery,
   ghQueryWith,
@@ -27,7 +25,6 @@ import type { Issue, NativeNode, Page, Reference } from "./types.js";
 import { QuotaStopped, quotaRefusal, ReadMeter, readProfiles } from "./readplan.js";
 import type { ReadCollection } from "./readplan.js";
 
-const execute = promisify(execFile);
 const pageInfo = "pageInfo { hasNextPage endCursor }";
 export const summaryFields =
   "issueDependenciesSummary { blockedBy totalBlockedBy blocking totalBlocking }";
@@ -704,21 +701,37 @@ export function dependencyText(report: DependencyReport): string {
 
 /** The only GitHub write boundary: `gh` with explicit arguments, never a shell. */
 export type GhRun = (args: string[], call?: CommentCallOptions) => Promise<void>;
-export const ghRun: GhRun = async (args, call) => {
-  // Workflow comments go through the shared bounded recovery boundary (#345).
-  if (commentCommand(args)) {
-    await ghCommentRun(args, call);
-    return;
-  }
-  try {
-    await execute("gh", args, { timeout: 60_000 });
-  } catch (error) {
-    // Keep only a rate-limit discriminator; never echo arguments, stderr or response bodies.
-    if (isRateLimit(`${outputText(prop(error, "stderr"))}\n${outputText(prop(error, "stdout"))}`))
-      throw new RateLimitError(`gh ${args[0]} ${args[1]} was rate limited by GitHub.`);
-    throw new Error(`gh ${args[0]} ${args[1]} failed. Check gh auth status and rate limits.`);
-  }
-};
+/** Build a guarded `gh` runner over an explicit GH transport, environment and query (#919). */
+export const ghRunOver =
+  (transport: GhTransport, env?: NodeJS.ProcessEnv, query?: Query): GhRun =>
+  async (args, call) => {
+    // Workflow comments go through the shared bounded recovery boundary (#345).
+    if (commentCommand(args)) {
+      const resolvedQuery = query ?? ghQuery;
+      const runComment =
+        transport === execFileTransport && !env && resolvedQuery === ghQuery
+          ? ghCommentRun
+          : withCommentRecovery({
+              dispatch: commentPostOver(transport, env),
+              readBack: (target, since) => ghCommentReceipt(target, since, resolvedQuery),
+            });
+      await runComment(args, call);
+      return;
+    }
+    const outcome = await transport({
+      args,
+      ...(env ? { env } : {}),
+      timeoutMs: 60_000,
+      maxBufferBytes: 1024 * 1024,
+    });
+    if (!outcome.ok) {
+      // Keep only a rate-limit discriminator; never echo arguments, stderr or response bodies.
+      if (isRateLimit(`${outcome.stderr}\n${outcome.stdout}`))
+        throw new RateLimitError(`gh ${args[0]} ${args[1]} was rate limited by GitHub.`);
+      throw new Error(`gh ${args[0]} ${args[1]} failed. Check gh auth status and rate limits.`);
+    }
+  };
+export const ghRun: GhRun = ghRunOver(execFileTransport);
 /**
  * One REST comment POST through gh with `--include`, so the refusal is classified from that same
  * response's status, headers and error fields (#293, #345). Resolves with the created URL.
@@ -844,8 +857,6 @@ export class RateLimitError extends Error {
     super(message);
   }
 }
-const outputText = (value: unknown): string =>
-  typeof value === "string" ? value : Buffer.isBuffer(value) ? value.toString() : "";
 export const isRateLimit = (text: string): boolean =>
   /rate limit|abuse detection|HTTP 429|retry-after/i.test(text);
 
