@@ -329,7 +329,7 @@ export function createGhService(options: GhServiceOptions = {}): GhService {
             locate: (repo, num) => locateIssue(repo, num, rest, collectOptions.signal),
             ...collectOptions,
           },
-          options.query || options.transport
+          options.query || options.transport || options.env
             ? (queryForSignal(collectOptions.signal) as Query)
             : undefined,
           now ?? options.now,
