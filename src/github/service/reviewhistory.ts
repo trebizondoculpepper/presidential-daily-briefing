@@ -54,7 +54,54 @@ comments(first:100){nodes{author{login} body createdAt url} pageInfo{hasNextPage
 
 const isRecord = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
-const connection = (v: unknown): boolean => isRecord(v) && Array.isArray(v.nodes);
+const str = (v: unknown): v is string => typeof v === "string";
+/** Present and either null or a string: an omitted field is missing evidence, not null. */
+const strOrNull = (o: Record<string, unknown>, k: string): boolean =>
+  k in o && (o[k] === null || str(o[k]));
+const actor = (v: unknown): boolean => v === null || (isRecord(v) && str(v.login));
+const oidOrNull = (v: unknown): boolean => v === null || (isRecord(v) && str(v.oid));
+/** A connection with every node valid and explicit paging evidence. */
+const connection = (v: unknown, node: (n: unknown) => boolean, paged = true): boolean =>
+  isRecord(v) &&
+  Array.isArray(v.nodes) &&
+  v.nodes.every((n) => isRecord(n) && node(n)) &&
+  (!paged || (isRecord(v.pageInfo) && typeof v.pageInfo.hasNextPage === "boolean"));
+
+const commitNode = (n: unknown): boolean =>
+  isRecord(n) &&
+  isRecord(n.commit) &&
+  str(n.commit.oid) &&
+  strOrNull(n.commit, "committedDate") &&
+  strOrNull(n.commit, "messageHeadline");
+const reviewNode = (n: unknown): boolean =>
+  isRecord(n) &&
+  "author" in n &&
+  actor(n.author) &&
+  str(n.state) &&
+  strOrNull(n, "submittedAt") &&
+  str(n.url) &&
+  "commit" in n &&
+  oidOrNull(n.commit);
+const commentNode =
+  (thread: boolean) =>
+  (n: unknown): boolean =>
+    isRecord(n) &&
+    "author" in n &&
+    actor(n.author) &&
+    strOrNull(n, "body") &&
+    strOrNull(n, "createdAt") &&
+    str(n.url) &&
+    (!thread || ("originalCommit" in n && oidOrNull(n.originalCommit)));
+const threadNode = (n: unknown): boolean =>
+  isRecord(n) &&
+  typeof n.isResolved === "boolean" &&
+  typeof n.isOutdated === "boolean" &&
+  strOrNull(n, "path") &&
+  "line" in n &&
+  (n.line === null || typeof n.line === "number") &&
+  isRecord(n.comments) &&
+  typeof n.comments.totalCount === "number" &&
+  connection(n.comments, commentNode(true), false);
 
 /** The review-history reads as one capability object. */
 export interface ReviewHistoryReads {
@@ -75,18 +122,21 @@ export function reviewHistoryReads(query: Query): ReviewHistoryReads {
       if (!isRecord(repo)) throw new Error(`Repository unavailable: ${repository}`);
       const pr = repo.pullRequest;
       if (pr === null || pr === undefined) return null;
+      // Every consumed field and every connection's paging evidence is checked here: a
+      // malformed record or missing coverage rejects the whole history, never disappears.
       if (
         !isRecord(pr) ||
         typeof pr.number !== "number" ||
-        typeof pr.url !== "string" ||
-        typeof pr.headRefOid !== "string" ||
-        !connection(pr.commits) ||
-        !connection(pr.reviews) ||
-        !connection(pr.reviewThreads) ||
-        !connection(pr.comments) ||
-        !(pr.reviewThreads as { nodes: unknown[] }).nodes.every(
-          (t) => isRecord(t) && typeof t.isResolved === "boolean" && connection(t.comments),
-        )
+        !str(pr.url) ||
+        !str(pr.headRefOid) ||
+        !("author" in pr) ||
+        !actor(pr.author) ||
+        !isRecord(pr.commits) ||
+        typeof pr.commits.totalCount !== "number" ||
+        !connection(pr.commits, commitNode) ||
+        !connection(pr.reviews, reviewNode) ||
+        !connection(pr.reviewThreads, threadNode) ||
+        !connection(pr.comments, commentNode(false))
       )
         throw new Error("GitHub returned a malformed pull request history.");
       return pr as unknown as ReviewHistoryNode;
