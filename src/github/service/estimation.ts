@@ -109,27 +109,32 @@ const labelNode = (value: unknown): EstimationLabelNode | null => {
   return typeof id === "string" && typeof name === "string" ? { id, name } : null;
 };
 
-const parseActor = (value: unknown): { __typename?: string; login?: string } | null => {
-  if (!isRecord(value)) return null;
+const parseActor = (value: unknown): { __typename?: string; login?: string } | null | undefined => {
+  if (value === null) return null;
+  if (!isRecord(value)) return undefined;
   return {
     ...(typeof value.__typename === "string" ? { __typename: value.__typename } : {}),
     ...(typeof value.login === "string" ? { login: value.login } : {}),
   };
 };
 
-const parseCommentNode = (value: unknown): Comment => ({
-  body: typeof prop(value, "body") === "string" ? (prop(value, "body") as string) : "",
-  createdAt:
-    typeof prop(value, "createdAt") === "string" ? (prop(value, "createdAt") as string) : "",
-  author: parseActor(prop(value, "author")),
-  ...(typeof prop(value, "lastEditedAt") === "string" || prop(value, "lastEditedAt") === null
-    ? { lastEditedAt: prop(value, "lastEditedAt") as string | null }
-    : {}),
-  ...(typeof prop(value, "includesCreatedEdit") === "boolean"
-    ? { includesCreatedEdit: prop(value, "includesCreatedEdit") as boolean }
-    : {}),
-  ...(prop(value, "editor") !== undefined ? { editor: parseActor(prop(value, "editor")) } : {}),
-});
+const parseCommentNode = (value: unknown): Comment => {
+  const author = parseActor(prop(value, "author"));
+  const editor = parseActor(prop(value, "editor"));
+  return {
+    body: typeof prop(value, "body") === "string" ? (prop(value, "body") as string) : "",
+    createdAt:
+      typeof prop(value, "createdAt") === "string" ? (prop(value, "createdAt") as string) : "",
+    ...(author !== undefined ? { author } : {}),
+    ...(typeof prop(value, "lastEditedAt") === "string" || prop(value, "lastEditedAt") === null
+      ? { lastEditedAt: prop(value, "lastEditedAt") as string | null }
+      : {}),
+    ...(typeof prop(value, "includesCreatedEdit") === "boolean"
+      ? { includesCreatedEdit: prop(value, "includesCreatedEdit") as boolean }
+      : {}),
+    ...(editor !== undefined ? { editor } : {}),
+  };
+};
 
 const parseCommentPage = (
   comments: unknown,
