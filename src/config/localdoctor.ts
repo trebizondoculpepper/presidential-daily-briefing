@@ -192,8 +192,9 @@ export async function localDoctor(
     (runtime.probe ? createGitService({ git: gitRunner(probe) }) : createGitService());
   const withSignal = (ctx: GitContext): GitContext => {
     signal?.throwIfAborted();
-    if (!signal) return ctx;
-    return { ...ctx, signal: ctx.signal ? AbortSignal.any([signal, ctx.signal]) : signal };
+    const timeout = AbortSignal.timeout(15_000);
+    const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
+    return { ...ctx, signal: ctx.signal ? AbortSignal.any([combined, ctx.signal]) : combined };
   };
   const gitService: GitService = {
     workingTreeRoot: (ctx) => baseGit.workingTreeRoot(withSignal(ctx)),
