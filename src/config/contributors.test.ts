@@ -13,6 +13,7 @@ import {
   runContributors,
 } from "./contributors.js";
 import type { GitRunner } from "./config.js";
+import { createGitService } from "../git/service.js";
 
 const repo = "owner/name";
 const withRoot = async (body: (root: string) => Promise<void>) => {
@@ -174,6 +175,27 @@ describe("pdb contributors (#672)", () => {
       const missing = await run([], root, checkout(root));
       expect(missing.code).toBe(2);
       expect(missing.out).toContain("MISSING");
+    });
+  });
+
+  it("accepts a typed GitService boundary (#906)", async () => {
+    await withRoot(async (root) => {
+      writeFileSync(join(root, "CONTRIBUTORS.md"), guidance);
+      const git = createGitService({ git: checkout(root) });
+      let out = "";
+      const code = await runContributors(["--json"], async (t) => void (out += t), {
+        cwd: root,
+        git,
+      });
+      expect(code).toBe(0);
+      expect(JSON.parse(out)).toMatchObject({
+        schemaVersion: 1,
+        kind: "contributor-guidance",
+        state: "available",
+        repository: repo,
+        revision: "abc1234def",
+        default: { state: "explicit", account: "alice" },
+      });
     });
   });
 });
