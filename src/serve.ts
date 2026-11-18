@@ -291,14 +291,18 @@ export async function startServe(
 
   // #816: the one application-state service of this process, when a verified global
   // configuration boundary exists. Its startup snapshot is the configuration `serve` resolved
-  // from (the same boundary registration uses); overrides are the command-line values that
-  // take precedence over saved ones (#459 sources). Live application (#808) records into it.
+  // from (the same boundary registration uses). The applied snapshot reports what this process
+  // actually runs for the launch-fixed settings (#459): the port and TTL always reflect the
+  // effective CLI values (given or built-in default), not the saved ones — a saved `serve.port`
+  // or `serve.ttl` that differs from the running value is reported as overridden, never wrongly
+  // in-sync. Live application (#808) records into it.
   if (runtime.globalConfig) {
     try {
       const startup = await loadGlobalConfig(runtime.globalConfig.dir, runtime.globalConfig.fs);
-      const overrides = new Map<string, GlobalValue>();
-      if (options.given?.port) overrides.set("serve.port", options.port);
-      if (options.given?.ttl) overrides.set("serve.ttl", ttlText(options.ttlMs));
+      const overrides = new Map<string, GlobalValue>([
+        ["serve.port", options.port],
+        ["serve.ttl", ttlText(options.ttlMs)],
+      ]);
       facts.applicationState = createApplicationState(startup, overrides, () =>
         runtime.clock.now(),
       );

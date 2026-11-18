@@ -976,12 +976,22 @@ describe("pdb serve cache (#373)", () => {
     // Collect both collectors, then a collector-scoped refresh of exactly `deps`.
     expect(await cache.read(briefing, produce("briefing"))).toBe("briefing#1");
     expect(await cache.read(deps, produce("deps"))).toBe("deps#1");
+    // #414: a closed-question scan slot exists for the project/repository before the refresh.
+    const scan = cache.closedQuestions.slot("p", "o/r");
     const dropped = cache.refresh("o/r", ["deps"]);
     expect(dropped).toBe(1);
-    // The briefing entry survives its cache row; the deps row is gone and re-collected.
+    // The briefing entry survives its cache row; the deps row is gone and re-collected; and the
+    // closed-question scan state is preserved (an unrelated dependency invalidation never
+    // discards scan progress of an unchanged context).
     expect(await cache.read(briefing, produce("briefing"))).toBe("briefing#1");
     expect(await cache.read(deps, produce("deps"))).toBe("deps#2");
     expect(counts).toEqual({ briefing: 1, deps: 2 });
+    expect(scan.lost).toBeNull();
+    // A repository-wide refresh does discard the scan (restart/revalidate #414).
+    const scan2 = cache.closedQuestions.slot("p2", "o/r");
+    (scan2 as { state: unknown }).state = { overwritten: false } as never;
+    cache.refresh("o/r");
+    expect(scan2.lost).not.toBeNull();
     cache.close();
   });
 
