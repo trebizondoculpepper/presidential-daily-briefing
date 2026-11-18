@@ -6,7 +6,9 @@ import { codexResponse } from "./codex.js";
 /** Opt-in process-per-hook wrapper. No native hooks or repository configuration are written. */
 import { parseArgs } from "node:util";
 import { isAbsolute } from "node:path";
+import { collect, ghQueryWith, ghRest } from "../github/github.js";
 import { createGhService, type GhService } from "../github/service/service.js";
+import { collectShortlist } from "../github/shortlist.js";
 import { dependencyReport } from "../github/dependencies.js";
 import { resolveIdentityTarget } from "../config/identity.js";
 import { validateHarness } from "../config/harness.js";
@@ -147,7 +149,10 @@ export async function runRebrief(
   const gh =
     runtime.gh ??
     runtime.read?.gh ??
-    createGhService({ rest: runtime.read?.rest, query: runtime.read?.query });
+    createGhService({
+      ...(runtime.read?.rest ? { rest: runtime.read.rest } : {}),
+      ...(runtime.read?.query && !runtime.read.queryWith ? { query: runtime.read.query } : {}),
+    });
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     const mode = args[0];
@@ -308,11 +313,22 @@ export async function runRebrief(
             ? httpMcpTransport
             : (runtime.transport?.(input) ??
               serviceTransport({
-                collect: (repo, opts, _injected, now) => gh.snapshot.collect(repo, opts, now),
-                collectShortlist: (repo, opts, _injected, now) =>
-                  gh.snapshot.collectShortlist(repo, opts, now),
+                collect: (repo, opts, injected, now) =>
+                  injected
+                    ? collect(repo, opts, injected, now)
+                    : gh.snapshot.collect(repo, opts, now),
+                collectShortlist: (repo, opts, injected, now) =>
+                  injected
+                    ? collectShortlist(repo, opts, injected, now)
+                    : gh.snapshot.collectShortlist(repo, opts, now),
                 dependencyReport,
                 gh,
+                ...(runtime.gh || runtime.read?.gh
+                  ? {}
+                  : {
+                      rest: ghRest,
+                      queryWith: runtime.read ? undefined : ghQueryWith,
+                    }),
                 ...runtime.read,
                 ...(input.project
                   ? {
