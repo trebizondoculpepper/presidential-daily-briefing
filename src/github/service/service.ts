@@ -188,10 +188,17 @@ export function createGhService(options: GhServiceOptions = {}): GhService {
       async create(target, call) {
         // The write and its receipt read run over this service's own transport, environment and
         // query executor; the gh command is an internal detail of the capability.
+        const overrides = options.commentRecovery ?? {};
         const run = withCommentRecovery({
+          ...overrides,
+          // At most one retry (two attempts): an override may lower the limit, never raise it.
+          policy: {
+            ...overrides.policy,
+            maxAttempts: Math.min(overrides.policy?.maxAttempts ?? 2, 2),
+          },
+          // The service owns its write path: these always win over any override object.
           dispatch: commentPostOver(transport, env),
           readBack: (t, since) => ghCommentReceipt(t, since, query as Query),
-          ...options.commentRecovery,
         });
         const result = await run(
           [
