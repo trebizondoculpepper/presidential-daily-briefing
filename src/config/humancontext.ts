@@ -35,8 +35,14 @@ export type HumanContext =
     }
   | { state: "unresolved"; host: string; login: null; source: "none"; reason: string };
 
-/** The authenticated login boundary: `gh api user` in production (`ghAuthContext`). */
+/** The authenticated login boundary: `ghService.account.current` in production. */
 export type AuthContextReader = (signal?: AbortSignal) => Promise<{ host: string; login: string }>;
+/** Typed GH account capability accepted by `resolveHumanContext` (#909). */
+export interface HumanContextAccount {
+  readonly account: {
+    current(signal?: AbortSignal): Promise<{ host: string; login: string }>;
+  };
+}
 
 export interface HumanContextOptions {
   /** The GitHub host of the target repository; repositories pdb manages are on github.com. */
@@ -111,9 +117,11 @@ async function remember(
 
 /** Resolve the employing human for the target host. Never throws for GitHub or cache failures. */
 export async function resolveHumanContext(
-  read: AuthContextReader | undefined,
+  read: AuthContextReader | HumanContextAccount | undefined,
   options: HumanContextOptions = {},
 ): Promise<HumanContext> {
+  const reader: AuthContextReader | undefined =
+    typeof read === "function" ? read : read ? (signal) => read.account.current(signal) : undefined;
   const host = options.host ?? "github.com";
   const now = options.now ?? (() => new Date());
   const path = join(options.cacheDir ?? defaultCacheDir(), humanCacheFile);
@@ -136,11 +144,11 @@ export async function resolveHumanContext(
           reason: `${reason}; no earlier login is recorded for ${host}`,
         };
   };
-  if (options.offline || !read)
+  if (options.offline || !reader)
     return fallback(options.offline ? "offline read" : "no login reader");
   let auth: { host: string; login: string };
   try {
-    auth = await read(options.signal);
+    auth = await reader(options.signal);
   } catch (error) {
     options.signal?.throwIfAborted();
     // Missing or refused credentials are a fact about this machine, not an outage: never
