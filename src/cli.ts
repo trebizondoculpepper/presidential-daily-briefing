@@ -1830,16 +1830,20 @@ async function run(
       agent: await commandActor({ ...parsed, agent: parsed.request.agent }, identity, completeHelp),
     };
     const repository = repo ?? (await runtime.currentRepository());
+    const gh = createGhService({
+      rest: runtime.rest ?? ghRest,
+      query: runtime.query,
+      run: runtime.ghRun,
+    });
     // Per run: a permission learned now is never reused by a later invocation.
-    const permission = createGhService({ rest: runtime.rest ?? ghRest }).repos.permissionOf(
-      repository,
-    );
+    const permission = gh.repos.permissionOf(repository);
     const rt = {
       query: runtime.query ?? ghQuery,
       run: runtime.ghRun ?? ghRun,
       rest: runtime.rest ?? ghRest,
       trust: markerTrust(permission),
       now: runtime.now ?? (() => new Date()),
+      completion: gh.completion,
     };
     const plan = await planComplete(repository, request, rt);
     const result =
