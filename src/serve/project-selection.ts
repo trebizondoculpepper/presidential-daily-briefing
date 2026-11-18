@@ -3,8 +3,43 @@ export async function restoreProjectSelection(): Promise<void> {
   const key = "pdb.selected-project";
   try {
     const response = await fetch("/api/v1/status");
-    if (!response.ok) return;
-    const status = (await response.json()) as { repositories: { repository: string }[] };
+    if (!response.ok) {
+      const slot =
+        typeof document === "undefined" ? null : document.querySelector("[data-working-for]");
+      if (slot) {
+        slot.textContent = "Working for: unavailable";
+        slot.setAttribute("data-state", "unavailable");
+      }
+      return;
+    }
+    const status = (await response.json()) as {
+      repositories: { repository: string }[];
+      human?: {
+        state?: string;
+        login?: string | null;
+        host?: string;
+        observedAt?: string;
+        reason?: string;
+      };
+    };
+    // The shared "Working for" header (#669): text only, never markup from the API.
+    const slot =
+      typeof document === "undefined" ? null : document.querySelector("[data-working-for]");
+    if (slot) {
+      const h = status.human;
+      const text =
+        h?.state === "current" && h.login
+          ? `Working for GitHub user ${h.login} (${h.host ?? "github.com"}, the signed-in gh account)`
+          : h?.state === "last-known" && h.login
+            ? `Working for GitHub user ${h.login} (last known at ${h.observedAt ?? "an earlier time"}; ${h.reason ?? "the current login could not be read"})`
+            : h?.state === "unresolved"
+              ? `Working for: unknown (${h.reason ?? "no GitHub login could be resolved"})`
+              : h?.state === "disabled"
+                ? "Working for: not shown (human context is disabled)"
+                : "Working for: unavailable";
+      slot.textContent = text;
+      slot.setAttribute("data-state", h?.state ?? "unavailable");
+    }
     // Read current navigation after awaiting status: Work may normalize role/agent meanwhile.
     const url = new URL(window.location.href);
     const projects = status.repositories.map((entry) => entry.repository);

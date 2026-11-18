@@ -86,3 +86,60 @@ describe("shared project selection", () => {
     ]);
   });
 });
+
+describe("Working for header (#669)", () => {
+  async function header(human: unknown, ok = true) {
+    const slot = { textContent: "", attrs: {} as Record<string, string> };
+    const sandbox = {
+      URL,
+      window: {
+        location: { href: "http://localhost/?repo=a%2Fb", replace: () => undefined },
+        localStorage: { getItem: () => null, setItem: () => undefined },
+      },
+      document: {
+        querySelector: (selector: string) =>
+          selector === "[data-working-for]"
+            ? {
+                set textContent(v: string) {
+                  slot.textContent = v;
+                },
+                setAttribute: (k: string, v: string) => (slot.attrs[k] = v),
+              }
+            : null,
+      },
+      fetch: async () => ({
+        ok,
+        json: async () => ({ repositories: [{ repository: "a/b" }], human }),
+      }),
+    };
+    await runInNewContext(projectSelectionScript(), sandbox);
+    return slot;
+  }
+
+  it("states whose work this is, with its source and freshness", async () => {
+    expect(
+      (await header({ state: "current", login: "octo", host: "github.com", source: "gh-login" }))
+        .textContent,
+    ).toBe("Working for GitHub user octo (github.com, the signed-in gh account)");
+    const last = await header({
+      state: "last-known",
+      login: "octo",
+      host: "github.com",
+      observedAt: "2026-11-18T00:00:00Z",
+      reason: "gh is offline",
+    });
+    expect(last.textContent).toContain("last known at 2026-11-18T00:00:00Z; gh is offline");
+    expect(last.attrs["data-state"]).toBe("last-known");
+  });
+
+  it("shows unknown and unavailable honestly, and never renders markup", async () => {
+    expect(
+      (await header({ state: "unresolved", login: null, reason: "not signed in" })).textContent,
+    ).toBe("Working for: unknown (not signed in)");
+    expect((await header(undefined)).textContent).toBe("Working for: unavailable");
+    expect((await header(undefined, false)).attrs["data-state"]).toBe("unavailable");
+    expect(
+      (await header({ state: "current", login: "<b>x</b>", host: "github.com" })).textContent,
+    ).toContain("<b>x</b>");
+  });
+});
