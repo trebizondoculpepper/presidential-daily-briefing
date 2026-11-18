@@ -7,10 +7,10 @@ import type { Rest, RestAnswer } from "../github/github.js";
 import { EventEmitter } from "node:events";
 import { PassThrough, Writable } from "node:stream";
 import { execFileSync } from "node:child_process";
+import { ghPostWith } from "../github/service/issues.js";
 import {
   createIssue,
   defaultReadFile,
-  ghPostWith,
   MAX_BODY_BYTES,
   readStdinBounded,
   creationMarker,

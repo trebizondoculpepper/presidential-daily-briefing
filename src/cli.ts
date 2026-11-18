@@ -182,11 +182,12 @@ import { ghAuthContext, runServe } from "./serve.js";
 import { createGhService } from "./github/service/service.js";
 import { runQuotas } from "./github/quotascli.js";
 import type { QuotasRuntime } from "./github/quotascli.js";
+import { ghPost } from "./github/service/issues.js";
+import { ghService } from "./github/service/service.js";
 import {
   createIssue,
   defaultOperationId,
   defaultReadFile,
-  ghPost,
   issueCreateExitCode,
   issueCreateHelp,
   issueCreateText,
@@ -1539,9 +1540,14 @@ async function runIssue(
     );
   }
   const stderr = runtime.stderr ?? ((text: string) => process.stderr.write(text));
+  const hasLegacyOverrides =
+    runtime.rest !== undefined ||
+    runtime.issueCreate?.rest !== undefined ||
+    runtime.issueCreate?.post !== undefined;
   const rt: IssueCreateRuntime = {
-    rest: runtime.rest ?? ghRest,
-    post: ghPost,
+    ...(hasLegacyOverrides
+      ? { rest: runtime.rest ?? ghRest, post: ghPost }
+      : { issues: ghService.issues }),
     currentRepository: () => runtime.currentRepository(),
     now: runtime.now ?? (() => new Date()),
     operationId: defaultOperationId,
