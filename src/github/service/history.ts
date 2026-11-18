@@ -60,7 +60,7 @@ export interface HistoryReads {
 const commentFields =
   "databaseId url body createdAt author{__typename login} lastEditedAt includesCreatedEdit editor{__typename login}";
 const issueFields =
-  "number createdAt updatedAt lastEditedAt state closedAt stateReason issueDependenciesSummary{blockedBy} closedByPullRequestsReferences(first:5,includeClosedPrs:false){nodes{number} pageInfo{hasNextPage}} labels(first:100){nodes{name} pageInfo{hasNextPage}} comments(first:100){totalCount nodes{" +
+  "number createdAt updatedAt lastEditedAt state closedAt stateReason issueDependenciesSummary{blockedBy} closedByPullRequestsReferences(first:10,includeClosedPrs:false){nodes{number state} pageInfo{hasNextPage}} labels(first:100){nodes{name} pageInfo{hasNextPage}} comments(first:100){totalCount nodes{" +
   commentFields +
   "}}";
 const issuePage = (states: string, order: string) =>
@@ -122,7 +122,9 @@ function issueOf(v: unknown): HistoryIssue {
       isRecord(v.closedByPullRequestsReferences.pageInfo) &&
       v.closedByPullRequestsReferences.pageInfo.hasNextPage === false &&
       Array.isArray(v.closedByPullRequestsReferences.nodes)
-        ? v.closedByPullRequestsReferences.nodes.length
+        ? v.closedByPullRequestsReferences.nodes.filter(
+            (n) => isRecord(n) && (n.state === undefined || n.state === "OPEN"),
+          ).length
         : null,
   };
 }
