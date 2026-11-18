@@ -39,6 +39,22 @@ describe("typed delivery-issue read (#945)", () => {
           pageInfo: { hasPreviousPage: false },
         },
       },
+      {
+        ...base,
+        comments: {
+          nodes: [
+            {
+              url: "c",
+              body: "b",
+              createdAt: "t",
+              lastEditedAt: null,
+              includesCreatedEdit: false,
+              editor: null,
+            },
+          ],
+          pageInfo: { hasPreviousPage: false },
+        },
+      },
     ])
       await expect(deliveryIssue(q(bad), "o/r", 3)).rejects.toThrow(/malformed/);
   });
