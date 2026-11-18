@@ -760,33 +760,36 @@ export function readApi(
         const selectionRevision = facts.contextRevisions?.get(served.repository.toLowerCase()) ?? 0;
         const refresh = booleanParam(values, "refresh");
         const chosen = served;
-        const { value, freshness } = await cache.track(refresh, () =>
-          read(values, chosen, (s) => (selection = s)),
-        );
-        // #808 request-context guard across cache access and response delivery: if a live
-        // application replaced, removed, changed-and-restored (A -> B -> A) this repository's
-        // context while the read ran, the collected facts describe an obsolete context. Reject
-        // rather than deliver them as fresh; a repository untouched by any application since
-        // selection (same canonical repository and project) is still valid.
-        if (
-          (facts.contextVersion?.value ?? 0) !== generation ||
-          (facts.contextRevisions?.get(chosen.repository.toLowerCase()) ?? 0) !== selectionRevision
-        ) {
+        // #808 request-context guard: if a live application replaced, removed, or changed and
+        // restored (A -> B -> A) this repository's context since selection, the collected facts
+        // describe an obsolete context. Reject rather than deliver them as fresh; a repository
+        // untouched by any application since selection (same canonical repository and project)
+        // is still valid. Run it after the cache read AND immediately before the response (the
+        // response-identity resolution below can itself await an identity read).
+        const assertContextStillCurrent = (): void => {
+          if (
+            (facts.contextVersion?.value ?? 0) === generation &&
+            (facts.contextRevisions?.get(chosen.repository.toLowerCase()) ?? 0) ===
+              selectionRevision
+          )
+            return;
           let still: ServedRepository | undefined;
           try {
             still = selectRepository(facts.served, chosen.repository);
           } catch {
             still = undefined;
           }
-          const current =
-            still !== undefined && (still.project ?? null) === (chosen.project ?? null);
-          if (!current)
+          if (still === undefined || (still.project ?? null) !== (chosen.project ?? null))
             throw new HttpFailure(
               409,
               "CONTEXT_CHANGED",
               "The served configuration changed while this read was running; retry.",
             );
-        }
+        };
+        const { value, freshness } = await cache.track(refresh, () =>
+          read(values, chosen, (s) => (selection = s)),
+        );
+        assertContextStillCurrent();
         const primary = freshness[0] ?? liveNow(cache, runtime.now());
         const stale = freshness.find((f) => f.stale);
         const warnings = [
@@ -807,6 +810,10 @@ export function readApi(
           "employingHuman" in result
         )
           result = { ...result, employingHuman: effectiveIdentity.human };
+        // #808: the response-identity resolution above can itself await an identity read, so
+        // re-check immediately before sending: a change during that read must not let a
+        // complete-looking, fresh-looking old-context response escape.
+        assertContextStillCurrent();
         respond(context, 200, {
           ...(effectiveIdentity ? { effectiveIdentity } : {}),
           schemaVersion: 1,
