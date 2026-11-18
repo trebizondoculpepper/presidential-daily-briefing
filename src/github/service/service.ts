@@ -13,6 +13,7 @@ import {
   ghQueryWith,
   hydratePullRequests,
   locateIssue,
+  graphqlApiOverTransport,
   permissionLookup,
   restOverTransport,
 } from "../github.js";
@@ -34,6 +35,7 @@ import { readRateLimits } from "./ratelimits.js";
 import { resolveLabels } from "./labels.js";
 import { deliveryIssue } from "./delivery.js";
 import type { DeliveryIssue } from "./delivery.js";
+import { estimationCapabilities, type EstimationCapabilities } from "./estimation.js";
 import { commentPostOver, ghCommentReceipt } from "../dependencies.js";
 import { withCommentRecovery } from "../commentwrite.js";
 import type {
@@ -157,6 +159,8 @@ export interface GhService {
     ): Promise<PullRequest[]>;
   };
   completion: CompletionCapabilities;
+  /** Typed estimation reads and guarded label/comment mutations (#916). */
+  estimation: EstimationCapabilities;
 }
 
 export interface GhServiceOptions {
@@ -251,6 +255,7 @@ export function createGhService(options: GhServiceOptions = {}): GhService {
       },
     },
     history: historyReads(query),
+    estimation: estimationCapabilities(graphqlApiOverTransport(transport, env)),
     delivery: {
       issue: (repository, number) => deliveryIssue(query as Query, repository, number),
     },

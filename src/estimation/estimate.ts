@@ -36,14 +36,20 @@ import {
   ConfigError,
   loadConfig,
   nodeFileSystem,
-  nodeGit,
   resolveRepositoryTarget,
   settingFor,
 } from "../config/config.js";
 import type { ConfigFileSystem, GitRunner } from "../config/config.js";
-import { ghGraphqlApi, isRecord, prop } from "../github/github.js";
-import type { GraphqlAnswer, GraphqlApi } from "../github/github.js";
-import { classifyAddComment, postCommentWithRecovery } from "../github/commentwrite.js";
+import { createGitService, type GitService } from "../git/service.js";
+import { isRecord } from "../github/github.js";
+import type { GraphqlApi } from "../github/github.js";
+import {
+  estimationCapabilities,
+  type EstimationCommentPage,
+  type EstimationIssueRead,
+} from "../github/service/estimation.js";
+import { createGhService, type GhService } from "../github/service/service.js";
+import { postCommentWithRecovery } from "../github/commentwrite.js";
 import type { CommentRecoveryPolicy } from "../github/commentwrite.js";
 
 export const estimateUsage = `Usage: pdb estimate N [--metric complexity|impact] --size SIZE --rationale TEXT
@@ -88,9 +94,11 @@ export interface EstimateRuntime {
     options: CommandActorOptions,
   ) => Promise<{ agent: string; repository: string }>;
   readonly fs?: ConfigFileSystem;
-  readonly git?: GitRunner;
+  readonly git?: GitService | GitRunner;
   readonly cwd?: string;
-  /** The authenticated gh GraphQL boundary (production: gh api graphql). */
+  /** Typed GH service estimation capability (#916). */
+  readonly gh?: Pick<GhService, "estimation">;
+  /** Legacy GraphQL boundary retained while tests migrate. */
   readonly api?: GraphqlApi;
   readonly now?: () => Date;
   /** Comment-write recovery (#345): millisecond clock, abortable wait, cancellation and budget. */
@@ -264,53 +272,17 @@ interface IssueState {
   readonly edited?: string | null;
 }
 
-/**
- * Both metrics read comment author/edit evidence, so provenance authority can be checked (#215,
- * #269); impact also reads the description edit time (staleness).
- */
-const commentNode = (_d: MetricDescriptor) =>
-  "body createdAt author { __typename login } lastEditedAt includesCreatedEdit editor { __typename login }";
-const issueQuery = (
-  number: number,
-  d: MetricDescriptor = complexityMetric,
-) => `query($owner: String!, $name: String!, $label: String!) {
-  repository(owner: $owner, name: $name) { id label(name: $label) { id name }
-    issue(number: ${number}) { id state ${d === complexityMetric ? "" : "lastEditedAt "}labels(first: 100) { pageInfo { hasNextPage } nodes { id name } }
-      comments(last: 100) { pageInfo { hasPreviousPage startCursor } nodes { ${commentNode(d)} } } } } }`;
-
-/** Older comment pages, newest first, read only until the newest valid marker is found. */
-const commentsPageQuery = (
-  number: number,
-  d: MetricDescriptor = complexityMetric,
-) => `query($owner: String!, $name: String!, $before: String!) {
-  repository(owner: $owner, name: $name) { issue(number: ${number}) {
-    comments(last: 100, before: $before) { pageInfo { hasPreviousPage startCursor } nodes { ${commentNode(d)} } } } } }`;
-
 /** Bound on extra comment pages (100 comments each) searched for an older marker. */
 export const MAX_COMMENT_PAGES = 20;
 
 /** Neutral colour for a created size label; existing definitions are never restyled. */
 export { COMPLEXITY_LABEL_COLOR };
 
-const CREATE_LABEL = `mutation($repository: ID!, $name: String!, $color: String!, $description: String!) {
-  createLabel(input: { repositoryId: $repository, name: $name, color: $color, description: $description }) {
-    label { id name } } }`;
-const ADD_LABEL = `mutation($issue: ID!, $label: ID!) {
-  addLabelsToLabelable(input: { labelableId: $issue, labelIds: [$label] }) { clientMutationId } }`;
-const REMOVE_LABEL = `mutation($issue: ID!, $label: ID!) {
-  removeLabelsFromLabelable(input: { labelableId: $issue, labelIds: [$label] }) { clientMutationId } }`;
-const ADD_COMMENT = `mutation($issue: ID!, $body: String!) {
-  addComment(input: { subjectId: $issue, body: $body }) { commentEdge { node { url } } } }`;
-
-const denied = (answer: GraphqlAnswer): string | null => {
-  const error = answer.errors[0];
+const denied = (errors: readonly { type?: string; message?: string }[]): string | null => {
+  const error = errors[0];
   if (!error) return null;
   return `${error.type ? `${error.type}: ` : ""}${error.message ?? "GitHub returned an error"}`;
 };
-
-/** A remote call whose transport failure becomes an errored answer, never a thrown secret. */
-const safely = (call: Promise<GraphqlAnswer>): Promise<GraphqlAnswer> =>
-  call.catch((error: unknown) => ({ data: null, errors: [{ message: (error as Error).message }] }));
 
 const unknownProvenance = (number: number, why: string) =>
   new Refusal(
@@ -346,7 +318,11 @@ export async function scanProvenance<N>(
 ): Promise<ProvenanceScan<N>> {
   const ignored: string[] = [];
   for (const node of [...nodes].reverse()) {
-    const provenance = parseMetricProvenance(d, text(prop(node, "body")));
+    const body =
+      typeof (node as { body?: unknown } | null)?.body === "string"
+        ? (node as { body: string }).body
+        : "";
+    const provenance = parseMetricProvenance(d, body);
     if (!provenance) continue;
     const authority = await trust(node as unknown as Comment);
     if (authority.status === "trusted") return { status: "trusted", provenance, node, ignored };
@@ -356,45 +332,33 @@ export async function scanProvenance<N>(
   return { status: "none", ignored };
 }
 
-const nodesOf = (comments: unknown): unknown[] => {
-  const nodes = prop(comments, "nodes");
-  return Array.isArray(nodes) ? nodes : [];
-};
-
 /** Cursor for older comments, or null when history is exhausted; throws when unreadable. */
-function olderCursor(comments: unknown, number: number): string | null {
-  if (!Array.isArray(prop(comments, "nodes"))) throw unknownProvenance(number, "comments missing");
-  const more = prop(comments, "pageInfo", "hasPreviousPage");
-  if (more === false) return null;
-  const cursor = prop(comments, "pageInfo", "startCursor");
-  if (more !== true || typeof cursor !== "string" || !cursor)
+function olderCursor(comments: EstimationCommentPage, number: number): string | null {
+  if (!comments.nodes) throw unknownProvenance(number, "comments missing");
+  if (comments.hasPreviousPage === false) return null;
+  if (
+    comments.hasPreviousPage !== true ||
+    typeof comments.startCursor !== "string" ||
+    !comments.startCursor
+  )
     throw unknownProvenance(number, "comment pagination missing");
-  return cursor;
+  return comments.startCursor;
 }
-
-const labelNode = (value: unknown): LabelNode | null => {
-  const id = prop(value, "id");
-  const name = prop(value, "name");
-  return typeof id === "string" && typeof name === "string" ? { id, name } : null;
-};
 
 /** Parse one issue read; incomplete or errored label evidence is unknown, never "no size". */
 function readIssue(
-  answer: GraphqlAnswer,
+  answer: EstimationIssueRead,
   number: number,
   size: ComplexitySize,
   replaceInvalid: boolean,
   d: MetricDescriptor,
-): IssueState & { comments: unknown } {
-  const repository = prop(answer.data, "repository");
-  const issue = prop(repository, "issue");
-  const repositoryId = prop(repository, "id");
-  if (!isRecord(issue) || typeof issue.id !== "string" || typeof repositoryId !== "string")
+): IssueState & { comments: EstimationCommentPage } {
+  if (!answer.issueId || !answer.repositoryId)
     throw new Refusal(
       "issue-unavailable",
       "failed",
       1,
-      `Issue #${number} could not be read${denied(answer) ? ` (${denied(answer)})` : ""}.`,
+      `Issue #${number} could not be read${denied(answer.errors) ? ` (${denied(answer.errors)})` : ""}.`,
       "Check the number, gh auth status and access; nothing was written.",
     );
   const unknown = (why: string) =>
@@ -405,23 +369,17 @@ function readIssue(
       `The labels of #${number} could not be read completely (${why}); nothing was written.`,
       "Retry the same command; incomplete labels are unknown, never treated as no estimate.",
     );
-  if (answer.errors.length) throw unknown(denied(answer) ?? "GitHub returned errors");
-  const nodes = prop(issue, "labels", "nodes");
-  if (!Array.isArray(nodes)) throw unknown("labels missing from the response");
-  const hasNext = prop(issue, "labels", "pageInfo", "hasNextPage");
-  if (hasNext !== false) throw unknown("more than 100 labels, or label pagination missing");
-  const labels: LabelNode[] = [];
-  for (const node of nodes) {
-    const parsed = labelNode(node);
-    if (!parsed) throw unknown("a label without id or name");
-    labels.push(parsed);
-  }
-  const found = prop(repository, "label");
-  const candidate = labelNode(found);
+  if (answer.errors.length) throw unknown(denied(answer.errors) ?? "GitHub returned errors");
+  if (!answer.labels.nodes) throw unknown("labels missing from the response");
+  if (answer.labels.malformed) throw unknown("a label without id or name");
+  if (answer.labels.hasNextPage !== false)
+    throw unknown("more than 100 labels, or label pagination missing");
+  const labels = answer.labels.nodes;
+  const candidate = answer.labelDefinition;
   // GitHub label identity is case-insensitive; accept only a definition naming this size.
   const definition = candidate && metricLabelSize(d, candidate.name) === size ? candidate : null;
   const classification = classifyMetricLabels(d, {
-    labels: { nodes: labels, pageInfo: { hasNextPage: false, endCursor: null } },
+    labels: { nodes: [...labels], pageInfo: { hasNextPage: false, endCursor: null } },
   });
   if (classification.unrecognized.length && !replaceInvalid)
     throw new Refusal(
@@ -431,23 +389,20 @@ function readIssue(
       `#${number} carries unrecognized ${d.metric} label(s) ${classification.unrecognized.join(", ")}; only ${COMPLEXITY_SIZES.map((s) => metricLabelName(d, s)).join(", ")} are managed, so nothing was written.`,
       `Read the ticket, choose the size, then re-run with --replace-invalid to remove them while recording it (or remove them yourself with gh issue edit ${number} --remove-label LABEL).`,
     );
-  const edited = prop(issue, "lastEditedAt");
   return {
-    repositoryId,
-    issueId: issue.id,
-    state: text(issue.state, "UNKNOWN"),
+    repositoryId: answer.repositoryId,
+    issueId: answer.issueId,
+    state: answer.state ?? "UNKNOWN",
     definition,
     labels,
     sizes: classification.sizes,
     invalid: labels.filter((l) => classification.unrecognized.includes(l.name)),
     provenance: null,
-    ...(d === complexityMetric ? {} : { edited: typeof edited === "string" ? edited : null }),
-    comments: prop(issue, "comments"),
+    ...(d === complexityMetric ? {} : { edited: answer.lastEditedAt ?? null }),
+    comments: answer.comments,
   };
 }
 
-const text = (value: unknown, fallback = ""): string =>
-  typeof value === "string" ? value : fallback;
 const sameList = (a: readonly string[] | undefined, b: readonly string[]) =>
   Array.isArray(a) && a.length === b.length && a.every((item, i) => item === b[i]);
 
@@ -521,8 +476,13 @@ export async function runEstimate(
   const estimator = prepared?.agent ?? (values.agent?.trim() || null);
   const json = !!values.json;
   const fs = runtime.fs ?? nodeFileSystem;
-  const git = runtime.git ?? nodeGit;
-  const api = runtime.api ?? ghGraphqlApi;
+  const git =
+    typeof runtime.git === "object"
+      ? runtime.git
+      : createGitService(typeof runtime.git === "function" ? { git: runtime.git } : {});
+  const estimation =
+    runtime.gh?.estimation ??
+    (runtime.api ? estimationCapabilities(runtime.api) : createGhService().estimation);
   const label = metricLabelName(d, size);
   const result: Record<string, unknown> = {
     schemaVersion: impact ? 1 : 2,
@@ -565,28 +525,31 @@ export async function runEstimate(
       (async () => ({ status: "unknown", why: "no trust boundary supplied" }));
 
     const [owner, name] = target.repository.split("/") as [string, string];
-    const vars = { owner, name, label };
+    const includeEdited = d !== complexityMetric;
     /** Fresh read, paging comments backward until the newest marker or exhausted history. */
     const read = async (): Promise<IssueState> => {
-      const answer = await safely(api.query(issueQuery(number, d), vars));
+      const answer = await estimation.readIssue({ owner, name, number, label, includeEdited });
       const { comments: firstPage, ...first } = readIssue(answer, number, size, replaceInvalid, d);
       // Paging stops at the first relevant marker: trusted (recorded) or unknown authority. An
       // unknown marker leaves `provenance` null, so it never matches and fresh provenance is
       // recorded, exactly where readAssessment reports `unknown` (doc/design/impact-estimation.md).
-      let scan = await scanProvenance(d, nodesOf(firstPage), trust);
+      let scan = await scanProvenance(d, firstPage.nodes ?? [], trust);
       let cursor = scan.status === "none" ? olderCursor(firstPage, number) : null;
       let pages = 0;
       while (scan.status === "none" && cursor !== null) {
         if (pages >= MAX_COMMENT_PAGES)
           throw unknownProvenance(number, `more than ${MAX_COMMENT_PAGES + 1} pages of comments`);
         pages += 1;
-        const page = await safely(
-          api.query(commentsPageQuery(number, d), { owner, name, before: cursor }),
-        );
-        if (page.errors.length)
-          throw unknownProvenance(number, denied(page) ?? "GitHub returned errors");
-        const comments = prop(page.data, "repository", "issue", "comments");
-        scan = await scanProvenance(d, nodesOf(comments), trust);
+        const comments = await estimation.readCommentsPage({
+          owner,
+          name,
+          number,
+          before: cursor,
+          includeEdited,
+        });
+        if (comments.errors.length)
+          throw unknownProvenance(number, denied(comments.errors) ?? "GitHub returned errors");
+        scan = await scanProvenance(d, comments.nodes ?? [], trust);
         const next = olderCursor(comments, number);
         cursor = scan.status === "none" ? next : null;
       }
@@ -604,7 +567,7 @@ export async function runEstimate(
     result.previous = before.sizes;
     if (replaceInvalid) result.replacedInvalid = invalidNames(before);
     result.issueState = before.state;
-    const revisionText = await git(["rev-parse", "HEAD"], target.root).catch(() => "");
+    const revisionText = (await git.revision({ cwd: target.root }).catch(() => null)) ?? "";
     const revision = /^[0-9a-f]{40}$/.test(revisionText.trim()) ? revisionText.trim() : null;
     const provenance = {
       schemaVersion: d.provenanceSchemaVersion,
@@ -682,15 +645,13 @@ export async function runEstimate(
     let definition = before.definition;
     result.labelCreated = false;
     if (!definition) {
-      const created = await safely(
-        api.mutate(CREATE_LABEL, {
-          repository: before.repositoryId,
-          name: label,
-          color: d.labelColor,
-          description: `${Title} estimate ${size} (pdb estimate)`,
-        }),
-      );
-      const node = labelNode(prop(created.data, "createLabel", "label"));
+      const created = await estimation.createLabel({
+        repositoryId: before.repositoryId,
+        name: label,
+        color: d.labelColor,
+        description: `${Title} estimate ${size} (pdb estimate)`,
+      });
+      const node = created.label;
       if (node && !created.errors.length) {
         definition = node;
         result.labelCreated = true;
@@ -703,7 +664,7 @@ export async function runEstimate(
             "label-create-denied",
             "failed",
             1,
-            `GitHub did not create the repository label ${label} (${denied(created) ?? "no result"}); nothing on #${number} was changed.`,
+            `GitHub did not create the repository label ${label} (${denied(created.errors) ?? "no result"}); nothing on #${number} was changed.`,
             `Creating a label needs write access to ${target.repository}. Check gh auth status, or ask a maintainer to create ${label}, then retry.`,
           );
         lines.push(`Reusing repository label ${definition.name} (created concurrently).`);
@@ -735,15 +696,13 @@ export async function runEstimate(
     result.labelsAdded = added;
     result.labelsRemoved = removed;
     if (!latest.labels.some((l) => metricLabelSize(d, l.name) === size)) {
-      const add = await safely(
-        api.mutate(ADD_LABEL, { issue: latest.issueId, label: definition.id }),
-      );
-      if (add.errors.length || !isRecord(prop(add.data, "addLabelsToLabelable")))
+      const add = await estimation.addLabel({ issueId: latest.issueId, labelId: definition.id });
+      if (!add.ok)
         throw new Refusal(
           "api-denied",
           result.labelCreated ? "partial" : "failed",
           result.labelCreated ? 2 : 1,
-          `GitHub did not apply ${definition.name} to #${number} (${denied(add) ?? "no result"}); the ticket's labels were not changed${result.labelCreated ? ", but the repository label was created and is kept" : ""}.`,
+          `GitHub did not apply ${definition.name} to #${number} (${denied(add.errors) ?? "no result"}); the ticket's labels were not changed${result.labelCreated ? ", but the repository label was created and is kept" : ""}.`,
           `Check gh auth status and that you may label issues here, then retry the same command${retryHint}.`,
         );
       added.push(definition.name);
@@ -752,11 +711,8 @@ export async function runEstimate(
       const otherSize = metricLabelSize(d, other.name);
       const invalid = latest.invalid.some((l) => l.id === other.id);
       if (!invalid && (!otherSize || otherSize === size)) continue;
-      const remove = await safely(
-        api.mutate(REMOVE_LABEL, { issue: latest.issueId, label: other.id }),
-      );
-      if (remove.errors.length || !isRecord(prop(remove.data, "removeLabelsFromLabelable")))
-        failed.push(`${other.name} (${denied(remove) ?? "no result"})`);
+      const remove = await estimation.removeLabel({ issueId: latest.issueId, labelId: other.id });
+      if (!remove.ok) failed.push(`${other.name} (${denied(remove.errors) ?? "no result"})`);
       else removed.push(other.name);
     }
     if (added.length || removed.length)
@@ -813,13 +769,7 @@ export async function runEstimate(
     // The description edit time this record was judged against (impact only).
     const editedBefore = final.edited;
     const written = await postCommentWithRecovery({
-      post: async () => {
-        const comment = await safely(api.mutate(ADD_COMMENT, { issue: latest.issueId, body }));
-        return classifyAddComment(
-          comment,
-          prop(comment.data, "addComment", "commentEdge", "node", "url"),
-        );
-      },
+      post: () => estimation.addComment({ issueId: latest.issueId, body }),
       // The semantic receipt: a trusted record of this same assessment on this ticket.
       readBack: async () => {
         try {
