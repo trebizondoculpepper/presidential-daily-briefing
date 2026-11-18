@@ -219,6 +219,10 @@ describe("typed Git service (#897)", () => {
       expect(await service.isTracked(context, "untracked.txt")).toBe(false);
       await expect(service.isIgnored(context, "tracked.txt")).resolves.toBe(false);
       expect(await service.isAncestor(context, "HEAD", "HEAD")).toBe(true);
+      // A commit id that was never fetched is an absent revision, not a failure.
+      expect(
+        await service.divergence(context, "1111111111111111111111111111111111111111", "HEAD"),
+      ).toBeNull();
     } finally {
       await rm(root, { recursive: true, force: true });
     }
