@@ -14,6 +14,9 @@ import { repositoryFromCheckout, throwIfCancelled } from "./repository.js";
 import { historyReads } from "./history.js";
 import { checkReads } from "./checks.js";
 import { readRateLimits } from "./ratelimits.js";
+import { discoveryPage, issueCommentsPage, issuesByNumber } from "./snapshot.js";
+import type { Issue } from "./snapshot.js";
+import type { Query } from "../github.js";
 import type { RateLimitAnswer } from "./ratelimits.js";
 import type { CheckReads } from "./checks.js";
 import type { HistoryReads } from "./history.js";
@@ -50,6 +53,30 @@ export interface GhService {
   history: HistoryReads;
   /** Required-check evidence: branch rules and protection, head requiredness (#926). */
   checks: CheckReads;
+  /** Open-work snapshot reads behind the shortlist briefing (#927). */
+  snapshot: {
+    discoveryPage(
+      repository: string,
+      field: "issues" | "pullRequests",
+      fields: string,
+      pageSize: number,
+      cursor: string | null,
+      signal?: AbortSignal,
+    ): Promise<unknown>;
+    issuesByNumber(
+      repository: string,
+      numbers: readonly number[],
+      fields: string,
+      signal?: AbortSignal,
+    ): Promise<(Issue | null)[]>;
+    issueCommentsPage(
+      repository: string,
+      number: number,
+      commentFields: string,
+      cursor: string,
+      signal?: AbortSignal,
+    ): Promise<unknown>;
+  };
 }
 
 export interface GhServiceOptions {
@@ -123,6 +150,11 @@ export function createGhService(options: GhServiceOptions = {}): GhService {
       },
     },
     history: historyReads(query),
+    snapshot: {
+      discoveryPage: (...args) => discoveryPage(query as Query, ...args),
+      issuesByNumber: (...args) => issuesByNumber(query as Query, ...args),
+      issueCommentsPage: (...args) => issueCommentsPage(query as Query, ...args),
+    },
     checks: checkReads(async (q, vars) => {
       const data = await query(q, vars);
       return typeof data === "object" && data !== null ? (data as Record<string, unknown>) : {};
