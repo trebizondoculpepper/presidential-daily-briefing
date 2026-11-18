@@ -6,6 +6,10 @@
 
 Closes #<!-- number -->, or Refs #<!-- number --> if the issue stays open.
 
+## Architecture
+
+<!-- Check doc/architecture.md. Name affected service/state ownership, applicable contracts and any documented exception. -->
+
 ## Validation
 
 <!-- Commands run and results: npm run check, npm test, npm run build, npm run smoke, npm run package-test; any live read-only runs. -->
