@@ -167,7 +167,7 @@ function classify(error: unknown, operation: string): GitError {
       exited,
     );
   if (
-    /unknown revision|bad revision|ambiguous argument|Needed a single revision|Not a valid object name|Invalid symmetric difference expression/i.test(
+    /unknown revision|bad revision|ambiguous argument|Needed a single revision|Not a valid object name|Invalid symmetric difference expression|must be run in a work tree/i.test(
       stderr,
     )
   )
@@ -260,11 +260,18 @@ export function createGitService(options: GitServiceOptions = {}): GitService {
     const seen = new Set<string>();
     const found: GitRemote[] = [];
     for (const line of output.split(/\r?\n/)) {
-      const fields = line.trim().split(/\s+/);
-      if (fields.length < 2) continue;
-      const [name, url] = fields as [string, string];
-      if (seen.has(name)) continue;
-      seen.add(name);
+      // `git remote -v` prints "<name>\t<url> (fetch|push)". Split on the first separator and
+      // keep the rest verbatim: a local-path URL may itself contain spaces. A partial-clone
+      // remote may append a trailing annotation after the (fetch) entry, e.g.
+      // "origin <url> (fetch) [blob:none]"; accept and ignore anything after the direction.
+      const parsed = /^(\S+)\s+(.*?)\s+\((?:fetch|push)\)(?:\s+.*)?$/.exec(line.trim());
+      if (!parsed) continue;
+      const [, name, url] = parsed as unknown as [string, string, string];
+      // A remote may fetch from one repository and push to another; both URLs are facts, so
+      // deduplicate identical name/URL pairs rather than every entry sharing a name.
+      const identity = `${name}\u0000${url}`;
+      if (seen.has(identity)) continue;
+      seen.add(identity);
       const host = remoteHost(url);
       const github =
         host === "github.com" ? (githubRepositories(`${name} ${url}`)[0] ?? null) : null;

@@ -112,6 +112,31 @@ describe("typed Git service (#897)", () => {
     });
   });
 
+  it("keeps a remote's distinct fetch and push URLs, and refuses the ambiguity", async () => {
+    const { git } = fakeGit({
+      "remote -v":
+        "origin\thttps://github.com/owner/a.git (fetch)\norigin\thttps://github.com/other/b.git (push)\n",
+    });
+    const service = createGitService({ git });
+    const remotes = await service.remotes({ cwd: "/work" });
+    expect(remotes.map((remote) => remote.repository)).toEqual(["owner/a", "other/b"]);
+    // Fetching one repository and pushing to another is a real Git configuration, and it is
+    // not a verified identity.
+    expect(await service.checkout({ cwd: "/work" })).toBeNull();
+  });
+
+  it("accepts a partial-clone filter annotation after the fetch entry (#897)", async () => {
+    const { git } = fakeGit({
+      "remote -v":
+        "origin\thttps://github.com/owner/a.git (fetch) [blob:none]\norigin\thttps://github.com/other/b.git (push)\n",
+    });
+    const service = createGitService({ git });
+    const remotes = await service.remotes({ cwd: "/work" });
+    expect(remotes.map((remote) => remote.repository)).toEqual(["owner/a", "other/b"]);
+    // A filtered fetch remote that pushes elsewhere is not a verified identity.
+    expect(await service.checkout({ cwd: "/work" })).toBeNull();
+  });
+
   it("refuses to name a checkout whose remotes disagree", async () => {
     const { git } = fakeGit({
       "remote -v":
@@ -174,6 +199,26 @@ describe("typed Git service (#897)", () => {
     expect(await service.workingTreeRoot(context)).toBe("/tmp/project ");
     expect(await service.gitPath(context, "info/exclude")).toBe("/tmp/project /.git/info/exclude");
     expect(await service.isAncestor(context, "missing", "HEAD")).toBe(false);
+  });
+
+  it("keeps spaces inside a remote URL and answers a bare repository as absence", async () => {
+    const { git } = fakeGit(
+      {
+        "remote -v": "origin\t/file path/with space/repo.git (fetch)\n",
+      },
+      {
+        "rev-parse --show-toplevel": Object.assign(new Error("exit 128"), {
+          code: 128,
+          stderr: "fatal: this operation must be run in a work tree",
+        }),
+      },
+    );
+    const service = createGitService({ git });
+    expect(await service.remotes({ cwd: "/work" })).toEqual([
+      { name: "origin", url: "/file path/with space/repo.git", host: null, repository: null },
+    ]);
+    // A bare repository has no working tree: absence, not a failure.
+    expect(await service.workingTreeRoot({ cwd: "/work" })).toBeNull();
   });
 
   it("parses the hosts of the remote URL forms Git accepts", () => {
