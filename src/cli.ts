@@ -273,7 +273,12 @@ function ghOf(runtime: Runtime): GhService {
   let gh = runtimeFacades.get(runtime);
   if (!gh) {
     gh =
-      !runtime.rest && !runtime.query && !runtime.ghRun && !runtime.now
+      // The production defaults are not overrides: an ordinary run shares the composition's
+      // facade; only a genuinely injected boundary gets its own.
+      (runtime.rest ?? ghRest) === ghRest &&
+      (runtime.query ?? ghQuery) === ghQuery &&
+      (runtime.ghRun ?? ghRun) === ghRun &&
+      !runtime.now
         ? servicesOf(runtime).gh
         : createGhService({
             rest: executorsOf(runtime).rest,
