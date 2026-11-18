@@ -189,6 +189,26 @@ describe("typed Git service (#897)", () => {
     expect(await service.isAncestor(context, "missing", "HEAD")).toBe(false);
   });
 
+  it("keeps spaces inside a remote URL and answers a bare repository as absence", async () => {
+    const { git } = fakeGit(
+      {
+        "remote -v": "origin\t/file path/with space/repo.git (fetch)\n",
+      },
+      {
+        "rev-parse --show-toplevel": Object.assign(new Error("exit 128"), {
+          code: 128,
+          stderr: "fatal: this operation must be run in a work tree",
+        }),
+      },
+    );
+    const service = createGitService({ git });
+    expect(await service.remotes({ cwd: "/work" })).toEqual([
+      { name: "origin", url: "/file path/with space/repo.git", host: null, repository: null },
+    ]);
+    // A bare repository has no working tree: absence, not a failure.
+    expect(await service.workingTreeRoot({ cwd: "/work" })).toBeNull();
+  });
+
   it("parses the hosts of the remote URL forms Git accepts", () => {
     expect(remoteHost("git@github.com:owner/name.git")).toBe("github.com");
     expect(remoteHost("https://github.com/owner/name.git")).toBe("github.com");
