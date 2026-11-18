@@ -815,11 +815,26 @@ export async function readBriefing(
   const liveQuery =
     meter && baseQuery ? meter.query(baseQuery, "delivery-records", request.repository) : baseQuery;
   const gh = runtime.ghWith?.(request.signal) ?? runtime.gh;
-  const permissionService = gh ?? (rest ? createGhService({ rest }) : undefined);
+  const permissionFor = (repository: string) => {
+    // When a shortlist meter and REST boundary are both present, keep permission lookups on the
+    // metered REST seam so telemetry, refusal notes, and the shared quota gate stay active.
+    if (meter && rest) {
+      return createGhService({ rest }).repos.permissionOf(repository, request.signal);
+    }
+    if (gh) {
+      const inner = gh.repos.permissionOf(repository, request.signal);
+      return async (login: string) => {
+        if (meter?.refused) return "unknown";
+        return inner(login);
+      };
+    }
+    return rest
+      ? createGhService({ rest }).repos.permissionOf(repository, request.signal)
+      : undefined;
+  };
+  const permission = permissionFor(request.repository);
   // One permission cache for every ranking pass and the final presentation.
-  const trust = permissionService
-    ? markerTrust(permissionService.repos.permissionOf(request.repository, request.signal))
-    : undefined;
+  const trust = permission ? markerTrust(permission) : undefined;
   // #413: claim activity is read live, before the first shortlist ranking, so every selection
   // pass and the final presentation rank the same retained-claim rows: hydration then covers
   // whatever those rows bring into view. The inventory is recomputed per snapshot; a claim
@@ -831,13 +846,13 @@ export async function readBriefing(
     if (!request.agent || (request.role ?? defaultEngineRole) !== "implementer") return undefined;
     const owned = ownedClaims(collected, request.agent);
     const fresh = owned.urls.filter((url) => !activityReadFor.has(url));
-    if (fresh.length && permissionService && liveQuery) {
+    if (fresh.length && permission && liveQuery) {
       const facts = await readRetainedFacts(
         { ...collected, issues: collected.issues.filter((i) => fresh.includes(i.url)) },
         request.agent,
         {
           query: liveQuery as GraphQuery,
-          permission: permissionService.repos.permissionOf(request.repository, request.signal),
+          permission,
         },
         runtime.claimActivityReader,
       );
