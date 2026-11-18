@@ -1,5 +1,5 @@
 /** Explicit diagnostic-run API and adapters (#585); passive diagnostics stay unchanged. */
-import { localDoctor } from "../config/localdoctor.js";
+import { localDoctor, type LocalDoctorRuntime } from "../config/localdoctor.js";
 import { resolveReviewPolicy } from "../config/review-setting.js";
 import { metricStatus } from "../estimation/complexitylabels.js";
 import { impactMetric } from "../estimation/metrics.js";
@@ -108,6 +108,7 @@ export function diagnosticRunServices(
   serve: ServeRuntime,
   read: ServeReadRuntime,
   cache: ServeCache,
+  services?: { git?: LocalDoctorRuntime["git"]; gh?: LocalDoctorRuntime["gh"] },
 ) {
   const isServed = (repo: string) =>
     facts.served.some((p) => p.repository.toLowerCase() === repo.toLowerCase());
@@ -128,7 +129,11 @@ export function diagnosticRunServices(
     execute: async (request, context, signal, onStep) => {
       const selected = request.repo ? selectRepository(facts.served, request.repo) : null;
       if (request.kind === "doctor") {
+        const git = services?.git ?? (typeof serve.git === "object" ? serve.git : undefined);
+        const gh = services?.gh;
         const result = await localDoctor(selected ? { repo: selected.repository } : {}, {
+          ...(!serve.doctor?.probe && git ? { git } : {}),
+          ...(!serve.doctor?.probe && gh ? { gh } : {}),
           ...serve.doctor,
           env: serve.doctor?.env ?? read.env,
           cwd: selected?.project ?? serve.cwd ?? process.cwd(),

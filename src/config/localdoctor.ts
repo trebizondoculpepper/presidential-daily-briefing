@@ -190,25 +190,39 @@ export async function localDoctor(
   const baseGit =
     runtime.git ??
     (runtime.probe ? createGitService({ git: gitRunner(probe) }) : createGitService());
-  const withSignal = (ctx: GitContext): GitContext => {
+  const runGit = async <T>(ctx: GitContext, fn: (timed: GitContext) => Promise<T>): Promise<T> => {
     signal?.throwIfAborted();
     const timeout = AbortSignal.timeout(15_000);
     const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
-    return { ...ctx, signal: ctx.signal ? AbortSignal.any([combined, ctx.signal]) : combined };
+    const timed = {
+      ...ctx,
+      signal: ctx.signal ? AbortSignal.any([combined, ctx.signal]) : combined,
+    };
+    try {
+      return await fn(timed);
+    } catch (error) {
+      // Distinguish internal probe deadlines from caller cancellation so one slow check
+      // reports unavailable evidence instead of aborting the whole Doctor run.
+      if (timeout.aborted && !signal?.aborted && !ctx.signal?.aborted) {
+        throw new GitError("failed", "git command timed out");
+      }
+      throw error;
+    }
   };
   const gitService: GitService = {
-    workingTreeRoot: (ctx) => baseGit.workingTreeRoot(withSignal(ctx)),
-    commonDirectory: (ctx) => baseGit.commonDirectory(withSignal(ctx)),
-    remotes: (ctx) => baseGit.remotes(withSignal(ctx)),
-    checkout: (ctx) => baseGit.checkout(withSignal(ctx)),
-    revision: (ctx) => baseGit.revision(withSignal(ctx)),
-    headRef: (ctx) => baseGit.headRef(withSignal(ctx)),
+    workingTreeRoot: (ctx) => runGit(ctx, (timed) => baseGit.workingTreeRoot(timed)),
+    commonDirectory: (ctx) => runGit(ctx, (timed) => baseGit.commonDirectory(timed)),
+    remotes: (ctx) => runGit(ctx, (timed) => baseGit.remotes(timed)),
+    checkout: (ctx) => runGit(ctx, (timed) => baseGit.checkout(timed)),
+    revision: (ctx) => runGit(ctx, (timed) => baseGit.revision(timed)),
+    headRef: (ctx) => runGit(ctx, (timed) => baseGit.headRef(timed)),
     isAncestor: (ctx, ancestor, descendant) =>
-      baseGit.isAncestor(withSignal(ctx), ancestor, descendant),
-    divergence: (ctx, left, right) => baseGit.divergence(withSignal(ctx), left, right),
-    isIgnored: (ctx, path, opts) => baseGit.isIgnored(withSignal(ctx), path, opts),
-    isTracked: (ctx, path) => baseGit.isTracked(withSignal(ctx), path),
-    gitPath: (ctx, path) => baseGit.gitPath(withSignal(ctx), path),
+      runGit(ctx, (timed) => baseGit.isAncestor(timed, ancestor, descendant)),
+    divergence: (ctx, left, right) =>
+      runGit(ctx, (timed) => baseGit.divergence(timed, left, right)),
+    isIgnored: (ctx, path, opts) => runGit(ctx, (timed) => baseGit.isIgnored(timed, path, opts)),
+    isTracked: (ctx, path) => runGit(ctx, (timed) => baseGit.isTracked(timed, path)),
+    gitPath: (ctx, path) => runGit(ctx, (timed) => baseGit.gitPath(timed, path)),
   };
   const ghDiag: GhDiagnostics =
     runtime.gh?.diagnostics ??
