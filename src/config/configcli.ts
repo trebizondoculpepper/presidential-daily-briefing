@@ -87,41 +87,12 @@ export interface ConfigRuntime {
 const gitServiceOf = (runtime: ConfigRuntime): GitService =>
   runtime.gitService ?? createGitService(runtime.git ? { git: runtime.git } : {});
 
-const gitRunnerFromService =
-  (service: GitService): GitRunner =>
-  async (args, cwd) => {
-    const ctx = { cwd };
-    if (args[0] === "rev-parse" && args[1] === "--show-toplevel") {
-      const root = await service.workingTreeRoot(ctx);
-      if (!root) throw Object.assign(new Error("not a git repository"), { code: 128 });
-      return `${root}\n`;
-    }
-    if (args[0] === "rev-parse" && args[1] === "--git-path" && args[2]) {
-      const path = await service.gitPath(ctx, args[2]);
-      if (!path) throw Object.assign(new Error("git-path unavailable"), { code: 128 });
-      return `${path}\n`;
-    }
-    if (args[0] === "remote" && args[1] === "-v") {
-      const remotes = await service.remotes(ctx);
-      return remotes.map((r) => `${r.name}\t${r.url} (fetch)`).join("\n");
-    }
-    if (args[0] === "check-ignore") {
-      const target = args[args.length - 1]!;
-      const ignored = await service.isIgnored(ctx, target);
-      if (ignored) return "";
-      throw Object.assign(new Error("not ignored"), { code: 1 });
-    }
-    if (args[0] === "ls-files") {
-      const target = args[args.length - 1]!;
-      const tracked = await service.isTracked(ctx, target);
-      if (tracked) return target;
-      throw Object.assign(new Error("not tracked"), { code: 1 });
-    }
-    throw new Error(`Unsupported legacy git command in configcli adapter: ${args[0] ?? ""}`);
-  };
-
-const legacyGitRunnerOf = (runtime: ConfigRuntime): GitRunner =>
-  !runtime.gitService && runtime.git ? runtime.git : gitRunnerFromService(gitServiceOf(runtime));
+/**
+ * The Git boundary identity commands use: the injected shared service, else a legacy runner
+ * (adapted inside identity.ts), else the typed service's isolated default (#910).
+ */
+const identityGitOf = (runtime: ConfigRuntime): GitService | GitRunner | undefined =>
+  runtime.gitService ?? runtime.git;
 
 export const configUsage = `Usage: pdb config get KEY [--scope repository|global] [--entry KEY | --harness NAME] [--json] [--repo owner/name]
        pdb config set KEY VALUE [--scope repository|global] [--entry KEY | --harness NAME] [--json] [--repo owner/name]
@@ -659,7 +630,7 @@ async function runIdentity(
   else identityKeyEntry(parsed.key);
   if (parsed.entry !== undefined) validateEntryKey(parsed.entry);
   const fs = runtime.fs ?? nodeFileSystem;
-  const git = legacyGitRunnerOf(runtime);
+  const git = identityGitOf(runtime);
   // Project selection precedes entry lookup: only this checkout's root file is consulted.
   const target = await resolveIdentityTarget(runtime.cwd ?? process.cwd(), parsed.repo, git);
   const resolution = await resolveFor(parsed, target.root, runtime);
@@ -997,7 +968,7 @@ export async function runSetup(
       throw new ConfigUsageError("usage", "--repo must be owner/name.", setupUsage);
     const parsed = { entry: values.entry, harness: values.harness, repo: values.repo };
     const fs = runtime.fs ?? nodeFileSystem;
-    const git = legacyGitRunnerOf(runtime);
+    const git = identityGitOf(runtime);
     const target = await resolveIdentityTarget(runtime.cwd ?? process.cwd(), values.repo, git);
     const resolution = await resolveFor(parsed, target.root, runtime);
     const repoFlag = values.repo ? ` --repo ${values.repo}` : "";

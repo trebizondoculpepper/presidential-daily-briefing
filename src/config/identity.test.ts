@@ -75,7 +75,7 @@ x = 1
       if (args[0] === "rev-parse" && args[1] === "--show-toplevel") return `${root}\n`;
       if (args[0] === "rev-parse" && args[1] === "--git-path") return ".git/info/exclude\n";
       if (args[0] === "remote") return "origin\thttps://github.com/owner/name.git (fetch)\n";
-      if (args[0] === "ls-files") {
+      if (args.includes("ls-files")) {
         if (options.tracked) return IDENTITY_FILE;
         throw fail(1);
       }
