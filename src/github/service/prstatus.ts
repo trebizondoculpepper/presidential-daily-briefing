@@ -100,7 +100,11 @@ const boolOrNull = (o: Record<string, unknown>, k: string): boolean =>
   o[k] === undefined || o[k] === null || typeof o[k] === "boolean";
 const optBool = (o: Record<string, unknown>, k: string): boolean =>
   o[k] === undefined || typeof o[k] === "boolean";
-const actor = (v: unknown): boolean => v === null || (isRecord(v) && str(v.login));
+const actor = (v: unknown): boolean =>
+  v === null || (isRecord(v) && str(v.login) && (v.__typename === undefined || str(v.__typename)));
+/** Required by the node type: present, and null or a string. */
+const reqStrOrNull = (o: Record<string, unknown>, k: string): boolean =>
+  k in o && (o[k] === null || str(o[k]));
 /** Paging evidence: absent is allowed here and normalised to "more remains" before returning. */
 const page = (v: unknown, key: "hasNextPage" | "hasPreviousPage"): boolean =>
   isRecord(v) &&
@@ -150,7 +154,7 @@ const reviewNode = (n: Record<string, unknown>): boolean =>
   "author" in n &&
   actor(n.author) &&
   str(n.state) &&
-  strOrNull(n, "submittedAt") &&
+  reqStrOrNull(n, "submittedAt") &&
   str(n.url) &&
   "commit" in n &&
   (n.commit === null || (isRecord(n.commit) && str(n.commit.oid)));
@@ -159,7 +163,7 @@ const threadComment =
   (n: Record<string, unknown>): boolean =>
     "author" in n &&
     actor(n.author) &&
-    strOrNull(n, "createdAt") &&
+    reqStrOrNull(n, "createdAt") &&
     str(n.url) &&
     (!withBody || strOrNull(n, "body"));
 const threadNode = (n: Record<string, unknown>): boolean =>
@@ -174,7 +178,7 @@ const threadNode = (n: Record<string, unknown>): boolean =>
       nodes(n.first, threadComment(true)))) &&
   (n.latest === undefined || n.latest === null || nodes(n.latest, threadComment(false)));
 const commentNode = (n: Record<string, unknown>): boolean =>
-  "author" in n && actor(n.author) && strOrNull(n, "body") && str(n.createdAt) && str(n.url);
+  "author" in n && actor(n.author) && reqStrOrNull(n, "body") && str(n.createdAt) && str(n.url);
 const linkedIssue = (n: Record<string, unknown>): boolean =>
   int(n.number) &&
   str(n.url) &&

@@ -82,4 +82,28 @@ describe("typed pull request status read (#946)", () => {
     expect(r?.comments.pageInfo?.hasPreviousPage).toBe(true);
     expect(r?.reviews.pageInfo?.hasPreviousPage).toBe(true);
   });
+  it("rejects a non-string author discriminator and omitted required nullable fields", async () => {
+    const reviews = (node: unknown) => ({
+      ...pr,
+      reviews: { nodes: [node], pageInfo: { hasPreviousPage: false } },
+    });
+    for (const bad of [
+      reviews({
+        author: { login: "x", __typename: 7 },
+        state: "APPROVED",
+        submittedAt: null,
+        url: "r",
+        commit: null,
+      }),
+      reviews({ author: null, state: "APPROVED", url: "r", commit: null }),
+      {
+        ...pr,
+        comments: {
+          nodes: [{ author: null, createdAt: "t", url: "c" }],
+          pageInfo: { hasPreviousPage: false },
+        },
+      },
+    ])
+      await expect(svc(bad).prStatus.pullRequest("o/r", 12)).rejects.toThrow(/malformed/);
+  });
 });
