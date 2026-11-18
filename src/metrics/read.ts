@@ -21,6 +21,7 @@ import {
   type ActivityComment,
 } from "../workflow/claimactivity.js";
 import { workflow } from "../workflow/definition.js";
+import { readRetained } from "../workflow/retained.js";
 import { evaluateDatalog } from "../rules/datalog/adapter.js";
 import {
   collectDeliveryFacts,
@@ -329,7 +330,7 @@ export async function readMetrics(
           stage = "claimed";
         } else if (blocked === true) {
           stage = "blocked";
-        } else {
+        } else if (issue.openClosingPrs === 0) {
           // Delegate readiness to the canonical native Datalog evaluator rather than checking labels alone.
           type DatalogSnapshot = Parameters<typeof evaluateDatalog>[0];
           const url = `https://github.com/${repository}/issues/${issue.number}`;
@@ -338,6 +339,7 @@ export async function readMetrics(
               schemaVersion: 1,
               repository,
               fetchedAt: now,
+              warnings: [],
               issues: [
                 {
                   number: issue.number,
@@ -356,10 +358,10 @@ export async function readMetrics(
                     issue.openBlockers === 0
                       ? { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } }
                       : undefined,
-                  closedByPullRequestsReferences:
-                    issue.openClosingPrs === 0
-                      ? { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } }
-                      : undefined,
+                  closedByPullRequestsReferences: {
+                    nodes: [],
+                    pageInfo: { hasNextPage: false, endCursor: null },
+                  },
                   comments: { totalCount: issue.comments.totalCount, nodes: [] },
                 } as unknown as DatalogSnapshot["issues"][number],
               ],
@@ -400,7 +402,36 @@ export async function readMetrics(
           claimStartedAt: latestClaimAdd,
           historyComplete: commentsComplete,
         });
-        waiting = activity.state === "waiting" ? true : activity.state === "active" ? false : null;
+        if (activity.state === "waiting") {
+          try {
+            const permission = async (login: string) => {
+              const t = await rt.trust.comment({ body: "", author: { __typename: "User", login } });
+              return t.status === "trusted"
+                ? "write"
+                : t.status === "untrusted"
+                  ? "read"
+                  : "unknown";
+            };
+            const retained = await readRetained(
+              repository,
+              issue.number,
+              ownerAgent,
+              query,
+              permission,
+            );
+            waiting =
+              retained.activity.state === "waiting"
+                ? true
+                : retained.activity.state === "active"
+                  ? false
+                  : null;
+          } catch (error) {
+            if (rt.signal?.aborted) throw error;
+            waiting = null;
+          }
+        } else {
+          waiting = activity.state === "active" ? false : null;
+        }
       } else if (
         commentsComplete &&
         !comments.some((c) => c.body.includes("github-triage:claim-activity"))
