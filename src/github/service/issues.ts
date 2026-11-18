@@ -10,9 +10,11 @@ import { classifyGhFailure, parseGhResponse } from "../evidence.js";
 import type { FailureClassification } from "../evidence.js";
 import { isRecord, prop } from "../github.js";
 import type { Rest, RestAnswer } from "../github.js";
+import type { GhTransport } from "./transport.js";
 
 const REPO = /^[\w.-]+\/[\w.-]+$/;
 const GITHUB_LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
+const HTTPS_ISSUE_URL = /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/issues\/[1-9]\d*$/;
 
 export interface IssueCreatePayload {
   title: string;
@@ -28,9 +30,34 @@ export interface PostAnswer {
   body: unknown;
   evidence?: FailureClassification;
   timedOut?: boolean;
+  cancelled?: boolean;
 }
 
-export type RestPost = (path: string, payload: unknown) => Promise<PostAnswer>;
+export type RestPost = (
+  path: string,
+  payload: unknown,
+  options?: { signal?: AbortSignal },
+) => Promise<PostAnswer>;
+
+export interface CreatedIssueRecord {
+  number: number;
+  nodeId: string;
+  url: string;
+  labels: string[] | null;
+  assignees: string[] | null;
+}
+
+export type IssueCreateOutcome =
+  | { kind: "created"; issue: CreatedIssueRecord }
+  | { kind: "not-dispatched"; cancelled?: boolean }
+  | { kind: "refused"; status: number; evidence?: FailureClassification }
+  | {
+      kind: "unknown";
+      reason: "transport" | "unexpected-status" | "malformed" | "target-mismatch";
+      status: number | null;
+      mismatchedUrl?: string;
+      evidence?: FailureClassification;
+    };
 
 export interface IssueRepositoryMeta {
   fullName: string;
@@ -65,7 +92,7 @@ export interface IssueCapabilities {
     repository: string,
     payload: IssueCreatePayload,
     signal?: AbortSignal,
-  ): Promise<PostAnswer>;
+  ): Promise<IssueCreateOutcome>;
   /** Bounded read-back of a created issue (`GET /repos/{owner}/{repo}/issues/{number}`). */
   readBack(
     repository: string,
@@ -146,6 +173,56 @@ export const ghPostWith =
     });
 
 export const ghPost: RestPost = ghPostWith();
+
+/** One-attempt POST over the shared GH transport; honours cancellation before dispatch. */
+export const postOverTransport =
+  (transport: GhTransport, env?: NodeJS.ProcessEnv): RestPost =>
+  async (path, payload, options) => {
+    const signal = options?.signal;
+    if (signal?.aborted) {
+      return { dispatched: false, status: null, body: null, cancelled: true };
+    }
+    const outcome = await transport({
+      args: ["api", "--include", "--method", "POST", path, "--input", "-"],
+      ...(env ? { env } : {}),
+      stdin: JSON.stringify(payload),
+      timeoutMs: 60_000,
+      maxBufferBytes: 1024 * 1024,
+      signal,
+    });
+    if (!outcome.ok) {
+      if (outcome.kind === "spawn") return { dispatched: false, status: null, body: null };
+      if (outcome.kind === "timeout")
+        return { dispatched: true, status: null, body: null, timedOut: true };
+      if (outcome.kind === "cancelled")
+        return { dispatched: true, status: null, body: null, cancelled: true };
+    }
+    try {
+      const response = parseGhResponse(outcome.stdout);
+      let body: unknown = null;
+      try {
+        body = JSON.parse(response.body);
+      } catch {
+        body = null;
+      }
+      const status = response.status;
+      return {
+        dispatched: true,
+        status,
+        body,
+        ...(status !== 201
+          ? {
+              evidence: classifyGhFailure({
+                response,
+                exitCode: outcome.ok ? 0 : outcome.exitCode,
+              }),
+            }
+          : {}),
+      };
+    } catch {
+      return { dispatched: true, status: null, body: null };
+    }
+  };
 
 const fieldStrings = (value: unknown, key: string): string[] | null =>
   Array.isArray(value)
@@ -229,8 +306,74 @@ export function issueCapabilities(rest: Rest, post: RestPost): IssueCapabilities
       };
     },
 
-    create(repository, payload) {
-      return post(`repos/${repository}/issues`, payload);
+    async create(repository, payload, signal) {
+      const answer = await post(`repos/${repository}/issues`, payload, { signal });
+      if (!answer.dispatched) {
+        return { kind: "not-dispatched", ...(answer.cancelled ? { cancelled: true } : {}) };
+      }
+      if (answer.status === null || answer.timedOut || answer.status >= 500) {
+        return {
+          kind: "unknown",
+          reason: "transport",
+          status: answer.status,
+          ...(answer.evidence ? { evidence: answer.evidence } : {}),
+        };
+      }
+      if (answer.status !== 201) {
+        if (answer.status >= 400) {
+          return {
+            kind: "refused",
+            status: answer.status,
+            ...(answer.evidence ? { evidence: answer.evidence } : {}),
+          };
+        }
+        return {
+          kind: "unknown",
+          reason: "unexpected-status",
+          status: answer.status,
+          ...(answer.evidence ? { evidence: answer.evidence } : {}),
+        };
+      }
+      const created = answer.body;
+      const number = prop(created, "number");
+      const issueNode = prop(created, "node_id");
+      const issueUrl = prop(created, "html_url");
+      const repositoryUrl = prop(created, "repository_url");
+      const expectedUrl = `https://github.com/${repository}/issues/${String(number)}`;
+      if (
+        !isRecord(created) ||
+        "pull_request" in created ||
+        typeof number !== "number" ||
+        !Number.isInteger(number) ||
+        number < 1 ||
+        typeof issueNode !== "string" ||
+        !issueNode ||
+        typeof issueUrl !== "string"
+      ) {
+        return { kind: "unknown", reason: "malformed", status: 201 };
+      }
+      if (
+        issueUrl.toLowerCase() !== expectedUrl.toLowerCase() ||
+        (typeof repositoryUrl === "string" &&
+          !repositoryUrl.toLowerCase().endsWith(`/repos/${repository.toLowerCase()}`))
+      ) {
+        return {
+          kind: "unknown",
+          reason: "target-mismatch",
+          status: 201,
+          ...(HTTPS_ISSUE_URL.test(issueUrl) ? { mismatchedUrl: issueUrl } : {}),
+        };
+      }
+      return {
+        kind: "created",
+        issue: {
+          number,
+          nodeId: issueNode,
+          url: issueUrl,
+          labels: fieldStrings(prop(created, "labels"), "name"),
+          assignees: fieldStrings(prop(created, "assignees"), "login"),
+        },
+      };
     },
 
     async readBack(repository, number, expectedNodeId, signal) {
