@@ -232,96 +232,11 @@ export async function readPr(url: string, query: GraphQuery): Promise<LivePr | n
     return null;
   }
 }
-export async function defaultBranch(repository: string, query: GraphQuery): Promise<string | null> {
-  const [owner, name] = repository.split("/");
-  try {
-    const data = (await query(
-      `query($owner:String!,$name:String!){repository(owner:$owner,name:$name){defaultBranchRef{name}}}`,
-      { owner, name },
-    )) as { repository: { defaultBranchRef: { name: string } | null } | null };
-    return data.repository?.defaultBranchRef?.name ?? null;
-  } catch {
-    return null;
-  }
-}
-async function readCommit(repository: string, oid: string, query: GraphQuery) {
-  const [owner, name] = repository.split("/");
-  try {
-    const data = (await query(
-      `query($owner:String!,$name:String!,$oid:String!){repository(owner:$owner,name:$name){nameWithOwner object(expression:$oid){__typename ... on Commit{oid}}}}`,
-      { owner, name, oid },
-    )) as {
-      repository: { nameWithOwner: string; object: { __typename: string; oid?: string } | null };
-    } | null;
-    const object = data?.repository?.object;
-    return object?.__typename === "Commit" && object.oid
-      ? { repository: data!.repository.nameWithOwner, oid: object.oid }
-      : null;
-  } catch {
-    return null;
-  }
-}
+// Commit containment reads live with the typed GH service (#943, #890); re-exported for importers.
+export { defaultBranch, targetContainment } from "../github/service/containment.js";
+export type { Containment } from "../github/service/containment.js";
+import { commitOf, targetContainment } from "../github/service/containment.js";
 
-/** One live containment compare of a commit against a target branch head. */
-export interface Containment {
-  /** `contained` and `absent` are positive evidence; anything inconclusive is `unknown`. */
-  state: "contained" | "absent" | "unknown";
-  /** The branch compared against (the live default branch when the target names none). */
-  branch: string | null;
-  /** The compare API's status, when one was returned. */
-  status: string | null;
-  why: string;
-}
-
-/**
- * Live containment of a commit in the target branch head (the compare API, base = the branch,
- * head = the commit): `identical` or `behind` is contained, `ahead` or `diverged` is positively
- * absent, and an error, a missing or unreadable branch or an unexpected status is unknown. The
- * default branch is read live unless `branchOf` supplies this read's own live answer; a branch
- * recorded or cached elsewhere is never substituted.
- */
-export async function targetContainment(
-  target: DeliveryTarget,
-  oid: string,
-  rt: Pick<DeliverablesRuntime, "query" | "rest">,
-  branchOf: (repository: string) => Promise<string | null> = (r) => defaultBranch(r, rt.query),
-): Promise<Containment> {
-  const branch = target.branch ?? (await branchOf(target.repository));
-  if (!branch)
-    return {
-      state: "unknown",
-      branch: null,
-      status: null,
-      why: `the default branch of ${target.repository} could not be read`,
-    };
-  try {
-    const answer = await rt.rest(
-      `repos/${target.repository}/compare/${encodeURIComponent(branch)}...${oid}`,
-    );
-    const status =
-      answer.status === 200 && typeof answer.body === "object" && answer.body !== null
-        ? (answer.body as { status?: unknown }).status
-        : undefined;
-    const text = typeof status === "string" ? status : null;
-    if (status === "identical" || status === "behind")
-      return { state: "contained", branch, status: text, why: `contained in ${branch}` };
-    if (status === "ahead" || status === "diverged")
-      return { state: "absent", branch, status: text, why: `not contained in ${branch} (${text})` };
-    return {
-      state: "unknown",
-      branch,
-      status: text,
-      why: `the compare against ${target.repository}:${branch} was inconclusive (${answer.status === 200 ? `status ${text ?? "missing"}` : `HTTP ${answer.status ?? "error"}`})`,
-    };
-  } catch (error) {
-    return {
-      state: "unknown",
-      branch,
-      status: null,
-      why: `the compare against ${target.repository}:${branch} failed (${error instanceof Error ? error.message : "unknown error"})`,
-    };
-  }
-}
 const contained = async (
   target: DeliveryTarget,
   oid: string,
@@ -836,7 +751,7 @@ export async function planDeliverables(
   for (const ref of r.commits) {
     const m = commitRef.exec(ref);
     if (!m) return refuse("EVIDENCE_INCOMPLETE", facts, `${ref} is not owner/name@SHA.`, [retry]);
-    const live = await readCommit(m[1], m[2], rt.query);
+    const live = await commitOf(rt.query, m[1], m[2]);
     if (!live)
       return refuse(
         "EVIDENCE_INCOMPLETE",
