@@ -4,7 +4,28 @@ import type { ReadRuntime } from "../briefing/service.js";
 import type { Transport } from "./core.js";
 import { nodeGit } from "../config/config.js";
 import type { GitRunner } from "../config/config.js";
-import type { GitService } from "../git/service.js";
+import type { GitContext, GitService } from "../git/service.js";
+
+const bindGitServiceSignal = (svc: GitService, signal: AbortSignal): GitService => {
+  const withSignal = (ctx: GitContext): GitContext => {
+    signal.throwIfAborted();
+    return { ...ctx, signal: ctx.signal ? AbortSignal.any([signal, ctx.signal]) : signal };
+  };
+  return {
+    workingTreeRoot: (ctx) => svc.workingTreeRoot(withSignal(ctx)),
+    commonDirectory: (ctx) => svc.commonDirectory(withSignal(ctx)),
+    remotes: (ctx) => svc.remotes(withSignal(ctx)),
+    checkout: (ctx) => svc.checkout(withSignal(ctx)),
+    revision: (ctx) => svc.revision(withSignal(ctx)),
+    headRef: (ctx) => svc.headRef(withSignal(ctx)),
+    isAncestor: (ctx, ancestor, descendant) =>
+      svc.isAncestor(withSignal(ctx), ancestor, descendant),
+    divergence: (ctx, left, right) => svc.divergence(withSignal(ctx), left, right),
+    isIgnored: (ctx, path) => svc.isIgnored(withSignal(ctx), path),
+    isTracked: (ctx, path) => svc.isTracked(withSignal(ctx), path),
+    gitPath: (ctx, path) => svc.gitPath(withSignal(ctx), path),
+  };
+};
 
 export function serviceTransport(runtime: ReadRuntime): Transport {
   return {
@@ -14,7 +35,8 @@ export function serviceTransport(runtime: ReadRuntime): Transport {
         readers: T | undefined,
       ): T | undefined => {
         if (!readers) return readers;
-        if (typeof readers.git === "object") return readers;
+        if (typeof readers.git === "object")
+          return { ...readers, git: bindGitServiceSignal(readers.git, signal) };
         const runner = readers.git ?? nodeGit;
         const git: GitRunner = (args, cwd) => {
           signal.throwIfAborted();
