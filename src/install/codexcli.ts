@@ -15,10 +15,9 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { ConfigError, nodeFileSystem } from "../config/config.js";
 import type { ConfigRuntime } from "../config/configcli.js";
-import { readIdentity, resolveIdentityTarget } from "../config/identity.js";
+import { readIdentity } from "../config/identity.js";
 import { resolveEntry, type Environment } from "../config/harness.js";
 import { createGitService } from "../git/service.js";
-import { resolveProjectGitCommonDir } from "./manifest.js";
 import type { InstallItemKind } from "./manifest.js";
 
 /** A registered installer client; only Codex is implemented in this slice. */
@@ -211,24 +210,38 @@ export async function resolveInstallScope(
     } catch {
       root = null;
     }
-    if (!root) throw new Error("NO_PROJECT: no Git working-tree root.");
+    if (!root)
+      throw new Error(
+        `NO_PROJECT: no Git working-tree root. Next: ${args.dryRun ? "pdb" : "pdb"} install codex --global --dry-run${args.json ? " --json" : ""} for a user-wide preview.`,
+      );
+    // Route every Git fact through the typed service so GIT_DIR/GIT_WORK_TREE cannot point at an
+    // unrelated checkout (architecture's explicit-checkout boundary). `svc.remotes` runs with the
+    // sanitized environment, unlike legacy runners that inherit those variables.
     let repository: string | null = null;
     if (args.repo !== null && args.repo !== undefined) {
-      try {
-        repository = (await resolveIdentityTarget(cwd, args.repo, runtime.git)).repository;
-      } catch (error) {
-        if (error instanceof ConfigError) throw new Error(`NO_PROJECT: ${error.message}`);
-        throw error;
+      const remotes = await svc.remotes({ cwd: root });
+      const repositories = [
+        ...new Set(remotes.map((r) => r.repository).filter((r): r is string => r !== null)),
+      ];
+      if (!repositories.includes(args.repo)) {
+        throw new Error(
+          `NO_PROJECT: the checkout is not ${args.repo} (GitHub remotes: ${repositories.join(", ") || "none"}).`,
+        );
       }
+      repository = args.repo;
     } else {
       const identity = await svc.checkout({ cwd: root });
       repository = identity ? identity.repository : null;
     }
     if (!repository)
       throw new Error(
-        "NO_PROJECT: the repository could not be resolved; run from a checkout with a single GitHub remote or pass --repo owner/name.",
+        `NO_PROJECT: the repository could not be resolved; run from a checkout with a single GitHub remote or pass --repo owner/name. Next: ${args.dryRun ? "pdb" : "pdb"} install codex --global --dry-run${args.json ? " --json" : ""} for a user-wide preview.`,
       );
-    const gitCommonDir = await resolveProjectGitCommonDir(root, runtime.git);
+    const gitCommonDir = (await svc.commonDirectory({ cwd: root })) ?? "";
+    if (!gitCommonDir)
+      throw new Error(
+        `NO_PROJECT: the checkout's common directory could not be resolved. Next: ${args.dryRun ? "pdb" : "pdb"} install codex --global --dry-run${args.json ? " --json" : ""} for a user-wide preview.`,
+      );
     return { kind: "project", root, repository, gitCommonDir };
   } catch (error) {
     if (error instanceof ConfigError) throw new Error(`NO_PROJECT: ${error.message}`);
