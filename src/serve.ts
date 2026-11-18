@@ -21,8 +21,10 @@ import { createServer as createHttpServer } from "node:http";
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { isIP } from "node:net";
-import { AuthenticationError, currentRepository } from "./github/github.js";
-import { nodeGit } from "./config/config.js";
+import { AuthenticationError } from "./github/github.js";
+import { createAppServices } from "./composition.js";
+import type { AppServices } from "./composition.js";
+import { gitServiceOf } from "./config/identity.js";
 import { systemClock } from "./mcp/polling.js";
 import { installedVersion } from "./updates/updates.js";
 import { defaultReadRuntime, readServices } from "./serve/services.js";
@@ -94,15 +96,20 @@ export type {
 import { ghAuthContext } from "./github/ghauth.js";
 export { ghAuthContext };
 
-export const defaultServeRuntime = (): ServeRuntime => ({
+/**
+ * The production serve runtime over one shared application composition (#870): the same typed
+ * Git service serves identity, project resolution and registration, and the same GH service the
+ * checkout repository and authenticated account. Nothing is read until startup asks.
+ */
+export const defaultServeRuntime = (services: AppServices = createAppServices()): ServeRuntime => ({
   ...(!process.env.PDB_NO_EFFECTIVE_IDENTITY
-    ? { identityRuntime: { env: process.env, git: nodeGit } }
+    ? { identityRuntime: { env: process.env, git: services.git } }
     : {}),
   cwd: process.cwd(),
-  git: nodeGit,
+  git: services.git,
   globalConfig: { dir: globalConfigDirectory() },
-  currentRepository,
-  authContext: ghAuthContext,
+  currentRepository: (cwd, signal) => services.gh.repos.fromCheckout(cwd, signal),
+  authContext: (signal) => services.gh.account.current(signal),
   clock: systemClock,
   stdout: (text) => process.stdout.write(text),
   stderr: (text) => process.stderr.write(text),
@@ -163,7 +170,8 @@ async function servedSet(
     if (runtime.git) {
       let root = "";
       try {
-        root = (await runtime.git(["rev-parse", "--show-toplevel"], project)).trim();
+        // The typed Git service (#870): null outside a checkout.
+        root = (await gitServiceOf(runtime.git).workingTreeRoot({ cwd: project })) ?? "";
       } catch {
         root = "";
       }
