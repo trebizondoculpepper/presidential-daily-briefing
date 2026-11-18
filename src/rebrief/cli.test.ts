@@ -621,7 +621,8 @@ describe("rebrief CLI/private state", () => {
     const local = noLocalProject(repo);
     const transport = serviceTransport({
       ...local,
-      guide: { ...local.guide, git },
+      // This test's own Git boundary replaces the empty checkout's typed service.
+      guide: { ...local.guide, gitService: undefined, git },
       now: clock,
       collect: async () => snapshot([], []),
       dependencyReport,

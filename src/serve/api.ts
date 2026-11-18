@@ -24,7 +24,8 @@ import {
 } from "../config/engine-setting.js";
 import { validateHarness } from "../config/harness.js";
 import { validateEntryKey } from "../config/identity.js";
-import type { ConfigFileSystem, GitRunner } from "../config/config.js";
+import type { ConfigFileSystem } from "../config/config.js";
+import type { GitService } from "../git/service.js";
 import { resolveReadIdentity } from "../config/readidentity.js";
 import type { ReadIdentity } from "../config/readidentity.js";
 import { briefingRoleNames, roleSectionIds } from "../briefing/roles.js";
@@ -145,10 +146,28 @@ const refuseWrite = async (): Promise<never> => {
 export function noLocalProject(
   repository: string,
 ): Pick<ReadRuntime, "estimation" | "guide" | "reviewPolicy" | "projectRules"> {
-  const git: GitRunner = async (args) =>
-    args[0] === "rev-parse"
-      ? `${NO_PROJECT_ROOT}\n`
-      : `origin\thttps://github.com/${repository}.git (fetch)\n`;
+  // A typed, read-only empty checkout of exactly this repository (#934): its root is the
+  // placeholder and its only remote is the served repository. Nothing else exists in it.
+  const git: GitService = {
+    workingTreeRoot: async () => NO_PROJECT_ROOT,
+    commonDirectory: async () => null,
+    gitPath: async () => null,
+    remotes: async () => [
+      {
+        name: "origin",
+        url: `https://github.com/${repository}.git`,
+        host: "github.com",
+        repository: repository.toLowerCase(),
+      },
+    ],
+    checkout: async () => ({ host: "github.com", repository: repository.toLowerCase() }),
+    revision: async () => null,
+    headRef: async () => null,
+    isAncestor: async () => false,
+    divergence: async () => null,
+    isIgnored: async () => false,
+    isTracked: async () => false,
+  };
   const fs: ConfigFileSystem = {
     readText: async () => null,
     writeText: refuseWrite,
@@ -156,11 +175,10 @@ export function noLocalProject(
     remove: refuseWrite,
     makeDirectory: refuseWrite,
   };
-  const readers = { cwd: NO_PROJECT_ROOT, git, fs };
   // #301: no verified project, so no declared review policy: explicitly undeclared.
   return {
-    estimation: readers,
-    guide: readers,
+    estimation: { cwd: NO_PROJECT_ROOT, git, fs },
+    guide: { cwd: NO_PROJECT_ROOT, gitService: git, fs },
     reviewPolicy: { state: "undeclared", scope: "no-matching-project" },
     // #516: whether project preferences are enabled cannot be read without the checkout.
     projectRules: { enabled: "unavailable", reason: noCheckout(repository) },

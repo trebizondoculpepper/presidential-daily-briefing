@@ -69,7 +69,8 @@ export function cachedMcpRuntime(
       : {}),
     now: read.now,
     env: read.env,
-    git: read.git,
+    // The MCP runtime still takes a legacy runner (#930); a shared service is left to its default.
+    git: typeof read.git === "function" ? read.git : undefined,
     fs: read.fs,
     // pdb serve never resolves a repository from a working directory (#271).
     currentRepository: async () => {
