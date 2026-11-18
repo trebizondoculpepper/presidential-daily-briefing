@@ -9,3 +9,8 @@ no compatibility alias remains. Native infrastructure failures stay explicit.
 Markdown is the shared rules renderer for CLI and generated onboarding files,
 preserving the JSON model, logic and provenance. These are documentation contracts;
 the corresponding runtime tickets remain open.
+
+The owner then requested a one-off 05:00 London-time release of merged work.
+A reviewed dated controller contract preserves the canonical explicit dispatch
+and publication checks, documents scheduling delay/cutoff semantics and avoids
+depending on the local computer remaining awake. Scheduling is not publication.
