@@ -248,8 +248,8 @@
 [(refinement-hold ?t) (awaiting-reestimate ?t)]
 [(refinement-hold ?t) [?t "refinement-complete" false]]
 [(refinement-empty ?t) (refinement-open ?t ?q) (not (refinement-asks ?q))]
-;; Resolved without a later estimate: back to estimation, still not implementable.
-[(awaiting-reestimate ?t) [?t "refinement" ?q] [?q "refinement-state" "resolved"] [?q "refinement-estimated" false] (not (needs-refinement ?t))]
+;; Resolved without a recorded later estimate (false or absent): back to estimation, never implementable.
+[(awaiting-reestimate ?t) [?t "refinement" ?q] [?q "refinement-state" "resolved"] (not [?q "refinement-estimated" true]) (not (needs-refinement ?t))]
 [(refinement-work ?t) (issue ?t) (open ?t) (needs-refinement ?t) [?t "labels-complete" true] (platform-ok ?t) (not (claimed ?t))]
 ;; #1092: needs refinement, awaiting re-estimate or unknown refinement holds an owned claim too;
 ;; the claim is kept, never continued as implementation.

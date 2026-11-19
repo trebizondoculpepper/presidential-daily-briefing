@@ -24,7 +24,7 @@ The native policy (`rules.edn`, `decisions.edn`, scenarios in `scenarios/refinem
 
 - `[?t "refinement" ?q]`: a refinement request on ticket `?t`, with `"refinement-state"` `open`, `resolved` or `unknown`. Any open or unknown request means **needs refinement**, so a newer open request after an earlier resolution reopens it.
 - `[?q "refinement-question" ?r]`: a blocking question, a question record in the existing #414 vocabulary. Only an explicit `record-outcome` `resolved` or `withdrawn` settles it. A request with no question is rejected at the boundary; if one is observed anyway, it is inspected (`D-REFINE-EMPTY`).
-- `[?q "refinement-estimated" false]` on a resolved request: no estimate recorded since the resolution.
+- `[?q "refinement-estimated" true]` on a resolved request: an estimate has been recorded since the resolution. If it is `false` or absent, the item awaits re-estimation (fail closed).
 - `[?t "refinement-complete" false]`: refinement evidence could not be read completely.
 
 Decisions:

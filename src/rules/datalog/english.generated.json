@@ -1,8 +1,8 @@
 {
   "modelVersion": 2,
   "policyVersion": 1,
-  "rulesHash": "8acb43d11302e190e223dffecc3e20901241d32629f204b37cba1d43a28c912b",
-  "narrationHash": "62eb22eff2469b281d95222ae7ebcfe49cbfaa14cf0a9d63cd577125e99537ab",
+  "rulesHash": "5365adc274ca204061d3e3e68b3989ac0f3fa2b890578112f5b5c72727299e0e",
+  "narrationHash": "86491148f3dd4f410fb9e7eb3fb1f9b96255548d986979e9c3f5cc9d53662356",
   "sources": [
     "policy/schema.edn",
     "policy/rules.edn",
@@ -16609,17 +16609,23 @@
               "many": false
             },
             {
-              "type": "fact",
-              "scope": "entity",
-              "entity": {
-                "var": "?q"
-              },
-              "attribute": "refinement-estimated",
-              "value": {
-                "lit": false
-              },
-              "phrase": "estimate recorded after resolution",
-              "many": false
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "fact",
+                  "scope": "entity",
+                  "entity": {
+                    "var": "?q"
+                  },
+                  "attribute": "refinement-estimated",
+                  "value": {
+                    "lit": true
+                  },
+                  "phrase": "estimate recorded after resolution",
+                  "many": false
+                }
+              ]
             },
             {
               "type": "not",
@@ -21710,6 +21716,6 @@
     "overrides": 4,
     "constants": 14,
     "attributes": 119,
-    "clauses": 1350
+    "clauses": 1351
   }
 }

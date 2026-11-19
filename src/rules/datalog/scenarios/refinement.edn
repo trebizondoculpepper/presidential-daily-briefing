@@ -176,4 +176,14 @@
           {:e 300 "record-trust" "trusted" "record-version" 2 "record-outcome" "none"}]
   :expect {:actions [{:subject 100 :rule "D-ORDINARY" :kind "implement" :band 6 :unlocks 0}
             {:subject 101 :rule "D-REFINE" :kind "refine" :band 4}]
-           :denials #{[101 "D-DENY-BLOCKER"] [101 "D-DENY-REFINEMENT"]}}}]}
+           :denials #{[101 "D-DENY-BLOCKER"] [101 "D-DENY-REFINEMENT"]}}}
+
+ {:id "r15-resolved-without-estimate-evidence-fails-closed"
+  :doc "A resolved request with no estimate flag is treated as awaiting re-estimation"
+  :viewer {:role "implementer"}
+  :facts [{:e 1 "forward-complete" true}
+          {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "S" "head" "not-a-pr" "label" "status:ready" "refinement" 200}
+          {:e 200 "refinement-state" "resolved" "refinement-question" 300}
+          {:e 300 "record-trust" "trusted" "record-version" 2 "record-outcome" "resolved"}]
+  :expect {:actions [{:subject 100 :rule "D-REESTIMATE" :kind "estimate-complexity" :band 5}]
+           :denials #{[100 "D-DENY-REESTIMATE"]}}}]}
