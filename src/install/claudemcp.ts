@@ -11,6 +11,7 @@
  * Per attended-installer-delivery.md, no Claude Stop entry is invented: the hook item stays
  * `not-attempted`/`HOOK_NOT_AVAILABLE` until a packaged session-bound adapter exists.
  */
+import { readFile } from "node:fs/promises";
 import { installedVersion } from "../updates/updates.js";
 import {
   editJsonEntry,
@@ -171,6 +172,46 @@ function manifestWriteRefusal(
   };
 }
 
+/** Raw Claude MCP config and ownership-manifest snapshot bound between preview and apply (#769). */
+export interface ClaudeInstallSnapshot {
+  configRaw: string | null;
+  manifestRaw: string | null;
+}
+
+const claudeTargetPath = (scope: InstallScope): string =>
+  scope.kind === "project" ? claudeProjectMcpPath(scope) : claudeUserConfigFile(scope);
+
+const readOptionalFile = async (
+  path: string,
+  fs?: ManifestRuntime["fs"],
+): Promise<string | null> => {
+  try {
+    return fs ? await fs.readFile(path) : await readFile(path, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
+};
+
+/** Capture raw Claude MCP config and manifest contents for preview-to-apply conflict checks (#769). */
+export async function readClaudeInstallSnapshot(
+  scope: InstallScope,
+  manifestPath: string,
+  fs?: ManifestRuntime["fs"],
+): Promise<ClaudeInstallSnapshot> {
+  return {
+    configRaw: await readOptionalFile(claudeTargetPath(scope), fs),
+    manifestRaw: await readOptionalFile(manifestPath, fs),
+  };
+}
+
+/** Whether the raw Claude MCP config or ownership manifest changed since a preview snapshot (#769). */
+export const claudeInstallSnapshotChanged = (
+  expected: ClaudeInstallSnapshot,
+  current: ClaudeInstallSnapshot,
+): boolean =>
+  expected.configRaw !== current.configRaw || expected.manifestRaw !== current.manifestRaw;
+
 /**
  * Install (or keep/replace) the PDB MCP entry in the project `.mcp.json` (project scope) or the
  * user-wide Claude config (--global). The hook item is never touched here.
@@ -186,11 +227,30 @@ export async function installClaudeMcp(params: {
   /** Platform used to shape the STDIO command (win32 launches through Node); tests inject. */
   platform?: NodeJS.Platform;
   runtime?: ManifestRuntime;
+  expectedSnapshot?: ClaudeInstallSnapshot;
 }): Promise<ClaudeMcpResult> {
-  const { scope, options, manifestPath, pdbVersion, dryRun, adopt, runtime } = params;
+  const { scope, options, manifestPath, pdbVersion, dryRun, adopt, runtime, expectedSnapshot } =
+    params;
   // Project scope uses the native project `.mcp.json`; --global targets the user config home.
-  const file = scope.kind === "project" ? claudeProjectMcpPath(scope) : claudeUserConfigFile(scope);
+  const file = claudeTargetPath(scope);
   const allowedRoot = scope.kind === "project" ? scope.root : scope.homeDir;
+  if (!dryRun && expectedSnapshot) {
+    const currentSnapshot = await readClaudeInstallSnapshot(scope, manifestPath, runtime?.fs);
+    if (claudeInstallSnapshotChanged(expectedSnapshot, currentSnapshot)) {
+      return {
+        mcp: {
+          action: "kept",
+          outcome: "refused",
+          ownership: "absent",
+          code: "CONFLICT",
+          message:
+            "Claude configuration or ownership manifest changed since the preview; re-run to inspect the updated plan.",
+          diff: null,
+          manifestRecord: null,
+        },
+      };
+    }
+  }
   const pdbMcp = params.pdbMcp ?? (await resolveInstalledPdbMcp()) ?? "";
   const desired = buildClaudeMcpEntry({
     pdbMcp,
@@ -240,10 +300,28 @@ export async function uninstallClaudeMcp(params: {
   manifestPath: string;
   dryRun?: boolean;
   runtime?: ManifestRuntime;
+  expectedSnapshot?: ClaudeInstallSnapshot;
 }): Promise<ClaudeMcpResult> {
-  const { scope, manifestPath, dryRun, runtime } = params;
-  const file = scope.kind === "project" ? claudeProjectMcpPath(scope) : claudeUserConfigFile(scope);
+  const { scope, manifestPath, dryRun, runtime, expectedSnapshot } = params;
+  const file = claudeTargetPath(scope);
   const allowedRoot = scope.kind === "project" ? scope.root : scope.homeDir;
+  if (!dryRun && expectedSnapshot) {
+    const currentSnapshot = await readClaudeInstallSnapshot(scope, manifestPath, runtime?.fs);
+    if (claudeInstallSnapshotChanged(expectedSnapshot, currentSnapshot)) {
+      return {
+        mcp: {
+          action: "kept",
+          outcome: "refused",
+          ownership: "absent",
+          code: "CONFLICT",
+          message:
+            "Claude configuration or ownership manifest changed since the preview; re-run to inspect the updated plan.",
+          diff: null,
+          manifestRecord: null,
+        },
+      };
+    }
+  }
   const read = await readInstallManifest(manifestPath, runtime?.fs);
   const manifestBlocked = manifestReadRefusal(read, file);
   if (manifestBlocked) return { mcp: manifestBlocked };

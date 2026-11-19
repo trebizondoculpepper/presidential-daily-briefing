@@ -1206,6 +1206,68 @@ try {
     console.log(
       "ok   installed pdb install/uninstall codex in checkout: first, rerun, http update, remove",
     );
+    // #769: installed pdb install claude / uninstall claude lifecycle in a fresh git checkout.
+    const claudeCheckout = join(work, "claude-install-checkout");
+    await mkdir(claudeCheckout);
+    await run("git", ["init", "-q"], { cwd: claudeCheckout });
+    await run("git", ["remote", "add", "origin", "https://github.com/example/claude-install.git"], {
+      cwd: claudeCheckout,
+    });
+    const runClaude = (cmdArgs: string[]) =>
+      run(bin, cmdArgs, { cwd: claudeCheckout, env: installEnv });
+    const claudeFirst = JSON.parse(
+      (await runClaude(["install", "claude", "--role", "implementer", "--yes", "--json"])).stdout,
+    ) as {
+      status?: { configured?: boolean };
+      items?: { kind: string; action: string; outcome: string }[];
+    };
+    if (
+      claudeFirst.status?.configured !== true ||
+      !claudeFirst.items?.some((i) => i.kind === "identity" && i.outcome === "applied") ||
+      !claudeFirst.items?.some((i) => i.kind === "mcp" && i.outcome === "applied")
+    )
+      throw new Error(
+        `Installed pdb install claude first run failed: ${JSON.stringify(claudeFirst)}`,
+      );
+    const claudeRerun = JSON.parse(
+      (await runClaude(["install", "claude", "--role", "implementer", "--yes", "--json"])).stdout,
+    ) as { items?: { kind: string; outcome: string }[] };
+    if (!claudeRerun.items?.some((i) => i.kind === "mcp" && i.outcome === "kept"))
+      throw new Error(`Installed pdb install claude rerun failed: ${JSON.stringify(claudeRerun)}`);
+    const claudeUpdated = JSON.parse(
+      (
+        await runClaude([
+          "install",
+          "claude",
+          "--transport",
+          "http",
+          "--url",
+          "https://example.com/mcp",
+          "--yes",
+          "--json",
+        ])
+      ).stdout,
+    ) as { items?: { kind: string; action: string; outcome: string }[] };
+    if (
+      !claudeUpdated.items?.some(
+        (i) => i.kind === "mcp" && i.action === "replace" && i.outcome === "applied",
+      )
+    )
+      throw new Error(
+        `Installed pdb install claude update failed: ${JSON.stringify(claudeUpdated)}`,
+      );
+    const claudeRemoved = JSON.parse(
+      (await runClaude(["uninstall", "claude", "--yes", "--json"])).stdout,
+    ) as { items?: { kind: string; action: string; outcome: string }[] };
+    if (
+      !claudeRemoved.items?.some(
+        (i) => i.kind === "mcp" && i.action === "remove" && i.outcome === "applied",
+      )
+    )
+      throw new Error(`Installed pdb uninstall claude failed: ${JSON.stringify(claudeRemoved)}`);
+    console.log(
+      "ok   installed pdb install/uninstall claude in checkout: first, rerun, http update, remove",
+    );
     const fakeDir = join(work, "fake-gh");
     await mkdir(fakeDir);
     await writeFile(join(fakeDir, "gh"), fakeGh);

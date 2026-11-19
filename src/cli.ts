@@ -1837,7 +1837,16 @@ async function run(
           await output(claudeInstallHelp(parsed.operation));
           return 0;
         }
-        return await runClaudeInstall(parsed, runtime.config ?? {}, output);
+        const configRuntime = runtime.config ?? {};
+        return await runClaudeInstall(
+          parsed,
+          {
+            ...configRuntime,
+            confirm: configRuntime.confirm ?? ((prompt) => ttyConfirm(prompt, parsed.json)),
+            stderr: runtime.stderr,
+          },
+          output,
+        );
       } catch (error) {
         if (error instanceof Error && error.message.startsWith("Unsupported installer client"))
           throw error;
