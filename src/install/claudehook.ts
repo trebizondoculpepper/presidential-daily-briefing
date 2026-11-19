@@ -4,9 +4,10 @@
  * Installs or removes only PDB's owned Stop entry in the target Claude settings
  * document (project `.claude/settings.local.json` or user `~/.claude/settings.json`),
  * invoking the packaged `pdb rebrief claude-stop --installed` adapter. Claude Code
- * registers hooks under a `hooks` object; each event (Stop, SessionStart) holds a flat
- * array of command entries (verified in claude-code-stop-hooks.md). Only the owned
- * command entry is created/replaced or removed; unrelated events, hooks and keys are
+ * registers hooks under a `hooks` object; each event (Stop, SessionStart) holds an
+ * array of matcher groups, each group holding its own `hooks` command list
+ * (`hooks.Stop: [{ hooks: [{ type, command }] }]`). Only the owned command entry is
+ * created/replaced or removed; unrelated events, groups, commands and keys are
  * preserved exactly, and an edited or foreign entry is refused, mirroring the MCP
  * entry rules and the Codex Stop hook (#770).
  *
@@ -72,13 +73,17 @@ export const claudeHookNativeTimeout = 10;
 /** The installed adapter deadline for `--installed` mode (must stay under the native timeout). */
 export const claudeInstalledDeadlineMs = 4000;
 
-/** The owned Stop entry PDB writes: one command entry under `hooks.Stop`. */
+/** The owned Stop group PDB writes: one matcher group holding one command entry (native shape). */
 export function claudeStopEntry(command: string): unknown[] {
   return [
     {
-      type: "command",
-      command,
-      timeout: claudeHookNativeTimeout,
+      hooks: [
+        {
+          type: "command",
+          command,
+          timeout: claudeHookNativeTimeout,
+        },
+      ],
     },
   ];
 }
@@ -101,6 +106,14 @@ export function claudeStopCommand(options: {
   return `pdb ${args.join(" ")}`;
 }
 
+/** Whether a command entry is PDB's owned Stop command. */
+const isOwnedClaudeEntry = (entry: unknown): boolean =>
+  typeof entry === "object" &&
+  entry !== null &&
+  (entry as { type?: unknown }).type === "command" &&
+  typeof (entry as { command?: unknown }).command === "string" &&
+  (entry as { command: string }).command.includes("claude-stop");
+
 /** Extract the owned hook entries text for classification, and whether it looks foreign. */
 export function inspectClaudeStopEntry(doc: Record<string, unknown>): {
   canonicalText: string | null;
@@ -112,17 +125,18 @@ export function inspectClaudeStopEntry(doc: Record<string, unknown>): {
   }
   const stop = (hooks as Record<string, unknown>)[claudeStopHookEvent];
   if (!Array.isArray(stop)) return { canonicalText: null, looksForeign: false };
-  // Only PDB-looking entries participate in ownership classification; unrelated command hooks
-  // are preserved and never conflate the canonical text (a foreign/owned entry is the one that
-  // invokes the PDB adapter).
-  const pdbEntries = stop.filter(
-    (entry) =>
-      typeof entry === "object" &&
-      entry !== null &&
-      (entry as { type?: unknown }).type === "command" &&
-      typeof (entry as { command?: unknown }).command === "string" &&
-      (entry as { command: string }).command.includes("claude-stop"),
-  );
+  // Claude Code nests command hooks inside matcher groups (hooks.Stop: [{ hooks: [...] }]).
+  // Only PDB-looking entries participate in ownership classification; unrelated commands and
+  // groups are preserved and never conflate the owned entry's canonical text.
+  const pdbEntries: unknown[] = [];
+  for (const group of stop) {
+    if (!group || typeof group !== "object") continue;
+    const commands = (group as { hooks?: unknown[] }).hooks;
+    if (!Array.isArray(commands)) continue;
+    for (const entry of commands) {
+      if (isOwnedClaudeEntry(entry)) pdbEntries.push(entry);
+    }
+  }
   if (pdbEntries.length === 0) return { canonicalText: null, looksForeign: false };
   return {
     canonicalText: JSON.stringify(pdbEntries),
@@ -149,7 +163,7 @@ export function claudeHookAdapter(command: string): JsonEntryAdapter {
         claudeStopHookEvent in (doc.hooks as Record<string, unknown>) &&
         !Array.isArray((doc.hooks as Record<string, unknown>)[claudeStopHookEvent])
       )
-        return `${claudeStopHookEvent} must be a JSON array of command hooks.`;
+        return `${claudeStopHookEvent} must be a JSON array of matcher groups.`;
       return null;
     },
     apply: (doc) => {
@@ -157,23 +171,28 @@ export function claudeHookAdapter(command: string): JsonEntryAdapter {
         doc.hooks && typeof doc.hooks === "object" && !Array.isArray(doc.hooks)
           ? (doc.hooks as Record<string, unknown>)
           : {};
-      const stopEntries = Array.isArray(existingHooks[claudeStopHookEvent])
-        ? (existingHooks[claudeStopHookEvent] as unknown[]).filter(
-            (entry) =>
-              !(
-                typeof entry === "object" &&
-                entry !== null &&
-                (entry as { type?: unknown }).type === "command" &&
-                typeof (entry as { command?: unknown }).command === "string" &&
-                (entry as { command: string }).command.includes("claude-stop")
-              ),
-          )
+      // Replace any owned claude-stop command entries and preserve unrelated hooks, including
+      // unrelated commands co-located in the same matcher group (reviewed #1124 pattern).
+      const stopGroups = Array.isArray(existingHooks[claudeStopHookEvent])
+        ? (existingHooks[claudeStopHookEvent] as unknown[]).flatMap((group) => {
+            if (!group || typeof group !== "object") return [group];
+            const commands = (group as { hooks?: unknown[] }).hooks;
+            if (!Array.isArray(commands)) return [group];
+            const kept = commands.filter((entry) => !isOwnedClaudeEntry(entry));
+            // A surviving group with unrelated commands keeps its other metadata (matcher, ...)
+            // and only replaces the hooks array; an emptied group is dropped.
+            return kept.length === commands.length
+              ? [group]
+              : kept.length > 0
+                ? [{ ...group, hooks: kept }]
+                : [];
+          })
         : [];
       return {
         ...doc,
         hooks: {
           ...existingHooks,
-          [claudeStopHookEvent]: [...stopEntries, ...claudeStopEntry(command)],
+          [claudeStopHookEvent]: [...stopGroups, ...claudeStopEntry(command)],
         },
       };
     },
@@ -182,25 +201,26 @@ export function claudeHookAdapter(command: string): JsonEntryAdapter {
         doc.hooks && typeof doc.hooks === "object" && !Array.isArray(doc.hooks)
           ? (doc.hooks as Record<string, unknown>)
           : {};
-      const stopEntries = Array.isArray(existingHooks[claudeStopHookEvent])
-        ? (existingHooks[claudeStopHookEvent] as unknown[]).filter(
-            (entry) =>
-              !(
-                typeof entry === "object" &&
-                entry !== null &&
-                (entry as { type?: unknown }).type === "command" &&
-                typeof (entry as { command?: unknown }).command === "string" &&
-                (entry as { command: string }).command.includes("claude-stop")
-              ),
-          )
+      const stopGroups = Array.isArray(existingHooks[claudeStopHookEvent])
+        ? (existingHooks[claudeStopHookEvent] as unknown[]).flatMap((group) => {
+            if (!group || typeof group !== "object") return [group];
+            const commands = (group as { hooks?: unknown[] }).hooks;
+            if (!Array.isArray(commands)) return [group];
+            const kept = commands.filter((entry) => !isOwnedClaudeEntry(entry));
+            return kept.length === commands.length
+              ? [group]
+              : kept.length > 0
+                ? [{ ...group, hooks: kept }]
+                : [];
+          })
         : [];
-      if (stopEntries.length === 0) {
-        const nextHooks = { ...existingHooks };
-        if (nextHooks[claudeStopHookEvent] && Array.isArray(nextHooks[claudeStopHookEvent]))
-          delete nextHooks[claudeStopHookEvent];
-        return { ...doc, hooks: nextHooks };
+      if (stopGroups.length === 0) {
+        const next = { ...existingHooks };
+        if (next[claudeStopHookEvent] && Array.isArray(next[claudeStopHookEvent]))
+          delete next[claudeStopHookEvent];
+        return { ...doc, hooks: next };
       }
-      return { ...doc, hooks: { ...existingHooks, [claudeStopHookEvent]: stopEntries } };
+      return { ...doc, hooks: { ...existingHooks, [claudeStopHookEvent]: stopGroups } };
     },
   };
 }

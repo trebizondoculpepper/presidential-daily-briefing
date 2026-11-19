@@ -41,9 +41,12 @@ describe("claude Stop hook entry shape (#771)", () => {
     expect(claudeStopCommand({ role: "implementer", entry: "claude" })).toBe(
       "pdb rebrief claude-stop --installed --deadline-ms 4000 --role implementer --entry claude",
     );
-    // The owned entry is one flat command entry under hooks.Stop (native Claude shape).
+    // The owned entry is a matcher group wrapping one command entry under hooks.Stop (native
+    // Claude Code shape: event -> matcher group -> handler).
     expect(claudeStopEntry("pdb rebrief claude-stop --installed")).toEqual([
-      { type: "command", command: "pdb rebrief claude-stop --installed", timeout: 10 },
+      {
+        hooks: [{ type: "command", command: "pdb rebrief claude-stop --installed", timeout: 10 }],
+      },
     ]);
   });
 
@@ -62,7 +65,7 @@ describe("claude Stop hook entry shape (#771)", () => {
     expect(foreign.canonicalText).toContain("claude-stop");
     // An unrelated non-PDB Stop command is absent with respect to PDB (preserved, not foreign).
     const unrelated = adapter.inspect({
-      hooks: { Stop: [{ type: "command", command: "some-other-tool" }] },
+      hooks: { Stop: [{ hooks: [{ type: "command", command: "some-other-tool" }] }] },
     });
     expect(unrelated.looksForeign).toBe(false);
     expect(unrelated.canonicalText).toBeNull();
@@ -74,7 +77,7 @@ describe("claude Stop hook entry shape (#771)", () => {
     expect(adapter.validateSchema?.({})).toBeNull();
     // A Stop value that is not an array is refused, not silently replaced.
     expect(adapter.validateSchema?.({ hooks: { Stop: "not-an-array" } })).toBe(
-      "Stop must be a JSON array of command hooks.",
+      "Stop must be a JSON array of matcher groups.",
     );
   });
 });
@@ -90,7 +93,7 @@ describe("installClaudeStopHook / uninstallClaudeStopHook (#771)", () => {
           {
             hooks: {
               SessionStart: [{ type: "command", command: "setup" }],
-              Stop: [{ type: "command", command: "unrelated-hook" }],
+              Stop: [{ hooks: [{ type: "command", command: "unrelated-hook" }] }],
             },
           },
           null,
@@ -109,9 +112,11 @@ describe("installClaudeStopHook / uninstallClaudeStopHook (#771)", () => {
       const doc = JSON.parse(await nodeSafeFs.readFile(file));
       // Unrelated events and hooks survive; the owned Stop entry was appended.
       expect(doc.hooks.SessionStart).toEqual([{ type: "command", command: "setup" }]);
-      const stopCommands = (doc.hooks.Stop as { command: string }[]).map((h) => h.command);
+      const stopCommands = doc.hooks.Stop.flatMap((g: { hooks: { command: string }[] }) =>
+        g.hooks.map((h: { command: string }) => h.command),
+      );
       expect(stopCommands).toContain("unrelated-hook");
-      expect(stopCommands.some((c) => c.includes("claude-stop"))).toBe(true);
+      expect(stopCommands.some((c: string) => c.includes("claude-stop"))).toBe(true);
 
       const removed = await uninstallClaudeStopHook({
         scope,
@@ -124,7 +129,9 @@ describe("installClaudeStopHook / uninstallClaudeStopHook (#771)", () => {
         ownership: "owned",
       });
       const after = JSON.parse(await nodeSafeFs.readFile(file));
-      const afterCommands = (after.hooks.Stop as { command: string }[]).map((h) => h.command);
+      const afterCommands = after.hooks.Stop.flatMap((g: { hooks: { command: string }[] }) =>
+        g.hooks.map((h: { command: string }) => h.command),
+      );
       expect(afterCommands).toEqual(["unrelated-hook"]);
       expect(after.hooks.SessionStart).toEqual([{ type: "command", command: "setup" }]);
     } finally {
@@ -186,7 +193,9 @@ describe("installClaudeStopHook / uninstallClaudeStopHook (#771)", () => {
       await nodeSafeFs.createSynced(
         file,
         JSON.stringify({
-          hooks: { Stop: [{ type: "command", command: "pdb rebrief claude-stop --old" }] },
+          hooks: {
+            Stop: [{ hooks: [{ type: "command", command: "pdb rebrief claude-stop --old" }] }],
+          },
         }),
       );
       const manifest = manifestPath(scope, "claude");
@@ -200,7 +209,7 @@ describe("installClaudeStopHook / uninstallClaudeStopHook (#771)", () => {
       expect(refused.hook.outcome).toBe("refused");
       expect(refused.hook.code).toBe("FOREIGN_ENTRY");
       const doc = JSON.parse(await nodeSafeFs.readFile(file));
-      expect(doc.hooks.Stop[0].command).toBe("pdb rebrief claude-stop --old");
+      expect(doc.hooks.Stop[0].hooks[0].command).toBe("pdb rebrief claude-stop --old");
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -213,7 +222,9 @@ describe("installClaudeStopHook / uninstallClaudeStopHook (#771)", () => {
       await nodeSafeFs.createSynced(
         file,
         JSON.stringify({
-          hooks: { Stop: [{ type: "command", command: "pdb rebrief claude-stop --old" }] },
+          hooks: {
+            Stop: [{ hooks: [{ type: "command", command: "pdb rebrief claude-stop --old" }] }],
+          },
         }),
       );
       const manifest = manifestPath(scope, "claude");
@@ -227,7 +238,7 @@ describe("installClaudeStopHook / uninstallClaudeStopHook (#771)", () => {
       });
       expect(adopted.hook.outcome).toBe("adopted");
       const doc = JSON.parse(await nodeSafeFs.readFile(file));
-      expect(doc.hooks.Stop[0].command).toBe("pdb rebrief claude-stop --old");
+      expect(doc.hooks.Stop[0].hooks[0].command).toBe("pdb rebrief claude-stop --old");
       // A later install now replaces the adopted entry with the owned command.
       const later = await installClaudeStopHook({
         scope,
@@ -238,7 +249,11 @@ describe("installClaudeStopHook / uninstallClaudeStopHook (#771)", () => {
       });
       expect(later.hook.outcome).toBe("applied");
       const after = JSON.parse(await nodeSafeFs.readFile(file));
-      expect(after.hooks.Stop[0].command).toContain("--installed");
+      expect(
+        after.hooks.Stop.some((g: { hooks: { command: string }[] }) =>
+          g.hooks.some((h: { command: string }) => h.command.includes("--installed")),
+        ),
+      ).toBe(true);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
