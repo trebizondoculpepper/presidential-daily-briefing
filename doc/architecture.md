@@ -100,7 +100,7 @@ Extend registered roles, rule handlers and declarative policy. Edit native EDN
 sources, never generated policy JSON. Keep formal decisions and their explanations
 consistent across CLI, MCP, rebrief and serve. Native blockedBy/blocking edges are
 authoritative; issue-body dependency text is migration/drift evidence only.
-See [rules](design/rules-component.md) and [native policy rationale](research/native-policy.md).
+See [rules](design/rules-component.md) and [native policy rationale](research/native-policy.md). Estimation review, needs-refinement admission and the discussion view follow the [estimation and refinement contract](design/estimation-refinement-loop.md).
 
 GitHub human assignment and agent claims are distinct. Agents work within their
 employing human's assignment and the shared native admission rules; claims never
