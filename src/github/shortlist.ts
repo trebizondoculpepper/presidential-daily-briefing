@@ -57,6 +57,12 @@ export interface ShortlistRecord {
     url: string;
     kind: "issue" | "pull-request";
     reason: NotHydratedReason;
+    /**
+     * #1105: an issue's discovered `agent:*` claim labels and whether its label read was whole,
+     * so an unhydrated issue can be proven not to hold a viewer's claim. Absent on pull requests.
+     */
+    claimLabels?: string[];
+    labelsComplete?: boolean;
   }[];
   /** Ranking rounds run (each re-ranks after hydration). */
   rounds: number;
@@ -316,12 +322,24 @@ export async function collectShortlist(
   const notHydrated = (): ShortlistRecord["notHydrated"] =>
     order
       .filter((url) => !isHydrated(url) && !gone.has(url))
-      .map((url) => ({
-        number: stubs.get(url)!.number,
-        url,
-        kind: kinds.get(url)!,
-        reason: unhydratable.get(url) ?? "not-shortlisted",
-      }));
+      .map((url) => {
+        const stub = stubs.get(url)!;
+        const kind = kinds.get(url)!;
+        return {
+          number: stub.number,
+          url,
+          kind,
+          reason: unhydratable.get(url) ?? "not-shortlisted",
+          ...(kind === "issue"
+            ? {
+                claimLabels: stub.labels.nodes
+                  .map((l) => l.name)
+                  .filter((name) => name.startsWith("agent:")),
+                labelsComplete: stub.labels.pageInfo.hasNextPage === false,
+              }
+            : {}),
+        };
+      });
   const discoveredComplete = () => issueInventory.complete && prInventory.complete;
   /** The omission notice, or null when every item was hydrated. */
   const shortlistNotice = (items: ShortlistRecord["notHydrated"]): string | null => {

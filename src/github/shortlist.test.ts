@@ -252,6 +252,14 @@ describe("routine briefing: discover all, rank, hydrate only the shortlist (#368
     const hydrated = new Set(shortlist.hydrated);
     for (const subject of report.subjects) expect(hydrated.has(subject.url)).toBe(true);
     expect(shortlist.notHydrated.length).toBe(122 - shortlist.hydrated.length);
+    // #1105: each unhydrated issue keeps its discovered claim labels and label completeness.
+    expect(
+      shortlist.notHydrated.every(
+        (i) =>
+          (i as { labelsComplete?: boolean }).labelsComplete === true &&
+          Array.isArray((i as { claimLabels?: unknown }).claimLabels),
+      ),
+    ).toBe(true);
     expect(shortlist.provisional).toBe(true);
     // Request count: discovery pages, issue batches and PR reads, nothing else.
     expect(report.collection?.telemetry.requests).toBe(

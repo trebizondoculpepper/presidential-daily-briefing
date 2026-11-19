@@ -81,6 +81,32 @@ describe("retained-claim facts (#413)", () => {
         me,
       ).complete,
     ).toBe(false);
+    // #1105: an unhydrated issue proven by its discovered labels not to hold this agent's claim
+    // keeps the inventory whole; one carrying the claim, or with cut-short labels, does not.
+    const unhydrated = (claimLabels: string[], labelsComplete: boolean) =>
+      ownedClaims(
+        {
+          ...s,
+          shortlist: {
+            ...shortlist,
+            notHydrated: [
+              {
+                number: 99,
+                url: gone,
+                kind: "issue" as const,
+                reason: "hydration-cap" as const,
+                claimLabels,
+                labelsComplete,
+              },
+            ],
+          },
+        },
+        me,
+      ).complete;
+    expect(unhydrated([], true)).toBe(true);
+    expect(unhydrated(["agent:someone-else"], true)).toBe(true);
+    expect(unhydrated([`agent:${me}`], true)).toBe(false);
+    expect(unhydrated([], false)).toBe(false);
   });
 
   it("states each activity, and never reads an unowned claim as waiting", () => {
