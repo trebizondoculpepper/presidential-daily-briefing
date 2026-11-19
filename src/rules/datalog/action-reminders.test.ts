@@ -5,6 +5,7 @@ import {
   RULE_REMINDERS_MAX_ITEMS,
   RULE_REMINDERS_SCHEMA_VERSION,
   claimObligationsHash,
+  formatActionRuleRemindersText,
   selectClaimRuleReminders,
 } from "./action-reminders.js";
 import { rulesHash } from "./adapter.js";
@@ -131,6 +132,15 @@ describe("native claim-time obligations and action-reminder selection (#1029)", 
     expect(res.label).toBe("no-op");
     expect(res.selectedIds).toContain("O-CLAIM-NOOP-CONTINUE");
     expect(res.selectedIds).toContain("D-OWN");
+
+    const unresolvedNoop = selectClaimRuleReminders({
+      role: "implementer",
+      outcome: "noop",
+      contextResolved: false,
+    });
+    expect(unresolvedNoop.selectedIds).not.toContain("D-OWN");
+    expect(unresolvedNoop.selectedIds).toContain("O-CLAIM-NOOP-CONTINUE");
+    expect(unresolvedNoop.coverage.status).toBe("unresolved");
   });
 
   it("maps denied outcomes without granting newly-acquired-owner obligations", () => {
@@ -370,5 +380,32 @@ describe("native claim-time obligations and action-reminder selection (#1029)", 
     expect(unmapped.admissionRationale).toEqual([]);
     expect(unmapped.coverage.status).toBe("partial");
     expect(unmapped.coverage.notes.some((n) => n.includes("TICKET_CLOSED"))).toBe(true);
+  });
+
+  it("formats bounded terminal text with rationale, obligations, omissions, and coverage (#1030)", () => {
+    const claimed = selectClaimRuleReminders({
+      role: "implementer",
+      outcome: "claimed",
+      facts: { decisionIds: ["D-PR-FAIL"] },
+    });
+    const text = formatActionRuleRemindersText(claimed);
+    expect(text).toContain("Rules for this work (claimed):");
+    expect(text).toContain("Admission rationale:");
+    expect(text).toContain("- D-OWN [decision]:");
+    expect(text).toContain("Obligations:");
+    expect(text).toContain("- O-CLAIM-ACCEPTANCE [procedural-obligation]:");
+    expect(text).toContain(
+      "Omitted: 1 more rule(s); run pdb rules (e.g. pdb rules --rule O-CLAIM-DELIVERABLE).",
+    );
+
+    const noop = selectClaimRuleReminders({ role: "implementer", outcome: "noop" });
+    expect(formatActionRuleRemindersText(noop)).toContain("Rules for this work (no-op):");
+
+    const unresolved = selectClaimRuleReminders({
+      role: null,
+      outcome: "claimed",
+      contextResolved: false,
+    });
+    expect(formatActionRuleRemindersText(unresolved)).toContain("Coverage (unresolved):");
   });
 });

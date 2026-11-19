@@ -419,7 +419,9 @@ export function selectClaimRuleReminders(input: SelectClaimRemindersInput): Acti
       ]);
       const hasExplicitOwnDecision = (facts.decisionIds ?? []).some((id) => ownDecisionIds.has(id));
       if (normalizedRole === "implementer" && !hasExplicitOwnDecision) {
-        addPolicyItem(ownClaimDecisionId(facts.claimActivity), "admission");
+        if (facts.claimActivity !== undefined || contextResolved) {
+          addPolicyItem(ownClaimDecisionId(facts.claimActivity), "admission");
+        }
       } else if (normalizedRole === "designer") {
         if (input.outcome === "claimed" && facts.needsDesign) {
           addPolicyItem("D-DESIGN", "admission");
@@ -560,4 +562,49 @@ export function selectClaimRuleReminders(input: SelectClaimRemindersInput): Acti
       notes,
     },
   };
+}
+
+/**
+ * Format bounded action-rule reminders into plain terminal text (#1030).
+ * Keeps admission rationale distinct from procedural obligations and preserves omission/coverage notices.
+ */
+export function formatActionRuleRemindersText(reminders: ActionRuleReminders): string {
+  const lines: string[] = ["", `Rules for this work (${reminders.label}):`];
+  const admission = reminders.items.filter((i) => i.category === "admission");
+  const obligations = reminders.items.filter((i) => i.category === "obligation");
+
+  if (admission.length > 0) {
+    lines.push("Admission rationale:");
+    for (const item of admission) {
+      lines.push(
+        `- ${item.id} [${item.sourceKind}]: ${sanitizeText(item.english)} (${item.reference})`,
+      );
+    }
+  }
+  if (obligations.length > 0) {
+    lines.push("Obligations:");
+    for (const item of obligations) {
+      lines.push(
+        `- ${item.id} [${item.sourceKind}]: ${sanitizeText(item.english)} (${item.reference})`,
+      );
+    }
+  }
+  if (reminders.omissions.count > 0) {
+    const sample = reminders.omissions.omittedIds[0];
+    const hint = sample ? ` (e.g. pdb rules --rule ${sample})` : "";
+    lines.push(
+      `Omitted: ${reminders.omissions.count} more rule(s); run ${reminders.omissions.reference}${hint}.`,
+    );
+  }
+  if (reminders.coverage.status !== "complete" || reminders.coverage.notes.length > 0) {
+    const detail = reminders.coverage.notes.map(sanitizeText).join(" ");
+    lines.push(`Coverage (${reminders.coverage.status})${detail ? `: ${detail}` : ""}`);
+  }
+  const text = `${lines.join("\n")}\n`;
+  const points = Array.from(text);
+  if (points.length <= RULE_REMINDERS_MAX_CODE_POINTS) return text;
+  return `${points
+    .slice(0, RULE_REMINDERS_MAX_CODE_POINTS - 4)
+    .join("")
+    .trimEnd()}...\n`;
 }

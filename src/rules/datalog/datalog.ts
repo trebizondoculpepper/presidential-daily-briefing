@@ -41,6 +41,7 @@ export { workerLimits } from "./project/worker.js";
 export { projectionVocabulary } from "./project/grammar.js";
 export {
   selectClaimRuleReminders,
+  formatActionRuleRemindersText,
   claimObligationsHash,
   CLAIM_OBLIGATIONS,
   RULE_REMINDERS_SCHEMA_VERSION,
