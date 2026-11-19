@@ -3,8 +3,8 @@ import { lstat, open, readdir, readFile, realpath, rename, unlink } from "node:f
 import { isAbsolute, join, relative, dirname, sep } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
-import { eventRecordSchema, metaSchema, stateSchema } from "./core.js";
-import type { SessionMeta, SessionState, SessionStore } from "./core.js";
+import { contextKey, eventRecordSchema, initializeV2, metaSchema, stateSchema } from "./core.js";
+import type { Context, SessionMeta, SessionState, SessionStore } from "./core.js";
 
 export class StateUnavailable extends Error {}
 /** The caller creates a disposable directory with mkdtemp; reject links, public dirs and repo paths. */
@@ -194,4 +194,47 @@ function fileStore(dir: string, metaPath: string): SessionStore {
     saveAcknowledged: (fingerprint) =>
       writePrivate(dir, record("f", fingerprint), JSON.stringify({ acknowledged: true })),
   };
+}
+
+/**
+ * Native evidence that a session binding may be initialized (#657 slice 2b). Adapters supply it
+ * only from their platform's verified protocol (a native session-start, or the first eligible
+ * event of a session the adapter itself bound); it is never synthesized from a process exit.
+ */
+export interface SessionStartEvidence {
+  kind: "session-start" | "eligible-event";
+  verified: true;
+}
+
+export type EnsuredSession =
+  | { state: "created"; store: SessionStore }
+  | { state: "reused"; store: SessionStore }
+  | { state: "legacy" }
+  | { state: "unavailable"; reason: "context-mismatch" | "no-start-evidence" };
+
+/**
+ * Ensure the v2 session for one native binding, under the directory's lock: reuse a matching
+ * session (a concurrent winner or a resumed turn) without resetting it, initialize an empty
+ * directory once with verified start evidence, and otherwise report why not. A legacy v1
+ * directory is reported, never upgraded; leftover records with lost metadata, an unknown schema
+ * or an unusable directory raise StateUnavailable. Nothing here selects a work budget beyond the
+ * caller's explicit `budget`.
+ */
+export async function ensureSession(
+  directory: string,
+  context: Context,
+  evidence: SessionStartEvidence | null,
+  budget: number | null = null,
+): Promise<EnsuredSession> {
+  return withSessionStore(directory, async (stored, create) => {
+    if (stored.version === 1) return { state: "legacy" };
+    if (stored.version === 2) {
+      const meta = await stored.store.meta();
+      return meta?.context === contextKey(context)
+        ? { state: "reused", store: stored.store }
+        : { state: "unavailable", reason: "context-mismatch" };
+    }
+    if (!evidence?.verified) return { state: "unavailable", reason: "no-start-evidence" };
+    return { state: "created", store: await create(initializeV2(context, budget)) };
+  });
 }
