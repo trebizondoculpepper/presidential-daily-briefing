@@ -359,6 +359,17 @@
    :codes ["own-claim" "inspection"]
    :witnesses {"waitReason" [[?t "wait-reason" ?value]]}}
 
+  {:id "D-OWN-PR-WAIT"
+   :purpose "Keep an owned PR that only waits on its checks visible as an owned wait, without inventing repair work (#651)."
+   :kind "inspect"
+   :band 8
+   :preference 1
+   :affinity "shared"
+   :owned true
+   :when [[1 "role" ?role] [(not= ?role "human")] (own-pr-waiting ?t)]
+   :why "Your PR's checks are still running at head {head}; there is nothing to repair yet. Check back once they finish."
+   :codes ["own-pr" "waiting-checks"]}
+
   {:id "D-OWN-WAIT"
    :purpose "Keep a verified waiting claim visible without suggesting immediate continuation."
    :kind "wait-claim"

@@ -399,8 +399,15 @@ describe("accepted PRs needing refresh are integration actions (#182 S9)", () =>
     ] as Partial<PrShape>[]) {
       const r = await cli(world(shape), "implementer");
       expect(ranked(r), JSON.stringify(shape)).not.toContain("pr-follow-up#22");
-      // Waiting on the PR never blocks own work or pickup.
-      expect(ranked(r)).toEqual(["continue-implementation#6", "implement#7"]);
+      // Waiting on the PR never blocks own work or pickup. #651: an owned PR whose checks are
+      // only pending is an owned wait row (never a repair), after own continuation.
+      // (Pending includes a missing required check.)
+      const order = ranked(r);
+      expect(order.filter((row) => row !== "inspect#22")).toEqual([
+        "continue-implementation#6",
+        "implement#7",
+      ]);
+      if (order.includes("inspect#22")) expect(order.indexOf("inspect#22")).toBe(1);
       const ts = await cli(world(shape), "implementer", typescript);
       expect(next(ts), JSON.stringify(shape)).not.toContain(22);
     }
