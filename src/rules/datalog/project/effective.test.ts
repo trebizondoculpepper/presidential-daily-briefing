@@ -362,7 +362,7 @@ describe("project policy enablement and briefing integration (#516)", () => {
     expect(text).not.toContain(rulesHash.slice(0, 12));
   });
 
-  it("marks the briefing incomplete when an enabled policy fails, never for the retired rollback alias", async () => {
+  it("marks the briefing incomplete when an enabled policy fails", async () => {
     const failed = await present({
       projectRules: enabled,
       projectRuntime: { loadPolicy: async () => compileProjectPolicy(fixture, base) },
@@ -375,18 +375,5 @@ describe("project policy enablement and briefing integration (#516)", () => {
     });
     expect(failed.report.completeness.warnings.join("\n")).toContain("Project policy error");
     expect(failed.text).toContain("Project policy error");
-
-    // #1050: the retired TypeScript rollback is an alias of the native engine, so an enabled
-    // project policy applies as usual instead of failing as "rollback in use".
-    const rollback = await present({
-      projectRules: enabled,
-      engineSetting: { requested: "typescript", source: "config" },
-    });
-    expect(rollback.report.decisionEngine.used).toBe("datalog");
-    // (This fixture's source is unreadable, so the policy still reports that error; what must
-    // not appear is the old "rollback engine is in use" refusal.)
-    expect(rollback.report.decisionEngine.effectivePolicy?.reason ?? "").not.toContain(
-      "TypeScript rollback",
-    );
   });
 });

@@ -551,7 +551,7 @@ describe("rebrief CLI/private state", () => {
       }
     }
   });
-  it("rebriefs an acknowledged PR follow-up when CI changes on the same head, under the retired typescript alias (#1050)", async () => {
+  it("rebriefs an acknowledged PR follow-up when CI changes on the same head, with a stored retired engine key (#1050)", async () => {
     const scoped = {
       ...context,
       repository: repo,

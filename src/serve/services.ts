@@ -309,7 +309,6 @@ function serveSettings(
       "serve.ttlSeconds": held(options.ttlMs / 1000, options.given?.ttl),
       "serve.staleWindowSeconds": { value: STALE_WINDOW_MS / 1000, source: "default", known: true },
       "serve.cacheEntries": { value: MAX_ENTRIES, source: "default", known: true },
-      "briefing.engine": repositorySetting(defaultEngine()),
       processGuide: repositorySetting(false),
       "complexity.enabled": repositorySetting(true),
       "impact.enabled": repositorySetting(true),
@@ -331,7 +330,8 @@ async function rulesIdentity(
   local: boolean,
 ): Promise<{ rules: RulesDiagnostic; warnings: string[] }> {
   const { rulesHash, policyVersion } = await import("../rules/datalog/datalog.js");
-  const engine = config.settings["briefing.engine"]!;
+  // #1050: the native policy is the only scheduler; this reports what runs, not a selectable knob.
+  const engine = { value: defaultEngine(), source: "default" as const, known: true };
   const rules: RulesDiagnostic = {
     // The same effective setting the config view reports: the repository's engine when held,
     // never the default passed off as a project's configuration.

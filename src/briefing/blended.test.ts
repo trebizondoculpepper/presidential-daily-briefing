@@ -424,7 +424,6 @@ async function present(
     limit: extra.limit ?? 20,
     maxChars: 20000,
     agent: "me",
-    engineSetting: { requested: "typescript" as const, source: "config" as const },
     ...(role ? { role } : {}),
     ...(extra.order ? { order: extra.order } : {}),
     ...(extra.estimate ? { estimate: true } : {}),

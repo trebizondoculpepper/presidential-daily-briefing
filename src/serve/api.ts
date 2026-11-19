@@ -876,7 +876,7 @@ export function readApi(
             next: [
               ...(cause?.recovery ?? []),
               cliCommand(view, served?.repository ?? "owner/name", number),
-              "pdb config get briefing.engine",
+              "pdb doctor",
             ],
           };
         } else throw error;

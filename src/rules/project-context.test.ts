@@ -186,15 +186,14 @@ describe("pdb rules init and surface parity (#516)", () => {
       );
       expect(briefing.manifest.effectiveRulesHash).toBe(cli.effectivePolicy.effectiveRulesHash);
 
-      // The TypeScript rollback cannot apply project preferences: an error, as in the briefing.
-      const rollback: string[] = [];
-      await main(["rules", "--json"], async (t) => void rollback.push(t), {
+      // #1050: a stored retired engine key never stops project preferences from applying.
+      const stale: string[] = [];
+      await main(["rules", "--json"], async (t) => void stale.push(t), {
         guide: { cwd: dir, git: gitAt(dir), fs: configFs(true, "typescript") },
       } as never);
-      expect(JSON.parse(rollback.join("")).effectivePolicy).toMatchObject({
-        state: "error",
-        effectiveRulesHash: null,
-        reason: expect.stringContaining("briefing.engine datalog"),
+      expect(JSON.parse(stale.join("")).effectivePolicy).toMatchObject({
+        state: "active",
+        effectiveRulesHash: cli.effectivePolicy.effectiveRulesHash,
       });
 
       // A repo-only served project is unknown, never shown as default-only effective policy.

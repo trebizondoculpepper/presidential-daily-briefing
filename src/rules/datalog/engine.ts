@@ -31,7 +31,7 @@ export class DatalogError extends Error {
     readonly code: string,
     detail: string,
   ) {
-    super(`${code}: ${detail}. Roll back: pdb config set briefing.engine typescript`);
+    super(`${code}: ${detail}. No other scheduler was run.`);
   }
 }
 

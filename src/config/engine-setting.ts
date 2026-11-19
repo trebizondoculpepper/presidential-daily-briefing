@@ -1,27 +1,26 @@
 /** Repository-scoped engine selection; importing this never initializes DataScript. */
 import {
   ConfigError,
-  CONFIG_KEYS,
   loadConfig,
-  settingFor,
+  retiredKeyNotices,
   resolveRepositoryTarget,
   nodeFileSystem,
 } from "./config.js";
 import type { GuideRuntime } from "../briefing/process.js";
 export type EngineName = "typescript" | "datalog";
-export const defaultEngine = (): EngineName =>
-  CONFIG_KEYS.find((k) => k.key === "briefing.engine")?.defaultValue === "datalog"
-    ? "datalog"
-    : "typescript";
+/** #1050: the native policy is the only next-action scheduler; there is no engine selector. */
+export const defaultEngine = (): EngineName => "datalog";
 export interface EngineSetting {
   requested: EngineName;
   source: "config" | "default" | "no-matching-project";
+  /** #1050: diagnostics for a stored retired engine key, with its safe removal. */
+  obsolete?: string[];
 }
 export class BriefingEngineError extends Error {
   constructor(
     readonly code: "decision-engine-config" | "decision-engine-role" | "decision-engine-failed",
     detail: string,
-    recovery = "Roll back: pdb config set briefing.engine typescript",
+    recovery = "No other scheduler was run; pdb doctor checks the engine's dependencies.",
     /** #346: a typed cause for `decision-engine-failed`, from structured error evidence only. */
     readonly engineCause?: EngineFailureCause,
   ) {
@@ -127,13 +126,16 @@ export async function resolveEngineSetting(
     );
   }
   try {
-    const setting = settingFor(
-      await loadConfig(target.root, runtime.fs ?? nodeFileSystem),
-      "briefing.engine",
-    );
+    // #1050: the configuration is still read and validated (a broken file is an error), but no
+    // key selects a scheduler. A stored retired briefing.engine key is reported, never applied.
+    const config = await loadConfig(target.root, runtime.fs ?? nodeFileSystem);
+    const notices = retiredKeyNotices(config).filter((n) => n.key === "briefing.engine");
     return {
-      requested: setting.value === "datalog" ? "datalog" : "typescript",
-      source: setting.source === "explicit" ? "config" : "default",
+      requested: "datalog",
+      source: "default",
+      ...(notices.length
+        ? { obsolete: notices.map((n) => `${n.detail} Remove it: ${n.next}`) }
+        : {}),
     };
   } catch (error) {
     throw new BriefingEngineError(

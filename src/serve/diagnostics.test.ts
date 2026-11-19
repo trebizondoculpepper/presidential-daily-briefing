@@ -383,7 +383,6 @@ describe("serve diagnostics (#459)", () => {
       });
       expect(Object.keys(config.data.settings).sort()).toEqual(
         [
-          "briefing.engine",
           "complexity.enabled",
           "impact.enabled",
           "processGuide",
