@@ -3,8 +3,8 @@ import { lstat, open, readdir, readFile, realpath, rename, unlink } from "node:f
 import { isAbsolute, join, relative, dirname, sep } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
-import { eventRecordSchema, metaSchema, stateSchema } from "./core.js";
-import type { SessionMeta, SessionState, SessionStore } from "./core.js";
+import { contextKey, eventRecordSchema, initializeV2, metaSchema, stateSchema } from "./core.js";
+import type { Context, SessionMeta, SessionState, SessionStore } from "./core.js";
 
 export class StateUnavailable extends Error {}
 /** The caller creates a disposable directory with mkdtemp; reject links, public dirs and repo paths. */
@@ -194,4 +194,48 @@ function fileStore(dir: string, metaPath: string): SessionStore {
     saveAcknowledged: (fingerprint) =>
       writePrivate(dir, record("f", fingerprint), JSON.stringify({ acknowledged: true })),
   };
+}
+
+/**
+ * Native evidence that a session binding may be initialized (#657 slice 2b). Adapters supply it
+ * only from their platform's verified protocol (a native session-start, or the first eligible
+ * event of a session the adapter itself bound); it is never synthesized from a process exit.
+ */
+export interface SessionStartEvidence {
+  kind: "session-start" | "eligible-event";
+  verified: true;
+}
+
+export type EnsuredSession<T> =
+  | { state: "created" | "reused"; result: T }
+  | { state: "legacy" }
+  | { state: "unavailable"; reason: "context-mismatch" | "no-start-evidence" };
+
+/**
+ * Ensure the v2 session for one native binding and run `work` on it, all under the directory's
+ * exclusive lock, so the store is never used after the lock is released (the state holder owns
+ * synchronization; one pending offer). A matching session (a resumed turn or a concurrent
+ * winner) is reused without reset; an empty directory is initialized once only with verified
+ * start evidence; otherwise the reason is reported. A legacy v1 directory is reported, never
+ * upgraded; leftover records with lost metadata, an unknown schema, an unusable directory or
+ * lock contention raise StateUnavailable. No budget is selected beyond the caller's `budget`.
+ */
+export async function ensureSession<T>(
+  directory: string,
+  context: Context,
+  evidence: SessionStartEvidence | null,
+  work: (store: SessionStore) => Promise<T>,
+  budget: number | null = null,
+): Promise<EnsuredSession<T>> {
+  return withSessionStore(directory, async (stored, create): Promise<EnsuredSession<T>> => {
+    if (stored.version === 1) return { state: "legacy" };
+    if (stored.version === 2) {
+      const meta = await stored.store.meta();
+      return meta?.context === contextKey(context)
+        ? { state: "reused", result: await work(stored.store) }
+        : { state: "unavailable", reason: "context-mismatch" };
+    }
+    if (!evidence?.verified) return { state: "unavailable", reason: "no-start-evidence" };
+    return { state: "created", result: await work(await create(initializeV2(context, budget))) };
+  });
 }
