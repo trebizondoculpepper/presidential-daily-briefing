@@ -16,6 +16,7 @@ export const requiredQueries = [
   "pr-blockers",
   "review-head-reviewed",
   "review-head-findings",
+  "delivery-follow-up",
   "human-sections",
   "q0",
   "declared-overrides",

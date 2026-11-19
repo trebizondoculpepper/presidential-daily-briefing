@@ -1,4 +1,4 @@
-import { evaluateCheckPolicy } from "../rules/datalog/engine.js";
+import { evaluateCheckPolicy, evaluateDeliveryFollowUp } from "../rules/datalog/engine.js";
 import { requiredCheckEvidence } from "../github/requiredchecks.js";
 /**
  * Delivery, responsibility and closure for the shared read surfaces (#192): briefing JSON and the
@@ -98,63 +98,6 @@ export interface FollowUpFacts {
   headFindings: boolean;
 }
 
-/**
- * Follow-up from current-head evidence, mirroring the briefing's PR rules (#182/#341:
- * `pr-failed-checks`, `pr-review`, `pr-conflicts`, `pr-pending`, `pr-integrate`,
- * `pr-inspect-merge`). Only positive evidence decides; anything missing is unknown.
- */
-export function classifyFollowUp(f: FollowUpFacts): [FollowUp, string] {
-  if (f.draft) return ["actionable", "draft: the responsible agent finishes it"];
-  // #502 (doc/design/delivery-follow-up-alignment.md, precedence 1): a positively observed
-  // failed check on the current head of a non-draft PR is actionable even when other evidence
-  // is incomplete, as the briefing's D-PR-FAIL. Both facts are said; it is never acceptance.
-  if (!f.complete)
-    return f.failing
-      ? [
-          "actionable",
-          "failing checks on the current head; other check, thread or review evidence is incomplete, so acceptance stays unknown",
-        ]
-      : ["unknown", "check, thread or review evidence is incomplete"];
-  if (f.failing) return ["actionable", "failing checks on the current head"];
-  if (f.changesRequested) return ["actionable", "changes requested"];
-  if (f.unresolvedThreads) return ["actionable", "unresolved review threads"];
-  if (f.headFindings)
-    return ["actionable", "Codex reports unresolved findings on the current head"];
-  if (workflow.conflicts.includes(f.mergeable)) return ["actionable", "merge conflict"];
-  if (f.pending) return ["waiting", "awaiting checks"];
-  if (f.unknownChecks || !f.verified) return ["unknown", "required-check evidence is unproven"];
-  if (f.mergeState === "BEHIND")
-    return [
-      "actionable",
-      f.headReviewed
-        ? "accepted on the current head but behind its base: update the branch (integrate)"
-        : "behind its base: update the branch",
-    ];
-  if (f.headReviewed) {
-    if (
-      workflow.unknownMergeable.includes(f.mergeable) ||
-      workflow.refreshMergeStates.includes(f.mergeState)
-    )
-      return ["actionable", "accepted on the current head: refresh mergeability (integrate)"];
-    if (workflow.currentMergeStates.includes(f.mergeState))
-      return [
-        "actionable",
-        "accepted on the current head but not merged: inspect, then consider merge",
-      ];
-    return [
-      "actionable",
-      `accepted on the current head but merge state is ${f.mergeState}: inspect the branch rules`,
-    ];
-  }
-  // As the briefing's clean-pr rule: a clean merge state is follow-up even before head review.
-  if (
-    workflow.mergeable.includes(f.mergeable) &&
-    workflow.currentMergeStates.includes(f.mergeState)
-  )
-    return ["actionable", "clean merge state: inspect the current head, then consider merge"];
-  return ["waiting", "awaiting current-head review"];
-}
-
 /** Facts from a PR as the snapshot collects it. */
 export function snapshotFollowUpFacts(
   pr: PullRequest,
@@ -218,7 +161,7 @@ function openFollowUp(
   if (draft) return ["actionable", "draft: the responsible agent finishes it"];
   if (!pr)
     return ["unknown", "the pull request is not in this read; its checks and review are unknown"];
-  return classifyFollowUp(snapshotFollowUpFacts(pr, warnings, reviewPolicy));
+  return evaluateDeliveryFollowUp(snapshotFollowUpFacts(pr, warnings, reviewPolicy));
 }
 
 function memberView(
@@ -560,7 +503,7 @@ export function memberFollowUp(
 ): [FollowUp, string] {
   const cleanup = closure !== "open" && closure !== "closed-completed";
   const own = open && !cleanup && (member.state === "open" || member.state === "draft");
-  return own ? classifyFollowUp(facts) : [member.followUp, member.followUpWhy];
+  return own ? evaluateDeliveryFollowUp(facts) : [member.followUp, member.followUpWhy];
 }
 
 export function prDelivery(

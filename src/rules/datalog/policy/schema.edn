@@ -139,7 +139,13 @@
    "codex-findings" "whether legacy Codex receipt reports findings on the current head"
    "codex-stale" "whether legacy Codex coverage is stale against the current head"
    "codex-running" "in-progress status of Codex's current-head review"
-   "review-request-status" "status of an explicit review request"}
+   "review-request-status" "status of an explicit review request"
+   "followup-failing" "whether the PR head has failing checks for delivery follow-up"
+   "followup-threads" "whether the PR has unresolved review threads for delivery follow-up"
+   "followup-findings" "whether the PR head has review findings for delivery follow-up"
+   "followup-pending" "whether the PR head has pending checks for delivery follow-up"
+   "followup-unknown-checks" "whether the PR head has unknown check outcomes for delivery follow-up"
+   "followup-reviewed" "whether the PR head has accepted review coverage for delivery follow-up"}
   :viewer
   {"agent" "agent name"
    "role" "role"

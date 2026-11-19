@@ -1,8 +1,8 @@
 {
   "modelVersion": 2,
   "policyVersion": 1,
-  "rulesHash": "8694c2741342f263fb4d32a878508b73760a59b1999719a1c930f90cb7e98671",
-  "narrationHash": "91b71dbfc8872b00327d68141659d4d89f39d06351240e1b0f4664754d0b4d95",
+  "rulesHash": "f602148967faeb682ba55cc0230314140d467e9167df6226b6e27a69a1af1cb8",
+  "narrationHash": "e5e4280d68f3a48166fff26a227d03127dc9a3c7c4faeae2b6f05dc64124b7d5",
   "sources": [
     "policy/schema.edn",
     "policy/rules.edn",
@@ -115,7 +115,13 @@
       "codex-findings": "whether legacy Codex receipt reports findings on the current head",
       "codex-stale": "whether legacy Codex coverage is stale against the current head",
       "codex-running": "in-progress status of Codex's current-head review",
-      "review-request-status": "status of an explicit review request"
+      "review-request-status": "status of an explicit review request",
+      "followup-failing": "whether the PR head has failing checks for delivery follow-up",
+      "followup-threads": "whether the PR has unresolved review threads for delivery follow-up",
+      "followup-findings": "whether the PR head has review findings for delivery follow-up",
+      "followup-pending": "whether the PR head has pending checks for delivery follow-up",
+      "followup-unknown-checks": "whether the PR head has unknown check outcomes for delivery follow-up",
+      "followup-reviewed": "whether the PR head has accepted review coverage for delivery follow-up"
     },
     "viewer": {
       "agent": "agent name",
@@ -9945,6 +9951,1726 @@
       "set": "rules"
     },
     {
+      "name": "delivery-follow-up",
+      "params": ["?t", "?rank", "?state", "?reason"],
+      "alternatives": [
+        {
+          "params": ["?t", "?rank", "?state", "?reason"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "draft",
+              "value": {
+                "lit": true
+              },
+              "phrase": "draft flag",
+              "many": false
+            },
+            {
+              "type": "bind",
+              "fn": "+",
+              "args": [
+                {
+                  "lit": 0
+                },
+                {
+                  "lit": 0
+                }
+              ],
+              "result": "?rank"
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "actionable"
+                }
+              ],
+              "result": "?state"
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "draft: the responsible agent finishes it"
+                }
+              ],
+              "result": "?reason"
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 97
+          }
+        },
+        {
+          "params": ["?t", "?rank", "?state", "?reason"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "draft",
+              "value": {
+                "lit": false
+              },
+              "phrase": "draft flag",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "pr-complete",
+              "value": {
+                "lit": false
+              },
+              "phrase": "completeness of pull request evidence",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "followup-failing",
+              "value": {
+                "lit": true
+              },
+              "phrase": "whether the PR head has failing checks for delivery follow-up",
+              "many": false
+            },
+            {
+              "type": "bind",
+              "fn": "+",
+              "args": [
+                {
+                  "lit": 0
+                },
+                {
+                  "lit": 1
+                }
+              ],
+              "result": "?rank"
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "actionable"
+                }
+              ],
+              "result": "?state"
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "failing checks on the current head; other check, thread or review evidence is incomplete, so acceptance stays unknown"
+                }
+              ],
+              "result": "?reason"
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 98
+          }
+        },
+        {
+          "params": ["?t", "?rank", "?state", "?reason"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "draft",
+              "value": {
+                "lit": false
+              },
+              "phrase": "draft flag",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "pr-complete",
+              "value": {
+                "lit": false
+              },
+              "phrase": "completeness of pull request evidence",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "followup-failing",
+              "value": {
+                "lit": false
+              },
+              "phrase": "whether the PR head has failing checks for delivery follow-up",
+              "many": false
+            },
+            {
+              "type": "bind",
+              "fn": "+",
+              "args": [
+                {
+                  "lit": 0
+                },
+                {
+                  "lit": 2
+                }
+              ],
+              "result": "?rank"
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "unknown"
+                }
+              ],
+              "result": "?state"
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "check, thread or review evidence is incomplete"
+                }
+              ],
+              "result": "?reason"
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 99
+          }
+        },
+        {
+          "params": ["?t", "?rank", "?state", "?reason"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "draft",
+              "value": {
+                "lit": false
+              },
+              "phrase": "draft flag",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "pr-complete",
+              "value": {
+                "lit": true
+              },
+              "phrase": "completeness of pull request evidence",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "followup-failing",
+              "value": {
+                "lit": true
+              },
+              "phrase": "whether the PR head has failing checks for delivery follow-up",
+              "many": false
+            },
+            {
+              "type": "bind",
+              "fn": "+",
+              "args": [
+                {
+                  "lit": 0
+                },
+                {
+                  "lit": 3
+                }
+              ],
+              "result": "?rank"
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "actionable"
+                }
+              ],
+              "result": "?state"
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "failing checks on the current head"
+                }
+              ],
+              "result": "?reason"
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 100
+          }
+        },
+        {
+          "params": ["?t", "?rank", "?state", "?reason"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "draft",
+              "value": {
+                "lit": false
+              },
+              "phrase": "draft flag",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "pr-complete",
+              "value": {
+                "lit": true
+              },
+              "phrase": "completeness of pull request evidence",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "review-decision",
+              "value": {
+                "lit": "CHANGES_REQUESTED"
+              },
+              "phrase": "review decision",
+              "many": false
+            },
+            {
+              "type": "bind",
+              "fn": "+",
+              "args": [
+                {
+                  "lit": 0
+                },
+                {
+                  "lit": 4
+                }
+              ],
+              "result": "?rank"
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "actionable"
+                }
+              ],
+              "result": "?state"
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "changes requested"
+                }
+              ],
+              "result": "?reason"
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 101
+          }
+        },
+        {
+          "params": ["?t", "?rank", "?state", "?reason"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "draft",
+              "value": {
+                "lit": false
+              },
+              "phrase": "draft flag",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "pr-complete",
+              "value": {
+                "lit": true
+              },
+              "phrase": "completeness of pull request evidence",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "followup-threads",
+              "value": {
+                "lit": true
+              },
+              "phrase": "whether the PR has unresolved review threads for delivery follow-up",
+              "many": false
+            },
+            {
+              "type": "bind",
+              "fn": "+",
+              "args": [
+                {
+                  "lit": 0
+                },
+                {
+                  "lit": 5
+                }
+              ],
+              "result": "?rank"
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "actionable"
+                }
+              ],
+              "result": "?state"
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "unresolved review threads"
+                }
+              ],
+              "result": "?reason"
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 102
+          }
+        },
+        {
+          "params": ["?t", "?rank", "?state", "?reason"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "draft",
+              "value": {
+                "lit": false
+              },
+              "phrase": "draft flag",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "pr-complete",
+              "value": {
+                "lit": true
+              },
+              "phrase": "completeness of pull request evidence",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "followup-findings",
+              "value": {
+                "lit": true
+              },
+              "phrase": "whether the PR head has review findings for delivery follow-up",
+              "many": false
+            },
+            {
+              "type": "bind",
+              "fn": "+",
+              "args": [
+                {
+                  "lit": 0
+                },
+                {
+                  "lit": 6
+                }
+              ],
+              "result": "?rank"
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "actionable"
+                }
+              ],
+              "result": "?state"
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "Codex reports unresolved findings on the current head"
+                }
+              ],
+              "result": "?reason"
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 103
+          }
+        },
+        {
+          "params": ["?t", "?rank", "?state", "?reason"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "draft",
+              "value": {
+                "lit": false
+              },
+              "phrase": "draft flag",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "pr-complete",
+              "value": {
+                "lit": true
+              },
+              "phrase": "completeness of pull request evidence",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "mergeable",
+              "value": {
+                "lit": "CONFLICTING"
+              },
+              "phrase": "mergeability",
+              "many": false
+            },
+            {
+              "type": "bind",
+              "fn": "+",
+              "args": [
+                {
+                  "lit": 0
+                },
+                {
+                  "lit": 7
+                }
+              ],
+              "result": "?rank"
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "actionable"
+                }
+              ],
+              "result": "?state"
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "merge conflict"
+                }
+              ],
+              "result": "?reason"
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 104
+          }
+        },
+        {
+          "params": ["?t", "?rank", "?state", "?reason"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "draft",
+              "value": {
+                "lit": false
+              },
+              "phrase": "draft flag",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "pr-complete",
+              "value": {
+                "lit": true
+              },
+              "phrase": "completeness of pull request evidence",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "followup-pending",
+              "value": {
+                "lit": true
+              },
+              "phrase": "whether the PR head has pending checks for delivery follow-up",
+              "many": false
+            },
+            {
+              "type": "bind",
+              "fn": "+",
+              "args": [
+                {
+                  "lit": 0
+                },
+                {
+                  "lit": 8
+                }
+              ],
+              "result": "?rank"
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "waiting"
+                }
+              ],
+              "result": "?state"
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "awaiting checks"
+                }
+              ],
+              "result": "?reason"
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 105
+          }
+        },
+        {
+          "params": ["?t", "?rank", "?state", "?reason"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "draft",
+              "value": {
+                "lit": false
+              },
+              "phrase": "draft flag",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "pr-complete",
+              "value": {
+                "lit": true
+              },
+              "phrase": "completeness of pull request evidence",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "followup-unknown-checks",
+              "value": {
+                "lit": true
+              },
+              "phrase": "whether the PR head has unknown check outcomes for delivery follow-up",
+              "many": false
+            },
+            {
+              "type": "bind",
+              "fn": "+",
+              "args": [
+                {
+                  "lit": 0
+                },
+                {
+                  "lit": 9
+                }
+              ],
+              "result": "?rank"
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "unknown"
+                }
+              ],
+              "result": "?state"
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "required-check evidence is unproven"
+                }
+              ],
+              "result": "?reason"
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 106
+          }
+        },
+        {
+          "params": ["?t", "?rank", "?state", "?reason"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "draft",
+              "value": {
+                "lit": false
+              },
+              "phrase": "draft flag",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "pr-complete",
+              "value": {
+                "lit": true
+              },
+              "phrase": "completeness of pull request evidence",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "native-checks-satisfied",
+              "value": {
+                "lit": false
+              },
+              "phrase": "materialized native required-check query result",
+              "many": false
+            },
+            {
+              "type": "bind",
+              "fn": "+",
+              "args": [
+                {
+                  "lit": 0
+                },
+                {
+                  "lit": 9
+                }
+              ],
+              "result": "?rank"
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "unknown"
+                }
+              ],
+              "result": "?state"
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "required-check evidence is unproven"
+                }
+              ],
+              "result": "?reason"
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 107
+          }
+        },
+        {
+          "params": ["?t", "?rank", "?state", "?reason"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "draft",
+              "value": {
+                "lit": false
+              },
+              "phrase": "draft flag",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "pr-complete",
+              "value": {
+                "lit": true
+              },
+              "phrase": "completeness of pull request evidence",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "merge-state",
+              "value": {
+                "lit": "BEHIND"
+              },
+              "phrase": "merge state",
+              "many": true
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "followup-reviewed",
+              "value": {
+                "lit": true
+              },
+              "phrase": "whether the PR head has accepted review coverage for delivery follow-up",
+              "many": false
+            },
+            {
+              "type": "bind",
+              "fn": "+",
+              "args": [
+                {
+                  "lit": 0
+                },
+                {
+                  "lit": 10
+                }
+              ],
+              "result": "?rank"
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "actionable"
+                }
+              ],
+              "result": "?state"
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "accepted on the current head but behind its base: update the branch (integrate)"
+                }
+              ],
+              "result": "?reason"
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 108
+          }
+        },
+        {
+          "params": ["?t", "?rank", "?state", "?reason"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "draft",
+              "value": {
+                "lit": false
+              },
+              "phrase": "draft flag",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "pr-complete",
+              "value": {
+                "lit": true
+              },
+              "phrase": "completeness of pull request evidence",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "merge-state",
+              "value": {
+                "lit": "BEHIND"
+              },
+              "phrase": "merge state",
+              "many": true
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "followup-reviewed",
+              "value": {
+                "lit": false
+              },
+              "phrase": "whether the PR head has accepted review coverage for delivery follow-up",
+              "many": false
+            },
+            {
+              "type": "bind",
+              "fn": "+",
+              "args": [
+                {
+                  "lit": 0
+                },
+                {
+                  "lit": 11
+                }
+              ],
+              "result": "?rank"
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "waiting"
+                }
+              ],
+              "result": "?state"
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "awaiting current-head review"
+                }
+              ],
+              "result": "?reason"
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 109
+          }
+        },
+        {
+          "params": ["?t", "?rank", "?state", "?reason"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "draft",
+              "value": {
+                "lit": false
+              },
+              "phrase": "draft flag",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "pr-complete",
+              "value": {
+                "lit": true
+              },
+              "phrase": "completeness of pull request evidence",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "followup-reviewed",
+              "value": {
+                "lit": true
+              },
+              "phrase": "whether the PR head has accepted review coverage for delivery follow-up",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "mergeable",
+              "value": {
+                "var": "?m"
+              },
+              "phrase": "mergeability",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "constant",
+              "entity": {
+                "lit": 1
+              },
+              "attribute": "unknown-mergeable",
+              "value": {
+                "var": "?m"
+              },
+              "phrase": null,
+              "many": true
+            },
+            {
+              "type": "bind",
+              "fn": "+",
+              "args": [
+                {
+                  "lit": 0
+                },
+                {
+                  "lit": 12
+                }
+              ],
+              "result": "?rank"
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "actionable"
+                }
+              ],
+              "result": "?state"
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "accepted on the current head: refresh mergeability (integrate)"
+                }
+              ],
+              "result": "?reason"
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 110
+          }
+        },
+        {
+          "params": ["?t", "?rank", "?state", "?reason"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "draft",
+              "value": {
+                "lit": false
+              },
+              "phrase": "draft flag",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "pr-complete",
+              "value": {
+                "lit": true
+              },
+              "phrase": "completeness of pull request evidence",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "followup-reviewed",
+              "value": {
+                "lit": true
+              },
+              "phrase": "whether the PR head has accepted review coverage for delivery follow-up",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "merge-state",
+              "value": {
+                "var": "?m"
+              },
+              "phrase": "merge state",
+              "many": true
+            },
+            {
+              "type": "fact",
+              "scope": "constant",
+              "entity": {
+                "lit": 1
+              },
+              "attribute": "refresh-state",
+              "value": {
+                "var": "?m"
+              },
+              "phrase": null,
+              "many": true
+            },
+            {
+              "type": "compare",
+              "op": "not=",
+              "args": [
+                {
+                  "var": "?m"
+                },
+                {
+                  "lit": "BEHIND"
+                }
+              ]
+            },
+            {
+              "type": "bind",
+              "fn": "+",
+              "args": [
+                {
+                  "lit": 0
+                },
+                {
+                  "lit": 12
+                }
+              ],
+              "result": "?rank"
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "actionable"
+                }
+              ],
+              "result": "?state"
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "accepted on the current head: refresh mergeability (integrate)"
+                }
+              ],
+              "result": "?reason"
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 111
+          }
+        },
+        {
+          "params": ["?t", "?rank", "?state", "?reason"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "draft",
+              "value": {
+                "lit": false
+              },
+              "phrase": "draft flag",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "pr-complete",
+              "value": {
+                "lit": true
+              },
+              "phrase": "completeness of pull request evidence",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "followup-reviewed",
+              "value": {
+                "lit": true
+              },
+              "phrase": "whether the PR head has accepted review coverage for delivery follow-up",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "merge-state",
+              "value": {
+                "var": "?m"
+              },
+              "phrase": "merge state",
+              "many": true
+            },
+            {
+              "type": "fact",
+              "scope": "constant",
+              "entity": {
+                "lit": 1
+              },
+              "attribute": "merge-state",
+              "value": {
+                "var": "?m"
+              },
+              "phrase": null,
+              "many": true
+            },
+            {
+              "type": "bind",
+              "fn": "+",
+              "args": [
+                {
+                  "lit": 0
+                },
+                {
+                  "lit": 13
+                }
+              ],
+              "result": "?rank"
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "actionable"
+                }
+              ],
+              "result": "?state"
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "accepted on the current head but not merged: inspect, then consider merge"
+                }
+              ],
+              "result": "?reason"
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 112
+          }
+        },
+        {
+          "params": ["?t", "?rank", "?state", "?reason"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "draft",
+              "value": {
+                "lit": false
+              },
+              "phrase": "draft flag",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "pr-complete",
+              "value": {
+                "lit": true
+              },
+              "phrase": "completeness of pull request evidence",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "followup-reviewed",
+              "value": {
+                "lit": true
+              },
+              "phrase": "whether the PR head has accepted review coverage for delivery follow-up",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "merge-state",
+              "value": {
+                "var": "?m"
+              },
+              "phrase": "merge state",
+              "many": true
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "fact",
+                  "scope": "constant",
+                  "entity": {
+                    "lit": 1
+                  },
+                  "attribute": "merge-state",
+                  "value": {
+                    "var": "?m"
+                  },
+                  "phrase": null,
+                  "many": true
+                }
+              ]
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "fact",
+                  "scope": "constant",
+                  "entity": {
+                    "lit": 1
+                  },
+                  "attribute": "refresh-state",
+                  "value": {
+                    "var": "?m"
+                  },
+                  "phrase": null,
+                  "many": true
+                }
+              ]
+            },
+            {
+              "type": "bind",
+              "fn": "+",
+              "args": [
+                {
+                  "lit": 0
+                },
+                {
+                  "lit": 14
+                }
+              ],
+              "result": "?rank"
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "actionable"
+                }
+              ],
+              "result": "?state"
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "accepted on the current head but merge state is "
+                },
+                {
+                  "var": "?m"
+                },
+                {
+                  "lit": ": inspect the branch rules"
+                }
+              ],
+              "result": "?reason"
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 113
+          }
+        },
+        {
+          "params": ["?t", "?rank", "?state", "?reason"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "draft",
+              "value": {
+                "lit": false
+              },
+              "phrase": "draft flag",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "pr-complete",
+              "value": {
+                "lit": true
+              },
+              "phrase": "completeness of pull request evidence",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "followup-reviewed",
+              "value": {
+                "lit": false
+              },
+              "phrase": "whether the PR head has accepted review coverage for delivery follow-up",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "mergeable",
+              "value": {
+                "lit": "MERGEABLE"
+              },
+              "phrase": "mergeability",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "merge-state",
+              "value": {
+                "var": "?m"
+              },
+              "phrase": "merge state",
+              "many": true
+            },
+            {
+              "type": "fact",
+              "scope": "constant",
+              "entity": {
+                "lit": 1
+              },
+              "attribute": "merge-state",
+              "value": {
+                "var": "?m"
+              },
+              "phrase": null,
+              "many": true
+            },
+            {
+              "type": "bind",
+              "fn": "+",
+              "args": [
+                {
+                  "lit": 0
+                },
+                {
+                  "lit": 15
+                }
+              ],
+              "result": "?rank"
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "actionable"
+                }
+              ],
+              "result": "?state"
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "clean merge state: inspect the current head, then consider merge"
+                }
+              ],
+              "result": "?reason"
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 114
+          }
+        },
+        {
+          "params": ["?t", "?rank", "?state", "?reason"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "draft",
+              "value": {
+                "lit": false
+              },
+              "phrase": "draft flag",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "pr-complete",
+              "value": {
+                "lit": true
+              },
+              "phrase": "completeness of pull request evidence",
+              "many": false
+            },
+            {
+              "type": "bind",
+              "fn": "+",
+              "args": [
+                {
+                  "lit": 0
+                },
+                {
+                  "lit": 99
+                }
+              ],
+              "result": "?rank"
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "waiting"
+                }
+              ],
+              "result": "?state"
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "awaiting current-head review"
+                }
+              ],
+              "result": "?reason"
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 115
+          }
+        }
+      ],
+      "calls": [],
+      "set": "rules"
+    },
+    {
       "name": "own-follow-up",
       "params": ["?t"],
       "alternatives": [
@@ -9972,7 +11698,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 97
+            "index": 116
           }
         }
       ],
@@ -10066,7 +11792,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 98
+            "index": 117
           }
         }
       ],
@@ -10138,7 +11864,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 99
+            "index": 118
           }
         },
         {
@@ -10202,7 +11928,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 100
+            "index": 119
           }
         }
       ],
@@ -10253,7 +11979,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 101
+            "index": 120
           }
         }
       ],
@@ -10296,7 +12022,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 102
+            "index": 121
           }
         }
       ],
@@ -10339,7 +12065,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 103
+            "index": 122
           }
         }
       ],
@@ -10382,7 +12108,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 104
+            "index": 123
           }
         }
       ],
@@ -10412,7 +12138,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 105
+            "index": 124
           }
         },
         {
@@ -10443,7 +12169,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 106
+            "index": 125
           }
         },
         {
@@ -10493,7 +12219,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 107
+            "index": 126
           }
         }
       ],
@@ -10549,7 +12275,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 108
+            "index": 127
           }
         }
       ],
@@ -10578,7 +12304,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 109
+            "index": 128
           }
         }
       ],
@@ -10622,7 +12348,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 110
+            "index": 129
           }
         }
       ],
@@ -10681,7 +12407,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 111
+            "index": 130
           }
         }
       ],
@@ -10736,7 +12462,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 112
+            "index": 131
           }
         }
       ],
@@ -10766,7 +12492,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 113
+            "index": 132
           }
         }
       ],
@@ -10796,7 +12522,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 114
+            "index": 133
           }
         },
         {
@@ -10818,7 +12544,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 115
+            "index": 134
           }
         }
       ],
@@ -10890,7 +12616,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 116
+            "index": 135
           }
         }
       ],
@@ -10962,7 +12688,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 117
+            "index": 136
           }
         },
         {
@@ -11057,7 +12783,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 118
+            "index": 137
           }
         }
       ],
@@ -11093,7 +12819,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 119
+            "index": 138
           }
         }
       ],
@@ -11122,7 +12848,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 120
+            "index": 139
           }
         }
       ],
@@ -11148,7 +12874,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 121
+            "index": 140
           }
         },
         {
@@ -11166,7 +12892,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 122
+            "index": 141
           }
         }
       ],
@@ -11221,7 +12947,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 123
+            "index": 142
           }
         }
       ],
@@ -11260,7 +12986,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 124
+            "index": 143
           }
         }
       ],
@@ -11316,7 +13042,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 125
+            "index": 144
           }
         },
         {
@@ -11396,7 +13122,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 126
+            "index": 145
           }
         }
       ],
@@ -11426,7 +13152,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 127
+            "index": 146
           }
         },
         {
@@ -11448,7 +13174,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 128
+            "index": 147
           }
         }
       ],
@@ -11487,7 +13213,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 129
+            "index": 148
           }
         }
       ],
@@ -11537,7 +13263,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 130
+            "index": 149
           }
         },
         {
@@ -11561,7 +13287,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 131
+            "index": 150
           }
         },
         {
@@ -11660,7 +13386,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 132
+            "index": 151
           }
         },
         {
@@ -11747,7 +13473,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 133
+            "index": 152
           }
         },
         {
@@ -11834,7 +13560,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 134
+            "index": 153
           }
         },
         {
@@ -11891,7 +13617,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 135
+            "index": 154
           }
         },
         {
@@ -11933,7 +13659,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 136
+            "index": 155
           }
         },
         {
@@ -11975,7 +13701,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 137
+            "index": 156
           }
         },
         {
@@ -12036,7 +13762,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 138
+            "index": 157
           }
         },
         {
@@ -12142,7 +13868,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 142
+            "index": 161
           }
         },
         {
@@ -12184,7 +13910,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 143
+            "index": 162
           }
         },
         {
@@ -12226,7 +13952,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 144
+            "index": 163
           }
         },
         {
@@ -12283,7 +14009,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 145
+            "index": 164
           }
         },
         {
@@ -12359,7 +14085,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 146
+            "index": 165
           }
         },
         {
@@ -12416,7 +14142,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 147
+            "index": 166
           }
         },
         {
@@ -12499,7 +14225,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 148
+            "index": 167
           }
         },
         {
@@ -12586,7 +14312,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 149
+            "index": 168
           }
         },
         {
@@ -12688,7 +14414,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 150
+            "index": 169
           }
         },
         {
@@ -12749,7 +14475,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 151
+            "index": 170
           }
         },
         {
@@ -12806,7 +14532,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 152
+            "index": 171
           }
         },
         {
@@ -12893,7 +14619,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 153
+            "index": 172
           }
         },
         {
@@ -12975,7 +14701,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 154
+            "index": 173
           }
         }
       ],
@@ -13023,7 +14749,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 139
+            "index": 158
           }
         },
         {
@@ -13058,7 +14784,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 140
+            "index": 159
           }
         },
         {
@@ -13093,7 +14819,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 141
+            "index": 160
           }
         }
       ],
@@ -13125,7 +14851,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 155
+            "index": 174
           }
         }
       ],
@@ -13197,7 +14923,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 156
+            "index": 175
           }
         },
         {
@@ -13234,7 +14960,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 157
+            "index": 176
           }
         },
         {
@@ -13304,7 +15030,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 158
+            "index": 177
           }
         }
       ],
@@ -17362,6 +19088,33 @@
       "ruleSet": "rules"
     },
     {
+      "name": "delivery-follow-up",
+      "find": ["?t", "?rank", "?state", "?reason"],
+      "inputs": ["$", "%"],
+      "clauses": [
+        {
+          "type": "call",
+          "predicate": "delivery-follow-up",
+          "args": [
+            {
+              "var": "?t"
+            },
+            {
+              "var": "?rank"
+            },
+            {
+              "var": "?state"
+            },
+            {
+              "var": "?reason"
+            }
+          ]
+        }
+      ],
+      "calls": ["delivery-follow-up"],
+      "ruleSet": "rules"
+    },
+    {
       "name": "human-sections",
       "find": ["?t", "?section", "?code", "?reason"],
       "inputs": ["$", "%"],
@@ -18034,15 +19787,15 @@
   ],
   "coverage": {
     "decisions": 50,
-    "predicates": 92,
-    "alternatives": 191,
+    "predicates": 93,
+    "alternatives": 210,
     "denials": 9,
-    "queries": 21,
+    "queries": 22,
     "keyQueries": 4,
     "evidence": 49,
     "overrides": 4,
     "constants": 14,
-    "attributes": 104,
-    "clauses": 1096
+    "attributes": 110,
+    "clauses": 1225
   }
 }

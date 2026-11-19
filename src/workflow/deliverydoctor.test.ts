@@ -18,8 +18,8 @@ import { deliveryMemberCap, evaluationRevision } from "./completion.js";
 import { ticketDoctor } from "./ticketdoctor.js";
 import type { TicketDoctorReport } from "./ticketdoctor.js";
 import type { Issue, PullRequest, Snapshot } from "../github/types.js";
+import { evaluateDeliveryFollowUp } from "../rules/datalog/engine.js";
 import {
-  classifyFollowUp,
   deliveryFields,
   deliveryRead,
   prDelivery,
@@ -1006,7 +1006,7 @@ describe("delivery, responsibility and closure on read surfaces (#192)", () => {
       ["actionable", "accepted on the current head but not merged: inspect, then consider merge"],
       ["waiting", "awaiting current-head review"],
       ["waiting", "awaiting current-head review"],
-      ["actionable", "behind its base: update the branch"],
+      ["waiting", "awaiting current-head review"],
       ["actionable", "accepted on the current head: refresh mergeability (integrate)"],
       [
         "actionable",
@@ -1122,7 +1122,7 @@ describe("delivery, responsibility and closure on read surfaces (#192)", () => {
       "closure cleanup",
     );
     expect(
-      classifyFollowUp({ ...facts, pending: false, verified: true, headFindings: true }),
+      evaluateDeliveryFollowUp({ ...facts, pending: false, verified: true, headFindings: true }),
     ).toEqual(["actionable", "Codex reports unresolved findings on the current head"]);
   });
 
@@ -1649,7 +1649,7 @@ describe("delivery, responsibility and closure on read surfaces (#192)", () => {
       headFindings: false,
       completeness: { complete: true, warnings: [] },
     } as unknown as PrStatusReport;
-    expect(classifyFollowUp(reportFollowUpFacts(report))).toEqual([
+    expect(evaluateDeliveryFollowUp(reportFollowUpFacts(report))).toEqual([
       "waiting",
       "awaiting current-head review",
     ]);
@@ -1671,7 +1671,7 @@ describe("delivery, responsibility and closure on read surfaces (#192)", () => {
         reviews: [{ state: "APPROVED", reviewedCommit: "h1" }],
         pullRequest: { ...report.pullRequest, mergeState: "CLEAN" },
       } as unknown as PrStatusReport;
-      expect(classifyFollowUp(reportFollowUpFacts(skipped))[0]).toBe("unknown");
+      expect(evaluateDeliveryFollowUp(reportFollowUpFacts(skipped))[0]).toBe("unknown");
     }
     const codex = {
       ...report,
@@ -1686,7 +1686,7 @@ describe("delivery, responsibility and closure on read surfaces (#192)", () => {
       ],
       pullRequest: { ...report.pullRequest, mergeState: "BEHIND" },
     } as unknown as PrStatusReport;
-    expect(classifyFollowUp(reportFollowUpFacts(codex))[1]).toBe(
+    expect(evaluateDeliveryFollowUp(reportFollowUpFacts(codex))[1]).toBe(
       "accepted on the current head but behind its base: update the branch (integrate)",
     );
   });

@@ -1,4 +1,4 @@
-import { evaluateCheckPolicy } from "../rules/datalog/engine.js";
+import { evaluateCheckPolicy, evaluateDeliveryFollowUp } from "../rules/datalog/engine.js";
 import { requiredCheckEvidence } from "./requiredchecks.js";
 /**
  * #497: every PR evidence source's completeness reaches the shared follow-up facts, and the
@@ -8,11 +8,7 @@ import { requiredCheckEvidence } from "./requiredchecks.js";
 import { describe, expect, it } from "vite-plus/test";
 import { prEvidenceGaps } from "./previdence.js";
 import type { Issue, Page, PullRequest, Snapshot } from "./types.js";
-import {
-  classifyFollowUp,
-  reportFollowUpFacts,
-  snapshotFollowUpFacts,
-} from "../workflow/deliveryread.js";
+import { reportFollowUpFacts, snapshotFollowUpFacts } from "../workflow/deliveryread.js";
 import type { PrStatusReport } from "../workflow/prstatus.js";
 import { evaluateDatalog } from "../rules/datalog/datalog.js";
 import type { SubjectAssessments } from "../briefing/assessments.js";
@@ -129,7 +125,7 @@ function report(p: PullRequest, warnings: string[] = []): PrStatusReport {
   } as unknown as PrStatusReport;
 }
 const follow = (p: PullRequest, warnings: string[] = []) =>
-  classifyFollowUp(snapshotFollowUpFacts(p, warnings));
+  evaluateDeliveryFollowUp(snapshotFollowUpFacts(p, warnings));
 
 /** Each source independently: another page (either direction) or not requested at all. */
 const sources: [string, (p: PullRequest, how: "next" | "previous" | "missing") => void][] = [
@@ -164,17 +160,19 @@ describe("PR evidence completeness across every source (#497)", () => {
       "actionable",
       "accepted on the current head but not merged: inspect, then consider merge",
     ]);
-    expect(classifyFollowUp(reportFollowUpFacts(report(accepted)))).toEqual(follow(accepted));
+    expect(evaluateDeliveryFollowUp(reportFollowUpFacts(report(accepted)))).toEqual(
+      follow(accepted),
+    );
     expect(nativeAccepts(accepted)).toBe(true);
 
     const waiting = pr(2, { reviewed: false, mergeState: "BLOCKED" });
     expect(follow(waiting)).toEqual(["waiting", "awaiting current-head review"]);
-    expect(classifyFollowUp(reportFollowUpFacts(report(waiting)))).toEqual(follow(waiting));
+    expect(evaluateDeliveryFollowUp(reportFollowUpFacts(report(waiting)))).toEqual(follow(waiting));
     expect(nativeAccepts(waiting)).toBe(false);
 
     const failed = pr(3, { verify: "FAILURE" });
     expect(follow(failed)).toEqual(["actionable", "failing checks on the current head"]);
-    expect(classifyFollowUp(reportFollowUpFacts(report(failed)))).toEqual(follow(failed));
+    expect(evaluateDeliveryFollowUp(reportFollowUpFacts(report(failed)))).toEqual(follow(failed));
     expect(nativeAccepts(failed)).toBe(false);
   });
 
@@ -186,7 +184,7 @@ describe("PR evidence completeness across every source (#497)", () => {
         damage(p, how);
         expect(prEvidenceGaps(p, [])).toEqual([label]);
         expect(follow(p)[0]).toBe("unknown");
-        expect(classifyFollowUp(reportFollowUpFacts(report(p)))[0]).toBe("unknown");
+        expect(evaluateDeliveryFollowUp(reportFollowUpFacts(report(p)))[0]).toBe("unknown");
         expect(nativeAccepts(p)).toBe(false);
       });
 
