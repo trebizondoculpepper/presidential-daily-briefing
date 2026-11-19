@@ -3,6 +3,7 @@ import { nodeSafeFs } from "./safejson.js";
 import { runRebrief } from "../rebrief/cli.js";
 import { prepareEffectiveIdentity } from "./effectiveidentity.js";
 import { readdir } from "node:fs/promises";
+import { memoryStore } from "../rebrief/core.js";
 import { describe, expect, it } from "vite-plus/test";
 import { withIdentityFixture as fixture } from "../testing/identity.js";
 import { startLocalIdentity } from "./serveridentity.js";
@@ -176,8 +177,9 @@ describe("rebrief session identity reuse", () => {
               });
             },
             state: async (_directory, use) =>
-              use(null, async () => {
+              use({ version: "none" }, async () => {
                 stateWrites++;
+                return memoryStore();
               }),
           },
         );

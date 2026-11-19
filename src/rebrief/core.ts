@@ -84,6 +84,8 @@ export interface Result {
   fingerprint: string | null;
   actionIds: string[];
   briefing: string | null;
+  /** Present only for a legacy v1 session: its restriction and the supported recovery. */
+  legacy?: string;
 }
 export const stopped = (
   input: Input,

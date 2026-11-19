@@ -39,19 +39,33 @@ const bindGitSignal = (svc: GitService, signal: AbortSignal): GitService => {
   };
 };
 import { noLocalProject } from "../serve/api.js";
-import { contextKey, defaults, initialize, RebriefSession, stopped } from "./core.js";
+import {
+  ContinuationSession,
+  contextKey,
+  defaults,
+  initializeV2,
+  maxUserBudget,
+  RebriefSession,
+  stopped,
+} from "./core.js";
 import type { ReadRuntime } from "../briefing/service.js";
 import type { Context, Input, Result, Transport } from "./core.js";
 import { httpMcpTransport, serviceTransport } from "./transports.js";
-import { withPrivateState } from "./state.js";
+import { withSessionStore } from "./state.js";
 
+const legacyNotice =
+  "Legacy v1 session: at most three continuation offers. Start a new session (pdb rebrief init in a new private directory) to continue without a default limit.";
 export const rebriefHelp = `Usage: pdb rebrief init|check|ack --json --state-dir PATH --session ID
        (--repo owner/name | --project /absolute/checkout) --platform NAME
        --role implementer|designer [--agent NAME] [--entry KEY | --harness NAME]
-       check: --enabled --event ID --reason natural [--deadline-ms 1..10000] [--cap 1..3]
+       check: --enabled --event ID --reason natural [--deadline-ms 1..10000] [--cap N]
        ack:   --event ID --fingerprint SHA256
-init explicitly creates a new session budget in an existing private temporary directory;
-it never resets existing state. check offers at most three changed briefings per session.
+init explicitly creates a new session in an empty private temporary directory; it never
+resets existing state. There is no default limit on approved continuation (#657): check offers
+each changed briefing once acknowledged delivery allows. --cap N (on init or check) selects an
+explicit finite budget, kept for the session; it can only tighten, never widen or remove one.
+A legacy v1 session directory keeps its documented limit of three offers and reports it; start
+a new session in a new directory to continue without a default limit.
 ack is for a native adapter AFTER it establishes exact event/fingerprint delivery. Ambiguous
 delivery stops. State holds only context/event hashes, fingerprints, counts and delivery state.
 --state-dir must be private, under the OS temporary directory, outside a Git tree.
@@ -74,7 +88,7 @@ export interface CliRuntime {
   signal?: AbortSignal;
   transport?: (context: Context) => Transport;
   read?: ReadRuntime;
-  state?: typeof withPrivateState;
+  state?: typeof withSessionStore;
 }
 export async function runRebrief(
   args: string[],
@@ -203,14 +217,12 @@ export async function runRebrief(
     if (values.entry) validateEntryKey(values.entry);
     if (values.harness) validateHarness(values.harness);
     const deadlineMs = Number(values["deadline-ms"] ?? defaults.deadlineMs);
-    const cap = Number(values.cap ?? defaults.cap);
+    const cap = values.cap === undefined ? undefined : Number(values.cap);
     if (
       !Number.isInteger(deadlineMs) ||
       deadlineMs < 1 ||
       deadlineMs > defaults.deadlineMs ||
-      !Number.isInteger(cap) ||
-      cap < 1 ||
-      cap > defaults.cap ||
+      (cap !== undefined && (!Number.isInteger(cap) || cap < 1 || cap > maxUserBudget)) ||
       (mode !== "init" && !valid(values.event, /^\S+$/)) ||
       (mode === "ack" && !valid(values.fingerprint, /^[a-f0-9]{64}$/))
     )
@@ -227,7 +239,7 @@ export async function runRebrief(
       reason: values.reason ?? "unknown",
       enabled: !!values.enabled,
       deadlineMs,
-      cap,
+      ...(cap !== undefined ? { cap } : {}),
     };
     if (
       mode === "check" &&
@@ -295,18 +307,25 @@ export async function runRebrief(
       return 0;
     }
     const result = await cancellable(
-      (runtime.state ?? withPrivateState)(values["state-dir"], async (state, save) => {
+      (runtime.state ?? withSessionStore)(values["state-dir"], async (stored, create) => {
         if (controller.signal.aborted) return stopped(input, "cancelled");
         if (mode === "init") {
-          if (state) return stopped(input, "state-exists");
-          await save(initialize(input));
+          if (stored.version !== "none") return stopped(input, "state-exists");
+          await create(initializeV2(input, input.cap ?? null));
           return stopped(input, "initialized");
         }
-        const session = new RebriefSession(state);
+        if (stored.version === "none") return stopped(input, "state-lost");
+        // A legacy v1 session keeps its documented restrictions and says so (#657).
+        const v1 = stored.version === 1 ? new RebriefSession(stored.state) : null;
+        const v2 = stored.version === 2 ? new ContinuationSession(stored.store) : null;
+        const legacy = (result: Result): Result =>
+          v1 ? { ...result, legacy: legacyNotice } : result;
         if (mode === "ack") {
-          const accepted = session.acknowledge(input, input.eventId, values.fingerprint!);
-          if (accepted) await save(session.state!);
-          return stopped(input, accepted ? "acknowledged" : "acknowledgement-refused");
+          const accepted = v1
+            ? v1.acknowledge(input, input.eventId, values.fingerprint!)
+            : await v2!.acknowledge(input, input.eventId, values.fingerprint!);
+          if (accepted && v1 && stored.version === 1) await stored.save(v1.state!);
+          return legacy(stopped(input, accepted ? "acknowledged" : "acknowledgement-refused"));
         }
         const transport =
           values.transport === "http-mcp"
@@ -337,9 +356,12 @@ export async function runRebrief(
                     }
                   : noLocalProject(input.repository)),
               }));
-        const decision = await session.evaluate(input, { transport }, controller.signal);
-        if (session.state && session.state.context === contextKey(input)) await save(session.state);
-        return controller.signal.aborted ? stopped(input, "cancelled") : decision;
+        const decision = v1
+          ? await v1.evaluate(input, { transport }, controller.signal)
+          : await v2!.evaluate(input, { transport }, controller.signal);
+        if (v1 && stored.version === 1 && v1.state && v1.state.context === contextKey(input))
+          await stored.save(v1.state);
+        return legacy(controller.signal.aborted ? stopped(input, "cancelled") : decision);
       }),
     );
     await emit(controller.signal.aborted ? stopped(input, "cancelled") : result);
