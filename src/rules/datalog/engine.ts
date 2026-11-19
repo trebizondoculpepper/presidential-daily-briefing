@@ -462,6 +462,62 @@ export function evaluateCheckPolicy(input: import("./check-types.js").CheckEvide
   };
 }
 
+/** One issue's typed discussion facts (#1093); `comments` null means the count was not read. */
+export interface DiscussionIssue {
+  number: number;
+  state: "OPEN" | "CLOSED";
+  comments: number | null;
+}
+
+/**
+ * The native discussion view (#1093, doc/design/estimation-refinement-loop.md): inclusion,
+ * order and explanation come from rules.edn; the host only sorts the emitted keys
+ * lexicographically, as the main comparator does. Unknown counts are listed, never ranked.
+ */
+export function evaluateDiscussion(input: {
+  scope: "open" | "closed" | "all";
+  issues: readonly DiscussionIssue[];
+}): {
+  scope: "open" | "closed" | "all";
+  items: { number: number; comments: number; why: string }[];
+  unknown: number[];
+  policyVersion: number;
+  rulesHash: string;
+} {
+  const facts: Datom[] = [[1, "discussion-scope", input.scope]];
+  for (const [i, issue] of input.issues.entries()) {
+    const id = firstSubjectId + i;
+    facts.push(
+      [id, "discussion-subject", true],
+      [id, "number", issue.number],
+      [id, "state", issue.state],
+      [id, "comment-count-known", issue.comments !== null],
+    );
+    if (issue.comments !== null) facts.push([id, "comment-count", issue.comments]);
+  }
+  const db = ds.init_db(facts, bundle.schema);
+  const ranked = (
+    ds.q(bundle.queries["discussion-ranked"], db, bundle.clauses) as [
+      number,
+      number,
+      number,
+      string,
+    ][]
+  ).sort((a, b) => a[1] - b[1] || a[2] - b[2]);
+  const unknown = (
+    ds.q(bundle.queries["discussion-unknown"], db, bundle.clauses) as [number, number][]
+  )
+    .map(([, number]) => number)
+    .sort((a, b) => a - b);
+  return {
+    scope: input.scope,
+    items: ranked.map(([, key, number, why]) => ({ number, comments: -key, why })),
+    unknown,
+    policyVersion,
+    rulesHash,
+  };
+}
+
 export interface ReviewCoverageInput {
   head: string;
   complete: boolean;

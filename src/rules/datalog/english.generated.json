@@ -1,8 +1,8 @@
 {
   "modelVersion": 2,
   "policyVersion": 1,
-  "rulesHash": "f602148967faeb682ba55cc0230314140d467e9167df6226b6e27a69a1af1cb8",
-  "narrationHash": "e5e4280d68f3a48166fff26a227d03127dc9a3c7c4faeae2b6f05dc64124b7d5",
+  "rulesHash": "a9aad202b9e15ce39337fe391076774327cf3621e54a379c27ebca057fac82f9",
+  "narrationHash": "184e15b67082d901356ff0a1d109f93c08d56503de3e36e7be78b4e3a8b3dbc6",
   "sources": [
     "policy/schema.edn",
     "policy/rules.edn",
@@ -57,6 +57,10 @@
       "missing-required": "required check not yet reported",
       "native-checks-satisfied": "materialized native required-check query result",
       "required-evidence-complete": "completeness of target required-check evidence",
+      "discussion-subject": "issue considered for the discussion view",
+      "discussion-scope": "requested open, closed or all-issue discussion scope",
+      "comment-count": "issue comment count",
+      "comment-count-known": "whether the issue comment count was read",
       "required-evidence-gap": "unread target required-check evidence",
       "mergeable": "mergeability",
       "name": "name",
@@ -15038,6 +15042,300 @@
       "set": "rules"
     },
     {
+      "name": "discussion-in-scope",
+      "params": ["?t"],
+      "alternatives": [
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "discussion-subject",
+              "value": {
+                "lit": true
+              },
+              "phrase": "issue considered for the discussion view",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "context",
+              "entity": {
+                "lit": 1
+              },
+              "attribute": "discussion-scope",
+              "value": {
+                "lit": "all"
+              },
+              "phrase": "requested open, closed or all-issue discussion scope",
+              "many": false
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 178
+          }
+        },
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "discussion-subject",
+              "value": {
+                "lit": true
+              },
+              "phrase": "issue considered for the discussion view",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "context",
+              "entity": {
+                "lit": 1
+              },
+              "attribute": "discussion-scope",
+              "value": {
+                "lit": "open"
+              },
+              "phrase": "requested open, closed or all-issue discussion scope",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "state",
+              "value": {
+                "lit": "OPEN"
+              },
+              "phrase": "state",
+              "many": false
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 179
+          }
+        },
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "discussion-subject",
+              "value": {
+                "lit": true
+              },
+              "phrase": "issue considered for the discussion view",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "context",
+              "entity": {
+                "lit": 1
+              },
+              "attribute": "discussion-scope",
+              "value": {
+                "lit": "closed"
+              },
+              "phrase": "requested open, closed or all-issue discussion scope",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "state",
+              "value": {
+                "lit": "CLOSED"
+              },
+              "phrase": "state",
+              "many": false
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 180
+          }
+        }
+      ],
+      "calls": [],
+      "set": "rules"
+    },
+    {
+      "name": "discussion-ranked",
+      "params": ["?t", "?key", "?number", "?why"],
+      "alternatives": [
+        {
+          "params": ["?t", "?key", "?number", "?why"],
+          "clauses": [
+            {
+              "type": "call",
+              "predicate": "discussion-in-scope",
+              "args": [
+                {
+                  "var": "?t"
+                }
+              ]
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "comment-count-known",
+              "value": {
+                "lit": true
+              },
+              "phrase": "whether the issue comment count was read",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "comment-count",
+              "value": {
+                "var": "?n"
+              },
+              "phrase": "issue comment count",
+              "many": false
+            },
+            {
+              "type": "compare",
+              "op": ">",
+              "args": [
+                {
+                  "var": "?n"
+                },
+                {
+                  "lit": 0
+                }
+              ]
+            },
+            {
+              "type": "bind",
+              "fn": "-",
+              "args": [
+                {
+                  "lit": 0
+                },
+                {
+                  "var": "?n"
+                }
+              ],
+              "result": "?key"
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "number",
+              "value": {
+                "var": "?number"
+              },
+              "phrase": "number",
+              "many": false
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "var": "?n"
+                },
+                {
+                  "lit": " comments: ranked by discussion volume, a rough proxy that does not imply disagreement."
+                }
+              ],
+              "result": "?why"
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 181
+          }
+        }
+      ],
+      "calls": ["discussion-in-scope"],
+      "set": "rules"
+    },
+    {
+      "name": "discussion-unknown",
+      "params": ["?t", "?number"],
+      "alternatives": [
+        {
+          "params": ["?t", "?number"],
+          "clauses": [
+            {
+              "type": "call",
+              "predicate": "discussion-in-scope",
+              "args": [
+                {
+                  "var": "?t"
+                }
+              ]
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "comment-count-known",
+              "value": {
+                "lit": false
+              },
+              "phrase": "whether the issue comment count was read",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "number",
+              "value": {
+                "var": "?number"
+              },
+              "phrase": "number",
+              "many": false
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 182
+          }
+        }
+      ],
+      "calls": ["discussion-in-scope"],
+      "set": "rules"
+    },
+    {
       "name": "selected",
       "params": ["?t", "?r"],
       "alternatives": [
@@ -19028,6 +19326,54 @@
       "ruleSet": "rules"
     },
     {
+      "name": "discussion-ranked",
+      "find": ["?t", "?key", "?number", "?why"],
+      "inputs": ["$", "%"],
+      "clauses": [
+        {
+          "type": "call",
+          "predicate": "discussion-ranked",
+          "args": [
+            {
+              "var": "?t"
+            },
+            {
+              "var": "?key"
+            },
+            {
+              "var": "?number"
+            },
+            {
+              "var": "?why"
+            }
+          ]
+        }
+      ],
+      "calls": ["discussion-ranked"],
+      "ruleSet": "rules"
+    },
+    {
+      "name": "discussion-unknown",
+      "find": ["?t", "?number"],
+      "inputs": ["$", "%"],
+      "clauses": [
+        {
+          "type": "call",
+          "predicate": "discussion-unknown",
+          "args": [
+            {
+              "var": "?t"
+            },
+            {
+              "var": "?number"
+            }
+          ]
+        }
+      ],
+      "calls": ["discussion-unknown"],
+      "ruleSet": "rules"
+    },
+    {
       "name": "pr-blockers",
       "find": ["?t", "?code", "?reason"],
       "inputs": ["$", "%"],
@@ -19787,15 +20133,15 @@
   ],
   "coverage": {
     "decisions": 50,
-    "predicates": 93,
-    "alternatives": 210,
+    "predicates": 96,
+    "alternatives": 215,
     "denials": 9,
-    "queries": 22,
+    "queries": 24,
     "keyQueries": 4,
     "evidence": 49,
     "overrides": 4,
     "constants": 14,
-    "attributes": 110,
-    "clauses": 1225
+    "attributes": 114,
+    "clauses": 1245
   }
 }

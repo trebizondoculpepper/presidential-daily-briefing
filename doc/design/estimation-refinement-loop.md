@@ -28,7 +28,7 @@ The designer resolves recorded questions from existing designs and decisions whe
 
 A read-only view of issues that attract discussion:
 
-- **Proxy:** the GitHub issue comment count, descending, with deterministic ties. No LLM classification, question-round detection or filtering of routine comments.
+- **Proxy:** the GitHub issue comment count, descending; ties go to the lower issue number. Only issues with at least one known comment are listed. No LLM classification, question-round detection or filtering of routine comments. The native rules (`discussion-ranked`, `discussion-unknown` in `rules.edn`, #1093) decide inclusion, keys and explanation.
 - **Meaning:** being listed is neither a blocker nor proof of disagreement. Answered discussions remain eligible.
 - **Scope:** open issues by default; closed issues may be included for historical discussion. The result states the scope queried.
 - **Completeness:** pagination and completeness are explicit. A count that could not be read is reported as unknown, never as zero, and its item is not ranked as if it were.
