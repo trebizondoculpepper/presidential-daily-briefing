@@ -116,6 +116,13 @@ export function codexHookAdapter(command: string): JsonEntryAdapter {
       if (!("hooks" in doc)) return null;
       if (typeof doc.hooks !== "object" || doc.hooks === null || Array.isArray(doc.hooks))
         return "hooks must be a JSON object.";
+      // A Stop value that exists but is not an array is an unsupported native shape: refuse it
+      // rather than replacing its contents (reviewed #1124 finding).
+      if (
+        codexStopHookEvent in (doc.hooks as Record<string, unknown>) &&
+        !Array.isArray((doc.hooks as Record<string, unknown>)[codexStopHookEvent])
+      )
+        return `${codexStopHookEvent} must be a JSON array of hook groups.`;
       return null;
     },
     apply: (doc) => {

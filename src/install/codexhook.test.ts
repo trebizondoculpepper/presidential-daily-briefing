@@ -81,6 +81,10 @@ describe("codex Stop hook entry shape (#770)", () => {
     const adapter = codexHookAdapter(codexStopCommand({}));
     expect(adapter.validateSchema?.({ hooks: 4 })).toBe("hooks must be a JSON object.");
     expect(adapter.validateSchema?.({})).toBeNull();
+    // A Stop value that is not an array is refused, not silently replaced.
+    expect(adapter.validateSchema?.({ hooks: { Stop: "not-an-array" } })).toBe(
+      "Stop must be a JSON array of hook groups.",
+    );
   });
 });
 
