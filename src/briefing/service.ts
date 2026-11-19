@@ -4,6 +4,8 @@ import {
   resolveEngineSetting,
   defaultEngine,
 } from "../config/engine-setting.js";
+import { HYDRATION_POOL } from "./compact.js";
+import { RANK_PARTITION } from "../rules/datalog/engine.js";
 import type { EngineSetting, DecisionEngineMetadata } from "../config/engine-setting.js";
 import { resolveReviewPolicy } from "../config/review-setting.js";
 import { resolveProjectRulesSetting } from "../config/project-rules-setting.js";
@@ -909,7 +911,10 @@ export async function readBriefing(
     snapshot = await runtime.collectShortlist!(
       request.repository,
       {
-        select: async (candidates) => shownSubjects((await present(candidates, false)).report),
+        // #652: hydrate the role-neutral prefix of the one ranked pool, so implementer and
+        // designer views read the same subjects under the same budget.
+        select: async (candidates) =>
+          hydrationSubjects((await present(candidates, false)).report, request.limit),
         signal: request.signal,
         ...(runtime.rest ? { rest: runtime.rest } : {}),
         ...(meter ? { meter } : {}),
@@ -938,6 +943,49 @@ export function shortlistLine(snapshot: Snapshot, maxChars: number): string {
 }
 
 /** The URLs a presented briefing shows (its subjects), in order; the shortlist to hydrate. */
+/**
+ * The subjects a bounded read hydrates (#652): the union of both agent roles' first `limit`
+ * activities, by the exact per-role ranks the native engine computed in its one evaluation, plus
+ * the first `limit` project-preferred activities and every subject the report itself shows. Nothing is
+ * re-ranked here, so a role-only change reads the same subjects and no shown row is unread. A
+ * report without a pool (human, unranked) falls back to its shown subjects.
+ */
+export function hydrationSubjects(report: PresentedBriefing["report"], limit: number): string[] {
+  type Item = { target: string; why?: { project?: unknown[] }; [RANK_PARTITION]?: string };
+  const pool = (report as { [HYDRATION_POOL]?: Item[] })[HYDRATION_POOL];
+  if (!pool?.length) return shownSubjects(report);
+  // RANK_PARTITION: ownership/attention/affinity/declared affinity/implementer rank/designer rank.
+  const rank = (item: Item, field: 4 | 5) =>
+    Number(String(item[RANK_PARTITION] ?? "").split("/")[field] ?? 0) || 0;
+  const subjects: string[] = [];
+  const add = (target: string) => {
+    if (!subjects.includes(target)) subjects.push(target);
+  };
+  // Interleave the two roles' prefixes: the collector hydrates selection units in order under a
+  // shared cap, so neither role's first activities can be crowded out by the other's.
+  const prefix = (field: 4 | 5) =>
+    [...pool].sort((a, b) => rank(a, field) - rank(b, field)).slice(0, Math.max(0, limit));
+  const [implementer, designer] = [prefix(4), prefix(5)];
+  for (let i = 0; i < Math.max(implementer.length, designer.length); i++) {
+    if (implementer[i]) add(implementer[i]!.target);
+    if (designer[i]) add(designer[i]!.target);
+  }
+  // Project-preferred activities, bounded like a prefix: highest project priority first, then a
+  // role-independent native rank, so a broad preference cannot exhaust the hydration budget.
+  const priority = (item: Item) =>
+    Math.max(
+      0,
+      ...(item.why?.project ?? []).map((r) => Number((r as { priority?: unknown }).priority) || 0),
+    );
+  for (const item of pool
+    .filter((i) => i.why?.project?.length)
+    .sort((a, b) => priority(b) - priority(a) || rank(a, 4) - rank(b, 4))
+    .slice(0, Math.max(0, limit)))
+    add(item.target);
+  for (const url of shownSubjects(report)) add(url);
+  return subjects;
+}
+
 export function shownSubjects(report: PresentedBriefing["report"]): string[] {
   const subjects = (report as { subjects?: { url: string }[] }).subjects;
   return (subjects ?? []).map((subject) => subject.url);

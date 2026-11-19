@@ -158,6 +158,12 @@ export class LabelFilterUnresolved extends Error {
   readonly code = "label-filter-unresolved";
 }
 
+/**
+ * The complete pre-limit ranked pool of a presentation (#652), kept outside the report's JSON:
+ * the shortlist hydrates from it role-neutrally, so a role-only change reads the same subjects.
+ */
+export const HYDRATION_POOL: unique symbol = Symbol("pdb.hydration-pool");
+
 export function compactBriefing(
   snapshot: Snapshot,
   options: Pick<BriefingOptions, "limit" | "agent" | "estimate" | "responsible" | "retained"> & {
@@ -678,6 +684,7 @@ export function compactBriefing(
         }
       : facts.completeness;
   return {
+    [HYDRATION_POOL]: fullRanking?.items ?? [],
     schemaVersion: 2 as const,
     repository: snapshot.repository,
     freshness: facts.freshness,
