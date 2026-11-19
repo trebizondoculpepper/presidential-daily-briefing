@@ -85,7 +85,7 @@
 [(claim-deny ?t ?code) (issue ?t) (open ?t) (not (claimed ?t)) [1 "owned-claims-complete" false] [(str "CLAIM-INVENTORY-UNKNOWN") ?code]]
 [(claim-deny ?t ?code) (issue ?t) (not (available ?t)) [(str "CLAIM-NOT-READY") ?code]]
 [(implementation-denied ?t) (implementation-deny ?t ?r)]
-[(eligible ?t) (implementation-permit ?t) (not (implementation-denied ?t))]
+[(eligible ?t) (implementation-permit ?t) (not (adoptable ?t)) (not (implementation-denied ?t))]
 [(design-eligible ?t) (issue ?t) (open ?t) [?t "label" "status:needs-design"] [?t "labels-complete" true] (platform-ok ?t) (closing-complete ?t) (not (claimed ?t)) (not (has-closing ?t)) (not [?t "label" "design:decision-needed"])]
 [(possible ?t) (available ?t) (not (claimed ?t)) (not (prerequisite ?t)) (not (blocked ?t)) (not (has-closing ?t))]
 [(possible ?t) [?t "label" "status:needs-design"] (not (claimed ?t)) (not (has-closing ?t))]

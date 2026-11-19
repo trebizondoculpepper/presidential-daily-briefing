@@ -1,8 +1,8 @@
 {
   "modelVersion": 2,
   "policyVersion": 1,
-  "rulesHash": "85ae122ded3a8f23bdf50da9d01b10fd0f346f14878997e91e1af6a1ed6c1341",
-  "narrationHash": "f9f25a680fdc48f471b90df80ebdc3f9a23d43acd4ba3aff5b81d7d4bae1ecd4",
+  "rulesHash": "902431fe15259023dd7d14624d2575d943833c5f19eef41b32583677e79a8c66",
+  "narrationHash": "9d8493ea4c55561c79957984185e62689d4f0ea63591ef0a6f6e8a2d81ecc007",
   "sources": [
     "policy/schema.edn",
     "policy/rules.edn",
@@ -8365,6 +8365,21 @@
               "body": [
                 {
                   "type": "call",
+                  "predicate": "adoptable",
+                  "args": [
+                    {
+                      "var": "?t"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "call",
                   "predicate": "implementation-denied",
                   "args": [
                     {
@@ -8381,7 +8396,7 @@
           }
         }
       ],
-      "calls": ["implementation-permit", "implementation-denied"],
+      "calls": ["implementation-permit", "adoptable", "implementation-denied"],
       "set": "rules"
     },
     {
@@ -22426,6 +22441,6 @@
     "overrides": 5,
     "constants": 14,
     "attributes": 123,
-    "clauses": 1393
+    "clauses": 1395
   }
 }
