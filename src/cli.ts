@@ -418,6 +418,7 @@ ${crashDisclosure()}
                         limits are unmetered (quotas --help)
   rebrief init|check|ack --json  Shared bounded continuation core (rebrief --help); no hook installed
   rebrief codex-stop     Experimental native stdin/JSON adapter (rebrief codex-stop --help)
+  rebrief claude-stop    Native Claude Code Stop adapter (rebrief claude-stop --help)
   serve [--repo owner/name | --project PATH]... [--port N]  Foreground local HTTP server:
                         read-only JSON API and HTTP MCP over a short-lived memory cache; without
                         targets, saved registrations and this checkout are served (serve --help)

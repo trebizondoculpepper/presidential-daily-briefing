@@ -86,5 +86,17 @@ consumed; this command grants no new model trial or production rollout. The
 owner's existing trusted definition is preserved until deliberately replaced;
 replacement requires normal native review/trust again.
 
+`pdb rebrief claude-stop --help` documents the Claude Code entry point (#771). It
+takes the same selection and state flags and reads one documented Claude Code `Stop`
+payload. Claude Code fires `Stop` only when the main agent finishes a turn on its own
+(never on a user interrupt; API errors fire `StopFailure`), which is the basis for
+passing `--natural-stop-confirmed`. The payload has no `turn_id`, so the event is its
+`prompt_id` within `session_id`; a repeated value is refused as a duplicate. A Stop
+already continued by a hook (`stop_hook_active: true`) gets `{}`. A continue is
+returned as `{"decision":"block","reason":…}` and stays pending: writing it is not
+receipt, because Claude Code overrides blocks at its native continuation cap (see
+[the Claude Code report](reports/agent-platforms/claude-code-stop-hooks.md)). Owned
+hook registration by `pdb install claude` is a separate slice.
+
 After stopping your adapter, remove only its native definition and private state
 directory. Preserve unrelated hooks and sessions. No global hook was installed.

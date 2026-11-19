@@ -95,7 +95,10 @@ export async function runRebrief(
   output: (text: string) => Promise<void>,
   runtime: CliRuntime = {},
 ): Promise<number> {
-  if (args[0] === "codex-stop") return runCodexStop(args.slice(1), output, runtime);
+  if (args[0] === "codex-stop")
+    return runNativeStop(codexStopProfile, args.slice(1), output, runtime);
+  if (args[0] === "claude-stop")
+    return runNativeStop(claudeStopProfile, args.slice(1), output, runtime);
   let input: Input = {
     repository: "",
     agent: "",
@@ -387,7 +390,7 @@ export async function runRebrief(
 const codexHelp = `Usage: pdb rebrief codex-stop --state-dir PATH --repo owner/name
        --role implementer|designer [--agent NAME] [--project PATH]
        [--entry KEY | --harness NAME] --natural-stop-confirmed
-       [--deadline-ms 1..10000] [--cap 1..3] [--transport service|http-mcp]
+       [--deadline-ms 1..10000] [--cap N] [--transport service|http-mcp]
 Experimental native Codex adapter: one JSON Stop event on stdin, one native JSON
 response on stdout. Requires explicit rebrief init for the actual session, same
 selection and --platform codex, in a private temporary state directory.
@@ -399,14 +402,51 @@ exceed the package deadline. Exact hook definition requires normal native trust.
 No hook is installed. See doc/rebrief.md for setup/removal and trial limits.
 `;
 
+const claudeHelp = `Usage: pdb rebrief claude-stop --state-dir PATH --repo owner/name
+       --role implementer|designer [--agent NAME] [--project PATH]
+       [--entry KEY | --harness NAME] --natural-stop-confirmed
+       [--deadline-ms 1..10000] [--cap N] [--transport service|http-mcp]
+Native Claude Code Stop adapter (#771): one JSON Stop event on stdin, one native JSON
+response on stdout. Claude Code fires Stop only when the main agent finishes a turn
+on its own (never on a user interrupt; API errors fire StopFailure), so the hook may
+pass --natural-stop-confirmed. The event is the payload's prompt_id within its
+session_id; a Stop already continued by a hook (stop_hook_active true), a missing
+prompt_id, missing/mismatched state, invalid input, cancellation or failure gives {}
+and exit 0, so Claude Code stops normally. A continue is returned as
+{"decision":"block","reason":BRIEFING}; writing it is not delivery receipt, so the
+offer stays pending (doc/reports/agent-platforms/claude-code-stop-hooks.md). No
+transcript access, implicit initialization, retries or update check.
+`;
+
+/** Per-platform Stop translation: the native event identifier and help; nothing else differs. */
+interface NativeStopProfile {
+  platform: "codex" | "claude-code";
+  help: string;
+  /** The native per-Stop event identifier, or null when the payload carries none. */
+  eventId: (event: Record<string, unknown>) => unknown;
+}
+const codexStopProfile: NativeStopProfile = {
+  platform: "codex",
+  help: codexHelp,
+  eventId: (event) => event.turn_id,
+};
+const claudeStopProfile: NativeStopProfile = {
+  platform: "claude-code",
+  help: claudeHelp,
+  // Claude Code's Stop payload has no turn_id; prompt_id identifies the prompt the turn served
+  // (observed in #386). A repeated value is refused by the session store as a duplicate event.
+  eventId: (event) => event.prompt_id,
+};
+
 /** Native framing over the existing CLI/core; wrappers contain no JSON or policy logic. */
-async function runCodexStop(
+async function runNativeStop(
+  profile: NativeStopProfile,
   args: string[],
   output: (text: string) => Promise<void>,
   runtime: CliRuntime,
 ): Promise<number> {
   if (args.includes("--help")) {
-    await output(codexHelp);
+    await output(profile.help);
     return 0;
   }
   const controller = new AbortController();
@@ -468,8 +508,7 @@ async function runCodexStop(
       event.hook_event_name !== "Stop" ||
       !("session_id" in event) ||
       !id(event.session_id) ||
-      !("turn_id" in event) ||
-      !id(event.turn_id) ||
+      !id(profile.eventId(event as Record<string, unknown>)) ||
       !("stop_hook_active" in event) ||
       event.stop_hook_active !== false
     )
@@ -481,11 +520,11 @@ async function runCodexStop(
       "--reason",
       "natural",
       "--platform",
-      "codex",
+      profile.platform,
       "--session",
       event.session_id,
       "--event",
-      event.turn_id,
+      String(profile.eventId(event as Record<string, unknown>)),
     ];
     for (const [key, value] of Object.entries(values))
       if (typeof value === "string") check.push(`--${key}`, value);
