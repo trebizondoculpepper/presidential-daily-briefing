@@ -2079,7 +2079,9 @@ async function run(
     return result.exitCode;
   }
   if (args[0] === "refine") {
-    if (args[1] === "--help" || args[1] === "-h" || args.length === 1) {
+    // Help before validation, at the group or after the subcommand (refine request --help).
+    const helpAt = args[1] === "request" ? 2 : 1;
+    if (args[helpAt] === "--help" || args[helpAt] === "-h" || args.length === 1) {
       await output(refineHelp);
       return args.length === 1 ? 1 : 0;
     }

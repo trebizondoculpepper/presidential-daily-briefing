@@ -126,6 +126,11 @@ describe("refine request: service wiring (#1095)", () => {
   it("prints help", async () => {
     let help = "";
     expect(await main(["refine", "--help"], async (t) => void (help = t))).toBe(0);
+    for (const flag of ["--help", "-h"]) {
+      let sub = "";
+      expect(await main(["refine", "request", flag], async (t) => void (sub = t))).toBe(0);
+      expect(sub).toContain("--question TEXT");
+    }
     expect(help).toContain("--question TEXT");
     expect(help).toContain("never added as a native dependency");
   });
