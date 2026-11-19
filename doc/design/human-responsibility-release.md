@@ -5,6 +5,10 @@ This addendum supersedes only the blanket open-PR prohibition for this explicit
 operation. Ordinary reset/readiness behavior and unrelated ownership guards remain.
 It does not implement release by merging this document.
 
+Owner correction, 19 November 2026: clearing ownership does not exclude the former
+owner from future work. This supersedes the earlier blanket removed-agent reclaim
+restriction; #1018 must update its native scenarios before dependent integration.
+
 ## Small user-visible behavior
 
 Clear the selected agent's ownership of the ticket and its required deliverables;
@@ -29,10 +33,20 @@ No arbitrary flag or shared GitHub login independently proves human intent.
 
 The same policy recognizes unowned preserved deliverables as adoptable existing
 work for an eligible agent. Ordinary new-implementation admission must not duplicate
-an open PR. A new agent explicitly adopts/reworks the existing member and becomes
-responsible; no automatic reclaim by the removed agent. A fresh explicit human
-instruction can authorize its return. Use the native follow-up/admission model,
+an open PR. An eligible agent explicitly adopts/reworks the existing member and
+becomes responsible. This may be the former owner: release/removal alone creates
+no ban, cooldown or requirement for fresh human permission to return. Preserve
+any explicit agent-specific exclusion or other applicable human direction; do
+not invent an exclusion from a release record. Adoption continues existing work
+rather than opening a duplicate PR. Use the native follow-up/admission model,
 not a parallel queue or a fake agent named "unassigned".
+
+An agent must not independently take another agent's active claim. Explicit
+trusted human direction can authorize reassignment/override of that default.
+Represent actual ownership and trusted direction separately, preserve useful work,
+and record the direction and truthful handoff. A shared login, model name, issue
+text or arbitrary caller field is not proof of that direction. This clarification
+does not waive technical, provenance or revision checks or implement generic force.
 
 #1019 gathers/rechecks facts, invokes that decision and performs bounded writes.
 Reuse the existing Human Unassign preview/apply path where available; add a CLI
@@ -77,7 +91,10 @@ unpickable by leaving obsolete admission assumptions in TypeScript.
 
 Policy matrix: active claim, responsibility without claim, already released,
 unauthorized direction, replacement owner, other member owner, unowned PR adoption,
-removed agent not automatically reclaiming. Engineering checks cover #891/#930 with
+former agent eligible to claim/adopt unowned work, an applicable explicit exclusion,
+another agent's active claim, and trusted human-directed reassignment. Distinguish
+explicit future pickup from falsely retaining responsibility after release.
+Engineering checks cover #891/#930 with
 open #998/#999, exact record/label outcomes, parser/fold compatibility, all preserved
 fields, stale claim-start/revision, partial writes and lost responses/retry.
 Policy alone does not complete #1014; only actual release and subsequent adoption
