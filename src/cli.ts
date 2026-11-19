@@ -186,6 +186,7 @@ import {
 import { readTicketStatus, ticketLimits, ticketStatusText } from "./workflow/ticketstatus.js";
 import { runServe } from "./serve.js";
 import { createGhService } from "./github/service/service.js";
+import { discussionHelp, discussionText, readDiscussion } from "./briefing/discussion.js";
 import type { GhService } from "./github/service/service.js";
 import { createAppServices } from "./composition.js";
 import type { AppServices } from "./composition.js";
@@ -419,6 +420,7 @@ ${crashDisclosure()}
   rebrief init|check|ack --json  Shared bounded continuation core (rebrief --help); no hook installed
   rebrief codex-stop     Experimental native stdin/JSON adapter (rebrief codex-stop --help)
   rebrief claude-stop    Native Claude Code Stop adapter (rebrief claude-stop --help)
+  discussion             Issues ranked by comment count; a rough discussion view (discussion --help)
   serve [--repo owner/name | --project PATH]... [--port N]  Foreground local HTTP server:
                         read-only JSON API and HTTP MCP over a short-lived memory cache; without
                         targets, saved registrations and this checkout are served (serve --help)
@@ -2321,6 +2323,51 @@ async function run(
             (ruleRemindersWarning ? `\nWarning: ${ruleRemindersWarning}\n` : ""),
     );
     return exitCode;
+  }
+  if (args[0] === "discussion") {
+    // #1100: read-only discussion view over the shared service (#1099) and native policy (#1093).
+    const { values } = parseArgs({
+      args: args.slice(1),
+      options: {
+        repo: { type: "string" },
+        agent: { type: "string" },
+        ...identitySelectionOptions,
+        json: { type: "boolean" },
+        state: { type: "string" },
+        limit: { type: "string" },
+        help: { type: "boolean" },
+      },
+    });
+    if (values.help) {
+      await output(discussionHelp);
+      return 0;
+    }
+    if (values.repo && !/^[\w.-]+\/[\w.-]+$/.test(values.repo))
+      throw new Error("--repo must be owner/name.");
+    const scope = values.state ?? "open";
+    if (scope !== "open" && scope !== "closed" && scope !== "all")
+      throw new Error("--state must be open, closed or all.");
+    const limit = values.limit === undefined ? 20 : Number(values.limit);
+    if (!Number.isInteger(limit) || limit < 1 || limit > 200)
+      throw new Error("--limit must be a whole number from 1 to 200.");
+    if (identity) values.repo ??= await runtime.currentRepository();
+    // An observational read: an agent may personalize nothing here and none is ever created.
+    await commandViewer(values, identity);
+    const view = await readDiscussion({
+      repository: values.repo ?? (await runtime.currentRepository()),
+      scope,
+      gh: ghOf(runtime),
+      ...(runtime.now ? { now: runtime.now } : {}),
+    });
+    // The display limit bounds presentation only; the native order is kept and omissions counted.
+    const shown = view.items.slice(0, limit);
+    const report = { ...view, shown: shown.length, omitted: view.items.length - shown.length };
+    await output(
+      values.json
+        ? JSON.stringify({ ...report, items: shown }, null, 2) + "\n"
+        : discussionText(view, shown, limit),
+    );
+    return view.coverage.complete ? 0 : 2;
   }
   if (args[0] === "team") {
     const { values } = parseArgs({
