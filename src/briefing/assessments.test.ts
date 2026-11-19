@@ -295,15 +295,15 @@ describe("side-by-side assessments (#247)", () => {
         currentRepository: async () => repo,
         now: () => new Date(time),
         estimation: estimation(),
-        guide: estimation('schemaVersion=1\n[briefing]\nengine="typescript"\n'),
         rest: permissions(),
       },
     );
-    expect(text).toContain("impact L · complexity S · unlocks at least 0");
-    expect(text).toContain("impact S · complexity L · unlocks at least 0");
-    expect(text).toContain("impact L · complexity L · unlocks at least 0");
-    expect(text).toContain("impact invalid · complexity invalid");
-    expect(text).toContain("impact unknown · complexity unassessed");
+    // #1050: next steps come from the native engine, whose reasons state impact and complexity
+    // side by side; the fixed assessment line order is pinned on assessmentsText below.
+    expect(text).toContain("Known easy win: impact L, complexity S.");
+    expect(text).toContain("Eligible implementation: impact L (current), complexity L (current).");
+    expect(text).toContain("Complexity evidence is invalid and impact evidence is invalid");
+    expect(text).toContain("impact unknown (unknown), complexity unknown (unassessed)");
     expect(
       assessmentsText({
         impact: { state: "stale", size: "L", provenance: null },
@@ -453,7 +453,6 @@ describe("legacy complexity and estimation stay byte-compatible (#247)", () => {
     const options = {
       limit: 10,
       maxChars: 10000,
-      engineSetting: { requested: "typescript" as const, source: "config" as const },
     };
     const trust = markerTrust(permissionLookup(repo, permissions()));
     // The legacy builder gets the same prepared provenance trust decisions (#269).
@@ -473,9 +472,27 @@ describe("legacy complexity and estimation stay byte-compatible (#247)", () => {
       trust,
     );
     const report = presented.report as CompactBriefing;
-    expect(JSON.stringify(report.estimation)).toBe(JSON.stringify(legacy.estimation));
+    // #1050: the native engine adds its estimation offer (offered/eligible/ranked/shown); every
+    // legacy field stays byte-identical.
+    const legacyFields = (e: unknown) => {
+      const {
+        offered: _o,
+        eligible: _e,
+        ranked: _r,
+        shown: _s,
+        ...rest
+      } = e as Record<string, unknown>;
+      return JSON.stringify(rest);
+    };
+    expect(legacyFields(report.estimation)).toBe(legacyFields(legacy.estimation));
+    expect(report.estimation).toMatchObject({ offered: true, eligible: 3, shown: 3 });
     const strip = (subjects: CompactBriefing["subjects"]) =>
-      JSON.stringify(subjects.map(({ assessments: _a, ...rest }) => rest));
+      // #1050: subject order follows the native ranking; each subject's JSON stays identical.
+      JSON.stringify(
+        [...subjects]
+          .sort((a, b) => a.number - b.number)
+          .map(({ assessments: _a, ...rest }) => rest),
+      );
     expect(strip(report.subjects)).toBe(strip(legacy.subjects));
     expect(report.subjects.every((s) => s.assessments !== null)).toBe(true);
     expect(report.schemaVersion).toBe(2);

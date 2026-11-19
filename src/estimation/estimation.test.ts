@@ -83,7 +83,7 @@ describe("estimation queue and briefing visibility from size labels (#122, #152)
       estimation: { fs: config(configText), git, cwd: root },
       rest: maintainerOnly,
       guide: {
-        fs: config('{"schemaVersion":1,"briefing":{"engine":"typescript"}}'),
+        fs: config('{"schemaVersion":1,"briefing":{"engine":"datalog"}}'),
         git,
         cwd: root,
       },
@@ -125,8 +125,14 @@ describe("estimation queue and briefing visibility from size labels (#122, #152)
       state: "estimated",
       recorded: { rationale: "contained capability across modules", estimator: "ana" },
     });
-    expect(report.actions.items[0]).toBe(issue(1).url);
-    expect(report.estimation.offered).toBe(false);
+    // #1050 (#651 bands): the native engine offers the blocked ticket's complexity estimate
+    // (band 5) before ordinary implementation (band 6); it stays ineligible for pickup.
+    expect(
+      report.rankedActions.items
+        .slice(0, 2)
+        .map((i: { kind: string; target: string }) => `${i.kind} ${i.target}`),
+    ).toEqual([`estimate-complexity ${issue(2).url}`, `implement ${issue(1).url}`]);
+    expect(report.estimation.offered).toBe(true);
   });
   it("flags stale estimates: label drift, older guidance or later description edits", async () => {
     const edited = {
@@ -192,7 +198,10 @@ describe("estimation queue and briefing visibility from size labels (#122, #152)
         lastEditedAt: "2026-11-13T00:00:00Z",
       },
     ]);
-    expect(JSON.stringify(report.estimation)).toBe(golden);
+    // #1050: the native engine adds offer counts (eligible/ranked/shown); every other field,
+    // in order, stays byte-identical to the golden.
+    const { eligible: _e, ranked: _r, shown: _s, ...legacy } = report.estimation;
+    expect(JSON.stringify(legacy)).toBe(golden);
   });
   it("keeps truncated labels unknown and conflicting labels as inspection, never queued", async () => {
     const { code, report } = await brief(null, [
@@ -251,7 +260,7 @@ describe("estimation queue and briefing visibility from size labels (#122, #152)
       now: () => new Date(time),
       estimation: { fs: config(null), git, cwd: root },
       guide: {
-        fs: config('{"schemaVersion":1,"briefing":{"engine":"typescript"}}'),
+        fs: config('{"schemaVersion":1,"briefing":{"engine":"datalog"}}'),
         git,
         cwd: root,
       },
@@ -268,10 +277,13 @@ describe("estimation queue and briefing visibility from size labels (#122, #152)
     expect(full.indexOf("ESTIMATION (requested)")).toBeLessThan(full.indexOf("NEXT ACTIONS"));
     let plain = "";
     await main(["--context"], async (t) => void (plain = t), runtime);
-    expect(plain.indexOf("ESTIMATION (optional")).toBeGreaterThan(plain.indexOf("NEXT STEPS"));
+    // #1050: native next steps rank estimates; the estimation detail follows NEXT STEPS.
+    expect(
+      plain.indexOf("ESTIMATION (detail; estimates are ranked in NEXT STEPS)"),
+    ).toBeGreaterThan(plain.indexOf("NEXT STEPS"));
     // #247: the side-by-side line replaces the old size parenthetical in text.
     expect(plain).toContain(
-      "#1 Ticket 1 \n  impact unassessed · complexity unassessed · unlocks at least 0",
+      "#1 Ticket 1 — estimate-complexity (assessment)\n  impact unassessed · complexity unassessed · unlocks at least 0",
     );
   });
   it("reads sizes from cached labels offline, and keeps --full in sync", async () => {
@@ -287,7 +299,7 @@ describe("estimation queue and briefing visibility from size labels (#122, #152)
         currentRepository: async () => repo,
         estimation: { fs: config(null), git, cwd: root },
         guide: {
-          fs: config('{"schemaVersion":1,"briefing":{"engine":"typescript"}}'),
+          fs: config('{"schemaVersion":1,"briefing":{"engine":"datalog"}}'),
           git,
           cwd: root,
         },

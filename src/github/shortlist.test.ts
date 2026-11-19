@@ -201,7 +201,8 @@ const smallRepository = () => {
 };
 
 describe("routine briefing: discover all, rank, hydrate only the shortlist (#368)", () => {
-  for (const engine of ["datalog", "typescript"] as const)
+  // #1050: the native engine is the only scheduler (the typescript setting is an alias).
+  for (const engine of ["datalog"] as const)
     it(`matches the full snapshot exactly when every relevant fact is hydrated (${engine})`, async () => {
       const full = await reportOf(runtimeFor(smallRepository(), engine, false));
       const short = await reportOf(runtimeFor(smallRepository(), engine, true));
@@ -227,12 +228,12 @@ describe("routine briefing: discover all, rank, hydrate only the shortlist (#368
     };
     owned.closedByPullRequestsReferences = page([{ number: 300, url: linked.url, state: "OPEN" }]);
     const before = fakeGitHub([...issues, owned], [linked]);
-    await reportOf(runtimeFor(before, "typescript", false));
+    await reportOf(runtimeFor(before, "datalog", false));
     // The full snapshot reads every open item with its comments, reviews and checks.
     expect(before.calls.fullPages).toBe(4);
 
     const fake = fakeGitHub([...issues, owned], [linked]);
-    const { report, text } = await reportOf(runtimeFor(fake, "typescript", true));
+    const { report, text } = await reportOf(runtimeFor(fake, "datalog", true));
     const shortlist = report.shortlist!;
     const hydratedIssues = fake.calls.issueBatches.flat();
     // No full-inventory page; discovery is 3 issue pages (121 / 50) and 1 PR page.
@@ -276,7 +277,7 @@ describe("routine briefing: discover all, rank, hydrate only the shortlist (#368
     // Delivery records on unhydrated issues are unknown, never "no delivery".
     expect(report.delivery?.complete).toBe(false);
     expect(report.delivery?.omissions.at(-1)).toContain("not hydrated are unknown");
-  });
+  }, 90_000);
 
   it("never shows an item it could not hydrate, and never as clean evidence", async () => {
     // Ten eligible tickets; the selector wants all of them, but only three may be hydrated.

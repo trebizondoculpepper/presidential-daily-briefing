@@ -13,11 +13,8 @@ import {
   roleCandidates,
 } from "./blended.js";
 import type { ActionFacts, ActionKind, CandidateSubject } from "./blended.js";
-import { briefing } from "./briefing.js";
-import { compactBriefing } from "./compact.js";
 import type { CompactBriefing } from "./compact.js";
 import type { ComplexitySize } from "../estimation/complexity.js";
-import { collectLabelEstimationInput } from "../estimation/complexitylabels.js";
 import { TOML_CONFIG_PATH } from "../config/config.js";
 import type { ConfigFileSystem, GitRunner } from "../config/config.js";
 import { collect } from "../github/github.js";
@@ -456,14 +453,17 @@ describe("rankedActions through collect() (#248)", () => {
       "implement#3",
       "implement#4",
       "implement#6",
-      "inspect#7",
       "implement#2",
+      // #1050 (#651): one pool; the designer-affinity rows follow the implementer's own.
+      "assess-impact#5",
+      "assess-impact#6",
+      "design#5",
     ]);
     const ranked = report.rankedActions!;
     expect(ranked.policyVersion).toBe(1);
     expect(ranked.items[0]).toMatchObject({
       band: 4,
-      reasonCodes: ["easy-win", "impact-current", "complexity-current"],
+      reasonCodes: ["easy-win"],
       impact: { state: "current", size: "L" },
       complexity: { state: "current", size: "S" },
       nextCommand: `pdb claim 1 --repo ${repo} --agent me`,
@@ -477,13 +477,9 @@ describe("rankedActions through collect() (#248)", () => {
       false,
     );
     const inspect = ranked.items.find((i) => i.kind === "inspect-assessment");
-    // #259: the implementer's complexity inspection carries the Ticket Doctor fix as its command.
-    expect(inspect).toMatchObject({
-      band: 5,
-      nextCommand: `pdb estimate 6 --metric complexity --size SIZE --rationale TEXT --repo ${repo}`,
-      inspection: null,
-    });
-    expect(ranked.items.at(-1)).toMatchObject({
+    // #1050: the native inspection reads the ticket (#1067 tracks restoring the Ticket Doctor fix).
+    expect(inspect).toMatchObject({ band: 5, nextCommand: `pdb --repo ${repo} --issue 6 --json` });
+    expect(ranked.items.find((i) => i.target === url(2))).toMatchObject({
       band: 7,
       reasonCodes: expect.arrayContaining(["unfavorable"]),
     });
@@ -495,12 +491,15 @@ describe("rankedActions through collect() (#248)", () => {
     expect(kinds[0]).toBe("assess-impact#5");
     expect(report.rankedActions?.items[0]?.reasonCodes).toContain("cross-role-boost");
     expect(kinds.indexOf("design#5")).toBeGreaterThan(kinds.indexOf("assess-impact#6"));
-    expect(kinds.some((k) => k.startsWith("estimate-complexity"))).toBe(false);
+    // #1050 (#651): implementer-affinity work follows the designer's own, never precedes it.
+    expect(kinds.findIndex((k) => k.startsWith("estimate-complexity"))).toBeGreaterThan(
+      kinds.indexOf("design#5"),
+    );
   });
 
   it("applies limits after ranking and keeps omitted assessments counted", async () => {
     const { report } = await present("implementer", { limit: 2 });
-    expect(report.rankedActions).toMatchObject({ total: 10, omitted: 8 });
+    expect(report.rankedActions).toMatchObject({ total: 12, omitted: 10 });
     expect(items(report)).toEqual(["implement#1", "estimate-complexity#4"]);
   });
 
@@ -521,13 +520,16 @@ describe("rankedActions through collect() (#248)", () => {
       config: "schemaVersion = 1\n[complexity]\nenabled = false\n",
     });
     expect(items(report).some((k) => k.startsWith("estimate-complexity"))).toBe(false);
-    expect(report.rankedActions?.items.every((i) => i.band === 6)).toBe(true);
+    // Without complexity there are no easy-win or unfavorable value bands for implementation.
+    expect(
+      report.rankedActions?.items.filter((i) => i.kind === "implement").every((i) => i.band === 6),
+    ).toBe(true);
     expect(items(report)).toContain("implement#1");
   });
 
-  it("is absent without a role", async () => {
+  it("defaults to the implementer order without a role (#651)", async () => {
     const { report } = await present(undefined);
-    expect(report.rankedActions).toBeNull();
+    expect(items(report)).toEqual(items((await present("implementer")).report));
   });
 });
 
@@ -540,44 +542,25 @@ describe("legacy projections follow the blended ranking (#259)", () => {
   for (const role of ["implementer", "designer"] as const)
     for (const order of ["impact", "oldest"] as const)
       it(`projects actions and role.next from rankedActions for ${role} (${order})`, async () => {
-        const { snapshot, options, report } = await present(role, { order });
-        // The pre-#248 pipeline: no assessments, so no blended ranking at all.
-        const input = await collectLabelEstimationInput(repo, estimation());
-        const wide = { ...options, estimation: input, limit: 2000 };
-        const legacy = compactBriefing(snapshot, options, briefing(snapshot, wide, new Date(time)));
-        expect(legacy.rankedActions).toBeNull();
-        // Deliberate change: target-only, each target once, in blended order.
+        const { report } = await present(role, { order });
+        // Target-only, each target once, in native ranked order (#1050: the native engine).
         const targets = projection(report);
         expect(report.actions).toEqual({ total: targets.length, omitted: 0, items: targets });
         expect(report.role?.next.map((r) => r.url)).toEqual(targets);
         expect(report.role?.next.every((r) => typeof r.reason === "string" && r.reason)).toBe(true);
-        expect(JSON.stringify(report.actions)).not.toBe(JSON.stringify(legacy.actions));
-        // Unchanged: the role sections, the non-role section lists and the ranking metadata.
-        for (const key of ["sections", "ranking"] as const)
-          expect(JSON.stringify(report[key])).toBe(JSON.stringify(legacy[key]));
-        expect(JSON.stringify(report.role?.sections)).toBe(JSON.stringify(legacy.role?.sections));
       });
 
   it("bounds the projection by --limit after ranking, with repeated targets once", async () => {
     const { report } = await present("implementer", { limit: 3 });
-    // Ranked: implement#1, estimate#4, estimate#7, ... implement#4 later repeats #4.
+    const all = projection((await present("implementer", { limit: 50 })).report);
+    // Ranked: implement#1, estimate#4, estimate#7, ...; later rows repeat targets.
     expect(report.actions.items).toEqual([url(1), url(4), url(7)]);
-    // Ten ranked actions on seven distinct targets: 1, 4, 7, 6, 8, 3, 2.
-    expect(report.actions).toMatchObject({ total: 7, omitted: 4 });
+    expect(report.actions).toMatchObject({ total: all.length, omitted: all.length - 3 });
     expect(report.role?.next.map((r) => r.url)).toEqual(report.actions.items);
     // A target no role section placed (another agent's claim) explains itself by its ranked action.
     expect(
       (await present("implementer")).report.role?.next.find((r) => r.url === url(8))?.reason,
-    ).toContain("estimate-complexity");
-  });
-
-  it("leaves the non-role briefing on its previous order", async () => {
-    const { snapshot, options, report } = await present(undefined);
-    const input = await collectLabelEstimationInput(repo, estimation());
-    const wide = { ...options, estimation: input, limit: 2000 };
-    const legacy = compactBriefing(snapshot, options, briefing(snapshot, wide, new Date(time)));
-    for (const key of ["actions", "role", "sections", "estimation"] as const)
-      expect(JSON.stringify(report[key])).toBe(JSON.stringify(legacy[key]));
+    ).toContain("Effort is unassessed");
   });
 });
 
@@ -599,8 +582,9 @@ describe("implementer estimation counts and NEXT STEPS (#259)", () => {
   it("renders the ranked queue as NEXT STEPS with kinds, reasons and commands", async () => {
     const { text, report } = await present("implementer", { limit: 3, context: true });
     const steps = text.slice(text.indexOf("NEXT STEPS"));
-    expect(steps).toMatch(/^NEXT STEPS \(10; 7 omitted\)/);
-    expect(steps).toContain("— implement (easy-win, impact-current, complexity-current)");
+    // #1050: the native pool (#651) also ranks impact assessments for the implementer.
+    expect(steps).toMatch(/^NEXT STEPS \(12; 9 omitted\)/);
+    expect(steps).toContain("— implement (easy-win)");
     expect(steps).toContain("— estimate-complexity (assessment, cross-role-boost");
     expect(steps).toContain(
       `Next: pdb estimate 4 --metric complexity --size SIZE --rationale TEXT --repo ${repo}`,
@@ -650,10 +634,10 @@ describe("implementer estimation counts and NEXT STEPS (#259)", () => {
       issue(3, ["status:ready", "agent:me", "impact:M", "complexity:M"], "2026-11-02T00:00:00Z"),
     ];
     const { report } = await present("implementer", { issues });
-    const own = report.rankedActions?.items.find((i) => i.target === url(3));
-    expect(own).toMatchObject({ kind: "continue-implementation", band: 6 });
+    // #1050 (#651): owned work ranks first, then the easy win with the release handoff.
+    const [own, easy] = report.rankedActions?.items ?? [];
+    expect(own).toMatchObject({ kind: "continue-implementation", target: url(3), band: 6 });
     expect(own?.reasonCodes).toContain("own-claim");
-    const easy = report.rankedActions?.items[0];
     expect(easy).toMatchObject({
       kind: "implement",
       target: url(1),

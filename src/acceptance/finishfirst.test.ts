@@ -195,7 +195,6 @@ const git: GitRunner = async (args) =>
 // Assessment actions are covered elsewhere; disabling both metrics keeps these queues focused.
 const metricsOff = "[complexity]\nenabled = false\n[impact]\nenabled = false\n";
 const datalog = `schemaVersion = 1\n${metricsOff}`;
-const typescript = `schemaVersion = 1\n[briefing]\nengine = "typescript"\n${metricsOff}`;
 
 interface World {
   issues: Issue[];
@@ -242,8 +241,6 @@ async function cli(
 }
 const ranked = (r: { rankedActions?: CompactBriefing["rankedActions"] }) =>
   (r.rankedActions?.items ?? []).map((i) => `${i.kind}#${i.target.split("/").pop()}`);
-const next = (r: CompactBriefing) =>
-  (r.role?.next ?? []).map((row) => Number(row.url.split("/").pop()));
 
 /**
  * #1 was submitted by `me` (claim released, so no `agent:` label) as PR 20, which has changes
@@ -301,18 +298,7 @@ describe("own submitted PR follow-up survives the released claim (#182 S2)", () 
       expect(ranked(r)[0], `issue order ${order.join(",")}`).toBe("pr-follow-up#25");
       const own = r.rankedActions!.items[0] as unknown as { why: { facts: object } };
       expect(own.why.facts).toMatchObject({ responsible: "me; other" });
-      const ts = await cli(shared(order), "implementer", typescript);
-      expect(next(ts)[0], `typescript, issue order ${order.join(",")}`).toBe(25);
     }
-  });
-
-  it("the explicit TypeScript engine applies the same responsibility", async () => {
-    const r = await cli(submittedWorld(), "implementer", typescript);
-    expect(next(r).slice(0, 3)).toEqual([20, 19, 3]);
-    const followUp = r.role!.sections.find((s) => s.name === "pr-follow-up")!;
-    expect(followUp.items[0]).toMatchObject({ url: pullUrl(20) });
-    expect(followUp.items[0]!.reason).toMatch(/^Your PR/);
-    expect(followUp.items[1]!.reason).toMatch(/^Review opportunity/);
   });
 
   it("a designer's submitted documentation PR is own follow-up, not design review", async () => {
@@ -365,8 +351,6 @@ describe("accepted PRs needing refresh are integration actions (#182 S9)", () =>
       expect(integrate.why.text).toContain(`merge state is ${shape.mergeState}`);
       expect(integrate.nextCommand).toBe(`pdb pr 22 --repo ${repo}`);
       // The TypeScript engine agrees.
-      const ts = await cli(world(shape), "implementer", typescript);
-      expect(next(ts)[0]).toBe(22);
     });
 
   it("own continuation precedes another agent's actionable review (#651 supersedes PR #251)", async () => {
@@ -410,8 +394,6 @@ describe("accepted PRs needing refresh are integration actions (#182 S9)", () =>
       // An owned wait or incomplete-evidence inspection of #22 precedes new pickup.
       if (order.includes("inspect#22"))
         expect(order.indexOf("inspect#22")).toBeLessThan(order.indexOf("implement#7"));
-      const ts = await cli(world(shape), "implementer", typescript);
-      expect(next(ts), JSON.stringify(shape)).not.toContain(22);
     }
 
     // Current-head Codex findings route as review follow-up (D-PR-REVIEW), never integration.
@@ -432,17 +414,6 @@ describe("accepted PRs needing refresh are integration actions (#182 S9)", () =>
       expect(prItem?.why.ruleIds, JSON.stringify(shape)).toEqual(["D-PR-REVIEW"]);
       expect(prItem?.reasonCodes, JSON.stringify(shape)).toContain("pr-review-findings");
       expect(prItem?.reasonCodes, JSON.stringify(shape)).not.toContain("pr-integrate");
-      const ts = await cli(world(shape), "implementer", typescript);
-      expect(next(ts), JSON.stringify(shape)).toContain(22);
-      const tsItem = (
-        ts.rankedActions!.items as unknown as {
-          url?: string;
-          target?: string;
-          reasonCodes: string[];
-        }[]
-      ).find((s) => (s.target ?? s.url ?? "").endsWith("/22"));
-      expect(tsItem?.reasonCodes, JSON.stringify(shape)).toContain("pr-follow-up");
-      expect(tsItem?.reasonCodes, JSON.stringify(shape)).not.toContain("pr-integrate");
     }
   });
 });

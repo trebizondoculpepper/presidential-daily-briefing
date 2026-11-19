@@ -71,21 +71,24 @@ describe("repository-scoped experimental engine selection", () => {
       "no decision engine was run",
     );
   });
-  it("does not load the evaluator for explicit TypeScript rollback or full intake", async () => {
+  it("aliases the retired TypeScript rollback to the native engine and never loads it for intake", async () => {
     const never = async () => {
       throw new Error("evaluator initialized");
     };
+    // #1050: the retired rollback is an alias of the native engine, reported with a diagnostic.
     const normal = await presentBriefing(
       snapshot,
       { limit: 10, maxChars: 10000, engineSetting: { requested: "typescript", source: "config" } },
       local(),
       new Date(),
-      undefined,
-      undefined,
-      undefined,
-      never,
     );
-    expect(normal.report.decisionEngine.used).toBe("typescript");
+    expect(normal.report.decisionEngine).toMatchObject({
+      requested: "typescript",
+      used: "datalog",
+    });
+    expect(normal.report.decisionEngine.diagnostics.join(" ")).toContain(
+      "briefing.engine typescript is retired (#1050)",
+    );
     const intake = await presentBriefing(
       snapshot,
       {

@@ -260,7 +260,10 @@ async function presentBriefingFor(
     source: "default" as const,
   };
   const roleSource = options.role === undefined ? ("default" as const) : ("request" as const);
-  const datalogPath = selection.requested === "datalog" && !options.full && !options.issue;
+  // #1050 (#679 step 5): next actions always come from the native engine. The former
+  // `briefing.engine typescript` rollback is now an alias of it, reported as such below; no
+  // second scheduler runs. Full intake keeps its own (non-ranking) path.
+  const datalogPath = !options.full && !options.issue;
   // #413: the viewer's retained claims and, on a live read, their activity: the same facts for
   // the Datalog rules and the TypeScript rollback ranking.
   // Facts a caller already holds (tests, a future shared read) are used as given.
@@ -400,6 +403,16 @@ async function presentBriefingFor(
         source: selection.source,
         role: { used: options.role ?? defaultEngineRole, source: roleSource },
         ...(effective ? { effectivePolicy: effective.manifest } : {}),
+        // #1050: the retired rollback is honoured as an alias, never silently.
+        ...(selection.requested === "typescript"
+          ? {
+              requested: "typescript" as const,
+              diagnostics: [
+                ...experimental.decisionEngine.diagnostics,
+                "briefing.engine typescript is retired (#1050): the native engine ranked these next actions; switch with: pdb config set briefing.engine datalog",
+              ],
+            }
+          : {}),
       }
     : {
         requested: selection.requested,
