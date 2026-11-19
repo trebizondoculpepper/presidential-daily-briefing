@@ -346,9 +346,19 @@ export const rulesAssets = { script: "/web/rules.js", stylesheet: "/web/rules.cs
 export function rulesBootstrapHtml(
   served: readonly { repository: string; project?: string }[],
   query: URLSearchParams,
+  /** Whether the built frontend assets are served; without them the page says so (#1138). */
+  assetsAvailable = true,
 ): string {
+  const context = shellContext("rules", served, query);
+  if (!assetsAvailable)
+    return `${shellStart(context, "Project rules")}<main id="content" tabindex="-1"><h1>Project rules</h1>
+<p class="error" role="alert">The Rules page's frontend assets are not built, so this page cannot load. Run <code>npm run build</code> in this source checkout and restart <code>pdb serve</code>. The same document is available from <code>pdb rules</code> and <code>/api/v1/rules</code>.</p>
+</main>
+</body>
+</html>
+`;
   return `${shellStart(
-    shellContext("rules", served, query),
+    context,
     "Project rules",
     rulesAssets.script,
     rulesAssets.stylesheet,

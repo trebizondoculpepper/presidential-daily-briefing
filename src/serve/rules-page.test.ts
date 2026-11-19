@@ -178,7 +178,7 @@ function call(port: number, path: string, headers: Record<string, string> = {}):
 }
 
 /** A server whose every GitHub boundary records the call, so a page load can prove none. */
-async function server(args: string[], files: Record<string, string> = {}) {
+async function server(args: string[], files: Record<string, string> = {}, built = true) {
   const github: string[] = [];
   const record = (name: string) => (): never => {
     github.push(name);
@@ -211,10 +211,14 @@ async function server(args: string[], files: Record<string, string> = {}) {
     platform: "linux",
     rulesPage: { git, fs },
     webAssets: async () =>
-      new Map([
-        ["/web/rules.js", { type: "text/javascript; charset=utf-8", body: "/* rules.js */" }],
-        ["/web/rules.css", { type: "text/css; charset=utf-8", body: "/* rules.css */" }],
-      ]),
+      new Map(
+        built
+          ? [
+              ["/web/rules.js", { type: "text/javascript; charset=utf-8", body: "/* rules.js */" }],
+              ["/web/rules.css", { type: "text/css; charset=utf-8", body: "/* rules.css */" }],
+            ]
+          : [],
+      ),
   };
   const read: ServeReadRuntime = {
     collect: record("collect"),
@@ -348,6 +352,23 @@ describe("GET /api/v1/rules and /rules (#392, #853)", () => {
       expect(script.body).toBe("/* rules.js */");
       const css = await call(port, "/web/rules.css");
       expect(css.headers["content-type"]).toBe("text/css; charset=utf-8");
+    } finally {
+      await running.close();
+    }
+  });
+
+  it("says the assets are not built instead of loading forever (#1138 review)", async () => {
+    const { running, port } = await server(["--repo", "example/project"], {}, false);
+    try {
+      const reply = await call(port, "/rules");
+      expect(reply.status).toBe(200);
+      expect(reply.body).toContain('role="alert">The Rules page\'s frontend assets are not built');
+      expect(reply.body).toContain("npm run build");
+      expect(reply.body).not.toContain("/web/rules.js");
+      expect(reply.body).not.toContain("Loading the rules");
+      expect((await call(port, "/web/rules.js")).status).toBe(404);
+      // The data route is unaffected.
+      expect((await call(port, "/api/v1/rules")).status).toBe(200);
     } finally {
       await running.close();
     }

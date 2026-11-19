@@ -564,7 +564,11 @@ export async function startServe(
           throw new HttpFailure(405, "METHOD_NOT_ALLOWED", "Use GET.", [], {
             allow: "GET, HEAD",
           });
-        const html = rulesBootstrapHtml(served, context.url.searchParams);
+        const html = rulesBootstrapHtml(
+          served,
+          context.url.searchParams,
+          dashboard.has("/web/rules.js") && dashboard.has("/web/rules.css"),
+        );
         response.writeHead(200, {
           "content-type": "text/html; charset=utf-8",
           "cache-control": "no-store",
