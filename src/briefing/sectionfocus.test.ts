@@ -186,5 +186,10 @@ describe("--section (#311)", () => {
     expect(focused.focus.total).toBe(nativePickup.length);
     // A section with no single native kind is refused, not re-ranked.
     await expect(present("stale-claims")).rejects.toThrow(BriefingArgumentError);
+    // Declared background context sections stay available on the native view.
+    for (const section of ["pr-waiting", "pickup-inspect", "pending-design"])
+      expect(
+        ((await present(section)).report as { focus: { section: string } }).focus.section,
+      ).toBe(section);
   });
 });

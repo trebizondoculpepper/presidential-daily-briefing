@@ -561,7 +561,7 @@ export function compactBriefing(
       );
     // #1088: on a native-ranked view a section is a projection of the native ranking (its items
     // of the section's action kind, in native order), never a second TypeScript ranking. A section
-    // with no single native kind is refused rather than re-ranked.
+    // with no single native kind (and no background declaration) is refused rather than re-ranked.
     const nativeSection = (): RoleView["sections"][number] => {
       const kind = nativeSectionKinds[options.section!];
       if (!kind)
@@ -583,9 +583,14 @@ export function compactBriefing(
         items: rows,
       };
     };
+    // Background sections are declared context, not ranked work (like other-context), so on a
+    // native view they keep the role view's context rows; only ranked sections are projected.
+    const backgroundSection =
+      roleRegistry.get(options.role)?.sections.find((s) => s.section === options.section)
+        ?.background === true;
     const view =
       role?.sections.find((s) => s.name === options.section) ??
-      (experimental
+      (experimental && !backgroundSection
         ? nativeSection()
         : defined(
             roleView(options.role, roleContext, {
