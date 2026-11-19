@@ -203,6 +203,10 @@ ${lines ? formal(lines, `Formal conditions for ${rule.id}`) : ""}</article>`;
           (doc.eligibility.denialQuery
             ? formal(denialQueryLines(doc.eligibility.denialQuery), "Formal denial query")
             : "") + doc.eligibility.denials.map((d) => card(d, denialFormalLines(d))).join("\n");
+      } else if (s.title.startsWith("Procedural obligations (")) {
+        content =
+          doc.obligations.map((o) => card(o)).join("\n") +
+          formal(s.lines, "Structured obligation definitions");
       } else if (s.title.startsWith("Project preferences (") && doc.project) {
         content =
           doc.project.preferences.map((p) => card(p)).join("\n") +

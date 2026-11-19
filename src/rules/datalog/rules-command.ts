@@ -871,6 +871,18 @@ export function rulesFormalText(doc: RulesDocument): string {
   if (doc.eligibility.denialQuery) push(...denialQueryLines(doc.eligibility.denialQuery));
   for (const d of doc.eligibility.denials) push(...denialFormalLines(d));
 
+  if (doc.obligations.length) {
+    push(
+      "",
+      `== Procedural obligations (${doc.obligations.length}) ==`,
+      "Structured action-time obligations (distinct from formally validated Datalog decisions):",
+    );
+    for (const o of doc.obligations) {
+      const roleNote = o.roles ? o.roles.join(", ") : "all";
+      push(`  ${o.id} (outcomes: ${o.outcomes.join(", ")}; roles: ${roleNote}): ${o.purpose}`);
+    }
+  }
+
   push("", "== Ordering ==");
   push(
     `Sort keys, compared in this sequence, smaller first: ${doc.ordering.comparison.join(", ")}.`,
