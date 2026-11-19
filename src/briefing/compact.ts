@@ -8,13 +8,25 @@ import { assessmentsText, provenanceText } from "./assessments.js";
 import type { MetricAvailability, SubjectAssessments } from "./assessments.js";
 import type { EstimateEntry } from "../estimation/estimation.js";
 import { compareImpact, impactLookup } from "./ranking.js";
-import { roleSectionIds, roleSectionRows, roleView } from "./roles.js";
+import { roleRegistry, roleSectionIds, roleSectionRows, roleView } from "./roles.js";
 import type { RoleContext } from "./roles.js";
 import type { BlendedRole, RankedActions } from "./blended.js";
 import { impactGuidance } from "../estimation/impact.js";
 import type { RoleView } from "./roles.js";
 import type { Action, Issue, PullRequest, Snapshot } from "../github/types.js";
 
+/** #1088: the native action kinds each role section projects; absent means no native projection. */
+const nativeSectionKinds: Readonly<Record<string, readonly string[]>> = {
+  addressed: ["addressed-response"],
+  "pr-follow-up": ["pr-follow-up"],
+  // Every owned-work obligation (#413), including a retained claim to resume or review.
+  "own-work": ["continue-implementation", "resume-claim", "review-owned-work", "wait-claim"],
+  pickup: ["implement"],
+  "decision-needed": ["decide"],
+  "documentation-needed": ["document"],
+  "design-review": ["design-review"],
+  "design-pickup": ["design"],
+};
 export type RuleGroup =
   | "hygiene"
   | "context"
@@ -548,14 +560,45 @@ export function compactBriefing(
           ? `--section for role ${options.role} must be one of: ${ids.join(", ")}.`
           : `Role ${options.role} has no sections to select; omit --section.`,
       );
+    // #1088: on a native-ranked view a section is a projection of the native ranking (its items
+    // of the section's action kind, in native order), never a second TypeScript ranking. A section
+    // with no single native kind (and no background declaration) is refused rather than re-ranked.
+    const nativeSection = (): RoleView["sections"][number] => {
+      const kinds = nativeSectionKinds[options.section!];
+      if (!kinds)
+        throw new BriefingArgumentError(
+          `--section ${options.section} has no native ranking projection; omit --section to see NEXT STEPS in native order, or use --section other-context.`,
+        );
+      const rows = experimental!.items
+        .filter((i) => kinds.includes(i.kind) && inScope(i.target))
+        .map((i) => ({ url: i.target, reason: i.why?.text ?? "Missing experimental explanation" }));
+      const declared = roleRegistry
+        .get(options.role!)
+        ?.sections.find((s) => s.section === options.section);
+      return {
+        name: options.section!,
+        title: declared?.title ?? options.section!.toUpperCase(),
+        background: false,
+        total: rows.length,
+        omitted: 0,
+        items: rows,
+      };
+    };
+    // Background sections are declared context, not ranked work (like other-context), so on a
+    // native view they keep the role view's context rows; only ranked sections are projected.
+    const backgroundSection =
+      roleRegistry.get(options.role)?.sections.find((s) => s.section === options.section)
+        ?.background === true;
     const view =
       role?.sections.find((s) => s.name === options.section) ??
-      defined(
-        roleView(options.role, roleContext, {
-          expand: options.section,
-          keep: inScope,
-        }).sections.find((s) => s.name === options.section),
-      );
+      (experimental && !backgroundSection
+        ? nativeSection()
+        : defined(
+            roleView(options.role, roleContext, {
+              expand: options.section,
+              keep: inScope,
+            }).sections.find((s) => s.name === options.section),
+          ));
     return {
       role: options.role,
       section: options.section,
