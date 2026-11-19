@@ -213,6 +213,58 @@ describe("v2 review regressions (#1074)", () => {
   });
 });
 
+describe("v2 second review regressions (#1074)", () => {
+  it("serializes acknowledgement with evaluation: a stale ack cannot clear a newer offer", async () => {
+    const base = memoryStore(initializeV2(input));
+    const session = new ContinuationSession(base);
+    const runtime = changing();
+    const a = await session.evaluate(event(0), runtime);
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const slow = new ContinuationSession({
+      ...base,
+      meta: async () => {
+        await gate;
+        return base.meta();
+      },
+    });
+    const first = slow.acknowledge(input, event(0).eventId, a.fingerprint!);
+    // While one acknowledgement holds the guard, a second one and an evaluation are refused.
+    expect(await slow.acknowledge(input, event(0).eventId, a.fingerprint!)).toBe(false);
+    expect((await slow.evaluate(event(1), runtime)).reason).toBe("reentry");
+    release();
+    expect(await first).toBe(true);
+  });
+
+  it("an interruption during the prelude starts no fetch", async () => {
+    const base = memoryStore(initializeV2(input));
+    const controller = new AbortController();
+    let fetched = 0;
+    const session = new ContinuationSession({
+      ...base,
+      saveMeta: async (meta) => {
+        controller.abort();
+        return base.saveMeta(meta);
+      },
+    });
+    const result = await session.evaluate(
+      event(0),
+      {
+        transport: {
+          freshRead: true,
+          read: async () => {
+            fetched++;
+            return read();
+          },
+        },
+        now: () => now,
+      },
+      controller.signal,
+    );
+    expect([result.reason, fetched]).toEqual(["cancelled", 0]);
+  });
+});
+
 describe("v2 private file store (#657)", () => {
   const dir = () => mkdtemp(join(tmpdir(), "pdb-continuation-"));
 

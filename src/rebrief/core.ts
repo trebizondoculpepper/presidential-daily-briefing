@@ -301,6 +301,7 @@ async function readCandidate(
     reason,
     ...(decision ? { decision } : {}),
   });
+  if (signal?.aborted) return no("cancelled");
   const controller = new AbortController();
   const now = runtime.now ?? Date.now;
   const start = now();
@@ -531,7 +532,21 @@ export class ContinuationSession {
   constructor(private readonly store: SessionStore) {}
   /** Record exact receipt; idempotently completes an interrupted acknowledgement. */
   async acknowledge(context: Context, eventId: string, fingerprint: string): Promise<boolean> {
+    // Acknowledgement takes the same session-wide guard as evaluation, so it never writes
+    // metadata read before another mutation.
     if (this.inflight) return false;
+    this.inflight = "acknowledge";
+    try {
+      return await this.acknowledgeClaimed(context, eventId, fingerprint);
+    } finally {
+      this.inflight = null;
+    }
+  }
+  private async acknowledgeClaimed(
+    context: Context,
+    eventId: string,
+    fingerprint: string,
+  ): Promise<boolean> {
     const meta = await this.store.meta();
     const event = hash(eventId);
     if (
@@ -622,6 +637,8 @@ export class ContinuationSession {
       } catch {
         return stop("state-unavailable");
       }
+      // An interruption during the asynchronous prelude starts no fetch.
+      if (signal?.aborted) return stop("cancelled");
       const candidate = await readCandidate(input, runtime, deadline, signal);
       if (!candidate.ok) return stop(candidate.reason, candidate.decision);
       const { fingerprint, policyRevision } = candidate;
