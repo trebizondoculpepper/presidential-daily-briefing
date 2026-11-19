@@ -362,7 +362,7 @@ describe("project policy enablement and briefing integration (#516)", () => {
     expect(text).not.toContain(rulesHash.slice(0, 12));
   });
 
-  it("marks the briefing incomplete when an enabled policy fails, or the TS rollback is in use", async () => {
+  it("marks the briefing incomplete when an enabled policy fails", async () => {
     const failed = await present({
       projectRules: enabled,
       projectRuntime: { loadPolicy: async () => compileProjectPolicy(fixture, base) },
@@ -375,15 +375,5 @@ describe("project policy enablement and briefing integration (#516)", () => {
     });
     expect(failed.report.completeness.warnings.join("\n")).toContain("Project policy error");
     expect(failed.text).toContain("Project policy error");
-
-    const rollback = await present({
-      projectRules: enabled,
-      engineSetting: { requested: "typescript", source: "config" },
-    });
-    expect(rollback.complete).toBe(false);
-    expect(rollback.report.decisionEngine.effectivePolicy).toMatchObject({
-      state: "error",
-      reason: expect.stringContaining("briefing.engine datalog"),
-    });
   });
 });

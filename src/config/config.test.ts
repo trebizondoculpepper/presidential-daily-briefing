@@ -65,7 +65,6 @@ describe("repository configuration service (#116, doc/design/repository-configur
     const config = await loadConfig(root, memory.fs);
     expect(config.storedVersion).toBeNull();
     expect(config.settings).toEqual([
-      { key: "briefing.engine", value: "datalog", source: "default" },
       { key: "complexity.enabled", value: true, source: "default" },
       { key: "impact.enabled", value: true, source: "default" },
       { key: "review.policy", value: null, source: "default" },
@@ -953,7 +952,6 @@ describe("config get/set/list/help commands (#117)", () => {
     expect(t.out.at(-1)).toContain("unchanged");
     expect(await t.call("list", "--json")).toBe(0);
     expect(t.json().settings).toEqual([
-      expect.objectContaining({ key: "briefing.engine", value: "datalog", source: "default" }),
       expect.objectContaining({ key: "complexity.enabled", value: false, source: "explicit" }),
       expect.objectContaining({ key: "impact.enabled", value: true, source: "default" }),
       expect.objectContaining({ key: "review.policy", value: null, source: "default" }),

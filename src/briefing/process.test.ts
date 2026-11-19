@@ -157,7 +157,8 @@ describe("workflow guide in help and briefings (#71, doc/design/workflow-guide.m
         else expect(out).toMatch(/…|\[truncated\]|Truncated due to maximum size/);
       }
     }
-  });
+    // #1050: every budget now runs the native engine (~0.5s each), so the sweep needs headroom.
+  }, 90_000);
 
   it("serves help and the full guide locally, without GitHub or configuration", async () => {
     let helpText = "";

@@ -208,9 +208,8 @@ describe("GET /rules (#392)", () => {
       ).not.toMatch(/<script|\sstyle=|https?:\/\/(?!127\.0\.0\.1)/);
       const text = unescape(reply.body);
       expect(text).toContain("processGuide = true  (stored in the settings file)");
-      expect(text).toContain(
-        'briefing.engine = "datalog"  (not stored; the registry default applies)',
-      );
+      // #1050: the retired engine selector is not a setting any more.
+      expect(text).not.toContain("briefing.engine");
       // Links use the real server origin and encoded selection.
       expect(reply.body).toContain(`href="/rules?repo=other%2Frepo"`);
       expect(reply.body).toContain(`href="/?repo=example%2Fproject"`);

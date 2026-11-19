@@ -147,7 +147,7 @@ describe("pdb rules command (#416)", () => {
     expect(code).toBe(0);
     expect(stderr).toBe("");
     expect(stdout.split("\n")[0]).toBe("# `pdb rules` — Compiled Policy");
-    expect(stdout).toContain('- `briefing.engine` = `"datalog"` (repository setting registry)');
+    expect(stdout).not.toContain("briefing.engine");
     expect(stdout).toContain('- `--order` = `"impact"` (briefing, when --order is omitted)');
   });
 

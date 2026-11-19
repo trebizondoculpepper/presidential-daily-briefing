@@ -146,7 +146,7 @@ const runtime = (config: string | null = null, issues: () => Issue[] = fixture) 
   now: () => new Date(time),
   estimation: { fs: files(config), git, cwd: root },
   // Historical TypeScript queue contract remains exercised through the explicit rollback.
-  guide: { fs: files('schemaVersion = 1\n[briefing]\nengine = "typescript"\n'), git, cwd: root },
+  guide: { fs: files('schemaVersion = 1\n[briefing]\nengine = "datalog"\n'), git, cwd: root },
   rest: permissions,
   updateCheck: async () => ({ status: "skipped" as const, reason: "" }),
 });
@@ -167,8 +167,14 @@ const json = async (args: string[], config: string | null = null) =>
   JSON.parse((await run(["--json", ...args], config)).out) as CompactBriefing & {
     impactEstimation?: ImpactEstimation;
   };
+// #1050: the native engine ranks one pool (#651): the fixture's unknown claim inventory adds a
+// repository-level ownership inspection, and implementer-affinity rows follow the designer's own.
 const kinds = (report: CompactBriefing) =>
-  (report.rankedActions?.items ?? []).map((i) => `${i.kind}#${Number(i.target.split("/").pop())}`);
+  (report.rankedActions?.items ?? [])
+    .filter((i) => i.kind !== "inspect-ownership")
+    .map((i) => `${i.kind}#${Number(i.target.split("/").pop())}`);
+const designerKinds = (report: CompactBriefing) =>
+  kinds(report).filter((k) => !k.startsWith("estimate-complexity#"));
 const disabled = "schemaVersion = 1\n[impact]\nenabled = false\n";
 
 describe("impact guidance in CLI and MCP help from one definition (#246)", () => {
@@ -242,7 +248,7 @@ describe("impact guidance in CLI and MCP help from one definition (#246)", () =>
 describe("designer impact queue through collect() (#246)", () => {
   it("ranks assessments and inspections after designer duties and before new design", async () => {
     const report = await json(["--role", "designer", "--limit", "20"]);
-    expect(kinds(report)).toEqual([
+    expect(designerKinds(report)).toEqual([
       "decide#10",
       "assess-impact#1",
       "inspect-assessment#2",
@@ -250,12 +256,17 @@ describe("designer impact queue through collect() (#246)", () => {
       "assess-impact#6",
       "assess-impact#8",
       "design#9",
+      "inspect#12",
     ]);
-    const [, boosted] = report.rankedActions!.items;
+    const boosted = report.rankedActions!.items.find(
+      (i) => i.target === url(1) && i.kind === "assess-impact",
+    );
     expect(boosted).toMatchObject({
       band: 5,
       role: "designer",
-      reasonCodes: expect.arrayContaining(["cross-role-boost", "impact-unassessed"]),
+      // #1050: native reason codes; the unassessed state is carried by `impact` below.
+      reasonCodes: expect.arrayContaining(["assessment", "cross-role-boost"]),
+      why: { ruleIds: ["D-IMPACT-BOOST"] },
       complexity: { state: "current", size: "XS" },
       impact: { state: "unassessed", size: null },
       nextCommand: `pdb estimate 1 --metric impact --size SIZE --rationale TEXT --repo ${repo}`,
@@ -272,13 +283,13 @@ describe("designer impact queue through collect() (#246)", () => {
     expect(items.find((i) => i.target === url(2))).toMatchObject({
       kind: "inspect-assessment",
       impact: { state: "invalid", size: null },
-      nextCommand: `pdb estimate 2 --metric impact --size SIZE --rationale TEXT --replace-invalid --repo ${repo}`,
-      inspection: null,
+      // #1050: the native D-BAD-IMPACT row inspects the ticket (#1067 tracks restoring the
+      // Ticket Doctor --replace-invalid fix as its next command).
+      nextCommand: `pdb --repo ${repo} --issue 2 --json`,
+      why: { ruleIds: ["D-BAD-IMPACT"] },
     });
     const conflict = items.find((i) => i.target === url(3));
-    expect(conflict?.nextCommand).toBe(
-      `pdb estimate 3 --metric impact --size SIZE --rationale TEXT --repo ${repo}`,
-    );
+    expect(conflict?.kind).toBe("inspect-assessment");
     expect(conflict?.reasonCodes).not.toContain("cross-role-boost");
   });
 
@@ -292,7 +303,8 @@ describe("designer impact queue through collect() (#246)", () => {
       ranked: 3,
       shown: 1,
       offered: true,
-      inspections: { ranked: 2, shown: 1 },
+      // #1050: the repository ownership inspection takes one of the three shown rows.
+      inspections: { ranked: 2, shown: 0 },
       conflicts: 1,
       invalid: 1,
       // #5 (provenance author unknown) and #12 (truncated labels): never queued.
@@ -300,19 +312,26 @@ describe("designer impact queue through collect() (#246)", () => {
       guidance: "pdb estimate --help --metric impact",
       boundaries: expect.stringContaining("no claim"),
     });
-    expect(report.rankedActions).toMatchObject({ total: 7, omitted: 4 });
+    // One pool (#651): 1 ownership inspection, 8 designer-affinity rows, 9 complexity estimates.
+    expect(report.rankedActions).toMatchObject({ total: 18, omitted: 15 });
     const all = await json(["--role", "designer", "--limit", "50"]);
-    expect(kinds(all).some((k) => k.endsWith("#5") || k.endsWith("#12") || k.endsWith("#7"))).toBe(
-      false,
-    );
+    // #5 (unknown provenance), #12 (truncated) and #7 (parked) never get impact work.
+    expect(
+      kinds(all).filter(
+        (k) =>
+          (k.startsWith("assess-impact") || k.startsWith("inspect-assessment")) &&
+          /#(5|7|12)$/.test(k),
+      ),
+    ).toEqual([]);
     // Ranked counts do not depend on the display limit.
     expect(all.impactEstimation).toMatchObject({ ranked: 3, shown: 3, eligible: 4 });
   });
 
   it("renders designer NEXT STEPS from the ranked actions with kind, assessments and command", async () => {
     const { out } = await run(["--role", "designer", "--limit", "3", "--context"]);
-    const next = out.slice(out.indexOf("NEXT STEPS"), out.indexOf("\nDECISION NEEDED"));
-    expect(next).toMatch(/^NEXT STEPS \(7; 4 omitted\)/);
+    const next = out.slice(out.indexOf("NEXT STEPS"), out.indexOf("\nOTHER CONTEXT"));
+    expect(next).toMatch(/^NEXT STEPS \(18; 15 omitted\)/);
+    expect(next).toContain("1. Inspect ownership: Repository ownership inventory");
     expect(next).toContain("- #10 Ticket 10 — decide (designer-duty)");
     expect(next).toContain("- #1 Ticket 1 — assess-impact (assessment, cross-role-boost");
     expect(next).toContain("impact unassessed · complexity XS");
@@ -324,12 +343,17 @@ describe("designer impact queue through collect() (#246)", () => {
     );
     // Order in text matches the JSON ranking.
     expect(next.indexOf("#10 Ticket 10")).toBeLessThan(next.indexOf("#1 Ticket 1"));
-    expect(next.indexOf("#1 Ticket 1")).toBeLessThan(next.indexOf("#2 Ticket 2"));
+    expect(next).not.toContain("#2 Ticket 2");
   });
 
   it("hides, never deletes, impact work when impact.enabled is false", async () => {
     const report = await json(["--role", "designer", "--limit", "20"], disabled);
-    expect(kinds(report)).toEqual(["decide#10", "design#9"]);
+    expect(designerKinds(report)).toEqual(["decide#10", "design#9", "inspect#12"]);
+    expect(
+      kinds(report).some(
+        (k) => k.startsWith("assess-impact") || k.startsWith("inspect-assessment"),
+      ),
+    ).toBe(false);
     expect(report.impactEstimation).toMatchObject({
       status: "disabled",
       eligible: 0,
@@ -341,7 +365,7 @@ describe("designer impact queue through collect() (#246)", () => {
     expect(bySubject?.assessments?.impact.state).toBe("disabled");
     const { out } = await run(["--role", "designer"], disabled);
     expect(out).not.toContain("Impact assessment:");
-    expect(out).toContain("NEXT STEPS (2)");
+    expect(out).toContain("NEXT STEPS (13; 3 omitted)");
   });
 
   it("leaves non-designer views unchanged: no impactEstimation, legacy NEXT STEPS", async () => {
@@ -377,7 +401,8 @@ describe("designer impact queue through collect() (#246)", () => {
       await writeFile(cache, JSON.stringify(old));
       const { out } = await run(["--offline", "--cache", cache, "--json", "--role", "designer"]);
       const report = JSON.parse(out) as CompactBriefing & { impactEstimation: ImpactEstimation };
-      expect(kinds(report)).toEqual(["assess-impact#1"]);
+      // #1050: truncated labels are a native inspection (D-INSPECT), never an assessment.
+      expect(kinds(report)).toEqual(["assess-impact#1", "inspect#2"]);
       expect(report.impactEstimation).toMatchObject({ eligible: 1, ranked: 1, unknown: 1 });
     } finally {
       await rm(dir, { recursive: true, force: true });

@@ -75,15 +75,6 @@ export interface ConfigKey {
 /** The single registry of supported keys. Extend here, never with special cases elsewhere. */
 export const CONFIG_KEYS: readonly ConfigKey[] = [
   {
-    key: "briefing.engine",
-    type: "string",
-    nullable: false,
-    defaultValue: "datalog",
-    choices: ["typescript", "datalog"],
-    description:
-      "Next-action decision engine: datalog (default) or explicit typescript rollback. Datalog ranks one activity pool for both roles, owned work first (#651), with --role implementer or designer setting the order (default implementer). The typescript rollback is a legacy compatibility mode that keeps the pre-#651 role-exclusive order; rollback: pdb config set briefing.engine typescript.",
-  },
-  {
     key: "complexity.enabled",
     type: "boolean",
     nullable: false,
@@ -133,6 +124,11 @@ export const CONFIG_KEYS: readonly ConfigKey[] = [
  * write (`config set`). This is not a schema migration: the schema version is unchanged.
  */
 export const RETIRED_CONFIG_KEYS: readonly { readonly key: string; readonly reason: string }[] = [
+  {
+    key: "briefing.engine",
+    reason:
+      "the native policy is the only next-action scheduler; the TypeScript ranker and its engine selector were retired (#1050)",
+  },
   {
     key: "complexity.fieldId",
     reason:
@@ -390,7 +386,13 @@ function flatten(
     if (schema.keys.some((entry) => entry.key === key)) {
       validateValue(schema, key, value);
     }
-    if (!schema.keys.some((entry) => entry.key.startsWith(`${key}.`))) findKey(schema, key);
+    // A section holding only retired keys (e.g. [briefing] engine, #1050) is read so its keys
+    // are reported as retired, never rejected as an unknown section.
+    if (
+      !schema.keys.some((entry) => entry.key.startsWith(`${key}.`)) &&
+      !RETIRED_CONFIG_KEYS.some((entry) => entry.key.startsWith(`${key}.`))
+    )
+      findKey(schema, key);
     for (const [inner, leaf] of flatten(schema, value, key)) flat.set(inner, leaf);
   }
   return flat;

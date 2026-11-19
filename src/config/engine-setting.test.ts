@@ -46,19 +46,28 @@ const local = (raw = 'schemaVersion = 1\n[briefing]\nengine = "datalog"\n') => (
   },
 });
 describe("repository-scoped experimental engine selection", () => {
-  it("registers and validates the enum, with Datalog default", () => {
-    expect(settingFor(parseConfig('{"schemaVersion":1}', undefined), "briefing.engine").value).toBe(
-      "datalog",
-    );
+  it("has no engine selector: a stored briefing.engine is a retired key (#1050)", () => {
     expect(() =>
-      parseConfig('{"schemaVersion":1,"briefing":{"engine":"invented"}}', undefined),
+      settingFor(parseConfig('{"schemaVersion":1}', undefined), "briefing.engine"),
     ).toThrow();
+    // Any stored value, including the old datalog default, is reported and ignored, never applied.
+    for (const value of ["typescript", "datalog", "invented"])
+      expect(
+        parseConfig(`{"schemaVersion":1,"briefing":{"engine":"${value}"}}`, undefined).retired,
+      ).toEqual(["briefing.engine"]);
   });
   it("uses only a matching selected checkout and never reads another repo settings", async () => {
-    expect(await resolveEngineSetting(snapshot.repository, local())).toMatchObject({
-      requested: "datalog",
-      source: "config",
-    });
+    const stale = await resolveEngineSetting(snapshot.repository, local());
+    expect(stale).toMatchObject({ requested: "datalog", source: "default" });
+    // The obsolete key and its file are named, with a removal that keeps unrelated settings.
+    expect(stale.obsolete?.join(" ")).toContain("contains the retired key briefing.engine");
+    expect(stale.obsolete?.join(" ")).toContain(
+      "Remove it: pdb config set complexity.enabled true",
+    );
+    expect(stale.obsolete?.join(" ")).not.toContain("config set briefing.engine");
+    expect(
+      (await resolveEngineSetting(snapshot.repository, local("schemaVersion = 1\n"))).obsolete,
+    ).toBeUndefined();
     expect(await resolveEngineSetting("another/repo", local())).toMatchObject({
       requested: "datalog",
       source: "no-matching-project",
@@ -71,21 +80,24 @@ describe("repository-scoped experimental engine selection", () => {
       "no decision engine was run",
     );
   });
-  it("does not load the evaluator for explicit TypeScript rollback or full intake", async () => {
+  it("reports a stored retired engine key on the native briefing and never loads it for intake", async () => {
     const never = async () => {
       throw new Error("evaluator initialized");
     };
+    const stale = await resolveEngineSetting(
+      snapshot.repository,
+      local('schemaVersion = 1\n[briefing]\nengine = "typescript"\n'),
+    );
     const normal = await presentBriefing(
       snapshot,
-      { limit: 10, maxChars: 10000, engineSetting: { requested: "typescript", source: "config" } },
+      { limit: 10, maxChars: 10000, engineSetting: stale },
       local(),
       new Date(),
-      undefined,
-      undefined,
-      undefined,
-      never,
     );
-    expect(normal.report.decisionEngine.used).toBe("typescript");
+    expect(normal.report.decisionEngine).toMatchObject({ requested: "datalog", used: "datalog" });
+    expect(normal.report.decisionEngine.diagnostics.join(" ")).toContain(
+      "contains the retired key briefing.engine",
+    );
     const intake = await presentBriefing(
       snapshot,
       {
@@ -203,7 +215,7 @@ it("preserves config repair guidance instead of an unusable rollback", async () 
 });
 
 it("returns sanitized MCP configuration repair guidance without an unusable rollback", async () => {
-  const broken = local('schemaVersion = 1\n[briefing]\nengine = "invalid"\n');
+  const broken = local('schemaVersion = 1\n[complexity]\nenabled = "invalid"\n');
   const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
   const server = createServer(
     { repo: snapshot.repository, project: SYNTHETIC_ROOT },

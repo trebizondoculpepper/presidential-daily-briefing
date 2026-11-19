@@ -365,7 +365,7 @@ Next-action default: Datalog, implementer view; --role designer selects design w
 Normal CLI first use: pass --role implementer|designer to safely initialize a missing local
 identity and continue. Configured sessions reuse it. --entry/--harness select local identity;
 explicit reads and dry-runs do not initialize. JSON adds effectiveIdentity; diagnostics use stderr.
-Rollback: pdb config set briefing.engine typescript.
+The native policy is the only next-action scheduler.
 ${crashDisclosure()}
   briefing [--last 24h | --since ISO | --checkpoint PATH]  Read-only repository catch-up:
                         what changed and what needs attention (briefing --help)

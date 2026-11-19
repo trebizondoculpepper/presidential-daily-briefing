@@ -262,7 +262,7 @@ pdb --role implementer --json
 pdb --role designer
 ```
 
-Actions and their reasons are derived from the same bundled rules. Structured output includes engine/policy provenance, matched explanation bindings and diagnostics. An omitted role uses the implementer view and reports that choice; explicit roles win. This does not infer identity or change mutation safeguards. TypeScript remains available as an explicit rollback. Roll back with `pdb config set briefing.engine typescript`.
+Actions and their reasons are derived from the same bundled rules. Structured output includes engine/policy provenance, matched explanation bindings and diagnostics. An omitted role uses the implementer view and reports that choice; explicit roles win. This does not infer identity or change mutation safeguards. The native policy is the only next-action scheduler; there is no engine selector. A stored `briefing.engine` key from an earlier release is reported as retired and ignored, and any `pdb config set` (for example `pdb config set complexity.enabled true`) rewrites the file without it.
 
 MCP reads the setting only from its explicitly selected matching project (`pdb-mcp --project /path/to/checkout`). A different requested repository does not inherit that project's setting. Full ticket intake and repository catch-up remain on their existing services. Invalid repository configuration or evaluator failure produces a diagnostic rather than a silently substituted Datalog result.
 

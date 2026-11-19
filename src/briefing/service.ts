@@ -260,7 +260,9 @@ async function presentBriefingFor(
     source: "default" as const,
   };
   const roleSource = options.role === undefined ? ("default" as const) : ("request" as const);
-  const datalogPath = selection.requested === "datalog" && !options.full && !options.issue;
+  // #1050 (doc/design/native-ranking-only.md): next actions always come from the native policy;
+  // there is no engine selector. Full intake keeps its own (non-ranking) path.
+  const datalogPath = !options.full && !options.issue;
   // #413: the viewer's retained claims and, on a live read, their activity: the same facts for
   // the Datalog rules and the TypeScript rollback ranking.
   // Facts a caller already holds (tests, a future shared read) are used as given.
@@ -340,38 +342,6 @@ async function presentBriefingFor(
     );
     experimental = { ...experimental, items: applied.items as typeof experimental.items };
     effective = applied;
-  } else if (
-    !options.full &&
-    !options.issue &&
-    options.projectRules &&
-    (options.projectRules.enabled === true || options.projectRules.enabled === "unknown")
-  ) {
-    // Enabled project rules are native Datalog: the TypeScript rollback cannot honour them.
-    const reason =
-      "project preferences need briefing.engine datalog; the TypeScript rollback engine is in use";
-    effective = {
-      manifest: {
-        schemaVersion: 1,
-        state: "error",
-        formatVersion: null,
-        projectionVersion: null,
-        basePolicyVersion: null,
-        defaultRulesHash: "",
-        projectRulesHash: null,
-        effectiveRulesHash: null,
-        appliedOrderMode: "error",
-        source: "pdb.rules.edn",
-        matchedIds: [],
-        reason,
-        next: [
-          "pdb config set briefing.engine datalog",
-          "pdb config set rules.project.enabled false",
-        ],
-      },
-      warnings: [
-        `Project policy error: ${reason}. The briefing is not the project's effective policy. Run pdb config set briefing.engine datalog, or pdb config set rules.project.enabled false.`,
-      ],
-    };
   }
   const expanded = briefing(
     snapshot,
@@ -400,6 +370,10 @@ async function presentBriefingFor(
         source: selection.source,
         role: { used: options.role ?? defaultEngineRole, source: roleSource },
         ...(effective ? { effectivePolicy: effective.manifest } : {}),
+        // #1050: a stored retired engine key is reported with its safe removal, never applied.
+        ...(selection.obsolete?.length
+          ? { diagnostics: [...experimental.decisionEngine.diagnostics, ...selection.obsolete] }
+          : {}),
       }
     : {
         requested: selection.requested,
