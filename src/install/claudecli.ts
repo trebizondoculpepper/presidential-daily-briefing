@@ -22,6 +22,7 @@ import {
   claudeInstallSnapshotChanged,
   installClaudeMcp,
   readClaudeInstallSnapshot,
+  resolveInstalledPdb,
   resolveInstalledPdbMcp,
   uninstallClaudeMcp,
   type ClaudeInstallSnapshot,
@@ -380,6 +381,8 @@ const mcpFileFor = (scope: ClaudeInstallScope): string =>
 export interface ClaudeRunRuntime extends ConfigRuntime {
   confirm?: (prompt: string) => Promise<boolean>;
   stderr?: (text: string) => void | Promise<void>;
+  /** Inject the installed pdb CLI path for tests; resolves from the running package when omitted. */
+  pdbPath?: string;
 }
 
 function formatClaudeInstallOutput(
@@ -413,6 +416,9 @@ async function evaluateClaudeInstallPlan(params: {
     args.operation === "install" && args.transport === "stdio"
       ? await resolveInstalledPdbMcp()
       : null;
+  // The owned Stop hook invokes the same package's pdb CLI (resolved once for install and uninstall).
+  const installedPdbPath =
+    args.operation === "install" ? (runtime.pdbPath ?? (await resolveInstalledPdb())) : null;
   if (!dryRun && args.operation === "install" && args.transport === "stdio" && !pdbMcp) {
     const refused: ClaudeInstallResult = {
       schemaVersion: 1,
@@ -584,6 +590,7 @@ async function evaluateClaudeInstallPlan(params: {
             pdbVersion: "0.1.0",
             dryRun,
             claudeConfigDir: scope.kind === "global" ? scope.claudeConfigDir : undefined,
+            pdbPath: installedPdbPath ?? undefined,
           });
   const mcpConfigured =
     args.operation === "install" &&

@@ -20,6 +20,8 @@ import {
 } from "./claudehook.js";
 
 const fixedNow = () => new Date("2026-11-19T00:00:00.000Z");
+/** Injected installed pdb CLI path used across the tests (source checkouts cannot resolve it). */
+const PDB = "/npm/lib/node_modules/pdb/dist/cli.mjs";
 
 const projectScope = (root: string): InstallScope => ({
   kind: "project",
@@ -37,16 +39,20 @@ async function tmpProject(): Promise<{ dir: string; scope: InstallScope }> {
 const settingsFile = (dir: string) => join(dir, ".claude", "settings.local.json");
 
 describe("claude Stop hook entry shape (#771)", () => {
-  it("renders the owned command with --installed and no paths or session", () => {
-    expect(claudeStopCommand({})).toBe("pdb rebrief claude-stop --installed --deadline-ms 4000");
-    expect(claudeStopCommand({ role: "implementer", entry: "claude" })).toBe(
-      "pdb rebrief claude-stop --installed --deadline-ms 4000 --role implementer --entry claude",
+  it("renders the owned command invoking the resolved packaged pdb, no session paths", () => {
+    expect(claudeStopCommand({ pdbPath: PDB })).toBe(
+      `'${PDB}' rebrief claude-stop --installed --deadline-ms 4000`,
+    );
+    expect(claudeStopCommand({ pdbPath: PDB, role: "implementer", entry: "claude" })).toBe(
+      `'${PDB}' rebrief claude-stop --installed --deadline-ms 4000 --role implementer --entry claude`,
     );
     // The owned entry is a matcher group wrapping one command entry under hooks.Stop (native
     // Claude Code shape: event -> matcher group -> handler).
-    expect(claudeStopEntry("pdb rebrief claude-stop --installed")).toEqual([
+    expect(claudeStopEntry(`'${PDB}' rebrief claude-stop --installed`)).toEqual([
       {
-        hooks: [{ type: "command", command: "pdb rebrief claude-stop --installed", timeout: 10 }],
+        hooks: [
+          { type: "command", command: `'${PDB}' rebrief claude-stop --installed`, timeout: 10 },
+        ],
       },
     ]);
   });
@@ -70,7 +76,7 @@ describe("claude Stop hook entry shape (#771)", () => {
   });
 
   it("classifies a missing Stop key as absent (create) and a PDB one as owned", () => {
-    const adapter = claudeHookAdapter(claudeStopCommand({}));
+    const adapter = claudeHookAdapter(claudeStopCommand({ pdbPath: PDB }));
     expect(adapter.inspect({})).toEqual({ canonicalText: null, looksForeign: false });
     expect(adapter.inspect({ hooks: {} })).toEqual({
       canonicalText: null,
@@ -91,7 +97,7 @@ describe("claude Stop hook entry shape (#771)", () => {
   });
 
   it("validates an unsupported top-level shape", () => {
-    const adapter = claudeHookAdapter(claudeStopCommand({}));
+    const adapter = claudeHookAdapter(claudeStopCommand({ pdbPath: PDB }));
     expect(adapter.validateSchema?.({ hooks: 4 })).toBe("hooks must be a JSON object.");
     expect(adapter.validateSchema?.({})).toBeNull();
     // A Stop value that is not an array is refused, not silently replaced.
@@ -125,6 +131,7 @@ describe("installClaudeStopHook / uninstallClaudeStopHook (#771)", () => {
         options: { role: "implementer", entry: "claude" },
         manifestPath: manifest,
         pdbVersion: "0.1.0",
+        pdbPath: PDB,
         runtime: { now: fixedNow },
       });
       expect(installed.hook.outcome).toBe("applied");
@@ -169,6 +176,7 @@ describe("installClaudeStopHook / uninstallClaudeStopHook (#771)", () => {
         options: {},
         manifestPath: manifest,
         pdbVersion: "0.1.0",
+        pdbPath: PDB,
         dryRun: true,
         runtime: { now: fixedNow },
       });
@@ -188,6 +196,7 @@ describe("installClaudeStopHook / uninstallClaudeStopHook (#771)", () => {
         options: {},
         manifestPath: manifest,
         pdbVersion: "0.1.0",
+        pdbPath: PDB,
         runtime: { now: fixedNow },
       });
       expect(first.hook.outcome).toBe("applied");
@@ -196,6 +205,7 @@ describe("installClaudeStopHook / uninstallClaudeStopHook (#771)", () => {
         options: {},
         manifestPath: manifest,
         pdbVersion: "0.1.0",
+        pdbPath: PDB,
         runtime: { now: fixedNow },
       });
       expect(again.hook.outcome).toBe("kept");
@@ -223,6 +233,7 @@ describe("installClaudeStopHook / uninstallClaudeStopHook (#771)", () => {
         options: {},
         manifestPath: manifest,
         pdbVersion: "0.1.0",
+        pdbPath: PDB,
         runtime: { now: fixedNow },
       });
       expect(refused.hook.outcome).toBe("refused");
@@ -252,6 +263,7 @@ describe("installClaudeStopHook / uninstallClaudeStopHook (#771)", () => {
         options: {},
         manifestPath: manifest,
         pdbVersion: "0.1.0",
+        pdbPath: PDB,
         adopt: true,
         runtime: { now: fixedNow },
       });
@@ -264,6 +276,7 @@ describe("installClaudeStopHook / uninstallClaudeStopHook (#771)", () => {
         options: {},
         manifestPath: manifest,
         pdbVersion: "0.1.0",
+        pdbPath: PDB,
         runtime: { now: fixedNow },
       });
       expect(later.hook.outcome).toBe("applied");

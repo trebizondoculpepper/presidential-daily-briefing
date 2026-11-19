@@ -33,6 +33,14 @@ export async function resolveInstalledPdbMcp(): Promise<string | null> {
   return `${installed.root}/dist/mcp.mjs`;
 }
 
+/** Resolve the installed `pdb` packaged CLI path, or null when not an npm install. */
+export async function resolveInstalledPdb(): Promise<string | null> {
+  const installed = await installedVersion();
+  if (!installed.installed || !installed.root) return null;
+  // package.json `bin.pdb` points at dist/cli.mjs; the packaged entry is the executable.
+  return `${installed.root}/dist/cli.mjs`;
+}
+
 export interface ClaudeMcpOptions {
   /** STDIO default; HTTP is explicit (no auto-detection). */
   transport: "stdio" | "http";

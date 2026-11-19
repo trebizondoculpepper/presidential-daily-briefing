@@ -22,10 +22,13 @@ import {
   removeJsonEntry,
   writeInstallManifestRecord,
   type InstallEditResult,
+  type InstallEditErrorCode,
   type InstallScope,
   type JsonEntryAdapter,
   type ManifestRuntime,
 } from "./manifest.js";
+import { resolveInstalledPdb } from "./claudemcp.js";
+import { acquireFileLock, type LockTiming } from "../config/filelock.js";
 
 /** Refuse an edit when the ownership manifest itself cannot be trusted (#970 pattern). */
 function manifestReadRefusal(
@@ -52,7 +55,11 @@ function manifestWriteRefusal(
   subject: string,
   hook: InstallEditResult,
 ): InstallEditResult {
-  if (outcome.status === "written" || outcome.status === "committed-with-error") return hook;
+  if (outcome.status === "written") return hook;
+  // A committed-with-error write is still a partial outcome: report it rather than clean success
+  // (it counts as written for uninstall but must surface the diagnostic and exit non-zero).
+  if (outcome.status === "committed-with-error")
+    return { ...hook, outcome: "committed-with-error" as const };
   return {
     action: hook.action,
     outcome: "refused",
@@ -66,6 +73,51 @@ function manifestWriteRefusal(
 
 /** The hook event PDB registers for: the synchronous Claude Code Stop event. */
 export const claudeStopHookEvent = "Stop";
+
+const LOCK_TIMING: LockTiming = { waitMs: 5_000, pollMs: 50 };
+
+/** Serialize read/edit/persist on the private manifest's operation lock so concurrent install and
+ * uninstall cannot delete an ownership record the other just saved (reviewed #1126 finding). */
+async function withScopeLock<T>(
+  manifestPath: string,
+  runtime: ManifestRuntime | undefined,
+  work: () => Promise<T>,
+): Promise<{ status: "ok"; value: T } | { status: "refused"; reason: InstallEditResult }> {
+  const fs = runtime?.fs;
+  if (!fs || typeof fs.readFile !== "function") {
+    return { status: "ok", value: await work() };
+  }
+  const now = runtime?.now ?? (() => new Date());
+  const held = await acquireFileLock(
+    {
+      readFile: (p) => fs.readFile(p),
+      writeFile: (p, data) => fs.createSynced(p, data),
+      unlink: (p) => fs.unlink(p),
+    },
+    `${manifestPath}.op.lock`,
+    LOCK_TIMING,
+    () => now().getTime(),
+    (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  );
+  if (held === null)
+    return {
+      status: "refused",
+      reason: {
+        action: "kept",
+        outcome: "refused",
+        ownership: "absent",
+        code: "CONFLICT",
+        message: "Another Claude installer operation holds the scope lock; retry.",
+        diff: null,
+        manifestRecord: null,
+      },
+    };
+  try {
+    return { status: "ok", value: await work() };
+  } finally {
+    await held();
+  }
+}
 
 /** Native hook timeout in seconds (native default 600; an explicit short bound per the shared core). */
 export const claudeHookNativeTimeout = 10;
@@ -88,12 +140,16 @@ export function claudeStopEntry(command: string): unknown[] {
   ];
 }
 
-/** The installed command for the owned Stop entry (no paths or session in it). */
+/** Construct the installed command invoking the resolved packaged `pdb` CLI (never a bare PATH name). */
 export function claudeStopCommand(options: {
+  /** The absolute installed `pdb` CLI path (package.json bin, dist/cli.mjs). */
+  pdbPath: string;
   /** Pass `--role` for project scope only (identity resolution is runtime). */
   role?: string | null;
   /** Pass `--entry <key>` for project scope only. */
   entry?: string | null;
+  /** Windows executes the packaged .mjs through Node (used by the native shell runner). */
+  platform?: NodeJS.Platform;
 }): string {
   const args = [
     "rebrief",
@@ -103,7 +159,14 @@ export function claudeStopCommand(options: {
   ];
   if (options.role) args.push(`--role ${options.role}`);
   if (options.entry) args.push(`--entry ${options.entry}`);
-  return `pdb ${args.join(" ")}`;
+  // The installed command carries no session paths; the executable is the running package's pdb,
+  // quoted for a native shell (attended-installer-delivery.md resolves from the running package).
+  const quotedPath = `'${options.pdbPath.replace(/'/g, `'\\''`)}'`;
+  const executable =
+    (options.platform ?? process.platform) === "win32"
+      ? `${process.execPath} ${quotedPath}`
+      : quotedPath;
+  return `${executable} ${args.join(" ")}`;
 }
 
 /** Whether a command entry is PDB's owned Stop command. */
@@ -258,46 +321,68 @@ export async function installClaudeStopHook(params: {
   adopt?: boolean;
   /** True when the global scope's homeDir is an explicit CLAUDE_CONFIG_DIR. */
   claudeConfigDir?: boolean;
+  /** Injected installed pdb path for tests; resolves from the running package when omitted. */
+  pdbPath?: string;
   runtime?: ManifestRuntime;
 }): Promise<ClaudeHookResult> {
   const { scope, options, manifestPath, pdbVersion, dryRun, adopt, claudeConfigDir, runtime } =
     params;
   const file = claudeSettingsPath(scope, claudeConfigDir);
   const allowedRoot = claudeSettingsRoot(scope);
-  const command = claudeStopCommand(options);
-  const read = await readInstallManifest(manifestPath, runtime?.fs);
-  const manifestBlocked = manifestReadRefusal(read, file);
-  if (manifestBlocked) return { hook: manifestBlocked };
-  const manifestRecord = read.status === "ok" ? read.manifest.records[file] : undefined;
-  const hook = await editJsonEntry({
-    file,
-    allowedRoot,
-    adapter: claudeHookAdapter(command),
-    manifestRecord,
-    pdbVersion,
-    dryRun,
-    adopt,
-    runtime,
-  });
-  // Persist the ownership record so a later uninstall/rerun recognizes this entry as owned; a
-  // persistence failure is an explicit partial outcome, never unconditional success.
-  if (
-    !dryRun &&
-    (hook.outcome === "applied" ||
-      hook.outcome === "adopted" ||
-      hook.outcome === "committed-with-error") &&
-    hook.manifestRecord
-  ) {
-    const wrote = await writeInstallManifestRecord(
-      manifestPath,
-      "claude",
+  // The installed command must invoke this running package's pdb, not another PATH version;
+  // a non-preview install refuses when it cannot be resolved (attended-installer-delivery.md).
+  const installedPdb = params.pdbPath ?? (await resolveInstalledPdb());
+  if (!dryRun && !installedPdb)
+    return {
+      hook: {
+        action: "kept",
+        outcome: "refused",
+        ownership: "absent",
+        code: "UNSUPPORTED_SCOPE" as InstallEditErrorCode,
+        message:
+          "The running PDB is not an npm installation, so the installed pdb command cannot be resolved; refusing to write a Stop hook that cannot run.",
+        diff: null,
+        manifestRecord: null,
+      },
+    };
+  const command = claudeStopCommand({ ...options, pdbPath: installedPdb ?? "" });
+  const guarded = await withScopeLock(manifestPath, runtime, async () => {
+    const read = await readInstallManifest(manifestPath, runtime?.fs);
+    const manifestBlocked = manifestReadRefusal(read, file);
+    if (manifestBlocked) return { hook: manifestBlocked };
+    const manifestRecord = read.status === "ok" ? read.manifest.records[file] : undefined;
+    const hook = await editJsonEntry({
       file,
-      hook.manifestRecord,
+      allowedRoot,
+      adapter: claudeHookAdapter(command),
+      manifestRecord,
+      pdbVersion,
+      dryRun,
+      adopt,
       runtime,
-    );
-    return { hook: manifestWriteRefusal(wrote, "The Claude Stop hook", hook) };
-  }
-  return { hook };
+    });
+    // Persist the ownership record so a later uninstall/rerun recognizes this entry as owned; a
+    // persistence failure is an explicit partial outcome, never unconditional success.
+    if (
+      !dryRun &&
+      (hook.outcome === "applied" ||
+        hook.outcome === "adopted" ||
+        hook.outcome === "committed-with-error") &&
+      hook.manifestRecord
+    ) {
+      const wrote = await writeInstallManifestRecord(
+        manifestPath,
+        "claude",
+        file,
+        hook.manifestRecord,
+        runtime,
+      );
+      return { hook: manifestWriteRefusal(wrote, "The Claude Stop hook", hook) };
+    }
+    return { hook };
+  });
+  if (guarded.status === "refused") return { hook: guarded.reason };
+  return guarded.value;
 }
 
 /** Remove PDB's owned Claude Stop hook entry when it is owned; preserve unrelated hooks. */
@@ -312,23 +397,29 @@ export async function uninstallClaudeStopHook(params: {
   const { scope, manifestPath, dryRun, claudeConfigDir, runtime } = params;
   const file = claudeSettingsPath(scope, claudeConfigDir);
   const allowedRoot = claudeSettingsRoot(scope);
-  const command = claudeStopCommand({});
-  const read = await readInstallManifest(manifestPath, runtime?.fs);
-  const manifestBlocked = manifestReadRefusal(read, file);
-  if (manifestBlocked) return { hook: manifestBlocked };
-  const manifestRecord = read.status === "ok" ? read.manifest.records[file] : undefined;
-  const hook = await removeJsonEntry({
-    file,
-    allowedRoot,
-    adapter: claudeHookAdapter(command),
-    manifestRecord,
-    dryRun,
-    runtime,
+  // Classification matches the claude-stop entry by command substring, so removal works regardless
+  // of the package path; no resolution is needed to delete an owned (possibly broken) hook.
+  const command = claudeStopCommand({ pdbPath: "" });
+  const guarded = await withScopeLock(manifestPath, runtime, async () => {
+    const read = await readInstallManifest(manifestPath, runtime?.fs);
+    const manifestBlocked = manifestReadRefusal(read, file);
+    if (manifestBlocked) return { hook: manifestBlocked };
+    const manifestRecord = read.status === "ok" ? read.manifest.records[file] : undefined;
+    const hook = await removeJsonEntry({
+      file,
+      allowedRoot,
+      adapter: claudeHookAdapter(command),
+      manifestRecord,
+      dryRun,
+      runtime,
+    });
+    // A successful removal deletes the ownership record; a persistence failure is explicit.
+    if (!dryRun && (hook.outcome === "applied" || hook.outcome === "committed-with-error")) {
+      const wrote = await writeInstallManifestRecord(manifestPath, "claude", file, null, runtime);
+      return { hook: manifestWriteRefusal(wrote, "The Claude Stop hook", hook) };
+    }
+    return { hook };
   });
-  // A successful removal deletes the ownership record; a persistence failure is explicit.
-  if (!dryRun && (hook.outcome === "applied" || hook.outcome === "committed-with-error")) {
-    const wrote = await writeInstallManifestRecord(manifestPath, "claude", file, null, runtime);
-    return { hook: manifestWriteRefusal(wrote, "The Claude Stop hook", hook) };
-  }
-  return { hook };
+  if (guarded.status === "refused") return { hook: guarded.reason };
+  return guarded.value;
 }
