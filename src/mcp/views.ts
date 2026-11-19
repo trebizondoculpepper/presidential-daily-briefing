@@ -699,3 +699,61 @@ export function dependenciesView(
     ],
   };
 }
+
+/**
+ * The bounded discussion view (#1101): the shared `discussion-view` result (#1099) paged in its
+ * native order (#1093). Unknown counts and partial coverage make the view incomplete; nothing is
+ * re-ranked here.
+ */
+export function discussionView(base: ViewBase, report: Json, page: Page, args: Json): BoundedView {
+  const coverage = obj(report.coverage);
+  const items = list(report.items);
+  const rows = paged(items, page, (offset) => ({
+    tool: "triage_discussion",
+    arguments: { ...args, offset, limit: page.limit },
+  }));
+  const unknown = list(report.unknown).map(obj);
+  const warnings = typeof coverage.note === "string" && coverage.note ? [coverage.note] : [];
+  const incomplete = coverage.complete !== true;
+  return {
+    ...base,
+    status: incomplete ? "incomplete" : base.status,
+    tool: "triage_discussion",
+    view: "discussion",
+    subject: null,
+    freshness: pick(report, ["fetchedAt"]),
+    sourceCompleteness: { complete: !incomplete, warnings },
+    data: {
+      reportSchemaVersion: report.schemaVersion,
+      scope: report.scope,
+      offset: page.offset,
+      total: rows.total,
+      items: rows.rows,
+      unknown,
+      coverage,
+      policyVersion: report.policyVersion,
+      rulesHash: report.rulesHash,
+    },
+    protectedPaths: [],
+    lists: () => [
+      { path: ["items"], available: rows.available, requireRow: true },
+      { path: ["unknown"] },
+    ],
+    next: (returned) => rows.next(returned["items"] ?? 0),
+    text: (d) => [
+      `Discussion (${str(d.scope)} issues), ranked by comment count: a rough proxy, not disagreement.`,
+      `Items ${page.offset + 1}–${page.offset + list(d.items).length} of ${String(d.total)}:`,
+      ...list(d.items).map((row) => {
+        const item = obj(row);
+        return `- ${String(item.rank)}. #${String(item.number)} ${str(item.title)} (${String(item.comments)} comments) ${str(item.url)}`;
+      }),
+      ...(list(d.unknown).length
+        ? [
+            `Unknown comment count, not ranked: ${list(d.unknown)
+              .map((u) => `#${String(obj(u).number)}`)
+              .join(", ")}`,
+          ]
+        : []),
+    ],
+  };
+}

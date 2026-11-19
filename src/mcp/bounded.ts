@@ -20,7 +20,13 @@ export const budgetErrorCode = "OUTPUT_BUDGET_EXCEEDED";
 export const incompleteNotice =
   "INCOMPLETE evidence: do not treat missing findings as clean or eligible.";
 
-export const views = ["briefing", "repository-briefing", "issue", "dependencies"] as const;
+export const views = [
+  "briefing",
+  "repository-briefing",
+  "issue",
+  "dependencies",
+  "discussion",
+] as const;
 export type View = (typeof views)[number];
 
 const identitySource = z.enum([

@@ -128,6 +128,7 @@ describe("read-only MCP adapter (#25)", async () => {
       expect(tools.map((t) => t.name).sort()).toEqual([
         "triage_briefing",
         "triage_dependencies",
+        "triage_discussion",
         "triage_events",
         "triage_issue",
       ]);
@@ -157,6 +158,7 @@ describe("read-only MCP adapter (#25)", async () => {
     expect(tools.map((t) => t.name).sort()).toEqual([
       "triage_briefing",
       "triage_dependencies",
+      "triage_discussion",
       "triage_events",
       "triage_issue",
     ]);

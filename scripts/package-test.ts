@@ -985,7 +985,13 @@ try {
   try {
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name).sort();
-    const want = ["triage_briefing", "triage_dependencies", "triage_events", "triage_issue"];
+    const want = [
+      "triage_briefing",
+      "triage_dependencies",
+      "triage_discussion",
+      "triage_events",
+      "triage_issue",
+    ];
     if (JSON.stringify(names) !== JSON.stringify(want))
       throw new Error(
         `Installed MCP bin listed ${JSON.stringify(names)}, not ${JSON.stringify(want)}.`,
@@ -1006,7 +1012,7 @@ try {
     !mcpHelp.stdout.includes("pdb estimate --help --metric impact")
   )
     throw new Error("Installed MCP help carries no impact guidance.");
-  console.log("ok   installed pdb-mcp completes a stdio round trip (four read-only tools)");
+  console.log("ok   installed pdb-mcp completes a stdio round trip (five read-only tools)");
   // #260: installed CLI and MCP produce identical blended role queues from the same facts.
   const mcpCommand = windows
     ? { command: process.execPath, args: [join(packageDir, "dist", "mcp.mjs")] }

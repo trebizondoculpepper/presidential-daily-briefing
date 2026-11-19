@@ -396,7 +396,7 @@ describe("pdb serve HTTP MCP (#373)", () => {
     await client.close();
     // A fresh client initializes a new session and works.
     const again = await connect(s.url);
-    expect((await again.listTools()).tools.length).toBe(4);
+    expect((await again.listTools()).tools.length).toBe(5);
     await again.close();
     // Without a session, only POST (initialize) is accepted; non-JSON POST is 415.
     expect((await raw(port, "GET", { accept: "text/event-stream" })).status).toBe(400);
@@ -575,7 +575,7 @@ describe("pdb serve HTTP MCP (#373)", () => {
       };
       expect(status.cache.mcpSessions).toBe(MAX_MCP_SESSIONS);
       // The newest works; the oldest was closed.
-      expect((await clients.at(-1)!.listTools()).tools.length).toBe(4);
+      expect((await clients.at(-1)!.listTools()).tools.length).toBe(5);
       await expect(clients[0]!.listTools()).rejects.toThrow();
     } finally {
       await Promise.all(clients.map((c) => c.close().catch(() => undefined)));
@@ -614,3 +614,73 @@ async function until(predicate: () => boolean, timeoutMs = 10_000): Promise<void
     await new Promise((done) => setTimeout(done, 5));
   }
 }
+
+describe("pdb serve discussion view through the shared cache (#1118 review)", () => {
+  it("reads once and serves a repeated identical request from the cache", async () => {
+    const clock = new ManualClock();
+    let discussionQueries = 0;
+    const discussionQuery: Query = async (source) => {
+      if (source.includes("comments{totalCount}")) discussionQueries++;
+      return {
+        repository: {
+          issues: {
+            nodes: [
+              {
+                number: 1,
+                title: "Ticket 1",
+                url: "https://github.com/example/one/issues/1",
+                state: "OPEN",
+                comments: { totalCount: 4 },
+              },
+            ],
+            pageInfo: { hasNextPage: false, endCursor: null },
+          },
+        },
+      } as never;
+    };
+    const serve: ServeRuntime = {
+      currentRepository: async () => "example/one",
+      authContext: async () => ({ host: "github.com", login: "octo" }),
+      clock,
+      stdout: () => undefined,
+      stderr: () => undefined,
+      signals: new EventEmitter(),
+      exit: () => undefined,
+      version: async () => "9.9.9",
+      platform: "linux",
+    };
+    const read: ServeReadRuntime = {
+      collect: async () => {
+        throw new Error("the discussion view must not collect a snapshot");
+      },
+      dependencyReport: async () => {
+        throw new Error("not used");
+      },
+      queryWith: () => discussionQuery,
+      now: () => clock.now(),
+      env: {},
+    };
+    const options = serveArguments(["--port", "0", "--repo", "example/one"]);
+    const running = await startServe(options, serve, readServices(options, serve, read));
+    const client = await connect(new URL(`${running.facts.url}mcp`));
+    try {
+      const call = async () =>
+        boundedEnvelope.parse(
+          (
+            await client.callTool({
+              name: "triage_discussion",
+              arguments: { repo: "example/one" },
+            })
+          ).structuredContent,
+        );
+      const first = await call();
+      expect(first).toMatchObject({ view: "discussion", status: "complete" });
+      expect(discussionQueries).toBe(1);
+      await call();
+      expect(discussionQueries).toBe(1);
+    } finally {
+      await client.close();
+      await running.close();
+    }
+  });
+});
