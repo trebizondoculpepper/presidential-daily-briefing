@@ -70,6 +70,14 @@ describe("native claim-time obligations and action-reminder selection (#1029)", 
     });
     expect(designerNoDesign.admissionRationale).toEqual([]);
 
+    expect(
+      selectClaimRuleReminders({
+        role: "designer",
+        outcome: "noop",
+        facts: { claimActivity: "resume-required" },
+      }).admissionRationale.map((i) => i.id),
+    ).toEqual(["D-OWN-RESUME"]);
+
     const waitingClaim = selectClaimRuleReminders({
       role: "implementer",
       outcome: "noop",
@@ -162,9 +170,18 @@ describe("native claim-time obligations and action-reminder selection (#1029)", 
     const unownedPartial = selectClaimRuleReminders({
       role: "implementer",
       outcome: "partial",
-      facts: { inventoryComplete: false, claimObserved: false },
+      facts: { inventoryComplete: false, claimObserved: false, hasOtherClaims: false },
     });
     expect(unownedPartial.admissionRationale.map((i) => i.id)).toEqual(["D-INVENTORY-UNKNOWN"]);
+
+    const otherObservedPartial = selectClaimRuleReminders({
+      role: "implementer",
+      outcome: "partial",
+      facts: { inventoryComplete: false, claimObserved: false, hasOtherClaims: true },
+    });
+    expect(otherObservedPartial.admissionRationale.map((i) => i.id)).toEqual([
+      "D-OWNED-INCOMPLETE",
+    ]);
 
     const unknownPartial = selectClaimRuleReminders({
       role: "implementer",

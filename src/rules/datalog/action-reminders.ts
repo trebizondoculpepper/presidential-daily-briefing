@@ -387,9 +387,13 @@ export function selectClaimRuleReminders(input: SelectClaimRemindersInput): Acti
     } else if (input.outcome === "partial") {
       for (const id of facts.denialIds ?? []) addPolicyItem(id, "admission");
       if (facts.inventoryComplete === false) {
-        if (facts.claimObserved === true) addPolicyItem("D-OWNED-INCOMPLETE", "admission");
-        else if (facts.claimObserved === false) addPolicyItem("D-INVENTORY-UNKNOWN", "admission");
-        else unverifiedPartialOwnership = true;
+        if (facts.claimObserved === true || facts.hasOtherClaims === true) {
+          addPolicyItem("D-OWNED-INCOMPLETE", "admission");
+        } else if (facts.claimObserved === false && facts.hasOtherClaims === false) {
+          addPolicyItem("D-INVENTORY-UNKNOWN", "admission");
+        } else {
+          unverifiedPartialOwnership = true;
+        }
       }
       for (const id of facts.decisionIds ?? []) addPolicyItem(id, "admission");
     } else {
@@ -405,12 +409,18 @@ export function selectClaimRuleReminders(input: SelectClaimRemindersInput): Acti
       const hasExplicitOwnDecision = (facts.decisionIds ?? []).some((id) => ownDecisionIds.has(id));
       if (normalizedRole === "implementer" && !hasExplicitOwnDecision) {
         addPolicyItem(ownClaimDecisionId(facts.claimActivity), "admission");
-      } else if (
-        input.outcome === "claimed" &&
-        normalizedRole === "designer" &&
-        facts.needsDesign
-      ) {
-        addPolicyItem("D-DESIGN", "admission");
+      } else if (normalizedRole === "designer") {
+        if (input.outcome === "claimed" && facts.needsDesign) {
+          addPolicyItem("D-DESIGN", "admission");
+        }
+        if (
+          !hasExplicitOwnDecision &&
+          (facts.claimActivity === "waiting" ||
+            facts.claimActivity === "resume-required" ||
+            facts.claimActivity === "unknown")
+        ) {
+          addPolicyItem(ownClaimDecisionId(facts.claimActivity), "admission");
+        }
       }
       if (facts.hasOtherClaims) {
         addPolicyItem(
