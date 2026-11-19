@@ -82,8 +82,9 @@ export function inspectCodexStopEntry(doc: Record<string, unknown>): {
   }
   const stop = (hooks as Record<string, unknown>)[codexStopHookEvent];
   if (!Array.isArray(stop)) return { canonicalText: null, looksForeign: false };
-  const commandEntries: unknown[] = [];
-  let pdbLookalike = false;
+  // Only PDB-looking entries participate in ownership classification; unrelated command hooks in
+  // the native file are preserved and never conflate the owned entry's canonical text.
+  const pdbEntries: unknown[] = [];
   for (const group of stop) {
     if (!group || typeof group !== "object") continue;
     const commands = (group as { hooks?: unknown[] }).hooks;
@@ -91,19 +92,17 @@ export function inspectCodexStopEntry(doc: Record<string, unknown>): {
     for (const entry of commands) {
       if (!entry || typeof entry !== "object") continue;
       const { type, command } = entry as { type?: unknown; command?: unknown };
-      if (type === "command" && typeof command === "string") {
-        commandEntries.push(entry);
-        if (command.includes("codex-stop")) pdbLookalike = true;
-      }
+      if (type === "command" && typeof command === "string" && command.includes("codex-stop"))
+        pdbEntries.push(entry);
     }
   }
-  if (commandEntries.length === 0) return { canonicalText: null, looksForeign: false };
+  if (pdbEntries.length === 0) return { canonicalText: null, looksForeign: false };
   return {
-    canonicalText: JSON.stringify(commandEntries),
+    canonicalText: JSON.stringify(pdbEntries),
     // A command invoking codex-stop without a manifest record is PDB-foreign and must be adopted,
     // never overwritten (codex-installer.md "Ownership and replacement"); unrelated hooks are
     // absent with respect to PDB and are preserved alongside the owned entry.
-    looksForeign: pdbLookalike,
+    looksForeign: true,
   };
 }
 

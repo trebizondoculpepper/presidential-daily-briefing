@@ -74,7 +74,7 @@ describe("codex Stop hook entry shape (#770)", () => {
       hooks: { Stop: [{ hooks: [{ type: "command", command: "some-other-tool" }] }] },
     });
     expect(unrelated.looksForeign).toBe(false);
-    expect(unrelated.canonicalText).toContain("some-other-tool");
+    expect(unrelated.canonicalText).toBeNull();
   });
 
   it("validates an unsupported top-level shape", () => {
@@ -276,6 +276,23 @@ describe("installCodexStopHook / uninstallCodexStopHook (#770)", () => {
       );
       expect(commands).toContain("some-other-tool");
       expect(commands.some((c: string) => c.includes("codex-stop"))).toBe(true);
+
+      // Uninstall removes only the owned entry and keeps the unrelated Stop hook.
+      const removed = await uninstallCodexStopHook({
+        scope,
+        manifestPath: manifest,
+        runtime: { now: fixedNow },
+      });
+      expect(removed.hook).toMatchObject({
+        outcome: "applied",
+        action: "remove",
+        ownership: "owned",
+      });
+      const after = JSON.parse(await nodeSafeFs.readFile(file));
+      const afterCommands = after.hooks.Stop.flatMap((g: { hooks: { command: string }[] }) =>
+        g.hooks.map((h: { command: string }) => h.command),
+      );
+      expect(afterCommands).toEqual(["some-other-tool"]);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
