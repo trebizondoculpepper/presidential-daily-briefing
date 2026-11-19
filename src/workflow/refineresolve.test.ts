@@ -69,6 +69,10 @@ describe("refine status (#1096)", () => {
     expect(text).toContain("not yet answered (pdb question resolve|withdraw)");
     // Reading changed nothing.
     expect(w.issues.get(1)!.comments).toHaveLength(1);
+    // #1139 review: a human with no agent identity can read it (an unattributed read).
+    const unattributed = await run(w, ["status", "1", "--json"]);
+    expect(unattributed.code).toBe(0);
+    expect(JSON.parse(unattributed.text).requests).toHaveLength(1);
   });
 });
 

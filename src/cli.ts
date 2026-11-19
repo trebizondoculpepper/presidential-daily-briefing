@@ -2113,6 +2113,22 @@ async function run(
           ? refineStatusArgumentsFor(args.slice(1), identitySelectionOptions)
           : refineArgumentsFor(args.slice(1), identitySelectionOptions);
     if (identity) parsed.repo ??= await runtime.currentRepository();
+    if (op === "status") {
+      // An observational read (#1139 review, effective-identity.md "Read-only operations"):
+      // the non-initializing optional viewer; with no safe selection it reads unattributed.
+      const viewer = await commandViewer({ ...parsed, ...identitySelection(parsed) }, identity);
+      const repository = parsed.repo ?? (await runtime.currentRepository());
+      const gh = ghOf(runtime);
+      const status = await readRefinementStatus(
+        repository,
+        parsed.number,
+        viewer ?? "",
+        gh.tickets,
+        gh.repos.permissionOf(repository),
+      );
+      await output(parsed.json ? statusJson(status) : statusText(status));
+      return !status.ok ? 1 : status.unknown.length ? 2 : 0;
+    }
     const agent = await commandActor({ ...parsed, ...identitySelection(parsed) }, identity, usage);
     const repository = parsed.repo ?? (await runtime.currentRepository());
     // One composed GH facade (#1136 review): the permission check, ticket reads and writes all use
@@ -2121,17 +2137,6 @@ async function run(
     const query = gh.tickets;
     const permission = gh.repos.permissionOf(repository);
     const writes = { run: gh.run, query, permission };
-    if (op === "status") {
-      const status = await readRefinementStatus(
-        repository,
-        parsed.number,
-        agent,
-        query,
-        permission,
-      );
-      await output(parsed.json ? statusJson(status) : statusText(status));
-      return !status.ok ? 1 : status.unknown.length ? 2 : 0;
-    }
     if (op === "resolve") {
       const values = parsed as ReturnType<typeof refineResolveArgumentsFor>;
       const input = { number: values.number, agent, request: values.request, why: values.why };
