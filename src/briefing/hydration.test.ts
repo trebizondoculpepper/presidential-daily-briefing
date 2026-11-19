@@ -43,6 +43,14 @@ describe("role-neutral shortlist hydration (#652)", () => {
     const a = hydrationSubjects(implementer, limit);
     const b = hydrationSubjects(designer, limit);
     expect([...a].sort()).toEqual([...b].sort());
+    // #651: both roles have the same pre-limit activity identities and count.
+    const { HYDRATION_POOL: poolKey } = await import("./compact.js");
+    const pool = (r: unknown) =>
+      ((r as Record<symbol, { id: string }[]>)[poolKey] ?? []).map((i) => i.id).sort();
+    expect(pool(implementer)).toEqual(pool(designer));
+    expect((implementer as { rankedActions: { total: number } }).rankedActions.total).toBe(
+      (designer as { rankedActions: { total: number } }).rankedActions.total,
+    );
     // The engine's per-role ranks reproduce each role's own displayed order exactly.
     const { HYDRATION_POOL } = await import("./compact.js");
     const { RANK_PARTITION } = await import("../rules/datalog/engine.js");

@@ -25,6 +25,11 @@
 ;; waiting, resume-required and unknown claims are not continued as implementation.
 [(own-active ?t) (own-issue ?t) (not [?t "claim-activity" _])]
 [(own-active ?t) (own-issue ?t) [?t "claim-activity" "active"]]
+;; #652: an owned active claim held back by an open native blocker or a prerequisite label (an
+;; outstanding question or design need) is managed, never continued as implementation.
+[(own-held-back ?t) (own-active ?t) (blocked ?t)]
+[(own-held-back ?t) (own-active ?t) (prerequisite ?t)]
+[(own-continuable ?t) (own-active ?t) (not (blocked ?t)) (not (prerequisite ?t))]
 ;; A closed source stays in the human view while a trusted question on it is unsettled (#414).
 [(foreground ?t) [1 "role" "human"] (orphan-source ?t)]
 [(platform-ok ?t) [?t "labels-complete" true] (not [?t "platform" _])]

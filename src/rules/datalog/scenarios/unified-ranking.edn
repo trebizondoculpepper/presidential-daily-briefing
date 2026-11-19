@@ -42,4 +42,16 @@
           {:e 100 "kind" "issue" "state" "OPEN" "target" "https://github.com/o/r/issues/1" "number" 1 "created" 1767225600001 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "head" "not-a-pr" "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "label" ["agent:me" "attention:me"] "owner" "me" "attention" "me"}]
   :expect {:actions [{:subject 100 :rule "D-ATTENTION" :kind "addressed-response" :band 1}
             {:subject 100 :rule "D-OWN" :kind "continue-implementation" :band 6}] :denials #{}}}
+ {:id "an-owned-blocked-claim-is-managed-not-continued"
+   :doc "#651: owned work that a native blocker or prerequisite holds back is a management row, never continuation."
+   :viewer {:role "implementer" :agent "me"}
+   :facts [{:e 1 "forward-complete" true}
+           {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600001 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 1 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "not-a-pr" "label" ["agent:me" "status:in-progress"] "owner" "me"}]
+   :expect {:actions [{:subject 100 :rule "D-OWN-HELD-BACK" :kind "inspect" :band 3}] :denials #{}}}
+  {:id "an-owned-claim-awaiting-a-question-is-managed"
+   :doc "#651: owned work that a native blocker or prerequisite holds back is a management row, never continuation."
+   :viewer {:role "implementer" :agent "me"}
+   :facts [{:e 1 "forward-complete" true}
+           {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600001 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "not-a-pr" "label" ["agent:me" "question"] "owner" "me"}]
+   :expect {:actions [{:subject 100 :rule "D-OWN-HELD-BACK" :kind "inspect" :band 3}] :denials #{}}}
  ]}

@@ -312,7 +312,7 @@ describe("purpose-first rule presentation (#578)", () => {
       expect(article).toContain(`<summary>Formal conditions for ${id}</summary>`);
       expect(article).not.toMatch(/<details[^>]*\bopen\b/);
     }
-    expect(html).toContain("Authored purposes: 48 of 48 rules in this view");
+    expect(html).toContain("Authored purposes: 49 of 49 rules in this view");
     expect(html).toContain("not evidence that a rule matched a ticket");
     expect(html).toContain("Mutation guards remain outside this listing");
     expect(html).toContain("Not formalized here");
@@ -324,7 +324,7 @@ describe("purpose-first rule presentation (#578)", () => {
     for (const rule of [...older.decisions, ...older.denials]) delete rule.purpose;
     const oldDoc = rulesDocument(declaredRulesContext(), {}, older);
     const oldPage = rulesPageHtml(oldDoc, rulesFormalText(oldDoc), page);
-    expect(oldPage).toContain("Authored purposes: 0 of 48 rules in this view");
+    expect(oldPage).toContain("Authored purposes: 0 of 49 rules in this view");
     expect(oldPage).toContain("Purpose not supplied");
     expect(pageSections(oldPage)).toEqual(formalSections(rulesFormalText(oldDoc)));
 
@@ -369,7 +369,7 @@ describe("purpose-first rule presentation (#578)", () => {
       expect(html).toContain(
         `Authored purposes: ${doc.narration.supplied} of ${doc.narration.total}`,
       );
-      expect(doc.narration.total).toBeLessThan(48);
+      expect(doc.narration.total).toBeLessThan(49);
       expect(doc.narration.missing).toEqual([]);
       expect(pageSections(html)).toEqual(formalSections(rulesFormalText(doc)));
     },

@@ -1,8 +1,8 @@
 {
   "modelVersion": 2,
   "policyVersion": 1,
-  "rulesHash": "30798736fce6e35cfcba22d149e2d79a3e5d34eeabf1dd5128bca1b883337e7e",
-  "narrationHash": "dc1aff3f8ac7622be401dc7713aaff5c3a21319a63693c38d588d0d12f162475",
+  "rulesHash": "ff7a759334b2e6f60633efffe600f22c97e2752c3b43fe536bbefd16ae6f2e3f",
+  "narrationHash": "44e89e7e19039be8f1fe18fbdcda0d371eb6a7e9c1317db986f6d877cbe8d507",
   "sources": [
     "policy/schema.edn",
     "policy/rules.edn",
@@ -1444,7 +1444,7 @@
         },
         {
           "type": "call",
-          "predicate": "own-active",
+          "predicate": "own-continuable",
           "args": [
             {
               "var": "?t"
@@ -1462,7 +1462,7 @@
         }
       ],
       "templateClauses": 1,
-      "calls": ["foreground", "own-active", "easy"],
+      "calls": ["foreground", "own-continuable", "easy"],
       "evidence": [],
       "source": {
         "file": "policy/decisions.edn",
@@ -2092,7 +2092,7 @@
         },
         {
           "type": "call",
-          "predicate": "own-active",
+          "predicate": "own-continuable",
           "args": [
             {
               "var": "?t"
@@ -2101,7 +2101,7 @@
         }
       ],
       "templateClauses": 1,
-      "calls": ["foreground", "own-active"],
+      "calls": ["foreground", "own-continuable"],
       "evidence": [],
       "source": {
         "file": "policy/decisions.edn",
@@ -2327,7 +2327,7 @@
         },
         {
           "type": "call",
-          "predicate": "own-active",
+          "predicate": "own-continuable",
           "args": [
             {
               "var": "?t"
@@ -2345,7 +2345,7 @@
         }
       ],
       "templateClauses": 1,
-      "calls": ["foreground", "own-active", "unfavorable"],
+      "calls": ["foreground", "own-continuable", "unfavorable"],
       "evidence": [],
       "source": {
         "file": "policy/decisions.edn",
@@ -2902,6 +2902,202 @@
       }
     },
     {
+      "id": "D-OWN-HELD-BACK",
+      "purpose": "Manage an owned claim that a native blocker or an outstanding prerequisite holds back (#651).",
+      "kind": "inspect",
+      "band": 3,
+      "preference": 2,
+      "codes": ["owned-blocked", "own-claim"],
+      "roles": null,
+      "clauses": [
+        {
+          "type": "call",
+          "predicate": "foreground",
+          "args": [
+            {
+              "var": "?t"
+            }
+          ]
+        },
+        {
+          "type": "fact",
+          "scope": "viewer",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "role",
+          "value": {
+            "var": "?role"
+          },
+          "phrase": "role",
+          "many": false
+        },
+        {
+          "type": "compare",
+          "op": "not=",
+          "args": [
+            {
+              "var": "?role"
+            },
+            {
+              "lit": "human"
+            }
+          ]
+        },
+        {
+          "type": "call",
+          "predicate": "own-held-back",
+          "args": [
+            {
+              "var": "?t"
+            }
+          ]
+        }
+      ],
+      "templateClauses": 1,
+      "calls": ["foreground", "own-held-back"],
+      "evidence": [
+        {
+          "name": "heldBack",
+          "scope": "rule",
+          "clauses": [
+            {
+              "type": "or",
+              "join": ["?t", "?value"],
+              "alternatives": [
+                [
+                  {
+                    "type": "fact",
+                    "scope": "entity",
+                    "entity": {
+                      "var": "?t"
+                    },
+                    "attribute": "label",
+                    "value": {
+                      "var": "?value"
+                    },
+                    "phrase": "label",
+                    "many": true
+                  },
+                  {
+                    "type": "fact",
+                    "scope": "constant",
+                    "entity": {
+                      "lit": 1
+                    },
+                    "attribute": "prerequisite",
+                    "value": {
+                      "var": "?value"
+                    },
+                    "phrase": null,
+                    "many": true
+                  }
+                ],
+                [
+                  {
+                    "type": "fact",
+                    "scope": "entity",
+                    "entity": {
+                      "var": "?t"
+                    },
+                    "attribute": "open-blockers",
+                    "value": {
+                      "var": "?n"
+                    },
+                    "phrase": "number of open blockers",
+                    "many": false
+                  },
+                  {
+                    "type": "compare",
+                    "op": ">",
+                    "args": [
+                      {
+                        "var": "?n"
+                      },
+                      {
+                        "lit": 0
+                      }
+                    ]
+                  },
+                  {
+                    "type": "bind",
+                    "fn": "str",
+                    "args": [
+                      {
+                        "var": "?n"
+                      },
+                      {
+                        "lit": " open native blocker(s)"
+                      }
+                    ],
+                    "result": "?value"
+                  }
+                ],
+                [
+                  {
+                    "type": "fact",
+                    "scope": "entity",
+                    "entity": {
+                      "var": "?t"
+                    },
+                    "attribute": "blocker",
+                    "value": {
+                      "var": "?i"
+                    },
+                    "phrase": "native blocker",
+                    "many": true
+                  },
+                  {
+                    "type": "fact",
+                    "scope": "entity",
+                    "entity": {
+                      "var": "?i"
+                    },
+                    "attribute": "state",
+                    "value": {
+                      "lit": "OPEN"
+                    },
+                    "phrase": "state",
+                    "many": false
+                  },
+                  {
+                    "type": "fact",
+                    "scope": "entity",
+                    "entity": {
+                      "var": "?i"
+                    },
+                    "attribute": "number",
+                    "value": {
+                      "var": "?b"
+                    },
+                    "phrase": "number",
+                    "many": false
+                  },
+                  {
+                    "type": "bind",
+                    "fn": "str",
+                    "args": [
+                      {
+                        "lit": "open blocker #"
+                      },
+                      {
+                        "var": "?b"
+                      }
+                    ],
+                    "result": "?value"
+                  }
+                ]
+              ]
+            }
+          ]
+        }
+      ],
+      "source": {
+        "file": "policy/decisions.edn",
+        "index": 28
+      }
+    },
+    {
       "id": "D-OWN-UNKNOWN",
       "purpose": "Surface a retained claim whose activity or wait evidence cannot be established.",
       "kind": "inspect",
@@ -2992,7 +3188,7 @@
       ],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 28
+        "index": 29
       }
     },
     {
@@ -3086,7 +3282,7 @@
       ],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 29
+        "index": 30
       }
     },
     {
@@ -3276,7 +3472,7 @@
       ],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 30
+        "index": 31
       }
     },
     {
@@ -3366,7 +3562,7 @@
       ],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 31
+        "index": 32
       }
     },
     {
@@ -3462,7 +3658,7 @@
       ],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 32
+        "index": 33
       }
     },
     {
@@ -3553,7 +3749,7 @@
       ],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 33
+        "index": 34
       }
     },
     {
@@ -3635,7 +3831,7 @@
       ],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 34
+        "index": 35
       }
     },
     {
@@ -3716,7 +3912,7 @@
       ],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 35
+        "index": 36
       }
     },
     {
@@ -3812,7 +4008,7 @@
       ],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 36
+        "index": 37
       }
     },
     {
@@ -3893,7 +4089,7 @@
       ],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 37
+        "index": 38
       }
     },
     {
@@ -3960,7 +4156,7 @@
       "evidence": [],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 38
+        "index": 39
       }
     }
   ],
@@ -4438,7 +4634,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 17
+            "index": 20
           }
         }
       ],
@@ -4585,6 +4781,124 @@
       "set": "rules"
     },
     {
+      "name": "own-held-back",
+      "params": ["?t"],
+      "alternatives": [
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
+              "type": "call",
+              "predicate": "own-active",
+              "args": [
+                {
+                  "var": "?t"
+                }
+              ]
+            },
+            {
+              "type": "call",
+              "predicate": "blocked",
+              "args": [
+                {
+                  "var": "?t"
+                }
+              ]
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 17
+          }
+        },
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
+              "type": "call",
+              "predicate": "own-active",
+              "args": [
+                {
+                  "var": "?t"
+                }
+              ]
+            },
+            {
+              "type": "call",
+              "predicate": "prerequisite",
+              "args": [
+                {
+                  "var": "?t"
+                }
+              ]
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 18
+          }
+        }
+      ],
+      "calls": ["own-active", "blocked", "prerequisite"],
+      "set": "rules"
+    },
+    {
+      "name": "own-continuable",
+      "params": ["?t"],
+      "alternatives": [
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
+              "type": "call",
+              "predicate": "own-active",
+              "args": [
+                {
+                  "var": "?t"
+                }
+              ]
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "call",
+                  "predicate": "blocked",
+                  "args": [
+                    {
+                      "var": "?t"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "call",
+                  "predicate": "prerequisite",
+                  "args": [
+                    {
+                      "var": "?t"
+                    }
+                  ]
+                }
+              ]
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 19
+          }
+        }
+      ],
+      "calls": ["own-active", "blocked", "prerequisite"],
+      "set": "rules"
+    },
+    {
       "name": "platform-ok",
       "params": ["?t"],
       "alternatives": [
@@ -4626,7 +4940,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 18
+            "index": 21
           }
         },
         {
@@ -4661,7 +4975,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 19
+            "index": 22
           }
         }
       ],
@@ -4704,7 +5018,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 20
+            "index": 23
           }
         }
       ],
@@ -4734,7 +5048,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 21
+            "index": 24
           }
         },
         {
@@ -4756,7 +5070,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 22
+            "index": 25
           }
         }
       ],
@@ -4799,7 +5113,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 23
+            "index": 26
           }
         }
       ],
@@ -4829,7 +5143,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 24
+            "index": 27
           }
         },
         {
@@ -4860,7 +5174,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 25
+            "index": 28
           }
         }
       ],
@@ -4890,7 +5204,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 26
+            "index": 29
           }
         },
         {
@@ -4925,7 +5239,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 27
+            "index": 30
           }
         }
       ],
@@ -5045,7 +5359,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 28
+            "index": 31
           }
         }
       ],
@@ -5096,7 +5410,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 29
+            "index": 32
           }
         },
         {
@@ -5131,7 +5445,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 30
+            "index": 33
           }
         }
       ],
@@ -5175,7 +5489,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 31
+            "index": 34
           }
         }
       ],
@@ -5220,7 +5534,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 32
+            "index": 35
           }
         },
         {
@@ -5257,7 +5571,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 33
+            "index": 36
           }
         },
         {
@@ -5294,7 +5608,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 34
+            "index": 37
           }
         },
         {
@@ -5331,7 +5645,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 35
+            "index": 38
           }
         },
         {
@@ -5372,7 +5686,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 36
+            "index": 39
           }
         },
         {
@@ -5413,7 +5727,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 37
+            "index": 40
           }
         },
         {
@@ -5456,7 +5770,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 38
+            "index": 41
           }
         },
         {
@@ -5499,7 +5813,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 39
+            "index": 42
           }
         },
         {
@@ -5573,7 +5887,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 40
+            "index": 43
           }
         }
       ],
@@ -5612,7 +5926,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 41
+            "index": 44
           }
         }
       ],
@@ -5653,7 +5967,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 42
+            "index": 45
           }
         }
       ],
@@ -5781,7 +6095,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 43
+            "index": 46
           }
         }
       ],
@@ -5867,7 +6181,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 44
+            "index": 47
           }
         },
         {
@@ -5919,7 +6233,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 45
+            "index": 48
           }
         }
       ],
@@ -5949,7 +6263,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 46
+            "index": 49
           }
         },
         {
@@ -5971,7 +6285,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 47
+            "index": 50
           }
         },
         {
@@ -6008,7 +6322,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 48
+            "index": 51
           }
         },
         {
@@ -6026,7 +6340,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 49
+            "index": 52
           }
         }
       ],
@@ -6082,7 +6396,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 50
+            "index": 53
           }
         }
       ],
@@ -6138,7 +6452,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 51
+            "index": 54
           }
         }
       ],
@@ -6173,7 +6487,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 52
+            "index": 55
           }
         }
       ],
@@ -6268,7 +6582,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 53
+            "index": 56
           }
         }
       ],
@@ -6311,7 +6625,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 54
+            "index": 57
           }
         }
       ],
@@ -6354,7 +6668,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 55
+            "index": 58
           }
         }
       ],
@@ -6397,7 +6711,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 56
+            "index": 59
           }
         }
       ],
@@ -6440,7 +6754,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 57
+            "index": 60
           }
         }
       ],
@@ -6492,7 +6806,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 58
+            "index": 61
           }
         },
         {
@@ -6549,7 +6863,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 59
+            "index": 62
           }
         }
       ],
@@ -6605,7 +6919,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 60
+            "index": 63
           }
         }
       ],
@@ -6680,7 +6994,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 61
+            "index": 64
           }
         },
         {
@@ -6702,7 +7016,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 62
+            "index": 65
           }
         }
       ],
@@ -6764,7 +7078,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 63
+            "index": 66
           }
         }
       ],
@@ -6794,7 +7108,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 64
+            "index": 67
           }
         },
         {
@@ -6829,7 +7143,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 65
+            "index": 68
           }
         },
         {
@@ -6847,7 +7161,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 66
+            "index": 69
           }
         }
       ],
@@ -6915,7 +7229,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 67
+            "index": 70
           }
         }
       ],
@@ -6958,7 +7272,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 68
+            "index": 71
           }
         }
       ],
@@ -7037,7 +7351,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 69
+            "index": 72
           }
         }
       ],
@@ -7067,7 +7381,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 70
+            "index": 73
           }
         }
       ],
@@ -7136,7 +7450,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 71
+            "index": 74
           }
         },
         {
@@ -7207,7 +7521,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 72
+            "index": 75
           }
         },
         {
@@ -7252,7 +7566,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 73
+            "index": 76
           }
         },
         {
@@ -7297,7 +7611,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 74
+            "index": 77
           }
         },
         {
@@ -7399,7 +7713,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 75
+            "index": 78
           }
         }
       ],
@@ -7559,7 +7873,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 76
+            "index": 79
           }
         }
       ],
@@ -7627,7 +7941,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 77
+            "index": 80
           }
         }
       ],
@@ -7705,7 +8019,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 78
+            "index": 81
           }
         },
         {
@@ -7788,7 +8102,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 79
+            "index": 82
           }
         },
         {
@@ -7862,7 +8176,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 80
+            "index": 83
           }
         }
       ],
@@ -7940,7 +8254,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 81
+            "index": 84
           }
         },
         {
@@ -8001,7 +8315,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 82
+            "index": 85
           }
         }
       ],
@@ -8156,7 +8470,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 83
+            "index": 86
           }
         }
       ],
@@ -8207,7 +8521,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 84
+            "index": 87
           }
         },
         {
@@ -8242,7 +8556,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 85
+            "index": 88
           }
         }
       ],
@@ -8277,7 +8591,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 86
+            "index": 89
           }
         }
       ],
@@ -8303,7 +8617,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 87
+            "index": 90
           }
         },
         {
@@ -8321,7 +8635,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 88
+            "index": 91
           }
         },
         {
@@ -8352,7 +8666,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 89
+            "index": 92
           }
         },
         {
@@ -8370,7 +8684,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 90
+            "index": 93
           }
         },
         {
@@ -8388,7 +8702,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 91
+            "index": 94
           }
         }
       ],
@@ -8423,7 +8737,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 92
+            "index": 95
           }
         }
       ],
@@ -8474,7 +8788,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 93
+            "index": 96
           }
         }
       ],
@@ -8517,7 +8831,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 94
+            "index": 97
           }
         }
       ],
@@ -8560,7 +8874,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 95
+            "index": 98
           }
         }
       ],
@@ -8603,7 +8917,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 96
+            "index": 99
           }
         }
       ],
@@ -8633,7 +8947,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 97
+            "index": 100
           }
         },
         {
@@ -8664,7 +8978,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 98
+            "index": 101
           }
         },
         {
@@ -8714,7 +9028,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 99
+            "index": 102
           }
         }
       ],
@@ -8770,7 +9084,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 100
+            "index": 103
           }
         }
       ],
@@ -8799,7 +9113,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 101
+            "index": 104
           }
         }
       ],
@@ -8843,7 +9157,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 102
+            "index": 105
           }
         }
       ],
@@ -8902,7 +9216,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 103
+            "index": 106
           }
         }
       ],
@@ -8957,7 +9271,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 104
+            "index": 107
           }
         }
       ],
@@ -8987,7 +9301,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 105
+            "index": 108
           }
         }
       ],
@@ -9017,7 +9331,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 106
+            "index": 109
           }
         },
         {
@@ -9039,7 +9353,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 107
+            "index": 110
           }
         }
       ],
@@ -9111,7 +9425,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 108
+            "index": 111
           }
         }
       ],
@@ -9183,7 +9497,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 109
+            "index": 112
           }
         },
         {
@@ -9278,7 +9592,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 110
+            "index": 113
           }
         }
       ],
@@ -9314,7 +9628,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 111
+            "index": 114
           }
         }
       ],
@@ -9343,7 +9657,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 112
+            "index": 115
           }
         }
       ],
@@ -9369,7 +9683,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 113
+            "index": 116
           }
         },
         {
@@ -9387,7 +9701,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 114
+            "index": 117
           }
         }
       ],
@@ -9442,7 +9756,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 115
+            "index": 118
           }
         }
       ],
@@ -9481,7 +9795,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 116
+            "index": 119
           }
         }
       ],
@@ -9537,7 +9851,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 117
+            "index": 120
           }
         },
         {
@@ -9617,7 +9931,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 118
+            "index": 121
           }
         }
       ],
@@ -9647,7 +9961,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 119
+            "index": 122
           }
         },
         {
@@ -9669,7 +9983,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 120
+            "index": 123
           }
         }
       ],
@@ -9708,7 +10022,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 121
+            "index": 124
           }
         }
       ],
@@ -9758,7 +10072,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 122
+            "index": 125
           }
         },
         {
@@ -9782,7 +10096,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 123
+            "index": 126
           }
         },
         {
@@ -9881,7 +10195,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 124
+            "index": 127
           }
         },
         {
@@ -9968,7 +10282,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 125
+            "index": 128
           }
         },
         {
@@ -10055,7 +10369,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 126
+            "index": 129
           }
         },
         {
@@ -10112,7 +10426,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 127
+            "index": 130
           }
         },
         {
@@ -10154,7 +10468,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 128
+            "index": 131
           }
         },
         {
@@ -10196,7 +10510,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 129
+            "index": 132
           }
         },
         {
@@ -10257,7 +10571,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 130
+            "index": 133
           }
         },
         {
@@ -10363,7 +10677,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 134
+            "index": 137
           }
         },
         {
@@ -10405,7 +10719,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 135
+            "index": 138
           }
         },
         {
@@ -10447,7 +10761,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 136
+            "index": 139
           }
         },
         {
@@ -10504,7 +10818,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 137
+            "index": 140
           }
         },
         {
@@ -10580,7 +10894,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 138
+            "index": 141
           }
         },
         {
@@ -10637,7 +10951,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 139
+            "index": 142
           }
         },
         {
@@ -10720,7 +11034,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 140
+            "index": 143
           }
         },
         {
@@ -10807,7 +11121,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 141
+            "index": 144
           }
         },
         {
@@ -10909,7 +11223,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 142
+            "index": 145
           }
         },
         {
@@ -10970,7 +11284,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 143
+            "index": 146
           }
         },
         {
@@ -11027,7 +11341,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 144
+            "index": 147
           }
         },
         {
@@ -11114,7 +11428,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 145
+            "index": 148
           }
         },
         {
@@ -11196,7 +11510,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 146
+            "index": 149
           }
         }
       ],
@@ -11244,7 +11558,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 131
+            "index": 134
           }
         },
         {
@@ -11279,7 +11593,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 132
+            "index": 135
           }
         },
         {
@@ -11314,7 +11628,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 133
+            "index": 136
           }
         }
       ],
@@ -11346,7 +11660,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 147
+            "index": 150
           }
         }
       ],
@@ -11418,7 +11732,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 148
+            "index": 151
           }
         },
         {
@@ -11455,7 +11769,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 149
+            "index": 152
           }
         },
         {
@@ -11525,7 +11839,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 150
+            "index": 153
           }
         }
       ],
@@ -16218,16 +16532,16 @@
     }
   ],
   "coverage": {
-    "decisions": 39,
-    "predicates": 87,
-    "alternatives": 183,
+    "decisions": 40,
+    "predicates": 89,
+    "alternatives": 186,
     "denials": 9,
     "queries": 19,
     "keyQueries": 4,
-    "evidence": 39,
+    "evidence": 40,
     "overrides": 4,
     "constants": 14,
     "attributes": 96,
-    "clauses": 990
+    "clauses": 1003
   }
 }
