@@ -240,6 +240,14 @@ describe("native claim-time obligations and action-reminder selection (#1029)", 
     expect(notReadyPlain.admissionRationale).toEqual([]);
     expect(notReadyPlain.coverage.status).toBe("partial");
 
+    const reworkNoPr = selectClaimRuleReminders({
+      role: "implementer",
+      outcome: "denied",
+      facts: { error: "REWORK_NOT_AUTHORISED" },
+    });
+    expect(reworkNoPr.admissionRationale).toEqual([]);
+    expect(reworkNoPr.coverage.status).toBe("partial");
+
     const unknownId = selectClaimRuleReminders({
       role: "implementer",
       outcome: "denied",

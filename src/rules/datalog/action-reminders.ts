@@ -227,8 +227,9 @@ function refusalErrorToRuleId(
     case "HAS_OPEN_PR":
     case "OPEN_PR":
     case "HAS_CLOSING_PR":
-    case "REWORK_NOT_AUTHORISED":
       return "D-DENY-OPEN-PR";
+    case "REWORK_NOT_AUTHORISED":
+      return facts.hasOpenPr ? "D-DENY-OPEN-PR" : null;
     case "NOT_READY":
       return facts.hasPrerequisite || facts.needsDesign ? "D-DENY-PREREQUISITE" : null;
     case "PREREQUISITE":
