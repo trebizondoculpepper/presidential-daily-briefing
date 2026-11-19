@@ -60,6 +60,8 @@ describe("claim and needs-human (doc/design/workflow.md)", () => {
     labelledAt?: string;
     permission?: Record<string, RepositoryPermission>;
     claims?: number[];
+    /** The agent's claim inventory has more pages than were read (#1083). */
+    claimsIncomplete?: boolean;
     repoLabels?: string[];
     afterWriteOwners?: string[];
     failRecheck?: boolean;
@@ -114,9 +116,12 @@ describe("claim and needs-human (doc/design/workflow.md)", () => {
                         : [],
                     ),
                   },
-          claims: page(
-            (t.claims ?? []).map((n) => ({ number: n, title: `Ticket ${n}`, url: issue(n).url })),
-          ),
+          claims: {
+            ...page(
+              (t.claims ?? []).map((n) => ({ number: n, title: `Ticket ${n}`, url: issue(n).url })),
+            ),
+            ...(t.claimsIncomplete ? { pageInfo: { hasNextPage: true, endCursor: "more" } } : {}),
+          },
           ownerLabel: has(variables.label),
           questionLabel: has(variables.question),
           decisionLabel: has(variables.decision),
@@ -144,6 +149,23 @@ describe("claim and needs-human (doc/design/workflow.md)", () => {
     const env = fake(t);
     return planClaim(repo, { number: 7, agent: "kavya", ...extra }, env.query, env.permission);
   };
+
+  it("refuses before any write when the claim inventory is incomplete, even with no observed claim (#1083)", async () => {
+    const env = fake({ labels: ["status:ready"], claimsIncomplete: true });
+    const plan = refused(await planClaim(repo, { number: 7, agent: "kavya" }, env.query));
+    expect(plan.error).toBe("EVIDENCE_INCOMPLETE");
+    expect(plan.prerequisite).toContain("could not be read completely");
+    expect(plan.recovery.join(" ")).toContain("pdb team");
+    expect(env.writes).toEqual([]);
+    // The same ticket with a complete inventory is still admitted.
+    accepted(
+      await planClaim(
+        repo,
+        { number: 7, agent: "kavya" },
+        fake({ labels: ["status:ready"] }).query,
+      ),
+    );
+  });
 
   it("claims an eligible ticket: creates the agent label if needed, swaps readiness, comments once", async () => {
     const env = fake({ labels: ["status:ready"] });
