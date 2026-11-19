@@ -15,16 +15,17 @@ import { impactGuidance } from "../estimation/impact.js";
 import type { RoleView } from "./roles.js";
 import type { Action, Issue, PullRequest, Snapshot } from "../github/types.js";
 
-/** #1088: the native action kind each role section projects; absent means no native projection. */
-const nativeSectionKinds: Readonly<Record<string, string>> = {
-  addressed: "addressed-response",
-  "pr-follow-up": "pr-follow-up",
-  "own-work": "continue-implementation",
-  pickup: "implement",
-  "decision-needed": "decide",
-  "documentation-needed": "document",
-  "design-review": "design-review",
-  "design-pickup": "design",
+/** #1088: the native action kinds each role section projects; absent means no native projection. */
+const nativeSectionKinds: Readonly<Record<string, readonly string[]>> = {
+  addressed: ["addressed-response"],
+  "pr-follow-up": ["pr-follow-up"],
+  // Every owned-work obligation (#413), including a retained claim to resume or review.
+  "own-work": ["continue-implementation", "resume-claim", "review-owned-work", "wait-claim"],
+  pickup: ["implement"],
+  "decision-needed": ["decide"],
+  "documentation-needed": ["document"],
+  "design-review": ["design-review"],
+  "design-pickup": ["design"],
 };
 export type RuleGroup =
   | "hygiene"
@@ -563,13 +564,13 @@ export function compactBriefing(
     // of the section's action kind, in native order), never a second TypeScript ranking. A section
     // with no single native kind (and no background declaration) is refused rather than re-ranked.
     const nativeSection = (): RoleView["sections"][number] => {
-      const kind = nativeSectionKinds[options.section!];
-      if (!kind)
+      const kinds = nativeSectionKinds[options.section!];
+      if (!kinds)
         throw new BriefingArgumentError(
           `--section ${options.section} has no native ranking projection; omit --section to see NEXT STEPS in native order, or use --section other-context.`,
         );
       const rows = experimental!.items
-        .filter((i) => i.kind === kind && inScope(i.target))
+        .filter((i) => kinds.includes(i.kind) && inScope(i.target))
         .map((i) => ({ url: i.target, reason: i.why?.text ?? "Missing experimental explanation" }));
       const declared = roleRegistry
         .get(options.role!)

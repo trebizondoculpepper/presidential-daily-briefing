@@ -192,4 +192,48 @@ describe("--section (#311)", () => {
         ((await present(section)).report as { focus: { section: string } }).focus.section,
       ).toBe(section);
   });
+
+  it("projects every owned-work kind into own-work, including a claim to resume (#1090 review)", () => {
+    const data = snapshot([issue(1), issue(2), issue(3)], []);
+    const item = (n: number, kind: string, text: string) => ({
+      id: `r ${n} ${kind}`,
+      kind,
+      target: data.issues[n - 1]!.url,
+      role: "implementer",
+      band: 3,
+      reasonCodes: [],
+      evidence: [],
+      nextCommand: null,
+      thenCommand: null,
+      inspection: null,
+      complexity: { state: "unknown", size: null },
+      impact: { state: "unknown", size: null },
+      unlocks: 0,
+      unlocksUnknown: [],
+      why: { text, ruleIds: [], facts: {}, overriddenRuleIds: [] },
+    });
+    const native = {
+      policyVersion: 1,
+      total: 3,
+      omitted: 0,
+      items: [
+        item(2, "resume-claim", "Resume your retained claim"),
+        item(1, "continue-implementation", "Continue your claim"),
+        item(3, "implement", "Pick up"),
+      ],
+    } as unknown as Parameters<typeof compactBriefing>[5];
+    const report = compactBriefing(
+      data,
+      { limit: 10, agent: "me", role: "implementer", section: "own-work" },
+      briefing(data, { limit: 1000, agent: "me" }, new Date(time)),
+      undefined,
+      "available",
+      native,
+    ) as { focus: { items: { url: string; reason: string }[] } };
+    expect(report.focus.items.map((r) => r.url)).toEqual([
+      data.issues[1]!.url,
+      data.issues[0]!.url,
+    ]);
+    expect(report.focus.items[0]!.reason).toBe("Resume your retained claim");
+  });
 });
