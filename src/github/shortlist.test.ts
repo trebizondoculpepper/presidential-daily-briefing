@@ -734,7 +734,7 @@ describe("routine briefing: discover all, rank, hydrate only the shortlist (#368
       );
       expect(read.text.startsWith("PROVISIONAL: Shortlist:")).toBe(true);
       expect((read.report as unknown as Report).shortlist?.provisional).toBe(true);
-    });
+    }, 120_000); // native policy over the large fixture; cost tracked in #1069
   });
 
   describe("an unknown answer is never closed or absent (#368)", () => {
