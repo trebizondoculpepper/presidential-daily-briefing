@@ -16,6 +16,22 @@ const bundle = bundleJson as unknown as PolicyBundle;
 const { policyVersion } = bundle;
 
 export const rulesHash = rulesHashOf(bundle);
+/**
+ * A decision rule's authored purpose and generated explanation, read from the bundled policy, so
+ * a command can show the guidance a rule gives without restating policy text (#1095).
+ */
+/** A denial rule's explanation from the bundled policy (#1095). */
+export function denialText(id: string): string | null {
+  return (bundle.denials as Record<string, string>)[id] ?? null;
+}
+export function decisionGuidance(
+  id: string,
+): { id: string; kind: string; purpose: string; why: string } | null {
+  const d = (
+    bundle.definitions as unknown as { id: string; kind: string; purpose?: string; why?: string }[]
+  ).find((x) => x.id === id);
+  return d ? { id: d.id, kind: d.kind, purpose: d.purpose ?? "", why: d.why ?? "" } : null;
+}
 export const narrationHash = narrationHashOf(bundle);
 export { policyVersion };
 

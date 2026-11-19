@@ -52,6 +52,14 @@ import {
 import { briefingRoleNames, roleSectionIds } from "./briefing/roles.js";
 import { labelsFromSnapshot, normalizeLabelRequest } from "./github/labels.js";
 import { doctorStaleHours } from "./workflow/ticketdoctor.js";
+import { planRefinementRequest, requestRefinement } from "./workflow/refinement.js";
+import {
+  refineArgumentsFor,
+  refineHelp,
+  refineJson,
+  refineText,
+  refineUsage,
+} from "./workflow/refinecli.js";
 import {
   applyPlan,
   claimPolicy,
@@ -411,6 +419,9 @@ ${crashDisclosure()}
   needs-human N [--agent NAME] --designer NAME --why TEXT --question TEXT... [--release] [--dry-run]
                         Record questions for a designer and mark the ticket decision-needed;
                         keeps your claim waiting on the question (--release relinquishes it)
+  refine request N [--agent NAME] --designer NAME --why TEXT --question TEXT... [--dependency owner/name#M...] [--dry-run]
+                        Mark a ticket as needing refinement with concrete blocking questions;
+                        denies implementation pickup until resolved and re-estimated (refine --help)
   question resolve|withdraw N [--agent NAME] --question URL --why TEXT [--dry-run]
                         Record that a needs-human question was answered or withdrawn (explicit,
                         with a reason; never inferred from replies, labels or closure)
@@ -2065,6 +2076,43 @@ async function run(
         ? JSON.stringify({ schemaVersion: 1, ...result }, null, 2) + "\n"
         : claimText(result, values.dryRun),
     );
+    return result.exitCode;
+  }
+  if (args[0] === "refine") {
+    if (args[1] === "--help" || args[1] === "-h" || args.length === 1) {
+      await output(refineHelp);
+      return args.length === 1 ? 1 : 0;
+    }
+    const parsed = refineArgumentsFor(args.slice(1), identitySelectionOptions);
+    if (identity) parsed.repo ??= await runtime.currentRepository();
+    const values = {
+      ...parsed,
+      ...identitySelection(parsed),
+      agent: await commandActor({ ...parsed, ...identitySelection(parsed) }, identity, refineUsage),
+    };
+    const repository = values.repo ?? (await runtime.currentRepository());
+    const query = executorsOf(runtime).query;
+    const permission = ghOf(runtime).repos.permissionOf(repository);
+    const input = {
+      number: values.number,
+      agent: values.agent,
+      designer: values.designer,
+      why: values.why,
+      questions: values.questions,
+      dependencies: values.dependencies,
+    };
+    // Read live immediately before writing; never act on a cached snapshot.
+    const result = values.dryRun
+      ? await (async () => {
+          const plan = await planRefinementRequest(repository, input, query, permission);
+          return { ...plan, exitCode: plan.ok ? 0 : 1 };
+        })()
+      : await requestRefinement(repository, input, {
+          run: executorsOf(runtime).run,
+          query,
+          permission,
+        });
+    await output(values.json ? refineJson(result) : refineText(result, values.dryRun));
     return result.exitCode;
   }
   if (args[0] === "claim" && (args[1] === "wait" || args[1] === "resume")) {
