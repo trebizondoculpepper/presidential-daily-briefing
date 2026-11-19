@@ -1,8 +1,8 @@
 {
   "modelVersion": 2,
   "policyVersion": 1,
-  "rulesHash": "93b9e47d031ecf544b5cdd41bee1e6d210dcdc81e07775e163e36f43157d3399",
-  "narrationHash": "c6bd630d7bf066c504c8f65e315112e01d0f4e0069742f16d26109f0e47847d6",
+  "rulesHash": "d4cdba3726319a4735591fe3d475aa979f11387069deafe128f9646ada0e86b2",
+  "narrationHash": "70b53488c7f367a99ebd2f9e13754ff25e30477246e8a942016939590b5f40a7",
   "sources": [
     "policy/schema.edn",
     "policy/rules.edn",
@@ -8914,6 +8914,19 @@
               "many": false
             },
             {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "required-evidence-complete",
+              "value": {
+                "lit": true
+              },
+              "phrase": "completeness of target required-check evidence",
+              "many": false
+            },
+            {
               "type": "call",
               "predicate": "pr-pending",
               "args": [
@@ -9014,6 +9027,70 @@
             "file": "policy/rules.edn",
             "index": 97
           }
+        },
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
+              "type": "call",
+              "predicate": "pr",
+              "args": [
+                {
+                  "var": "?t"
+                }
+              ]
+            },
+            {
+              "type": "call",
+              "predicate": "open",
+              "args": [
+                {
+                  "var": "?t"
+                }
+              ]
+            },
+            {
+              "type": "call",
+              "predicate": "mine-linked",
+              "args": [
+                {
+                  "var": "?t"
+                }
+              ]
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "required-evidence-complete",
+              "value": {
+                "lit": false
+              },
+              "phrase": "completeness of target required-check evidence",
+              "many": false
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "call",
+                  "predicate": "follow-up",
+                  "args": [
+                    {
+                      "var": "?t"
+                    }
+                  ]
+                }
+              ]
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 98
+          }
         }
       ],
       "calls": ["pr", "open", "mine-linked", "follow-up"],
@@ -9063,7 +9140,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 98
+            "index": 99
           }
         }
       ],
@@ -9106,7 +9183,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 99
+            "index": 100
           }
         }
       ],
@@ -9149,7 +9226,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 100
+            "index": 101
           }
         }
       ],
@@ -9192,7 +9269,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 101
+            "index": 102
           }
         }
       ],
@@ -9222,7 +9299,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 102
+            "index": 103
           }
         },
         {
@@ -9253,7 +9330,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 103
+            "index": 104
           }
         },
         {
@@ -9303,7 +9380,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 104
+            "index": 105
           }
         }
       ],
@@ -9359,7 +9436,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 105
+            "index": 106
           }
         }
       ],
@@ -9388,7 +9465,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 106
+            "index": 107
           }
         }
       ],
@@ -9432,7 +9509,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 107
+            "index": 108
           }
         }
       ],
@@ -9491,7 +9568,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 108
+            "index": 109
           }
         }
       ],
@@ -9546,7 +9623,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 109
+            "index": 110
           }
         }
       ],
@@ -9576,7 +9653,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 110
+            "index": 111
           }
         }
       ],
@@ -9606,7 +9683,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 111
+            "index": 112
           }
         },
         {
@@ -9628,7 +9705,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 112
+            "index": 113
           }
         }
       ],
@@ -9700,7 +9777,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 113
+            "index": 114
           }
         }
       ],
@@ -9772,7 +9849,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 114
+            "index": 115
           }
         },
         {
@@ -9867,7 +9944,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 115
+            "index": 116
           }
         }
       ],
@@ -9903,7 +9980,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 116
+            "index": 117
           }
         }
       ],
@@ -9932,7 +10009,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 117
+            "index": 118
           }
         }
       ],
@@ -9958,7 +10035,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 118
+            "index": 119
           }
         },
         {
@@ -9976,7 +10053,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 119
+            "index": 120
           }
         }
       ],
@@ -10031,7 +10108,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 120
+            "index": 121
           }
         }
       ],
@@ -10070,7 +10147,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 121
+            "index": 122
           }
         }
       ],
@@ -10126,7 +10203,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 122
+            "index": 123
           }
         },
         {
@@ -10206,7 +10283,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 123
+            "index": 124
           }
         }
       ],
@@ -10236,7 +10313,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 124
+            "index": 125
           }
         },
         {
@@ -10258,7 +10335,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 125
+            "index": 126
           }
         }
       ],
@@ -10297,7 +10374,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 126
+            "index": 127
           }
         }
       ],
@@ -10347,7 +10424,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 127
+            "index": 128
           }
         },
         {
@@ -10371,7 +10448,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 128
+            "index": 129
           }
         },
         {
@@ -10470,7 +10547,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 129
+            "index": 130
           }
         },
         {
@@ -10557,7 +10634,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 130
+            "index": 131
           }
         },
         {
@@ -10644,7 +10721,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 131
+            "index": 132
           }
         },
         {
@@ -10701,7 +10778,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 132
+            "index": 133
           }
         },
         {
@@ -10743,7 +10820,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 133
+            "index": 134
           }
         },
         {
@@ -10785,7 +10862,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 134
+            "index": 135
           }
         },
         {
@@ -10846,7 +10923,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 135
+            "index": 136
           }
         },
         {
@@ -10952,7 +11029,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 139
+            "index": 140
           }
         },
         {
@@ -10994,7 +11071,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 140
+            "index": 141
           }
         },
         {
@@ -11036,7 +11113,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 141
+            "index": 142
           }
         },
         {
@@ -11093,7 +11170,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 142
+            "index": 143
           }
         },
         {
@@ -11169,7 +11246,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 143
+            "index": 144
           }
         },
         {
@@ -11226,7 +11303,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 144
+            "index": 145
           }
         },
         {
@@ -11309,7 +11386,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 145
+            "index": 146
           }
         },
         {
@@ -11396,7 +11473,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 146
+            "index": 147
           }
         },
         {
@@ -11498,7 +11575,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 147
+            "index": 148
           }
         },
         {
@@ -11559,7 +11636,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 148
+            "index": 149
           }
         },
         {
@@ -11616,7 +11693,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 149
+            "index": 150
           }
         },
         {
@@ -11703,7 +11780,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 150
+            "index": 151
           }
         },
         {
@@ -11785,7 +11862,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 151
+            "index": 152
           }
         }
       ],
@@ -11833,7 +11910,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 136
+            "index": 137
           }
         },
         {
@@ -11868,7 +11945,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 137
+            "index": 138
           }
         },
         {
@@ -11903,7 +11980,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 138
+            "index": 139
           }
         }
       ],
@@ -11935,7 +12012,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 152
+            "index": 153
           }
         }
       ],
@@ -12007,7 +12084,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 153
+            "index": 154
           }
         },
         {
@@ -12044,7 +12121,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 154
+            "index": 155
           }
         },
         {
@@ -12114,7 +12191,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 155
+            "index": 156
           }
         }
       ],
@@ -16809,7 +16886,7 @@
   "coverage": {
     "decisions": 42,
     "predicates": 91,
-    "alternatives": 188,
+    "alternatives": 189,
     "denials": 9,
     "queries": 19,
     "keyQueries": 4,
@@ -16817,6 +16894,6 @@
     "overrides": 4,
     "constants": 14,
     "attributes": 96,
-    "clauses": 1024
+    "clauses": 1031
   }
 }

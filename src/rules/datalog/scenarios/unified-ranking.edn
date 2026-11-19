@@ -164,4 +164,9 @@
   :viewer {:role "implementer" :agent "me"}
   :facts [{:e 1 "forward-complete" true} {:e 100 "kind" "pr" "state" "OPEN" "number" 5 "target" "https://github.com/o/r/pull/5" "created" 1767225600005 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "head5" "draft" false "mergeable" "MERGEABLE" "merge-state" "CLEAN" "review-decision" "" "pr-complete" false "required-evidence-complete" true "check" 102 "responsible" "me"} {:e 102 "name" "verify" "outcome" "PENDING"}]
   :expect {:actions [{:subject 100 :rule "D-OWN-PR-INCOMPLETE" :kind "inspect" :band 3}] :denials #{}}}
+ {:id "owned-pr-with-unread-required-checks-is-inspected"
+  :doc "#651: an owned PR with a pending check but unread required-check evidence is inspected, never declared only waiting."
+  :viewer {:role "implementer" :agent "me"}
+  :facts [{:e 1 "forward-complete" true} {:e 100 "kind" "pr" "state" "OPEN" "number" 5 "target" "https://github.com/o/r/pull/5" "created" 1767225600005 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "head5" "draft" false "mergeable" "MERGEABLE" "merge-state" "CLEAN" "review-decision" "" "pr-complete" true "required-evidence-complete" false "check" 102 "responsible" "me"} {:e 102 "name" "verify" "outcome" "PENDING"}]
+  :expect {:actions [{:subject 100 :rule "D-OWN-PR-INCOMPLETE" :kind "inspect" :band 3}] :denials #{}}}
  ]}
