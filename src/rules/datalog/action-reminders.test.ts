@@ -52,7 +52,7 @@ describe("native claim-time obligations and action-reminder selection (#1029)", 
     });
   });
 
-  it("differentiates designer role from implementer role", () => {
+  it("differentiates designer role from implementer role and waiting claim activity", () => {
     const res = selectClaimRuleReminders({
       role: "designer",
       outcome: "claimed",
@@ -62,6 +62,20 @@ describe("native claim-time obligations and action-reminder selection (#1029)", 
     expect(res.selectedIds).not.toContain("O-CLAIM-DELIVERABLE");
     expect(res.selectedIds).toContain("O-CLAIM-ACCEPTANCE");
     expect(res.coverage.status).toBe("complete");
+
+    const designerNoDesign = selectClaimRuleReminders({
+      role: "designer",
+      outcome: "claimed",
+      facts: { needsDesign: false },
+    });
+    expect(designerNoDesign.admissionRationale).toEqual([]);
+
+    const waitingClaim = selectClaimRuleReminders({
+      role: "implementer",
+      outcome: "noop",
+      facts: { claimActivity: "waiting" },
+    });
+    expect(waitingClaim.admissionRationale.map((i) => i.id)).toEqual(["D-OWN-WAIT"]);
   });
 
   it("labels noop outcomes as no-op and includes continuation obligation", () => {
@@ -214,9 +228,34 @@ describe("native claim-time obligations and action-reminder selection (#1029)", 
       selectClaimRuleReminders({
         role: "implementer",
         outcome: "denied",
-        facts: { error: "NOT_READY" },
+        facts: { error: "NOT_READY", hasPrerequisite: true },
       }).admissionRationale.map((i) => i.id),
     ).toEqual(["D-DENY-PREREQUISITE"]);
+
+    const notReadyPlain = selectClaimRuleReminders({
+      role: "implementer",
+      outcome: "denied",
+      facts: { error: "NOT_READY" },
+    });
+    expect(notReadyPlain.admissionRationale).toEqual([]);
+    expect(notReadyPlain.coverage.status).toBe("partial");
+
+    const unknownId = selectClaimRuleReminders({
+      role: "implementer",
+      outcome: "denied",
+      facts: { denialIds: ["D-UNKNOWN"] },
+    });
+    expect(unknownId.coverage.unresolvedIds).toEqual(["D-UNKNOWN"]);
+    expect(unknownId.coverage.status).toBe("partial");
+
+    const mismatch = selectClaimRuleReminders({
+      role: "implementer",
+      outcome: "claimed",
+      effectivePolicy: { rulesHash: "0000" },
+    });
+    expect(mismatch.coverage.status).toBe("unresolved");
+    expect(mismatch.admissionRationale).toEqual([]);
+    expect(mismatch.effectivePolicy.rulesHash).toBe(rulesHash);
 
     const unmapped = selectClaimRuleReminders({
       role: "implementer",

@@ -112,7 +112,12 @@ for (const obligation of CLAIM_OBLIGATIONS) {
 }
 
 const OBLIGATIONS_HASH = createHash("sha256")
-  .update(JSON.stringify(CLAIM_OBLIGATIONS))
+  .update(
+    JSON.stringify({
+      obligations: CLAIM_OBLIGATIONS,
+      refusalMapper: refusalErrorToRuleId.toString(),
+    }),
+  )
   .digest("hex");
 
 export const claimObligationsHash = (): string => OBLIGATIONS_HASH;
@@ -134,6 +139,9 @@ export interface ClaimReminderFactInput {
   hasOpenPr?: boolean;
   hasBlockers?: boolean;
   needsDesign?: boolean;
+  /** True when a NOT_READY refusal is caused by a prerequisite label rather than missing readiness. */
+  hasPrerequisite?: boolean;
+  claimActivity?: "active" | "waiting" | "resume-required" | "unknown";
 }
 
 export interface SelectClaimRemindersInput {
@@ -193,14 +201,15 @@ export interface ActionRuleReminders {
     status: "complete" | "partial" | "unresolved";
     contextResolved: boolean;
     missingPurposes: string[];
+    unresolvedIds: string[];
     notes: string[];
   };
 }
 
-const refusalErrorToRuleId = (
+function refusalErrorToRuleId(
   error: string | undefined,
   facts: ClaimReminderFactInput,
-): string | null => {
+): string | null {
   switch (error) {
     case "OWNED_BY_OTHER":
       return "D-DENY-CLAIM";
@@ -221,6 +230,7 @@ const refusalErrorToRuleId = (
     case "REWORK_NOT_AUTHORISED":
       return "D-DENY-OPEN-PR";
     case "NOT_READY":
+      return facts.hasPrerequisite || facts.needsDesign ? "D-DENY-PREREQUISITE" : null;
     case "PREREQUISITE":
     case "NEEDS_DESIGN":
       return "D-DENY-PREREQUISITE";
@@ -232,7 +242,7 @@ const refusalErrorToRuleId = (
     default:
       return null;
   }
-};
+}
 
 function resolvePolicyRule(
   id: string,
@@ -300,14 +310,23 @@ export function selectClaimRuleReminders(input: SelectClaimRemindersInput): Acti
   const maxItems = Math.max(1, input.maxItems ?? RULE_REMINDERS_MAX_ITEMS);
   const maxCodePoints = Math.max(1, input.maxCodePoints ?? RULE_REMINDERS_MAX_CODE_POINTS);
 
+  const modelRulesHash = model.rulesHash ?? rulesHash;
+  const modelNarrationHash = model.narrationHash ?? null;
+  const policyMismatch =
+    (input.effectivePolicy?.rulesHash !== undefined &&
+      input.effectivePolicy.rulesHash !== modelRulesHash) ||
+    (input.effectivePolicy?.narrationHash !== undefined &&
+      input.effectivePolicy.narrationHash !== modelNarrationHash);
+
   const missingPurposes: string[] = [];
+  const unresolvedIds: string[] = [];
   const notes: string[] = [];
   const seenIds = new Set<string>();
   const admissionRationale: RuleReminderItem[] = [];
   const obligations: RuleReminderItem[] = [];
 
   const addPolicyItem = (id: string | null | undefined, category: RuleReminderCategory): void => {
-    if (!id || seenIds.has(id)) return;
+    if (!id || seenIds.has(id) || policyMismatch) return;
     const resolved = resolvePolicyRule(
       id,
       category,
@@ -315,7 +334,10 @@ export function selectClaimRuleReminders(input: SelectClaimRemindersInput): Acti
       input.purposesOverride,
       missingPurposes,
     );
-    if (!resolved) return;
+    if (!resolved) {
+      unresolvedIds.push(id);
+      return;
+    }
     seenIds.add(id);
     if (category === "admission") admissionRationale.push(resolved);
     else obligations.push(resolved);
@@ -323,36 +345,38 @@ export function selectClaimRuleReminders(input: SelectClaimRemindersInput): Acti
 
   let unresolvedEvidenceCategory = false;
   let unmappedRefusal = false;
-  if (input.outcome === "denied") {
-    const explicitDenials = facts.denialIds ?? [];
-    for (const id of explicitDenials) addPolicyItem(id, "admission");
-    if (explicitDenials.length === 0) {
-      const mapped = refusalErrorToRuleId(facts.error, facts);
-      if (mapped) addPolicyItem(mapped, "admission");
-      else if (facts.error === "EVIDENCE_INCOMPLETE") unresolvedEvidenceCategory = true;
-      else if ((facts.decisionIds ?? []).length === 0) unmappedRefusal = true;
+  if (!policyMismatch) {
+    if (input.outcome === "denied") {
+      const explicitDenials = facts.denialIds ?? [];
+      for (const id of explicitDenials) addPolicyItem(id, "admission");
+      if (explicitDenials.length === 0) {
+        const mapped = refusalErrorToRuleId(facts.error, facts);
+        if (mapped) addPolicyItem(mapped, "admission");
+        else if (facts.error === "EVIDENCE_INCOMPLETE") unresolvedEvidenceCategory = true;
+        else if ((facts.decisionIds ?? []).length === 0) unmappedRefusal = true;
+      }
+      for (const id of facts.decisionIds ?? []) addPolicyItem(id, "admission");
+    } else if (input.outcome === "partial") {
+      for (const id of facts.denialIds ?? []) addPolicyItem(id, "admission");
+      if (facts.inventoryComplete === false) addPolicyItem("D-OWNED-INCOMPLETE", "admission");
+      for (const id of facts.decisionIds ?? []) addPolicyItem(id, "admission");
+    } else {
+      // claimed or noop
+      if (facts.needsDesign) {
+        addPolicyItem("D-DESIGN", "admission");
+      } else if (normalizedRole === "implementer") {
+        addPolicyItem(facts.claimActivity === "waiting" ? "D-OWN-WAIT" : "D-OWN", "admission");
+      }
+      if (facts.hasOtherClaims) {
+        addPolicyItem(
+          facts.inventoryComplete === false ? "D-REVIEW-OWNED-PARTIAL" : "D-REVIEW-OWNED",
+          "admission",
+        );
+      } else if (facts.inventoryComplete === false) {
+        addPolicyItem("D-INVENTORY-UNKNOWN", "admission");
+      }
+      for (const id of facts.decisionIds ?? []) addPolicyItem(id, "admission");
     }
-    for (const id of facts.decisionIds ?? []) addPolicyItem(id, "admission");
-  } else if (input.outcome === "partial") {
-    for (const id of facts.denialIds ?? []) addPolicyItem(id, "admission");
-    if (facts.inventoryComplete === false) addPolicyItem("D-OWNED-INCOMPLETE", "admission");
-    for (const id of facts.decisionIds ?? []) addPolicyItem(id, "admission");
-  } else {
-    // claimed or noop
-    if (normalizedRole === "designer" || facts.needsDesign) {
-      addPolicyItem("D-DESIGN", "admission");
-    } else if (normalizedRole === "implementer") {
-      addPolicyItem("D-OWN", "admission");
-    }
-    if (facts.hasOtherClaims) {
-      addPolicyItem(
-        facts.inventoryComplete === false ? "D-REVIEW-OWNED-PARTIAL" : "D-REVIEW-OWNED",
-        "admission",
-      );
-    } else if (facts.inventoryComplete === false) {
-      addPolicyItem("D-INVENTORY-UNKNOWN", "admission");
-    }
-    for (const id of facts.decisionIds ?? []) addPolicyItem(id, "admission");
   }
 
   for (const obl of CLAIM_OBLIGATIONS) {
@@ -392,6 +416,11 @@ export function selectClaimRuleReminders(input: SelectClaimRemindersInput): Acti
     usedCodePoints += itemLen;
   }
 
+  if (policyMismatch) {
+    notes.push(
+      "Effective policy identity does not match the bundled English model; policy-matched explanations are omitted.",
+    );
+  }
   if (!contextResolved) {
     notes.push(
       "Reminder context is unresolved; showing only applicable baseline rules without inventing ticket-specific instructions.",
@@ -408,15 +437,23 @@ export function selectClaimRuleReminders(input: SelectClaimRemindersInput): Acti
       `Refusal ${facts.error ? sanitizeText(facts.error) : "reason"} has no single mapped Datalog denial rule; see the refusal prerequisite.`,
     );
   }
+  if (unresolvedIds.length > 0) {
+    notes.push(`Unresolved rule ID(s) absent from the English model: ${unresolvedIds.join(", ")}.`);
+  }
   if (missingPurposes.length > 0) {
     notes.push(`Purpose not supplied for ${missingPurposes.length} rule(s); see pdb rules.`);
   }
 
-  const coverageStatus: ActionRuleReminders["coverage"]["status"] = !contextResolved
-    ? "unresolved"
-    : !normalizedRole || missingPurposes.length > 0 || unresolvedEvidenceCategory || unmappedRefusal
-      ? "partial"
-      : "complete";
+  const coverageStatus: ActionRuleReminders["coverage"]["status"] =
+    !contextResolved || policyMismatch
+      ? "unresolved"
+      : !normalizedRole ||
+          missingPurposes.length > 0 ||
+          unresolvedEvidenceCategory ||
+          unmappedRefusal ||
+          unresolvedIds.length > 0
+        ? "partial"
+        : "complete";
 
   const omittedIds = allItems.slice(bounded.length).map((i) => i.id);
 
@@ -428,11 +465,8 @@ export function selectClaimRuleReminders(input: SelectClaimRemindersInput): Acti
     label: outcomeLabel(input.outcome),
     effectivePolicy: {
       policyVersion,
-      rulesHash: input.effectivePolicy?.rulesHash ?? model.rulesHash ?? rulesHash,
-      narrationHash:
-        input.effectivePolicy?.narrationHash !== undefined
-          ? input.effectivePolicy.narrationHash
-          : (model.narrationHash ?? null),
+      rulesHash: modelRulesHash,
+      narrationHash: modelNarrationHash,
       obligationsHash: OBLIGATIONS_HASH,
       projectRulesHash: input.effectivePolicy?.projectRulesHash ?? null,
     },
@@ -448,8 +482,9 @@ export function selectClaimRuleReminders(input: SelectClaimRemindersInput): Acti
     },
     coverage: {
       status: coverageStatus,
-      contextResolved,
+      contextResolved: contextResolved && !policyMismatch,
       missingPurposes,
+      unresolvedIds,
       notes,
     },
   };
