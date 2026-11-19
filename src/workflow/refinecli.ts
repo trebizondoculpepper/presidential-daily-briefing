@@ -401,6 +401,10 @@ export function statusText(status: RefinementStatus): string {
     );
   }
   lines.push(`${refinementLabel}: ${status.labelPresent ? "present" : "absent"}`);
+  if (!status.labelAgrees)
+    lines.push(
+      `INCOMPLETE: ${refinementLabel} is ${status.labelPresent ? "present but no request is outstanding" : "absent but a request is outstanding"}; the index must be reconciled (re-run the last refine request or resolve).`,
+    );
   if (status.unknown.length)
     lines.push(
       `INCOMPLETE: some records could not be verified, so this listing may be missing requests or answers: ${status.unknown.join("; ")}`,

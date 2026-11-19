@@ -53,7 +53,11 @@ describe("refine status (#1096)", () => {
     const op = await request(w);
     const listed = await status(w);
     expect(listed.code).toBe(0);
-    expect(listed.body).toMatchObject({ kind: "refinement-status", labelPresent: true });
+    expect(listed.body).toMatchObject({
+      kind: "refinement-status",
+      labelPresent: true,
+      labelAgrees: true,
+    });
     expect(listed.body.requests).toEqual([
       {
         request: op,
@@ -148,6 +152,14 @@ describe("refine resolve (#1096)", () => {
     const partial = await resolve(w, op);
     expect(partial.code).toBe(2);
     expect(partial.text).toMatch(/labels: failed/);
+    // #1139 review: the label still disagrees with the (now resolved) request, so status is
+    // incomplete until the index is reconciled.
+    const disagree = await status(w);
+    expect(disagree.code).toBe(2);
+    expect(disagree.body.labelAgrees).toBe(false);
+    expect((await run(w, ["status", "1"])).text).toContain(
+      "INCOMPLETE: refinement:needed is present but no request is outstanding",
+    );
     w.failing.delete("labels");
     expect((await resolve(w, op)).code).toBe(0);
     expect(w.issues.get(1)!.labels).not.toContain(refinementLabel);

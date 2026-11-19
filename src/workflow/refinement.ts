@@ -949,6 +949,11 @@ export type RefinementStatus =
       unknown: string[];
       rejected: string[];
       labelPresent: boolean;
+      /**
+       * Whether the index label agrees with the outstanding requests (contract: disagreement is
+       * incomplete evidence, `refinement-complete false`, until the label is reconciled).
+       */
+      labelAgrees: boolean;
     }
   | ClaimRefusal;
 
@@ -966,6 +971,7 @@ export async function readRefinementStatus(
   const read = await readComplete(repository, number, agent, query);
   if (isRefusal(read)) return read;
   const fold = await foldRefinement(repository, number, read.comments, permission);
+  const labelPresent = read.item.labels.nodes.some((l) => l.name === refinementLabel);
   const url = (id: string) =>
     `https://github.com/${repository}/issues/${number}#issuecomment-${id}`;
   return {
@@ -981,6 +987,7 @@ export async function readRefinementStatus(
     })),
     unknown: fold.unknown,
     rejected: fold.rejected,
-    labelPresent: read.item.labels.nodes.some((l) => l.name === refinementLabel),
+    labelPresent,
+    labelAgrees: labelPresent === fold.requests.some((q) => !q.resolved),
   };
 }

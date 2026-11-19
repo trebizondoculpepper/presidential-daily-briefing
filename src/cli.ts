@@ -2127,7 +2127,7 @@ async function run(
         gh.repos.permissionOf(repository),
       );
       await output(parsed.json ? statusJson(status) : statusText(status));
-      return !status.ok ? 1 : status.unknown.length ? 2 : 0;
+      return !status.ok ? 1 : status.unknown.length || !status.labelAgrees ? 2 : 0;
     }
     const agent = await commandActor({ ...parsed, ...identitySelection(parsed) }, identity, usage);
     const repository = parsed.repo ?? (await runtime.currentRepository());
