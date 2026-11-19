@@ -396,7 +396,7 @@ describe("pdb serve HTTP MCP (#373)", () => {
     await client.close();
     // A fresh client initializes a new session and works.
     const again = await connect(s.url);
-    expect((await again.listTools()).tools.length).toBe(4);
+    expect((await again.listTools()).tools.length).toBe(5);
     await again.close();
     // Without a session, only POST (initialize) is accepted; non-JSON POST is 415.
     expect((await raw(port, "GET", { accept: "text/event-stream" })).status).toBe(400);
@@ -575,7 +575,7 @@ describe("pdb serve HTTP MCP (#373)", () => {
       };
       expect(status.cache.mcpSessions).toBe(MAX_MCP_SESSIONS);
       // The newest works; the oldest was closed.
-      expect((await clients.at(-1)!.listTools()).tools.length).toBe(4);
+      expect((await clients.at(-1)!.listTools()).tools.length).toBe(5);
       await expect(clients[0]!.listTools()).rejects.toThrow();
     } finally {
       await Promise.all(clients.map((c) => c.close().catch(() => undefined)));

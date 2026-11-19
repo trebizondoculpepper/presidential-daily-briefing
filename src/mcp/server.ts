@@ -1,3 +1,5 @@
+import { readDiscussion } from "../briefing/discussion.js";
+import { discussionPage } from "../github/service/snapshot.js";
 import {
   startLocalIdentity,
   withDisplayRole,
@@ -26,7 +28,9 @@ import { parseArgs } from "node:util";
 import { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod";
 import { collect, ghQueryWith, ghRest } from "../github/github.js";
+import type { Query } from "../github/github.js";
 import { createGhService } from "../github/service/service.js";
+import type { GhService } from "../github/service/service.js";
 import { collectShortlist } from "../github/shortlist.js";
 import { dependencyReport } from "../github/dependencies.js";
 import { impactGuidanceSummary } from "../estimation/impact.js";
@@ -76,6 +80,7 @@ import type { BoundedView, ToolResult } from "./bounded.js";
 import {
   briefingView,
   dependenciesView,
+  discussionView,
   issueSections,
   issueView,
   repositoryBriefingView,
@@ -377,6 +382,39 @@ export const dependenciesInput = z.strictObject({
   repo,
   tree: z.boolean().default(false),
   /** Page of the stable flattened relationship list (#266). */
+  offset,
+  limit: pageLimit,
+});
+
+/**
+ * The GH facade slice the discussion read uses (#1101): the runtime's composed facade, else a
+ * signal-bound executor from the injected query boundary, else the default production facade.
+ */
+function discussionGhOf(rt: McpRuntime): {
+  snapshot: Pick<GhService["snapshot"], "discussionPage">;
+} {
+  if (rt.gh) return rt.gh;
+  if (rt.queryWith || rt.query)
+    return {
+      snapshot: {
+        discussionPage: (repository, scope, pageSize, cursor, signal) =>
+          discussionPage(
+            (rt.queryWith?.(signal) ?? rt.query) as Query,
+            repository,
+            scope,
+            pageSize,
+            cursor,
+            signal,
+          ),
+      },
+    };
+  return createGhService();
+}
+
+/** The discussion view (#1101): validated at the adapter; the shared service owns the result. */
+export const discussionInput = z.strictObject({
+  repo,
+  state: z.enum(["open", "closed", "all"]).default("open"),
   offset,
   limit: pageLimit,
 });
@@ -956,6 +994,45 @@ export function createServer(
                 args.number,
                 { offset: args.offset, limit: args.limit },
                 navigation,
+              ),
+          };
+        },
+      ),
+  );
+
+  server.registerTool(
+    "triage_discussion",
+    {
+      title: "Discussion view",
+      description:
+        "Issues ranked by GitHub comment count, a rough proxy for where discussion is happening, as a paged (offset, limit) list for a state scope (open, closed or all). Listing is neither a blocker nor proof of disagreement; unknown counts are listed, never ranked. Read-only.",
+      inputSchema: discussionInput,
+      outputSchema: boundedEnvelope,
+      annotations,
+    },
+    async (args, ctx) =>
+      call(
+        "triage_discussion",
+        "discussion",
+        { repo: args.repo },
+        ctx.mcpReq.signal,
+        10000,
+        async (selection, rt) => {
+          const view = await readDiscussion({
+            repository: selection.repository,
+            scope: args.state,
+            gh: discussionGhOf(rt),
+            signal: ctx.mcpReq.signal,
+            ...(rt.now ? { now: rt.now } : {}),
+          });
+          return {
+            status: view.coverage.complete ? "complete" : "incomplete",
+            build: (base, redact) =>
+              discussionView(
+                base,
+                redact(plain(view)),
+                { offset: args.offset, limit: args.limit },
+                { ...(args.repo ? { repo: args.repo } : {}), state: args.state },
               ),
           };
         },
