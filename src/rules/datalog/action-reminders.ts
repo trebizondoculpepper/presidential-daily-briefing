@@ -403,10 +403,14 @@ export function selectClaimRuleReminders(input: SelectClaimRemindersInput): Acti
         "D-OWN-UNFAVORABLE",
       ]);
       const hasExplicitOwnDecision = (facts.decisionIds ?? []).some((id) => ownDecisionIds.has(id));
-      if (facts.needsDesign) {
-        addPolicyItem("D-DESIGN", "admission");
-      } else if (normalizedRole === "implementer" && !hasExplicitOwnDecision) {
+      if (normalizedRole === "implementer" && !hasExplicitOwnDecision) {
         addPolicyItem(ownClaimDecisionId(facts.claimActivity), "admission");
+      } else if (
+        input.outcome === "claimed" &&
+        normalizedRole === "designer" &&
+        facts.needsDesign
+      ) {
+        addPolicyItem("D-DESIGN", "admission");
       }
       if (facts.hasOtherClaims) {
         addPolicyItem(

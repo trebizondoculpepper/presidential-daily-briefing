@@ -104,6 +104,14 @@ describe("native claim-time obligations and action-reminder selection (#1029)", 
     expect(
       selectClaimRuleReminders({
         role: "implementer",
+        outcome: "noop",
+        facts: { needsDesign: true },
+      }).admissionRationale.map((i) => i.id),
+    ).toEqual(["D-OWN"]);
+
+    expect(
+      selectClaimRuleReminders({
+        role: "implementer",
         outcome: "claimed",
         facts: { inventoryComplete: false },
       }).admissionRationale.map((i) => i.id),
