@@ -69,6 +69,24 @@ not by comparing separately generated prose after the fact. `rulesSections` or a
 equivalent display helper may arrange supplied text, but cannot decide policy,
 invent English explanations or alter supplied formal semantics.
 
+### As built (#853)
+
+- `GET /api/v1/rules` returns `{schemaVersion: 1, kind: "rules", selected, filters, view}`.
+  `view` passes through the document's own `policy`, `effectivePolicy`, `scope`, `narration` and
+  effective settings, plus `sections` arranged by the existing display helpers (`rulesView`).
+  Errors use the standard envelope. `readRules` is the shared read; CLI and MCP keep calling the
+  rules document directly.
+- `/rules` is a static bootstrap (shared shell, mount point, `/web/rules.js` and
+  `/web/rules.css`). The components in `src/web/rules` render English first, with formal
+  detail in closed native `<details>`. `client.ts` cancels superseded reads and ignores late
+  responses.
+- `npm run build` runs `vite.web.config.ts` (official `@sveltejs/vite-plugin-svelte` on the
+  installed Vite+). It writes a fixed `dist/web/rules.{js,css}`, which the package lists and
+  `pdb serve` reads once at startup from beside its module; it never reads `src/`.
+- `svelte-check` needs TypeScript 5 or 6 and this project uses TypeScript 7, so
+  `scripts/check-svelte.ts` compiles every component with warnings as errors instead.
+  Component scripts hold presentation only; logic lives in `tsc`-checked modules.
+
 ## Incremental adoption
 
 #853 is a focused endpoint-plus-page migration. It does not authorize rewriting

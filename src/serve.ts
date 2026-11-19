@@ -66,7 +66,8 @@ import type {
   ServerFacts,
   StatusSource,
 } from "./serve/types.js";
-import { defaultRulesPageRuntime, rulesPage } from "./serve/rules-page.js";
+import { defaultRulesPageRuntime, readRules, rulesBootstrapHtml } from "./serve/rules-page.js";
+import { readWebAssets } from "./serve/webassets.js";
 import type { LiveApplicationResult } from "./serve/liveapp.js";
 import { setupPage, setupScript } from "./serve/setup-page.js";
 import {
@@ -348,6 +349,9 @@ export async function startServe(
   }
 
   const dashboard = dashboardFiles();
+  // #853: the built frontend assets, read once from the packaged (or checkout) dist.
+  for (const [path, asset] of await (runtime.webAssets ?? readWebAssets)())
+    dashboard.set(path, asset);
   const statusDocument = () => ({
     schemaVersion: 1,
     kind: "serve-status",
@@ -532,20 +536,40 @@ export async function startServe(
         );
         return;
       }
-      if (path === "/rules") {
-        // The compiled policy page (#392): local only, no GitHub request, no background work.
+      if (path === "/api/v1/rules") {
+        // #853: the shared rules read as versioned data; local only, no GitHub request.
         if (request.method !== "GET" && request.method !== "HEAD")
           throw new HttpFailure(405, "METHOD_NOT_ALLOWED", "Use GET.", [], {
             allow: "GET, HEAD",
           });
-        const page = await rulesPage(
+        const read = await readRules(
           context.url.searchParams,
-          facts.url,
           served,
           runtime.rulesPage ?? defaultRulesPageRuntime(),
           selectRepository,
         );
-        response.writeHead(page.status, {
+        if (!read.ok) throw new HttpFailure(read.status, read.code, read.message);
+        sendJson(response, 200, {
+          schemaVersion: 1,
+          kind: "rules",
+          selected: read.selected,
+          filters: read.filters,
+          view: read.view,
+        });
+        return;
+      }
+      if (path === "/rules") {
+        // The rules page (#392, #853): a static bootstrap; the component reads /api/v1/rules.
+        if (request.method !== "GET" && request.method !== "HEAD")
+          throw new HttpFailure(405, "METHOD_NOT_ALLOWED", "Use GET.", [], {
+            allow: "GET, HEAD",
+          });
+        const html = rulesBootstrapHtml(
+          served,
+          context.url.searchParams,
+          dashboard.has("/web/rules.js") && dashboard.has("/web/rules.css"),
+        );
+        response.writeHead(200, {
           "content-type": "text/html; charset=utf-8",
           "cache-control": "no-store",
           "x-content-type-options": "nosniff",
@@ -555,7 +579,7 @@ export async function startServe(
         response.end(
           request.method === "HEAD"
             ? undefined
-            : withProcessIdentity(page.html, processIdentity, selectedPage ?? undefined),
+            : withProcessIdentity(html, processIdentity, selectedPage ?? undefined),
         );
         return;
       }

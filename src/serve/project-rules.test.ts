@@ -230,10 +230,14 @@ describe("project preferences in pdb serve (#516)", () => {
         await writeFile(join(a.dir, "pdb.rules.edn"), withPriority(20));
 
         // The rules page and diagnostics name the same revision and source.
-        const pageA = await get(running.port, `/rules?repo=${encodeURIComponent(a.repository)}`);
-        expect(pageA).toContain(next.effectiveRulesHash);
-        const pageRemote = await get(running.port, "/rules?repo=example%2Fremote");
-        expect(pageRemote).toContain("Effective policy</dt><dd>unknown");
+        // #853: the rules page reads /api/v1/rules, which carries the effective policy.
+        const pageA = await get(
+          running.port,
+          `/api/v1/rules?repo=${encodeURIComponent(a.repository)}`,
+        );
+        expect(pageA.view.effectivePolicy.effectiveRulesHash).toBe(next.effectiveRulesHash);
+        const pageRemote = await get(running.port, "/api/v1/rules?repo=example%2Fremote");
+        expect(pageRemote.view.effectivePolicy.state).toBe("unknown");
         const diag = await get(running.port, "/api/v1/diagnostics/rules?repo=example%2Fremote");
         expect(diag.data.projectPolicy.state).toBe("unknown");
         const diagA = await get(

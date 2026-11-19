@@ -108,6 +108,8 @@ export interface ServeRuntime {
   read?: ServeReadRuntime;
   /** Local read-only git/file boundaries of the rules page (#392); absent means the real ones. */
   rulesPage?: RulesPageRuntime;
+  /** Built frontend assets (#853); tests inject them, production reads dist/web. */
+  webAssets?: import("./webassets.js").WebAssetReader;
   /** Read-only Doctor probes; run scope/root and cancellation are fixed by the server. */
   doctor?: LocalDoctorRuntime;
 }
