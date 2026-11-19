@@ -302,6 +302,22 @@ describe("effective identity in actual CLI results (#677)", () => {
       expect(await f.fs.readText(f.file)).toBeNull();
     }));
 
+  it("still refuses a read with an invalid explicit selector (#865 review)", async () =>
+    fixture(async (f) => {
+      for (const flags of [
+        ["--json", "--role", "implementer", "--agent", "invalid name"],
+        ["--json", "--role", "implementer", "--entry", "codex", "--harness", "claude"],
+      ]) {
+        const result = await invoke(runtimeFor(f, []), flags).catch((error: Error) => ({
+          code: 1,
+          document: { kind: `refused: ${error.message}` } as { kind?: string },
+        }));
+        expect(result.code).not.toBe(0);
+        expect(result.document.kind).not.toBe("briefing");
+        expect(await f.fs.readText(f.file)).toBeNull();
+      }
+    }));
+
   it("still requires attribution for a claim when no identity exists (#865)", async () =>
     fixture(async (f) => {
       const blocked = async (): Promise<never> => {
