@@ -168,4 +168,71 @@ describe("refine resolve (#1096)", () => {
       expect(help).toContain("never answers for you");
     }
   });
+
+  it("says refinement continues, not re-estimation, while another request stays open (#1139 review)", async () => {
+    const w = world();
+    w.add(1);
+    const older = await request(w, "First?");
+    const newer = await request(w, "Second?");
+    await w.answer(1, w.questionOf(1, 1));
+    const { code, text } = await resolve(w, newer, ["--json"]);
+    expect(code).toBe(0);
+    const guidance = JSON.parse(text).guidance;
+    expect(guidance).toMatchObject({ rule: "D-REFINE", nextActor: "designer" });
+    expect(guidance.next).toContain(`Still open: ${older}`);
+    expect(guidance.pickup).toBe(denialText("D-DENY-REFINEMENT"));
+  });
+
+  it("previews the label repair when another request is open and the label is missing (#1139 review)", async () => {
+    const w = world();
+    w.add(1);
+    await request(w, "First?");
+    const newer = await request(w, "Second?");
+    await w.answer(1, w.questionOf(1, 1));
+    w.issues.get(1)!.labels = w.issues.get(1)!.labels.filter((l) => l !== refinementLabel);
+    const dry = JSON.parse((await resolve(w, newer, ["--dry-run", "--json"])).text);
+    expect(dry.changes.map((c: { step: string }) => c.step)).toEqual(["comment", "labels"]);
+    expect(dry.changes[1].command).toContain("--add-label");
+  });
+
+  it("promises no label change in a preview when records cannot be verified (#1139 review)", async () => {
+    const w = world();
+    w.add(1);
+    const op = await request(w);
+    await w.answer(1, w.questionOf(1));
+    // A planner read that succeeds, then an unverifiable record before the preview's second read.
+    let reads = 0;
+    const query: typeof w.query = async (source, variables) => {
+      const answer = (await w.query(source, variables)) as never as {
+        repository?: { issueOrPullRequest?: { comments?: { nodes: unknown[] } } };
+      };
+      const item = answer.repository?.issueOrPullRequest;
+      // The planner's read is the first; the preview's own re-read is the second.
+      if (!source.startsWith("query{viewer") && item?.comments && ++reads >= 2) {
+        const nodes = [
+          ...item.comments.nodes,
+          { ...(item.comments.nodes[0] as object), databaseId: undefined },
+        ];
+        // A copy, so the fixture's own comments are untouched.
+        return {
+          ...answer,
+          repository: {
+            ...answer.repository,
+            issueOrPullRequest: { ...item, comments: { ...item.comments, nodes } },
+          },
+        } as never;
+      }
+      return answer as never;
+    };
+    const { previewRefinementResolve } = await import("./refinement.js");
+    const preview = await previewRefinementResolve(
+      repo,
+      { number: 1, agent: "nicole", request: op, why: "Answered." },
+      query,
+      w.permission,
+    );
+    if (!preview.ok) throw new Error(preview.error);
+    expect(preview.changes.map((c) => c.step)).toEqual(["comment"]);
+    expect((preview.notes ?? []).join(" ")).toMatch(/cannot be confirmed/);
+  });
 });

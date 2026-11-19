@@ -873,23 +873,59 @@ export async function previewRefinementResolve(
   const read = await readComplete(repository, input.number, input.agent, query);
   if (isRefusal(read)) return read;
   const fold = await foldRefinement(repository, input.number, read.comments, permission);
+  // Unverifiable evidence stays unknown (#1139 review): the label reconciliation would refuse,
+  // so the preview promises no label change.
+  if (fold.unknown.length)
+    return {
+      ...plan,
+      notes: [
+        ...(plan.notes ?? []),
+        `${refinementLabel} changes cannot be confirmed: records could not be verified (${fold.unknown.join("; ")}).`,
+      ],
+    };
   const othersOutstanding = fold.requests.some((q) => q.opId !== input.request && !q.resolved);
   const present = read.item.labels.nodes.some((l) => l.name === refinementLabel);
-  return present && !othersOutstanding
-    ? {
-        ...plan,
-        changes: [
-          ...plan.changes,
-          writeStep("labels", {
-            kind: "labels-edit",
-            repository,
-            number: input.number,
-            add: [],
-            remove: [refinementLabel],
-          }),
-        ],
-      }
-    : plan;
+  const labelSteps: PlanStep[] = [];
+  if (!othersOutstanding && present)
+    labelSteps.push(
+      writeStep("labels", {
+        kind: "labels-edit",
+        repository,
+        number: input.number,
+        add: [],
+        remove: [refinementLabel],
+      }),
+    );
+  // Another request stays outstanding: the real run keeps (or repairs) the label.
+  if (othersOutstanding && !present) {
+    const { repoLabels } = await readTicket(
+      repository,
+      input.number,
+      input.agent,
+      query,
+      "",
+      refinementLabel,
+    );
+    if (!repoLabels.has(refinementLabel))
+      labelSteps.push(
+        writeStep("create-label", {
+          kind: "label-create",
+          repository,
+          name: refinementLabel,
+          color: "d4c5f9",
+        }),
+      );
+    labelSteps.push(
+      writeStep("labels", {
+        kind: "labels-edit",
+        repository,
+        number: input.number,
+        add: [refinementLabel],
+        remove: [],
+      }),
+    );
+  }
+  return { ...plan, changes: [...plan.changes, ...labelSteps] };
 }
 
 /** One request as `pdb refine status` lists it. */

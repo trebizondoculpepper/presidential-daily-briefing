@@ -282,7 +282,12 @@ export function refineStatusArgumentsFor(
  * request, it is stated only when this run planned or wrote the resolve record; a replay or a
  * failed write says so instead of claiming a state the result does not establish.
  */
-export function resolveGuidance(result: ClaimPlan | ClaimResult, request: string) {
+export function resolveGuidance(
+  result: ClaimPlan | ClaimResult,
+  request: string,
+  /** Requests other than this one still unresolved after the run, from a fresh status read. */
+  stillOpen: string[] | null = [],
+) {
   if (!result.ok) return null;
   const executed = "steps" in result && Array.isArray(result.steps);
   const planned = result.changes.some((c) => c.step === "comment");
@@ -305,6 +310,26 @@ export function resolveGuidance(result: ClaimPlan | ClaimResult, request: string
       next: "This request was already resolved; read the ticket for its current state.",
       pickup: null,
     };
+  // The resulting records decide which native state applies (#1139 review): while another request
+  // stays open the ticket still needs refinement; only with none left does it await re-estimation.
+  if (stillOpen === null)
+    return {
+      request,
+      nextActor: null,
+      rule: null,
+      next: "The ticket's remaining refinement could not be read; run pdb refine status for its state.",
+      pickup: null,
+    };
+  if (stillOpen.length) {
+    const refine = decisionGuidance("D-REFINE");
+    return {
+      request,
+      nextActor: "designer",
+      rule: refine?.id ?? "D-REFINE",
+      next: `${refine?.why ?? ""} Still open: ${stillOpen.join(", ")}.`,
+      pickup: denialText("D-DENY-REFINEMENT"),
+    };
+  }
   const rule = decisionGuidance("D-REESTIMATE");
   return {
     request,
@@ -316,14 +341,18 @@ export function resolveGuidance(result: ClaimPlan | ClaimResult, request: string
   };
 }
 
-export function resolveJson(result: ClaimPlan | ClaimResult, request: string): string {
+export function resolveJson(
+  result: ClaimPlan | ClaimResult,
+  request: string,
+  stillOpen: string[] | null = [],
+): string {
   return (
     JSON.stringify(
       {
         schemaVersion: 1,
         kind: "refinement-resolve",
         ...result,
-        guidance: resolveGuidance(result, request),
+        guidance: resolveGuidance(result, request, stillOpen),
       },
       null,
       2,
@@ -335,8 +364,9 @@ export function resolveText(
   result: ClaimPlan | ClaimResult,
   request: string,
   dryRun: boolean,
+  stillOpen: string[] | null = [],
 ): string {
-  const guidance = resolveGuidance(result, request);
+  const guidance = resolveGuidance(result, request, stillOpen);
   const lines = [claimText(result as ClaimResult, dryRun).trimEnd()];
   if (guidance) {
     lines.push(`Refinement request: ${guidance.request}`);

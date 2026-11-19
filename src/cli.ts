@@ -2147,10 +2147,20 @@ async function run(
             return { ...plan, exitCode: plan.ok ? 0 : 1 };
           })()
         : await resolveRefinement(repository, input, writes);
+      // The next step depends on what stays open afterwards, read back from the records.
+      const after = result.ok
+        ? await readRefinementStatus(repository, values.number, agent, query, permission)
+        : null;
+      const stillOpen =
+        after?.ok && !after.unknown.length
+          ? after.requests
+              .filter((q) => q.request !== values.request && q.state === "open")
+              .map((q) => q.request)
+          : null;
       await output(
         values.json
-          ? resolveJson(result, values.request)
-          : resolveText(result, values.request, values.dryRun),
+          ? resolveJson(result, values.request, stillOpen)
+          : resolveText(result, values.request, values.dryRun, stillOpen),
       );
       return result.exitCode;
     }
