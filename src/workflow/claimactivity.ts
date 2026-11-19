@@ -167,7 +167,8 @@ export type Parsed<T> =
   | { kind: "malformed"; why: string }
   | { kind: "unsupported"; version: string };
 
-function parseMarker<T>(
+/** Parse one versioned JSON marker (`<prefix>v1 {...} -->`); shared with refinement records (#1094). */
+export function parseMarker<T>(
   body: string,
   prefix: string,
   problem: (v: unknown) => string | null,
@@ -195,7 +196,8 @@ function parseMarker<T>(
   return why ? { kind: "malformed", why } : { kind: "record", record: payload as T };
 }
 
-const markerOf = (prefix: string, record: object): string =>
+/** Write one versioned JSON marker; `<` and `>` are escaped so a payload cannot end the comment. */
+export const markerOf = (prefix: string, record: object): string =>
   `${prefix}v${version} ${JSON.stringify(record).replaceAll("<", "\\u003c").replaceAll(">", "\\u003e")} -->`;
 
 export const parseActivityComment = (body: string): Parsed<ClaimActivityRecord> =>
