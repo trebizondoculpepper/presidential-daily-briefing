@@ -285,7 +285,55 @@ export function evaluatePolicy(input: PolicyFacts, options: PolicyOptions = {}):
         )
       : null;
   options.signal?.throwIfAborted();
-  const witnessCache = new Map<string, Value[]>();
+  // #1069: each witness query runs once for every ranked subject (a collection binding) instead
+  // of once per subject: the answers per subject are identical, and DataScript's per-call query
+  // and rule parsing dominated large briefings. Every bundled witness has the build's canonical
+  // single-subject shape; any other shape keeps the per-subject call.
+  const rankedSubjects = [...new Set(rows.map((row) => row[0]))];
+  const witnessCache = new Map<string, Map<string, Value[]>>();
+  const singleSubject = /^\[:find (\?[\w-]+) :in \$ % \?t :where /;
+  const witnessValues = (witnessQuery: string, t: Value): Value[] => {
+    const shape = singleSubject.exec(witnessQuery);
+    if (!shape) return ds.q(witnessQuery, db, clauses, t).flat();
+    let bySubject = witnessCache.get(witnessQuery);
+    if (!bySubject) {
+      bySubject = new Map();
+      const batched = witnessQuery.replace(
+        singleSubject,
+        `[:find ?t ${shape[1]} :in $ % [?t ...] :where `,
+      );
+      for (const [subject, value] of ds.q(batched, db, clauses, rankedSubjects)) {
+        const list = bySubject.get(String(subject)) ?? [];
+        list.push(value);
+        bySubject.set(String(subject), list);
+      }
+      witnessCache.set(witnessQuery, bySubject);
+    }
+    return bySubject.get(String(t)) ?? [];
+  };
+  // Per-subject answers are pure over this database: several decisions on one subject share them,
+  // and the viewer's other claims are one relation read once, not once per implement row (#1069).
+  const perSubject = <T>(cache: Map<string, T>, key: string, read: () => T): T => {
+    let value = cache.get(key);
+    if (value === undefined) {
+      value = read();
+      cache.set(key, value);
+    }
+    return value;
+  };
+  const subjectCache = new Map<string, unknown>();
+  let otherClaimsBySubject: Map<number, number[]> | null = null;
+  const otherClaimsOf = (t: number): number[] => {
+    if (!otherClaimsBySubject) {
+      otherClaimsBySubject = new Map();
+      for (const [id, other] of query(db, queries["other-claims"])) {
+        const list = otherClaimsBySubject.get(Number(id)) ?? [];
+        list.push(Number(other));
+        otherClaimsBySubject.set(Number(id), list);
+      }
+    }
+    return [...(otherClaimsBySubject.get(t) ?? [])];
+  };
   // Both agent roles' exact orders from this one evaluation (#652): the declared :comparison
   // with the affinity key taken for each role from the rule's declared :affinity. A host uses
   // these ranks to hydrate the same subjects for either role without re-running the policy.
@@ -324,12 +372,7 @@ export function evaluatePolicy(input: PolicyFacts, options: PolicyOptions = {}):
       for (const [key, witnessQuery] of Object.entries(selectedWitnesses)) {
         // A subject's witnesses are pure over this database: several decisions on one subject
         // (one activity pool for both roles, #652) share the same answers, so read each once.
-        const cacheKey = `${witnessQuery}\u0000${String(t)}`;
-        let values = witnessCache.get(cacheKey);
-        if (!values) {
-          values = ds.q(witnessQuery, db, clauses, t).flat();
-          witnessCache.set(cacheKey, values);
-        }
+        const values = witnessValues(witnessQuery, t);
         if (values.length === 1) bindings[key] = values[0];
         else if (values.length > 1) {
           const sorted = values.map(String).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
@@ -358,14 +401,15 @@ export function evaluatePolicy(input: PolicyFacts, options: PolicyOptions = {}):
           facts: bindings,
           overriddenRuleIds: ds.q(queries.q5, db, t).flat().map(String),
         },
-        unlocks: Number(ds.q(queries.q6, db, t)[0]?.[0] ?? 0),
-        unlocksUnknown: ds.q(queries.q7, db, t).flat().map(String),
-        otherClaims:
-          definition.kind === "implement"
-            ? query(db, queries["other-claims"])
-                .filter(([id]) => Number(id) === Number(t))
-                .map(([, id]) => Number(id))
-            : [],
+        unlocks: perSubject(subjectCache as Map<string, number>, `q6\u0000${String(t)}`, () =>
+          Number(ds.q(queries.q6, db, t)[0]?.[0] ?? 0),
+        ),
+        unlocksUnknown: [
+          ...perSubject(subjectCache as Map<string, string[]>, `q7\u0000${String(t)}`, () =>
+            ds.q(queries.q7, db, t).flat().map(String),
+          ),
+        ],
+        otherClaims: definition.kind === "implement" ? otherClaimsOf(Number(t)) : [],
         ...(attentionSection ? { attentionSection } : {}),
       };
     });
