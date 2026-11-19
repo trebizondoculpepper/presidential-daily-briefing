@@ -19,7 +19,13 @@ import { isAgentName, readIdentity, setIdentity } from "../config/identity.js";
 import { resolveEntry, type Environment } from "../config/harness.js";
 import { createGitService } from "../git/service.js";
 import { manifestPath, type InstallItemKind, type InstallScope } from "./manifest.js";
-import { installCodexMcp, uninstallCodexMcp } from "./codexmcp.js";
+import {
+  codexInstallSnapshotChanged,
+  installCodexMcp,
+  readCodexInstallSnapshot,
+  uninstallCodexMcp,
+  type CodexInstallSnapshot,
+} from "./codexmcp.js";
 
 /** A registered installer client; only Codex is implemented in this slice. */
 export type InstallClient = "codex";
@@ -188,16 +194,15 @@ export const installHelp = (operation: "install" | "uninstall"): string =>
   operation === "install"
     ? `Usage: pdb install codex [--global] [--transport stdio|http] [--url URL] [--role implementer|designer]
                     [--entry KEY | --harness NAME] [--repo owner/name] [--dry-run] [--json] [--yes]
-Configure the PDB MCP connection for Codex (identity decision and hook follow in later slices).
+Configure project-local (or explicit --global) PDB identity and Codex MCP entries.
 Default scope is the current repository; --global uses the user-wide Codex home. Without an
 explicit --entry/--harness, the Codex identity entry is targeted (never the invoking agent).
 STDIO is the default; --transport http with --url is explicit. --dry-run previews planned items
-and writes nothing. This slice performs no file writes: the exact per-transport diff is not
-shown.`
+and writes nothing; pass --yes to apply non-interactively.`
     : `Usage: pdb uninstall codex [--global] [--dry-run] [--json] [--yes]
-Preview/record removal intent for PDB-managed Codex entries in the selected scope. This slice
-performs no file writes: entries are not removed yet, and identity/project settings are never
-touched. Already absent is a no-op. --global is required to target user-wide entries.`;
+Remove PDB-managed Codex MCP entries in the selected scope while preserving identity and
+project settings. Already absent is a no-op. --global is required to target user-wide entries;
+--dry-run previews without writing, and --yes applies non-interactively.`;
 
 /** The user-wide Codex home: $CODEX_HOME when set, else `~/.codex`. */
 function codexHome(env: Environment): string {
@@ -571,36 +576,62 @@ const manifestScope = (scope: InstallInternalScope): InstallScope =>
 const manifestFor = (scope: InstallInternalScope, client: InstallClient): string =>
   manifestPath(manifestScope(scope), client);
 
-/** Build a not-yet-implemented install result for slice 2a (no file writes). */
-export async function runCodexInstallSurface(
+function formatCodexInstallOutput(
+  result: InstallResult,
+  redacted: InstallResult["scope"],
+  operation: InstallArguments["operation"],
+  json: boolean,
+): string {
+  if (json) return JSON.stringify(result, null, 2) + "\n";
+  const scopeLine =
+    redacted.kind === "project"
+      ? `project ${redacted.repository}`
+      : "global (user-wide Codex home)";
+  return `pdb ${operation} codex\nScope: ${scopeLine}\nItems:\n${result.items
+    .map(
+      (i) =>
+        `  ${i.kind} (${i.outcome}${i.code ? `, ${i.code}` : ""}): ${i.message}${i.diff ? `\n${i.diff.trimEnd()}` : ""}${i.retry ? `\n    retry: ${i.retry}` : ""}`,
+    )
+    .join("\n")}\nHere's what to do next:\n${result.next.map((n) => `  - ${n}`).join("\n")}\n`;
+}
+
+async function evaluateCodexInstallPlan(
   args: InstallArguments,
-  runtime: ConfigRuntime & { confirm?: (prompt: string) => Promise<boolean> },
-  output: (text: string) => Promise<void>,
-): Promise<number> {
-  const internal = await resolveInstallScope(args, runtime);
-  const redacted = resultScope(internal);
-  // Confirmation contract: --dry-run always previews; --yes applies directly; otherwise a TTY
-  // requests confirmation and a non-TTY without --yes behaves as a dry run (never writes
-  // identity, MCP config or ownership records unconfirmed).
-  let apply = !args.dryRun;
-  if (apply && !args.yes) {
-    apply = runtime.confirm
-      ? await runtime.confirm(
-          `Apply pdb ${args.operation} codex in ${internal.kind === "project" ? internal.root : internal.home}?`,
-        )
-      : false;
-  }
-  const dryRun = args.dryRun || !apply;
-  const identity = await identityStep(args, internal, runtime, dryRun);
+  internal: InstallInternalScope,
+  redacted: InstallResult["scope"],
+  runtime: ConfigRuntime,
+  dryRun: boolean,
+  expectedSnapshot?: CodexInstallSnapshot,
+): Promise<{ result: InstallResult; exitCode: number }> {
+  const manifest = manifestFor(internal, args.client);
+  const scope = manifestScope(internal);
+  const conflicted =
+    !dryRun &&
+    expectedSnapshot &&
+    codexInstallSnapshotChanged(expectedSnapshot, await readCodexInstallSnapshot(scope, manifest));
+  const identity = conflicted
+    ? { item: null, entry: null }
+    : await identityStep(args, internal, runtime, dryRun);
   const identityItem = identity.item;
   const identityEntry = identity.entry;
   // Identity/context boundary: a project MCP registration must not proceed when the identity
   // decision refused or failed — otherwise the server later picks an unrelated agent from client
   // metadata instead of honoring the refused selection.
   const identityBlocked = identityItem?.outcome === "refused" || identityItem?.outcome === "failed";
-  const manifest = manifestFor(internal, args.client);
-  const mcp =
-    identityBlocked && internal.kind === "project" && args.operation === "install"
+  const mcp = conflicted
+    ? {
+        mcp: {
+          action: "kept" as const,
+          outcome: "refused" as const,
+          ownership: "absent" as const,
+          code: "CONFLICT" as const,
+          message:
+            "Codex configuration or ownership manifest changed since the preview; re-run to inspect the updated plan.",
+          diff: null,
+          manifestRecord: null,
+        },
+      }
+    : identityBlocked && internal.kind === "project" && args.operation === "install"
       ? {
           mcp: {
             action: "kept" as const,
@@ -615,12 +646,13 @@ export async function runCodexInstallSurface(
         }
       : args.operation === "uninstall"
         ? await uninstallCodexMcp({
-            scope: manifestScope(internal),
+            scope,
             manifestPath: manifest,
             dryRun,
+            expectedSnapshot,
           })
         : await installCodexMcp({
-            scope: manifestScope(internal),
+            scope,
             options: {
               transport: args.transport,
               url: args.url,
@@ -630,6 +662,7 @@ export async function runCodexInstallSurface(
             manifestPath: manifest,
             pdbVersion: "0.1.0",
             dryRun,
+            expectedSnapshot,
           });
   const mcpFailed =
     mcp.mcp.outcome === "refused" ||
@@ -717,21 +750,57 @@ export async function runCodexInstallSurface(
     (i) => i.outcome === "applied" || i.outcome === "kept" || i.outcome === "adopted",
   );
   const exitCode = refusedOrFailed ? 2 : !appliedOrCurrent && !args.dryRun ? 1 : 0;
-  if (args.json) {
-    await output(JSON.stringify(result, null, 2) + "\n");
-    return exitCode;
+  return { result, exitCode };
+}
+
+/** Execute `pdb install codex` / `pdb uninstall codex` for the resolved scope (#768). */
+export async function runCodexInstallSurface(
+  args: InstallArguments,
+  runtime: ConfigRuntime & { confirm?: (prompt: string) => Promise<boolean> },
+  output: (text: string) => Promise<void>,
+): Promise<number> {
+  const internal = await resolveInstallScope(args, runtime);
+  const redacted = resultScope(internal);
+  // Confirmation contract: --dry-run always previews; --yes applies directly; otherwise a TTY
+  // shows the read-only preview first and requests confirmation before applying, while a non-TTY
+  // without --yes behaves as a dry run (never writes unconfirmed).
+  if (args.dryRun || (!args.yes && !runtime.confirm)) {
+    const preview = await evaluateCodexInstallPlan(args, internal, redacted, runtime, true);
+    await output(formatCodexInstallOutput(preview.result, redacted, args.operation, args.json));
+    return preview.exitCode;
   }
-  const scopeLine =
-    redacted.kind === "project"
-      ? `project ${redacted.repository}`
-      : "global (user-wide Codex home)";
-  await output(
-    `pdb ${args.operation} codex\nScope: ${scopeLine}\nItems:\n${result.items
-      .map(
-        (i) =>
-          `  ${i.kind} (${i.outcome}${i.code ? `, ${i.code}` : ""}): ${i.message}${i.diff ? `\n${i.diff.trimEnd()}` : ""}${i.retry ? `\n    retry: ${i.retry}` : ""}`,
-      )
-      .join("\n")}\nHere's what to do next:\n${result.next.map((n) => `  - ${n}`).join("\n")}\n`,
+  let expectedSnapshot: CodexInstallSnapshot | undefined;
+  if (!args.yes && runtime.confirm) {
+    expectedSnapshot = await readCodexInstallSnapshot(
+      manifestScope(internal),
+      manifestFor(internal, args.client),
+    );
+    const preview = await evaluateCodexInstallPlan(args, internal, redacted, runtime, true);
+    if (preview.exitCode === 2) {
+      await output(formatCodexInstallOutput(preview.result, redacted, args.operation, args.json));
+      return 2;
+    }
+    if (!args.json) {
+      await output(formatCodexInstallOutput(preview.result, redacted, args.operation, false));
+    }
+    const approved = await runtime.confirm(
+      `Apply pdb ${args.operation} codex in ${internal.kind === "project" ? internal.root : internal.home}?`,
+    );
+    if (!approved) {
+      if (args.json) {
+        await output(formatCodexInstallOutput(preview.result, redacted, args.operation, true));
+      }
+      return preview.exitCode;
+    }
+  }
+  const applied = await evaluateCodexInstallPlan(
+    args,
+    internal,
+    redacted,
+    runtime,
+    false,
+    expectedSnapshot,
   );
-  return exitCode;
+  await output(formatCodexInstallOutput(applied.result, redacted, args.operation, args.json));
+  return applied.exitCode;
 }
