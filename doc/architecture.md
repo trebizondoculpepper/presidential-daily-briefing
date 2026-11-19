@@ -214,6 +214,14 @@ Logging and overrides follow the [local logging](design/local-logging.md),
 
 ## 11. Generated action guidance and onboarding
 
+Action obligations and their applicability/order belong to native policy, not a
+TypeScript obligation catalog or command-authored policy paragraphs. The shared
+English generator explains the native result; generic grammar and rendering stay
+presentation. Follow the [native-obligation addendum](design/native-action-obligations.md),
+including the owner's duty to minimize unpushed work and open draft PRs early for
+recoverability, visibility and incremental review. Existing hybrid reminders are
+migration debt; this principle does not claim the migration is complete.
+
 Modifying operations should, where practical, show applicable current rules in
 English through the shared native policy/document generator. Distinguish admission
 reasons from ongoing obligations and actual success from no-op/partial/failure.
