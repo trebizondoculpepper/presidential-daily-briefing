@@ -1285,23 +1285,16 @@ try {
     console.log(
       `ok   installed project preferences: CLI, pdb rules, MCP, serve and /rules name ${await projectRulesParity(bin, mcpCommand, env, checkout)}`,
     );
-    await run(bin, ["config", "set", "briefing.engine", "typescript"], { cwd: checkout, env });
-    for (const role of ["implementer", "designer"])
-      for (const order of ["impact", "oldest"]) {
-        const kinds = await blendedParity(
-          bin,
-          mcpCommand,
-          "example/parity",
-          role,
-          order,
-          env,
-          checkout,
-          "typescript",
-        );
-        console.log(
-          `ok   installed TypeScript rollback CLI = MCP ${role} (${order}): ${kinds.join(", ")}`,
-        );
-      }
+    // #1050: the engine selector is retired; setting it is refused, never a second scheduler.
+    const refused = await run(bin, ["config", "set", "briefing.engine", "typescript"], {
+      cwd: checkout,
+      env,
+    }).then(
+      () => false,
+      () => true,
+    );
+    if (!refused) throw new Error("Installed CLI accepted the retired briefing.engine selector.");
+    console.log("ok   installed CLI refuses the retired briefing.engine selector");
   }
   // Optional read-only live smoke (#260): GITHUB_TRIAGE_PACKAGE_LIVE_REPO=owner/name uses the
   // real authenticated gh from this checkout. No labels, claims or other writes are made.
