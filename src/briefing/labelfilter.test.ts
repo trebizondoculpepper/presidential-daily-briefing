@@ -7,6 +7,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { briefing } from "./briefing.js";
 import { compactBriefing, compactText } from "./compact.js";
 import { presentBriefing } from "./service.js";
+import { emptyFileSystem, fakeGit, SYNTHETIC_ROOT } from "../../scripts/benchmark-isolation.js";
 import { argumentsFor } from "../cli.js";
 import type { Issue, Snapshot } from "../github/types.js";
 import { issue, page, pr, repo, snapshot, time } from "../testing/snapshots.js";
@@ -110,38 +111,32 @@ describe("--label (#312)", () => {
     expect(r.filter?.outside.owned).toBe(1);
   });
 
-  it("assessment counts describe the filtered pool only", () => {
+  it("assessment counts describe the filtered pool only", async () => {
+    // #1050: counts come from the native ranking (the only ranker), filtered before display.
     const data = snapshot(
-      [issue(1, ["status:ready", "sfx"]), issue(2, ["status:ready"]), issue(3, ["status:ready"])],
+      [
+        issue(1, ["status:ready", "sfx", "impact:S", "impact:L"]),
+        issue(2, ["status:ready", "impact:S", "impact:L"]),
+        issue(3, ["status:ready", "impact:S", "impact:L"]),
+      ],
       [],
     );
-    const view = (state: "unassessed" | "conflict") => ({
-      state,
-      size: null,
-      provenance: null,
-    });
-    const assessments = new Map(
-      data.issues.map((i) => [
-        i.url,
-        {
-          impact: view("conflict"),
-          complexity: view("unassessed"),
-          unlocks: 0,
-          unlocksUnknown: [],
-        },
-      ]),
-    );
-    const run = (role: string, labels?: string[]) =>
-      compactBriefing(
-        data,
-        { limit: 10, agent: "me", role, ...(labels ? { labels } : {}) },
-        briefing(data, { limit: 1000, agent: "me" }, new Date(time)),
-        assessments as never,
-      );
-    expect((run("implementer").estimation as { eligible?: number }).eligible).toBe(3);
-    expect((run("implementer", ["sfx"]).estimation as { eligible?: number }).eligible).toBe(1);
-    expect(run("designer").impactEstimation?.conflicts).toBe(3);
-    expect(run("designer", ["sfx"]).impactEstimation?.conflicts).toBe(1);
+    const run = async (role: "implementer" | "designer", labels?: string[]) =>
+      (
+        await presentBriefing(
+          data,
+          { limit: 10, maxChars: 100000, agent: "me", role, ...(labels ? { labels } : {}) },
+          { cwd: SYNTHETIC_ROOT, git: fakeGit(repo), fs: emptyFileSystem },
+          new Date(time),
+        )
+      ).report as unknown as {
+        estimation: { eligible?: number };
+        impactEstimation?: { conflicts: number };
+      };
+    expect((await run("implementer")).estimation.eligible).toBe(3);
+    expect((await run("implementer", ["sfx"])).estimation.eligible).toBe(1);
+    expect((await run("designer")).impactEstimation?.conflicts).toBe(3);
+    expect((await run("designer", ["sfx"])).impactEstimation?.conflicts).toBe(1);
   });
 
   it("the estimation summary describes the filtered pool, never repository-wide work", () => {

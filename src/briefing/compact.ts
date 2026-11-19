@@ -7,10 +7,9 @@ import { estimateLine } from "../estimation/estimation.js";
 import { assessmentsText, provenanceText } from "./assessments.js";
 import type { MetricAvailability, SubjectAssessments } from "./assessments.js";
 import type { EstimateEntry } from "../estimation/estimation.js";
-import { compareImpact, impactLookup, urgencyBand } from "./ranking.js";
-import { followUpRules, roleSectionIds, roleSectionRows, roleView } from "./roles.js";
+import { compareImpact, impactLookup } from "./ranking.js";
+import { roleSectionIds, roleSectionRows, roleView } from "./roles.js";
 import type { RoleContext } from "./roles.js";
-import { designFollowUpSections, rankActions, roleCandidates } from "./blended.js";
 import type { BlendedRole, RankedActions } from "./blended.js";
 import { impactGuidance } from "../estimation/impact.js";
 import type { RoleView } from "./roles.js";
@@ -404,50 +403,9 @@ export function compactBriefing(
   // "Output and compatibility"); views without a blended ranking keep their previous order.
   const blendedRole: BlendedRole | null =
     role && (role.name === "implementer" || role.name === "designer") ? role.name : null;
-  const unscopedRanking: RankedActions | null =
-    experimental ??
-    (role && blendedRole && assessments
-      ? rankActions(
-          roleCandidates({
-            repository: snapshot.repository,
-            role: blendedRole,
-            ...(options.agent ? { agent: options.agent } : {}),
-            ...(facts.ranking.platform ? { platform: facts.ranking.platform } : {}),
-            sections: designFollowUpSections(
-              role.sections.map((section) => ({
-                name: section.name,
-                background: section.background,
-                // Ranking happens before limits: rank every row the selector placed.
-                rows: rowsBySection.get(section.name) ?? section.items,
-              })),
-              (url) =>
-                linkedMine(byUrl.get(url)) &&
-                (grouped.get(url) ?? []).some((f) => followUpRules.includes(f.rule)),
-            ),
-            subjects: new Map(
-              objects.map((item) => [
-                item.url,
-                {
-                  url: item.url,
-                  number: item.number,
-                  state: item.state,
-                  createdAt: item.createdAt,
-                  labels: labelNames(item),
-                  isIssue: !("headRefOid" in item),
-                },
-              ]),
-            ),
-            assessments,
-            isAddressed: (url) => isAddressed(byUrl.get(url)),
-            isParked: (url) => isParked(defined(byUrl.get(url))),
-            urgency: (url) => urgencyBand(defined(byUrl.get(url))),
-            ownedByViewer: (url) => isMine(defined(byUrl.get(url))),
-            ...(options.retained ? { retained: options.retained } : {}),
-          }),
-          // Rank everything once; the display limit is applied below, so counts see it all.
-          { order: facts.ranking.order, limit: Number.MAX_SAFE_INTEGER },
-        )
-      : null);
+  // #1050 (doc/design/native-ranking-only.md): only the native policy ranks; views it does not
+  // rank (full intake, --issue, the human view) carry no ranked queue.
+  const unscopedRanking: RankedActions | null = experimental ?? null;
   // #312: scope the ranked candidates before the display limit. Ranking already ran over every
   // fact, so included items keep their exact reasons, order and tie-breaks.
   const fullRanking: RankedActions | null =
