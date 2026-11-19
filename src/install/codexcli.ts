@@ -700,7 +700,7 @@ async function evaluateCodexInstallPlan(
         : await installCodexStopHook({
             scope,
             options: {
-              role: internal.kind === "project" ? (identityEntry ?? args.role) : undefined,
+              role: internal.kind === "project" ? args.role : undefined,
               entry: internal.kind === "project" ? (identityEntry ?? args.entry) : undefined,
             },
             manifestPath: manifest,

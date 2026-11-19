@@ -854,8 +854,9 @@ describe("codex-stop --installed binding (#770)", () => {
       runtime,
     );
     expect(code, text).toBe(0);
-    const response = JSON.parse(text) as { decision?: string | undefined };
-    expect(response.decision).toBe("block");
+    // Codex Stop carries no cause field: unknown provenance means a normal stop, never a
+    // fabricated natural continuation (owner decision codex-natural-stop-semantics.md).
+    expect(JSON.parse(text)).toEqual({});
   });
 
   it("fails closed with {} and exit 0 when the event cwd is not a resolvable repository", async () => {

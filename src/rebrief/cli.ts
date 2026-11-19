@@ -422,7 +422,10 @@ directory, and --natural-stop-confirmed. Installed mode (pdb install codex) omit
 event cwd's verified Git root and remote, the identity through resolveReadIdentity,
 and the private state directory is derived (owner-only, under the OS temporary
 directory) keyed by repository and session, initializing once on the first
-eligible Stop with verified native context.
+eligible Stop with verified native context. Codex Stop carries no cause field, so
+installed mode treats the event as unknown provenance and stops normally until a
+release-specific native provenance mechanism is verified; it never fabricates a
+natural stop.
 Without controlled natural-stop confirmation, missing/mismatched state, reentry,
 invalid input, cancellation or failure: {} and exit 0. No transcript access,
 implicit repository inference beyond the verified event cwd, retries, update check
@@ -456,12 +459,20 @@ interface NativeStopProfile {
   eventId: (event: Record<string, unknown>) => unknown;
   /** Platform facts that rule a Stop out before any read (true when none apply). */
   eligible: (event: Record<string, unknown>) => boolean;
+  /**
+   * Whether a qualifying Stop natively attests natural completion. Claude Code fires Stop only on
+   * a natural turn end (StopFailure is separate), so it may continue. Codex Stop carries no cause
+   * field, so a qualifying Stop's provenance is unknown and it must stop normally (owner decision:
+   * "unknown native stop cause is not natural completion"; codex-natural-stop-semantics.md).
+   */
+  naturalStop: boolean;
 }
 const codexStopProfile: NativeStopProfile = {
   platform: "codex",
   help: codexHelp,
   eventId: (event) => event.turn_id,
   eligible: () => true,
+  naturalStop: false,
 };
 /** Installed-mode adapter deadline default (codex-installer.md "Hook definition"). */
 const codexInstalledDeadlineMs = 4000;
@@ -477,6 +488,8 @@ const claudeStopProfile: NativeStopProfile = {
     [event.background_tasks, event.session_crons].every(
       (work) => work === undefined || (Array.isArray(work) && work.length === 0),
     ),
+  // Claude Code documents that Stop fires only when the main agent finishes a turn on its own.
+  naturalStop: true,
 };
 
 /** Native framing over the existing CLI/core; wrappers contain no JSON or policy logic. */
@@ -632,7 +645,7 @@ async function runNativeStop(
             {
               ...context,
               eventId: String(profile.eventId(eventRecord)),
-              reason: "natural",
+              reason: profile.naturalStop ? "natural" : "unknown",
               enabled: true,
               deadlineMs: deadline,
               ...(cap !== undefined ? { cap } : {}),

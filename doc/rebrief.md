@@ -91,8 +91,11 @@ The installed adapter needs no `--state-dir`, `--repo` or
 `--natural-stop-confirmed`. It derives the private state directory itself
 (owner-only, under the OS temporary directory) keyed by repository and session,
 resolves the repository and identity from the event `cwd`'s verified Git root and
-remote, and initializes a v2 session once with eligible-event evidence before the
-shared continuation decision runs. Missing/mismatched state, unresolved
+remote, and initializes a v2 session once with eligible-event evidence. Codex Stop
+carries no cause field, so installed mode treats a qualifying Stop as unknown
+provenance and stops normally (`{}`, exit 0); only a release-specific native
+provenance mechanism may enable automatic continuation later (owner decision,
+codex-natural-stop-semantics.md). Missing/mismatched state, unresolved
 repository or identity, reentry, cancellation, an unknown schema or an unusable
 directory stop normally (`{}`, exit 0). A legacy v1 state directory keeps its own
 documented three-offer restriction and is never upgraded implicitly. Only the
