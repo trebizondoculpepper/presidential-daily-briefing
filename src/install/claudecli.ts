@@ -26,7 +26,11 @@ import {
   uninstallClaudeMcp,
   type ClaudeInstallSnapshot,
 } from "./claudemcp.js";
-import { installClaudeStopHook, uninstallClaudeStopHook } from "./claudehook.js";
+import {
+  installClaudeStopHook,
+  uninstallClaudeStopHook,
+  claudeSettingsPath,
+} from "./claudehook.js";
 
 /** A registered installer client; only Claude is implemented by this module. */
 export type ClaudeInstallClient = "claude";
@@ -66,7 +70,10 @@ export interface ClaudeInstallItem {
 /** The installer scope, with `repository` carried on the project variant for reporting. */
 export type ClaudeInstallScope =
   | (Extract<InstallScope, { kind: "project" }> & { repository: string })
-  | Extract<InstallScope, { kind: "global" }>;
+  | (Extract<InstallScope, { kind: "global" }> & {
+      /** True when `homeDir` is an explicit CLAUDE_CONFIG_DIR rather than the user home. */
+      claudeConfigDir: boolean;
+    });
 
 export interface ClaudeInstallResult {
   schemaVersion: 1;
@@ -331,7 +338,9 @@ export async function resolveClaudeInstallScope(
     const homeDir = process.env.HOME ?? homedir();
     const claudeHome = process.env.CLAUDE_CONFIG_DIR?.trim();
     const home = claudeHome ? resolveHome(claudeHome, homeDir) : homeDir;
-    return { kind: "global", stateDir: home, homeDir: home };
+    // When CLAUDE_CONFIG_DIR is set, `home` is the Claude config directory itself: the global
+    // hook settings file lives at `<home>/settings.json` there, not `<home>/.claude/settings.json`.
+    return { kind: "global", stateDir: home, homeDir: home, claudeConfigDir: !!claudeHome };
   }
   try {
     // Resolve the verified working-tree root first (never a parent or global fallback).
@@ -426,10 +435,10 @@ async function evaluateClaudeInstallPlan(params: {
         },
         {
           kind: "hook",
-          file:
-            scope.kind === "project"
-              ? `${scope.root}/.claude/settings.local.json`
-              : `${scope.homeDir}/.claude/settings.json`,
+          file: claudeSettingsPath(
+            scope,
+            scope.kind === "global" ? scope.claudeConfigDir : undefined,
+          ),
           action: "kept",
           outcome: "not-attempted",
           code: "UNSUPPORTED_SCOPE",
@@ -453,7 +462,11 @@ async function evaluateClaudeInstallPlan(params: {
     expectedSnapshot &&
     claudeInstallSnapshotChanged(
       expectedSnapshot,
-      await readClaudeInstallSnapshot(scope, manifestPathForScope),
+      await readClaudeInstallSnapshot(
+        scope,
+        manifestPathForScope,
+        claudeSettingsPath(scope, scope.kind === "global" ? scope.claudeConfigDir : undefined),
+      ),
     );
   // Resolve/recover the per-repository identity before writing the project MCP entry so the
   // installed server uses the intended identity (attended-installer-delivery.md). A refusal is
@@ -517,12 +530,14 @@ async function evaluateClaudeInstallPlan(params: {
             manifestPath: manifestPathForScope,
             pdbVersion: "0.1.0",
             dryRun,
+            claudeConfigDir: scope.kind === "global" ? scope.claudeConfigDir : undefined,
             expectedSnapshot,
           })
         : await uninstallClaudeMcp({
             scope,
             manifestPath: manifestPathForScope,
             dryRun,
+            claudeConfigDir: scope.kind === "global" ? scope.claudeConfigDir : undefined,
             expectedSnapshot,
           });
   const mcp = performed.mcp;
@@ -557,6 +572,7 @@ async function evaluateClaudeInstallPlan(params: {
             scope,
             manifestPath: manifestPathForScope,
             dryRun,
+            claudeConfigDir: scope.kind === "global" ? scope.claudeConfigDir : undefined,
           })
         : await installClaudeStopHook({
             scope,
@@ -567,6 +583,7 @@ async function evaluateClaudeInstallPlan(params: {
             manifestPath: manifestPathForScope,
             pdbVersion: "0.1.0",
             dryRun,
+            claudeConfigDir: scope.kind === "global" ? scope.claudeConfigDir : undefined,
           });
   const mcpConfigured =
     args.operation === "install" &&
@@ -609,10 +626,7 @@ async function evaluateClaudeInstallPlan(params: {
     },
     {
       kind: "hook",
-      file:
-        scope.kind === "project"
-          ? `${scope.root}/.claude/settings.local.json`
-          : `${scope.homeDir}/.claude/settings.json`,
+      file: claudeSettingsPath(scope, scope.kind === "global" ? scope.claudeConfigDir : undefined),
       action: hook.hook.action,
       outcome: hook.hook.outcome,
       code: hook.hook.code,
@@ -708,10 +722,10 @@ export async function runClaudeInstall(
         },
         {
           kind: "hook",
-          file:
-            scope.kind === "project"
-              ? `${scope.root}/.claude/settings.local.json`
-              : `${scope.homeDir}/.claude/settings.json`,
+          file: claudeSettingsPath(
+            scope,
+            scope.kind === "global" ? scope.claudeConfigDir : undefined,
+          ),
           action: "kept",
           outcome: "not-attempted",
           code: "UNSUPPORTED_SCOPE",
@@ -754,7 +768,11 @@ export async function runClaudeInstall(
   }
   let expectedSnapshot: ClaudeInstallSnapshot | undefined;
   if (!args.yes && runtime.confirm) {
-    expectedSnapshot = await readClaudeInstallSnapshot(scope, manifestPathForScope);
+    expectedSnapshot = await readClaudeInstallSnapshot(
+      scope,
+      manifestPathForScope,
+      claudeSettingsPath(scope, scope.kind === "global" ? scope.claudeConfigDir : undefined),
+    );
     const preview = await evaluateClaudeInstallPlan({
       args,
       scope,

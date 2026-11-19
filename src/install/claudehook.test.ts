@@ -12,6 +12,7 @@ import type { InstallScope } from "./manifest.js";
 import { manifestPath } from "./manifest.js";
 import {
   claudeHookAdapter,
+  claudeSettingsPath,
   claudeStopCommand,
   claudeStopEntry,
   installClaudeStopHook,
@@ -48,6 +49,24 @@ describe("claude Stop hook entry shape (#771)", () => {
         hooks: [{ type: "command", command: "pdb rebrief claude-stop --installed", timeout: 10 }],
       },
     ]);
+  });
+
+  it("resolves the global settings path honoring an explicit CLAUDE_CONFIG_DIR", () => {
+    const userScope: InstallScope = { kind: "global", stateDir: "/home/u", homeDir: "/home/u" };
+    expect(claudeSettingsPath(userScope)).toBe("/home/u/.claude/settings.json");
+    // When CLAUDE_CONFIG_DIR names the config directory, Claude reads its settings.json directly.
+    const configScope: InstallScope = {
+      kind: "global",
+      stateDir: "/cfg/claude",
+      homeDir: "/cfg/claude",
+    };
+    expect(claudeSettingsPath(configScope, true)).toBe("/cfg/claude/settings.json");
+    const projectScope: InstallScope = {
+      kind: "project",
+      root: "/work",
+      gitCommonDir: "/work/.git",
+    };
+    expect(claudeSettingsPath(projectScope)).toBe("/work/.claude/settings.local.json");
   });
 
   it("classifies a missing Stop key as absent (create) and a PDB one as owned", () => {

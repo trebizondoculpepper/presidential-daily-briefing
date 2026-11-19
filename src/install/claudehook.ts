@@ -226,10 +226,13 @@ export function claudeHookAdapter(command: string): JsonEntryAdapter {
 }
 
 /** Claude settings path within a project or user-wide scope (gitignored for project). */
-const claudeSettingsPath = (scope: InstallScope): string =>
-  scope.kind === "project"
+export function claudeSettingsPath(scope: InstallScope, claudeConfigDir?: boolean): string {
+  return scope.kind === "project"
     ? `${scope.root}/.claude/settings.local.json`
-    : `${scope.homeDir}/.claude/settings.json`;
+    : claudeConfigDir
+      ? `${scope.homeDir}/settings.json`
+      : `${scope.homeDir}/.claude/settings.json`;
+}
 /** The root files are allowed to be written under (project root or user home). */
 const claudeSettingsRoot = (scope: InstallScope): string =>
   scope.kind === "project" ? scope.root : scope.homeDir;
@@ -253,10 +256,13 @@ export async function installClaudeStopHook(params: {
   pdbVersion: string;
   dryRun?: boolean;
   adopt?: boolean;
+  /** True when the global scope's homeDir is an explicit CLAUDE_CONFIG_DIR. */
+  claudeConfigDir?: boolean;
   runtime?: ManifestRuntime;
 }): Promise<ClaudeHookResult> {
-  const { scope, options, manifestPath, pdbVersion, dryRun, adopt, runtime } = params;
-  const file = claudeSettingsPath(scope);
+  const { scope, options, manifestPath, pdbVersion, dryRun, adopt, claudeConfigDir, runtime } =
+    params;
+  const file = claudeSettingsPath(scope, claudeConfigDir);
   const allowedRoot = claudeSettingsRoot(scope);
   const command = claudeStopCommand(options);
   const read = await readInstallManifest(manifestPath, runtime?.fs);
@@ -299,10 +305,12 @@ export async function uninstallClaudeStopHook(params: {
   scope: InstallScope;
   manifestPath: string;
   dryRun?: boolean;
+  /** True when the global scope's homeDir is an explicit CLAUDE_CONFIG_DIR. */
+  claudeConfigDir?: boolean;
   runtime?: ManifestRuntime;
 }): Promise<ClaudeHookResult> {
-  const { scope, manifestPath, dryRun, runtime } = params;
-  const file = claudeSettingsPath(scope);
+  const { scope, manifestPath, dryRun, claudeConfigDir, runtime } = params;
+  const file = claudeSettingsPath(scope, claudeConfigDir);
   const allowedRoot = claudeSettingsRoot(scope);
   const command = claudeStopCommand({});
   const read = await readInstallManifest(manifestPath, runtime?.fs);
