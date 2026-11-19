@@ -144,3 +144,39 @@ describe("shared discussion view (#1099)", () => {
     }
   });
 });
+
+describe("discussion read through the composed GH facade (#1111 review)", () => {
+  it("passes the caller's abort signal to the gh transport", async () => {
+    const { createGhService } = await import("../github/service/service.js");
+    const seen: (AbortSignal | undefined)[] = [];
+    const service = createGhService({
+      transport: async (call) => {
+        seen.push(call.signal);
+        return {
+          ok: true,
+          stdout: JSON.stringify({
+            data: {
+              repository: {
+                issues: {
+                  nodes: [node(1, 2)],
+                  pageInfo: { hasNextPage: false, endCursor: null },
+                },
+              },
+            },
+          }),
+        };
+      },
+    });
+    const controller = new AbortController();
+    const view = await readDiscussion({
+      repository: repo,
+      scope: "open",
+      gh: service,
+      now,
+      signal: controller.signal,
+    });
+    expect(view.items.map((i) => i.number)).toEqual([1]);
+    expect(seen.length).toBeGreaterThan(0);
+    expect(seen.every((s) => s !== undefined)).toBe(true);
+  });
+});

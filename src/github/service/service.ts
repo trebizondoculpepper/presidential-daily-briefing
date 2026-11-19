@@ -391,7 +391,16 @@ export function createGhService(options: GhServiceOptions = {}): GhService {
       discoveryPage: (...args) => discoveryPage(query as Query, ...args),
       issuesByNumber: (...args) => issuesByNumber(query as Query, ...args),
       issueCommentsPage: (...args) => issueCommentsPage(query as Query, ...args),
-      discussionPage: (...args) => discussionPage(query as Query, ...args),
+      // Bound to the caller's signal so cancellation reaches the running transport (#1111 review).
+      discussionPage: (repository, scope, pageSize, cursor, signal) =>
+        discussionPage(
+          queryForSignal(signal) as Query,
+          repository,
+          scope,
+          pageSize,
+          cursor,
+          signal,
+        ),
       collect: (repository, collectOptions = {}, now) =>
         collect(
           repository,
