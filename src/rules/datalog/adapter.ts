@@ -455,6 +455,15 @@ export function evaluateDatalog(
     let nextCommand = fillCommand(
       commandKey === "detail" && "headRefOid" in subject ? "pr" : commandKey,
     );
+    // #1067: an inspection of invalid (not conflicting) metric labels offers the one-step
+    // Ticket Doctor repair as its next command; other unusable states keep the plain inspection.
+    if (decision.kind === "inspect-assessment") {
+      const rules = decision.why.ruleIds;
+      if (rules.includes("D-BAD-IMPACT") && a?.impact.state === "invalid")
+        nextCommand = fillCommand("impact-replace");
+      else if (rules.includes("D-BAD-COMPLEXITY") && a?.complexity.state === "invalid")
+        nextCommand = fillCommand("complexity-replace");
+    }
     let thenCommand: string | null = null;
     if (decision.kind === "implement") {
       const others = decision.otherClaims.map((id) => objects.get(id)!.number);

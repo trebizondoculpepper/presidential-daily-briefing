@@ -155,7 +155,7 @@ describe("rankedActions through collect() (#248)", () => {
       false,
     );
     const inspect = ranked.items.find((i) => i.kind === "inspect-assessment");
-    // #1050: the native inspection reads the ticket (#1067 tracks restoring the Ticket Doctor fix).
+    // Conflicting (not invalid) complexity is inspected; only invalid labels get --replace-invalid (#1067).
     expect(inspect).toMatchObject({ band: 5, nextCommand: `pdb --repo ${repo} --issue 6 --json` });
     expect(ranked.items.find((i) => i.target === url(2))).toMatchObject({
       band: 7,

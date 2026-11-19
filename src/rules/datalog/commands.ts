@@ -11,6 +11,11 @@ export const commandTemplates: Record<string, string> = {
   complexity:
     "pdb estimate {number} --metric complexity --size SIZE --rationale TEXT --repo {repo}",
   impact: "pdb estimate {number} --metric impact --size SIZE --rationale TEXT --repo {repo}",
+  // #1067: the Ticket Doctor fix for invalid metric labels (#178), chosen by the adapter.
+  "complexity-replace":
+    "pdb estimate {number} --metric complexity --size SIZE --rationale TEXT --replace-invalid --repo {repo}",
+  "impact-replace":
+    "pdb estimate {number} --metric impact --size SIZE --rationale TEXT --replace-invalid --repo {repo}",
   // #413: an explicit resume; the read-only team inventory for reviewing several claims.
   resume: "pdb claim resume {number} --repo {repo} --agent {agent}",
   team: "pdb team --repo {repo}",
