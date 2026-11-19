@@ -1,8 +1,8 @@
 {
   "modelVersion": 2,
   "policyVersion": 1,
-  "rulesHash": "7279fd5b267b536a370394d1b4ec6225101eec0d7cbeb53c283e2d223645f07f",
-  "narrationHash": "673ec5549d835e498f47f1a399cb973ec18b06ed31b4fbab5a5f454886bdde50",
+  "rulesHash": "8acb43d11302e190e223dffecc3e20901241d32629f204b37cba1d43a28c912b",
+  "narrationHash": "62eb22eff2469b281d95222ae7ebcfe49cbfaa14cf0a9d63cd577125e99537ab",
   "sources": [
     "policy/schema.edn",
     "policy/rules.edn",
@@ -6527,7 +6527,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 200
+            "index": 202
           }
         }
       ],
@@ -7062,6 +7062,21 @@
                   ]
                 }
               ]
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "call",
+                  "predicate": "refinement-hold",
+                  "args": [
+                    {
+                      "var": "?t"
+                    }
+                  ]
+                }
+              ]
             }
           ],
           "source": {
@@ -7078,7 +7093,8 @@
         "closing-complete",
         "claimed",
         "has-closing",
-        "prerequisite"
+        "prerequisite",
+        "refinement-hold"
       ],
       "set": "rules"
     },
@@ -16323,6 +16339,21 @@
                   "many": false
                 }
               ]
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "call",
+                  "predicate": "refinement-unknown",
+                  "args": [
+                    {
+                      "var": "?t"
+                    }
+                  ]
+                }
+              ]
             }
           ],
           "source": {
@@ -16331,7 +16362,7 @@
           }
         }
       ],
-      "calls": ["refinement-open", "refinement-asks", "refinement-pending"],
+      "calls": ["refinement-open", "refinement-asks", "refinement-pending", "refinement-unknown"],
       "set": "rules"
     },
     {
@@ -16368,9 +16399,70 @@
             "file": "policy/rules.edn",
             "index": 193
           }
+        },
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
+              "type": "call",
+              "predicate": "refinement-unknown",
+              "args": [
+                {
+                  "var": "?t"
+                }
+              ]
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 195
+          }
         }
       ],
-      "calls": ["needs-refinement"],
+      "calls": ["needs-refinement", "refinement-unknown"],
+      "set": "rules"
+    },
+    {
+      "name": "refinement-unknown",
+      "params": ["?t"],
+      "alternatives": [
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "refinement",
+              "value": {
+                "var": "?q"
+              },
+              "phrase": "refinement request",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?q"
+              },
+              "attribute": "refinement-state",
+              "value": {
+                "lit": "unknown"
+              },
+              "phrase": "refinement state",
+              "many": false
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 194
+          }
+        }
+      ],
+      "calls": [],
       "set": "rules"
     },
     {
@@ -16392,7 +16484,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 194
+            "index": 196
           }
         },
         {
@@ -16410,7 +16502,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 195
+            "index": 197
           }
         },
         {
@@ -16432,7 +16524,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 196
+            "index": 198
           }
         }
       ],
@@ -16476,7 +16568,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 197
+            "index": 199
           }
         }
       ],
@@ -16547,7 +16639,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 198
+            "index": 200
           }
         }
       ],
@@ -16628,7 +16720,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 199
+            "index": 201
           }
         }
       ],
@@ -21609,8 +21701,8 @@
   ],
   "coverage": {
     "decisions": 55,
-    "predicates": 107,
-    "alternatives": 233,
+    "predicates": 108,
+    "alternatives": 235,
     "denials": 12,
     "queries": 24,
     "keyQueries": 4,
@@ -21618,6 +21710,6 @@
     "overrides": 4,
     "constants": 14,
     "attributes": 119,
-    "clauses": 1343
+    "clauses": 1350
   }
 }
