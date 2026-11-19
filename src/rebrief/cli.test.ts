@@ -879,3 +879,114 @@ describe("codex-stop --installed binding (#770)", () => {
     expect(JSON.parse(text)).toEqual({});
   });
 });
+
+describe("claude-stop --installed binding (#771)", () => {
+  const eventInput = (event: Record<string, unknown>) =>
+    Readable.from([`${JSON.stringify(event)}\n`]);
+  const gitRunner: GitRunner = async (args) => {
+    if (args[0] === "rev-parse" && args[1] === "--show-toplevel") return "/work/project\n";
+    if (args[0] === "remote" && args[1] === "-v")
+      return "origin\thttps://github.com/o/r.git (fetch)\norigin\thttps://github.com/o/r.git (push)\n";
+    throw new Error(`unexpected git ${args.join(" ")}`);
+  };
+  const ready = (): Transport => {
+    let n = 0;
+    return {
+      freshRead: true,
+      read: async () => {
+        const r = fixtureRead();
+        const report = r.report as {
+          freshness: { startedAt: string; fetchedAt: string };
+          decisionEngine: { rulesHash: string };
+          repository: string;
+          role: { name: string };
+          ranking: { platform: string };
+        };
+        const at = new Date().toISOString();
+        report.freshness.startedAt = at;
+        report.freshness.fetchedAt = at;
+        report.decisionEngine.rulesHash = `rules${n++}`;
+        report.repository = "o/r";
+        report.role.name = "implementer";
+        report.ranking.platform = "claude-code";
+        return {
+          ...r,
+          selection: {
+            repository: "o/r",
+            agent: "tester",
+            role: "implementer",
+            platform: "claude-code",
+          },
+        };
+      },
+    };
+  };
+
+  it("resolves the repository from the event cwd, initializes once on an eligible Stop, and returns the native offer", async () => {
+    let text = "";
+    const accept = (_path: string, work: Parameters<typeof withSessionStore>[1]) =>
+      work({ version: "none" }, async (meta) => memoryStore(meta));
+    const runtime: CliRuntime = {
+      input: eventInput({
+        hook_event_name: "Stop",
+        session_id: context.session,
+        prompt_id: "prompt-1",
+        stop_hook_active: false,
+        cwd: "/work/project",
+        background_tasks: [],
+        session_crons: [],
+      }),
+      git: gitRunner,
+      env: {},
+      currentRepository: async () => "o/r",
+      transport: () => ready(),
+      state: accept as typeof withSessionStore,
+      prepareIdentity: (async () =>
+        ({
+          schemaVersion: 1,
+          state: "resolved",
+          agent: "tester",
+          entry: null,
+          source: "explicit-agent",
+          store: null,
+          bindingProvider: null,
+          triageRole: "implementer",
+          role: "implementer",
+          roleSource: "explicit",
+          human: null,
+          diagnostic: null,
+          setup: { state: "not-needed", changed: null, persisted: null, notices: [] },
+        }) as unknown) as NonNullable<CliRuntime["prepareIdentity"]>,
+    };
+    const code = await runRebrief(
+      ["claude-stop", "--installed", "--role", "implementer"],
+      async (s) => void (text = s),
+      runtime,
+    );
+    expect(code, text).toBe(0);
+    const response = JSON.parse(text) as { decision?: string | undefined };
+    expect(response.decision).toBe("block");
+  });
+
+  it("fails closed with {} and exit 0 when the event cwd is not a resolvable repository", async () => {
+    const git: GitRunner = async () => {
+      throw new Error("not a repo");
+    };
+    let text = "";
+    const code = await runRebrief(["claude-stop", "--installed"], async (s) => void (text = s), {
+      input: eventInput({
+        hook_event_name: "Stop",
+        session_id: context.session,
+        prompt_id: "prompt-2",
+        stop_hook_active: false,
+        cwd: "/nowhere/project",
+        background_tasks: [],
+        session_crons: [],
+      }),
+      git,
+      env: {},
+    });
+    expect(code).toBe(0);
+    expect(JSON.parse(text)).toEqual({});
+  });
+});

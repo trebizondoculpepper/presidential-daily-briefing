@@ -38,8 +38,7 @@ export type ClaudeInstallErrorCode =
   | "IDENTITY_AMBIGUOUS"
   | "UNSUPPORTED_SCOPE"
   | "UNSUPPORTED_CLIENT_VERSION"
-  | "LOCKED"
-  | "HOOK_NOT_AVAILABLE";
+  | "LOCKED";
 
 /** Installer item kinds: the managed native entries plus the identity preparation outcome. */
 export type ClaudeInstallItemKind = InstallItemKind | "identity";
