@@ -629,6 +629,47 @@ export function evaluateDeliveryFollowUp(
   return best ? [best[2], best[3]] : ["waiting", "awaiting current-head review"];
 }
 
+export interface ClaimAdmissionInput {
+  state: string;
+  labels: readonly string[];
+  labelsComplete: boolean;
+  nativeComplete: boolean;
+  openBlockers: number;
+  openPrCount: number;
+  platform: string | null;
+  platforms: readonly string[];
+  ownedClaimsComplete: boolean;
+  claimedByOther: boolean;
+}
+
+/** Pure claim-admission seam (#1086); all pickup denial rules live in native EDN. */
+export function evaluateClaimAdmission(input: ClaimAdmissionInput): Set<string> {
+  const facts: Datom[] = [];
+  for (const [attr, vals] of Object.entries(bundle.constants)) {
+    for (const v of vals) facts.push([1, attr, v]);
+  }
+  facts.push(
+    [1, "platform", input.platform ?? ""],
+    [1, "owned-claims-complete", input.ownedClaimsComplete],
+    [1, "forward-complete", true],
+    [100, "kind", "issue"],
+    [100, "state", input.state],
+    [100, "labels-complete", input.labelsComplete],
+    [100, "native-complete", input.nativeComplete],
+    [100, "open-blockers", input.openBlockers],
+    [100, "reverse-complete", true],
+  );
+  if (input.claimedByOther) facts.push([100, "owner", "other"]);
+  for (const l of input.labels) facts.push([100, "label", l]);
+  for (const p of input.platforms) if (p) facts.push([100, "platform", p]);
+  for (let i = 0; i < input.openPrCount; i++) {
+    facts.push([100, "closing", 200 + i]);
+  }
+  const db = ds.init_db(facts, bundle.schema);
+  const rows = ds.q(bundle.queries["claim-denials"], db, bundle.clauses) as [number, string][];
+  return new Set(rows.filter(([id]) => id === 100).map(([, code]) => code));
+}
+
 export interface PrReadinessInput {
   state: string;
   closedLabel: string;
