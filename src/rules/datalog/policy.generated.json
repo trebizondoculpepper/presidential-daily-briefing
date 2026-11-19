@@ -600,10 +600,10 @@
       "preference": 1,
       "affinity": "implementer",
       "owned": false,
-      "clauses": "[1 \"role\" ?role] [(not= ?role \"human\")] (adoptable ?t)",
+      "clauses": "[1 \"role\" ?role] [(not= ?role \"human\")] (adoptable ?t) (not (implementation-denied ?t))",
       "why": "Preserved unowned PR work: a human-directed release cleared {releaseFrom} from this ticket; an open PR continues it. Adopt it and become responsible. Impact {impact} ({impactState}), complexity {complexity} ({complexityState}).",
       "codes": ["ordinary", "adopt-unowned"],
-      "query": "[:find ?t :in $ % :where (foreground ?t) [1 \"role\" ?role] [(not= ?role \"human\")] (adoptable ?t)]",
+      "query": "[:find ?t :in $ % :where (foreground ?t) [1 \"role\" ?role] [(not= ?role \"human\")] (adoptable ?t) (not (implementation-denied ?t))]",
       "witnesses": {
         "releaseFrom": "[:find ?value :in $ % ?t :where [?t \"release\" ?r] (human-release ?t ?r) [?r \"release-from\" ?rfrom] [(str ?rfrom) ?value]]"
       }

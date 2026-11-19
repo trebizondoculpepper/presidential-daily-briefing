@@ -1,8 +1,8 @@
 {
   "modelVersion": 2,
   "policyVersion": 1,
-  "rulesHash": "902431fe15259023dd7d14624d2575d943833c5f19eef41b32583677e79a8c66",
-  "narrationHash": "9d8493ea4c55561c79957984185e62689d4f0ea63591ef0a6f6e8a2d81ecc007",
+  "rulesHash": "2b3a84c605ceb2905f9dbf94af19b02a68ee2b5c71d7f8afa118649218f131c9",
+  "narrationHash": "97a06a9893a1259836ffb2a2b9e812f877e14e40f930dcd0a26c339e9a1a3351",
   "sources": [
     "policy/schema.edn",
     "policy/rules.edn",
@@ -2125,10 +2125,25 @@
               "var": "?t"
             }
           ]
+        },
+        {
+          "type": "not",
+          "join": null,
+          "body": [
+            {
+              "type": "call",
+              "predicate": "implementation-denied",
+              "args": [
+                {
+                  "var": "?t"
+                }
+              ]
+            }
+          ]
         }
       ],
       "templateClauses": 1,
-      "calls": ["foreground", "adoptable"],
+      "calls": ["foreground", "adoptable", "implementation-denied"],
       "evidence": [
         {
           "name": "releaseFrom",
@@ -22441,6 +22456,6 @@
     "overrides": 5,
     "constants": 14,
     "attributes": 123,
-    "clauses": 1395
+    "clauses": 1397
   }
 }
