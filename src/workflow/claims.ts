@@ -762,6 +762,21 @@ async function planClaimFor(
       [`${triage} --agent ${agent}`],
     );
   const ownOther = claims.filter((c) => c.number !== number);
+  // #1083: an incomplete read of this agent's claims proves nothing about other active claims,
+  // so it refuses before any write, whether or not another claim happened to be observed. This
+  // matches the native D-DENY-INVENTORY-UNKNOWN denial the briefing applies (rules.edn).
+  if (!claimsComplete && !ownOther.length)
+    return refuse(
+      "EVIDENCE_INCOMPLETE",
+      facts,
+      `${agent}'s open claims could not be read completely, so whether ${agent} already holds a claim is unknown; nothing was written.`,
+      [
+        `pdb team --repo ${repository}`,
+        command(
+          `claim ${number} --agent ${agent}${branch ? ` --branch ${branch}` : ""}${rework ? " --rework" : ""}`,
+        ),
+      ],
+    );
   // A retained claim admits another only when every other one is verified waiting on fresh,
   // complete evidence (#412); anything else keeps the one-active-claim refusal.
   let verdict: Awaited<ReturnType<Admission>> | null = null;
