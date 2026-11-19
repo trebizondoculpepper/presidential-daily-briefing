@@ -7,7 +7,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { rulesDocument, rulesFormalText } from "../../rules/datalog/rules-command.js";
 import { declaredRulesContext } from "../../rules/declared-context.js";
 import { rulesView } from "../../serve/rules-page.js";
-import { fetchRules, parseRulesResponse, rulesLoader } from "./client.js";
+import { fetchRules, parseRulesResponse, revealFragment, rulesLoader } from "./client.js";
 import type { RulesState as State } from "./client.js";
 import RulesState from "./RulesState.svelte";
 
@@ -119,6 +119,21 @@ describe("rules loader history (#1138 review)", () => {
     // A real query change still reloads.
     await loader.load("?repo=a%2Fb&role=designer");
     expect(calls).toHaveLength(2);
+  });
+});
+
+describe("fragment after render (#1138 review)", () => {
+  it("scrolls to the fragment target once it exists, and ignores absent or malformed fragments", () => {
+    const scrolled: string[] = [];
+    const find = (id: string) =>
+      id === "section-5" ? { scrollIntoView: () => void scrolled.push(id) } : null;
+    expect(revealFragment("#section-5", find)).toBe(true);
+    expect(scrolled).toEqual(["section-5"]);
+    expect(revealFragment("", find)).toBe(false);
+    expect(revealFragment("#", find)).toBe(false);
+    expect(revealFragment("#missing", find)).toBe(false);
+    expect(revealFragment("#%E0%A4%A", find)).toBe(false);
+    expect(scrolled).toEqual(["section-5"]);
   });
 });
 

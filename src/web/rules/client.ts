@@ -182,3 +182,24 @@ export function rulesLoader(
     },
   };
 }
+
+/**
+ * Scroll to the page's fragment target once the rules have rendered (#1138 review): a direct or
+ * refreshed `/rules?…#section-N` has no targets until the API answers, so the browser's own
+ * initial fragment scroll finds nothing. Returns whether a target was found.
+ */
+export function revealFragment(
+  hash: string,
+  find: (id: string) => { scrollIntoView(): void } | null,
+): boolean {
+  if (!hash || hash === "#") return false;
+  let id: string;
+  try {
+    id = decodeURIComponent(hash.slice(1));
+  } catch {
+    return false;
+  }
+  const target = find(id);
+  target?.scrollIntoView();
+  return !!target;
+}
