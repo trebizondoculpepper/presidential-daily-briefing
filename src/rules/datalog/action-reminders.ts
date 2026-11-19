@@ -382,9 +382,18 @@ export function selectClaimRuleReminders(input: SelectClaimRemindersInput): Acti
       for (const id of facts.decisionIds ?? []) addPolicyItem(id, "admission");
     } else {
       // claimed or noop
+      const ownDecisionIds = new Set([
+        "D-OWN",
+        "D-OWN-WAIT",
+        "D-OWN-RESUME",
+        "D-OWN-UNKNOWN",
+        "D-OWN-EASY",
+        "D-OWN-UNFAVORABLE",
+      ]);
+      const hasExplicitOwnDecision = (facts.decisionIds ?? []).some((id) => ownDecisionIds.has(id));
       if (facts.needsDesign) {
         addPolicyItem("D-DESIGN", "admission");
-      } else if (normalizedRole === "implementer") {
+      } else if (normalizedRole === "implementer" && !hasExplicitOwnDecision) {
         addPolicyItem(ownClaimDecisionId(facts.claimActivity), "admission");
       }
       if (facts.hasOtherClaims) {
@@ -393,7 +402,7 @@ export function selectClaimRuleReminders(input: SelectClaimRemindersInput): Acti
           "admission",
         );
       } else if (facts.inventoryComplete === false) {
-        addPolicyItem("D-INVENTORY-UNKNOWN", "admission");
+        addPolicyItem("D-OWNED-INCOMPLETE", "admission");
       }
       for (const id of facts.decisionIds ?? []) addPolicyItem(id, "admission");
     }
