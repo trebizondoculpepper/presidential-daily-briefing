@@ -46,6 +46,11 @@ describe("claude Stop hook entry shape (#771)", () => {
     expect(claudeStopCommand({ pdbPath: PDB, role: "implementer", entry: "claude" })).toBe(
       `'${PDB}' rebrief claude-stop --installed --deadline-ms 4000 --role implementer --entry claude`,
     );
+    // Windows routes through Node and quotes both the Node executable and the packaged script so
+    // paths with spaces forward literally (reviewed #1126 finding).
+    expect(
+      claudeStopCommand({ pdbPath: "C:\\Program Files\\pdb\\cli.mjs", platform: "win32" }),
+    ).toContain(`'${process.execPath}' 'C:\\Program Files\\pdb\\cli.mjs'`);
     // The owned entry is a matcher group wrapping one command entry under hooks.Stop (native
     // Claude Code shape: event -> matcher group -> handler).
     expect(claudeStopEntry(`'${PDB}' rebrief claude-stop --installed`)).toEqual([

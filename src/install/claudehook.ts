@@ -28,6 +28,9 @@ import {
   type ManifestRuntime,
 } from "./manifest.js";
 import { resolveInstalledPdb } from "./claudemcp.js";
+import { nodeSafeFs } from "../config/safejson.js";
+import { mkdir } from "node:fs/promises";
+import { dirname } from "node:path";
 import { acquireFileLock, type LockTiming } from "../config/filelock.js";
 
 /** Refuse an edit when the ownership manifest itself cannot be trusted (#970 pattern). */
@@ -77,17 +80,22 @@ export const claudeStopHookEvent = "Stop";
 const LOCK_TIMING: LockTiming = { waitMs: 5_000, pollMs: 50 };
 
 /** Serialize read/edit/persist on the private manifest's operation lock so concurrent install and
- * uninstall cannot delete an ownership record the other just saved (reviewed #1126 finding). */
+ * uninstall cannot delete an ownership record the other just saved (reviewed #1126 finding). The
+ * lock always runs on a filesystem: an injected runtime fs in tests, the real one otherwise. */
 async function withScopeLock<T>(
   manifestPath: string,
   runtime: ManifestRuntime | undefined,
   work: () => Promise<T>,
 ): Promise<{ status: "ok"; value: T } | { status: "refused"; reason: InstallEditResult }> {
-  const fs = runtime?.fs;
-  if (!fs || typeof fs.readFile !== "function") {
-    return { status: "ok", value: await work() };
-  }
+  const fs = runtime?.fs ?? nodeSafeFs;
   const now = runtime?.now ?? (() => new Date());
+  // The lock file lives beside the private manifest; ensure its directory exists (the ownership
+  // writer creates it later, but the lock must be acquired first).
+  try {
+    await mkdir(dirname(manifestPath), { recursive: true });
+  } catch {
+    // A pre-existing directory is fine; refuse only on a real write failure below.
+  }
   const held = await acquireFileLock(
     {
       readFile: (p) => fs.readFile(p),
@@ -161,11 +169,13 @@ export function claudeStopCommand(options: {
   if (options.entry) args.push(`--entry ${options.entry}`);
   // The installed command carries no session paths; the executable is the running package's pdb,
   // quoted for a native shell (attended-installer-delivery.md resolves from the running package).
-  const quotedPath = `'${options.pdbPath.replace(/'/g, `'\\''`)}'`;
+  // Windows launches the packaged .mjs through Node: both the Node executable and the script path
+  // are quoted so paths containing spaces are forwarded literally.
+  const quote = (p: string) => `'${p.replace(/'/g, `'\\''`)}'`;
   const executable =
     (options.platform ?? process.platform) === "win32"
-      ? `${process.execPath} ${quotedPath}`
-      : quotedPath;
+      ? `${quote(process.execPath)} ${quote(options.pdbPath)}`
+      : quote(options.pdbPath);
   return `${executable} ${args.join(" ")}`;
 }
 
