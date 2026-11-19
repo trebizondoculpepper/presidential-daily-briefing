@@ -10,7 +10,7 @@ import { decisionGuidance, denialText } from "../rules/datalog/engine.js";
 import { claimText } from "./claims.js";
 import type { ClaimPlan, ClaimResult } from "./claims.js";
 import { refinementLabel } from "./refinement.js";
-import type { RefinementStatus } from "./refinement.js";
+import type { RefinementGuidance, RefinementStatus } from "./refinement.js";
 
 export const refineUsage =
   "Usage: pdb refine request N [--agent NAME] --designer NAME --why TEXT --question TEXT [--question TEXT...] [--dependency owner/name#M...] [--dry-run] [--json] [--repo owner/name]";
@@ -285,8 +285,11 @@ export function refineStatusArgumentsFor(
 export function resolveGuidance(
   result: ClaimPlan | ClaimResult,
   request: string,
-  /** Requests other than this one still unresolved after the run, from a fresh status read. */
-  stillOpen: string[] | null = [],
+  /**
+   * The native policy's guidance for the ticket's refinement state after the run
+   * (`nativeRefinementGuidance` over a fresh status read), or null when that read failed.
+   */
+  native: RefinementGuidance | null,
 ) {
   if (!result.ok) return null;
   const executed = "steps" in result && Array.isArray(result.steps);
@@ -294,57 +297,29 @@ export function resolveGuidance(
   const recordedNow = executed
     ? result.steps!.some((s) => s.step === "comment" && s.status === "done")
     : planned;
+  const none = (next: string) => ({ request, nextActor: null, rule: null, next, pickup: null });
   if (executed && !recordedNow && planned)
-    return {
-      request,
-      nextActor: null,
-      rule: null,
-      next: "The resolve was not confirmed as recorded; see the step statuses and retry.",
-      pickup: null,
-    };
+    return none("The resolve was not confirmed as recorded; see the step statuses and retry.");
   if (!recordedNow)
-    return {
-      request,
-      nextActor: null,
-      rule: null,
-      next: "This request was already resolved; read the ticket for its current state.",
-      pickup: null,
-    };
-  // The resulting records decide which native state applies (#1139 review): while another request
-  // stays open the ticket still needs refinement; only with none left does it await re-estimation.
-  if (stillOpen === null)
-    return {
-      request,
-      nextActor: null,
-      rule: null,
-      next: "The ticket's remaining refinement could not be read; run pdb refine status for its state.",
-      pickup: null,
-    };
-  if (stillOpen.length) {
-    const refine = decisionGuidance("D-REFINE");
-    return {
-      request,
-      nextActor: "designer",
-      rule: refine?.id ?? "D-REFINE",
-      next: `${refine?.why ?? ""} Still open: ${stillOpen.join(", ")}.`,
-      pickup: denialText("D-DENY-REFINEMENT"),
-    };
-  }
-  const rule = decisionGuidance("D-REESTIMATE");
+    return none("This request was already resolved; read the ticket for its current state.");
+  if (!native)
+    return none(
+      "The ticket's remaining refinement could not be read; run pdb refine status for its state.",
+    );
+  // The native policy selected the rule (#1139 review); nothing here chooses between them.
   return {
     request,
-    nextActor: "estimator",
-    rule: rule?.id ?? "D-REESTIMATE",
-    next: rule?.why ?? "",
-    // The re-estimation denial's own explanation, not restated here.
-    pickup: denialText("D-DENY-REESTIMATE"),
+    nextActor: native.rule === "D-REESTIMATE" ? "estimator" : native.rule ? "designer" : null,
+    rule: native.rule,
+    next: native.why ?? "No refinement decision applies to the ticket now.",
+    pickup: native.denial,
   };
 }
 
 export function resolveJson(
   result: ClaimPlan | ClaimResult,
   request: string,
-  stillOpen: string[] | null = [],
+  native: RefinementGuidance | null,
 ): string {
   return (
     JSON.stringify(
@@ -352,7 +327,7 @@ export function resolveJson(
         schemaVersion: 1,
         kind: "refinement-resolve",
         ...result,
-        guidance: resolveGuidance(result, request, stillOpen),
+        guidance: resolveGuidance(result, request, native),
       },
       null,
       2,
@@ -364,9 +339,9 @@ export function resolveText(
   result: ClaimPlan | ClaimResult,
   request: string,
   dryRun: boolean,
-  stillOpen: string[] | null = [],
+  native: RefinementGuidance | null,
 ): string {
-  const guidance = resolveGuidance(result, request, stillOpen);
+  const guidance = resolveGuidance(result, request, native);
   const lines = [claimText(result as ClaimResult, dryRun).trimEnd()];
   if (guidance) {
     lines.push(`Refinement request: ${guidance.request}`);

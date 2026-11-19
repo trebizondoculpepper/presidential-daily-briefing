@@ -13,6 +13,7 @@
  * another request lands concurrently or an earlier label write failed. It adds no CLI or browser
  * flow (#1095, #1096).
  */
+import { denialText, evaluatePolicy } from "../rules/datalog/engine.js";
 import { createHash } from "node:crypto";
 import {
   classifyMarkers,
@@ -989,5 +990,104 @@ export async function readRefinementStatus(
     rejected: fold.rejected,
     labelPresent,
     labelAgrees: labelPresent === fold.requests.some((q) => !q.resolved),
+  };
+}
+
+/** The refinement decisions and denials the native policy may select for a ticket. */
+const refinementDecisions = new Set([
+  "D-REFINE",
+  "D-REFINE-RESOLVE",
+  "D-REFINE-EMPTY",
+  "D-REFINE-INCOMPLETE",
+  "D-REESTIMATE",
+]);
+const refinementDenials = ["D-DENY-REFINEMENT", "D-DENY-REESTIMATE", "D-DENY-REFINEMENT-UNKNOWN"];
+
+/** The native policy's guidance for one ticket's refinement state; null where none applies. */
+export interface RefinementGuidance {
+  /** The refinement decision the policy selects (e.g. D-REFINE-RESOLVE), or null. */
+  rule: string | null;
+  /** That decision's generated explanation. */
+  why: string | null;
+  /** The refinement pickup denial in force, or null. */
+  denialRule: string | null;
+  denial: string | null;
+}
+
+/**
+ * Ask the native policy which refinement decision and pickup denial apply to a ticket in this
+ * refinement state (#1139 review): the rules decide, the CLI only renders. The ticket is otherwise
+ * neutral (open, ready, estimated, unblocked), so only its refinement facts select the rule.
+ */
+export function nativeRefinementGuidance(facts: RefinementFacts): RefinementGuidance {
+  const t = 100;
+  const datoms: [number, string, string | number | boolean][] = [
+    [1, "forward-complete", true],
+    [t, "kind", "issue"],
+    [t, "state", "OPEN"],
+    [t, "number", 1],
+    [t, "target", "https://github.com/o/r/issues/1"],
+    [t, "created", 0],
+    [t, "labels-complete", true],
+    [t, "reverse-complete", true],
+    [t, "native-complete", true],
+    [t, "open-blockers", 0],
+    [t, "blocking-complete", true],
+    [t, "impact-state", "current"],
+    [t, "impact-size", "M"],
+    [t, "complexity-state", "current"],
+    [t, "complexity-size", "M"],
+    [t, "head", "not-a-pr"],
+    [t, "label", "status:ready"],
+  ];
+  if (!facts.complete) datoms.push([t, "refinement-complete", false]);
+  facts.requests.forEach((q, i) => {
+    const r = 200 + i;
+    const question = 300 + i;
+    datoms.push([t, "refinement", r], [r, "refinement-state", q.state]);
+    if (q.state === "resolved") datoms.push([r, "refinement-estimated", q.estimated]);
+    datoms.push(
+      [r, "refinement-question", question],
+      [question, "record-trust", q.question.trust],
+      [question, "record-version", q.question.version],
+      [question, "record-outcome", q.question.outcome],
+    );
+  });
+  const result = evaluatePolicy({
+    viewer: { role: "designer", agent: "", platform: "", order: "impact" },
+    datoms,
+  });
+  const decision = result.decisions.find(
+    (d) => d.subject === t && refinementDecisions.has(d.ruleId),
+  );
+  const denied = refinementDenials.find((id) =>
+    result.denials.some((d) => d.subject === t && d.ruleId === id),
+  );
+  return {
+    rule: decision?.ruleId ?? null,
+    why: decision?.why.text ?? null,
+    denialRule: denied ?? null,
+    denial: denied ? denialText(denied) : null,
+  };
+}
+
+/**
+ * The native facts of a status read, for guidance: trusted requests and their outcomes, with
+ * incomplete evidence or an index disagreement as `complete: false`. Estimates are not read here,
+ * so a resolved request counts as awaiting re-estimation (fail closed).
+ */
+export function statusFacts(status: RefinementStatus): RefinementFacts | null {
+  if (!status.ok) return null;
+  return {
+    requests: status.requests.map((q) => ({
+      state: q.state,
+      estimated: false,
+      question: {
+        trust: "trusted",
+        version: 2,
+        outcome: q.outcome === "none" ? "none" : q.outcome === "resolve" ? "resolved" : "withdrawn",
+      },
+    })),
+    complete: !status.unknown.length && status.labelAgrees,
   };
 }

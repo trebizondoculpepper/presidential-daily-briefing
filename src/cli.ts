@@ -55,10 +55,13 @@ import { doctorStaleHours } from "./workflow/ticketdoctor.js";
 import {
   previewRefinementRequest,
   previewRefinementResolve,
+  nativeRefinementGuidance,
   readRefinementStatus,
   requestRefinement,
   resolveRefinement,
+  statusFacts,
 } from "./workflow/refinement.js";
+import type { RefinementGuidance } from "./workflow/refinement.js";
 import {
   refineArgumentsFor,
   refineHelp,
@@ -2147,20 +2150,22 @@ async function run(
             return { ...plan, exitCode: plan.ok ? 0 : 1 };
           })()
         : await resolveRefinement(repository, input, writes);
-      // The next step depends on what stays open afterwards, read back from the records.
-      const after = result.ok
-        ? await readRefinementStatus(repository, values.number, agent, query, permission)
-        : null;
-      const stillOpen =
-        after?.ok && !after.unknown.length
-          ? after.requests
-              .filter((q) => q.request !== values.request && q.state === "open")
-              .map((q) => q.request)
-          : null;
+      // The next step is the native policy's, for the state read back afterwards. A failed
+      // read-back never discards the write receipt (#1139 review): the guidance is then unknown.
+      let native: RefinementGuidance | null = null;
+      if (result.ok)
+        try {
+          const facts = statusFacts(
+            await readRefinementStatus(repository, values.number, agent, query, permission),
+          );
+          native = facts ? nativeRefinementGuidance(facts) : null;
+        } catch {
+          native = null;
+        }
       await output(
         values.json
-          ? resolveJson(result, values.request, stillOpen)
-          : resolveText(result, values.request, values.dryRun, stillOpen),
+          ? resolveJson(result, values.request, native)
+          : resolveText(result, values.request, values.dryRun, native),
       );
       return result.exitCode;
     }

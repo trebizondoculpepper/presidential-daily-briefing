@@ -191,8 +191,14 @@ describe("refine resolve (#1096)", () => {
     expect(code).toBe(0);
     const guidance = JSON.parse(text).guidance;
     expect(guidance).toMatchObject({ rule: "D-REFINE", nextActor: "designer" });
-    expect(guidance.next).toContain(`Still open: ${older}`);
+    expect(guidance.next).toBe(decisionGuidance("D-REFINE")!.why);
     expect(guidance.pickup).toBe(denialText("D-DENY-REFINEMENT"));
+    expect(
+      (await status(w)).body.requests.map((q: { request: string; state: string }) => [
+        q.request,
+        q.state,
+      ]),
+    ).toContainEqual([older, "open"]);
   });
 
   it("previews the label repair when another request is open and the label is missing (#1139 review)", async () => {
@@ -246,5 +252,65 @@ describe("refine resolve (#1096)", () => {
     if (!preview.ok) throw new Error(preview.error);
     expect(preview.changes.map((c) => c.step)).toEqual(["comment"]);
     expect((preview.notes ?? []).join(" ")).toMatch(/cannot be confirmed/);
+  });
+
+  it("lets the native policy choose: an answered remaining request is to be resolved, not answered (#1139 review)", async () => {
+    const w = world();
+    w.add(1);
+    await request(w, "First?");
+    const newer = await request(w, "Second?");
+    await w.answer(1, w.questionOf(1, 0));
+    await w.answer(1, w.questionOf(1, 1));
+    const guidance = JSON.parse((await resolve(w, newer, ["--json"])).text).guidance;
+    expect(guidance).toMatchObject({ rule: "D-REFINE-RESOLVE", nextActor: "designer" });
+    expect(guidance.next).toBe(decisionGuidance("D-REFINE-RESOLVE")!.why);
+    expect(guidance.pickup).toBe(denialText("D-DENY-REFINEMENT"));
+  });
+
+  it("keeps the write receipt when the guidance read-back fails (#1139 review)", async () => {
+    const w = world();
+    w.add(1);
+    const op = await request(w);
+    await w.answer(1, w.questionOf(1));
+    const comments = w.issues.get(1)!.comments.length;
+    // Every read after the resolve record lands fails.
+    const flaky: typeof w.query = async (source, variables) => {
+      if (!source.startsWith("query{viewer") && w.issues.get(1)!.comments.length > comments)
+        throw new Error("GitHub unavailable");
+      return w.query(source, variables);
+    };
+    let text = "";
+    const code = await main(
+      [
+        "refine",
+        "resolve",
+        "1",
+        "--agent",
+        "nicole",
+        "--request",
+        op,
+        "--why",
+        "Answered.",
+        "--json",
+        "--repo",
+        repo,
+      ],
+      async (t) => void (text = t),
+      {
+        collect: async () => {
+          throw new Error("no briefing");
+        },
+        currentRepository: async () => repo,
+        query: flaky as unknown as Query,
+        ghRun: w.run,
+        rest: w.rest,
+      },
+    );
+    const receipt = JSON.parse(text);
+    expect(
+      receipt.steps.map((s: { step: string; status: string }) => `${s.step}:${s.status}`),
+    ).toEqual(["comment:done"]);
+    expect(code).toBe(2);
+    expect(receipt.guidance).toMatchObject({ rule: null, nextActor: null });
   });
 });
