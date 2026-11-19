@@ -1139,6 +1139,73 @@ try {
     await run("git", ["remote", "add", "origin", "https://github.com/example/parity.git"], {
       cwd: checkout,
     });
+    // #768: installed pdb install codex / uninstall codex lifecycle in a fresh git checkout.
+    const installCheckout = join(work, "codex-install-checkout");
+    await mkdir(installCheckout);
+    await run("git", ["init", "-q"], { cwd: installCheckout });
+    await run("git", ["remote", "add", "origin", "https://github.com/example/codex-install.git"], {
+      cwd: installCheckout,
+    });
+    const installEnv = {
+      ...process.env,
+      HOME: join(work, "install-home"),
+      PDB_NO_UPDATE_CHECK: "1",
+      PDB_NO_FIRST_USE_HINT: "1",
+      PDB_NO_HUMAN_CONTEXT: "1",
+      PDB_NO_EFFECTIVE_IDENTITY: "1",
+    };
+    await mkdir(installEnv.HOME);
+    const runInstall = (cmdArgs: string[]) =>
+      run(bin, cmdArgs, { cwd: installCheckout, env: installEnv });
+    const first = JSON.parse(
+      (await runInstall(["install", "codex", "--role", "implementer", "--yes", "--json"])).stdout,
+    ) as {
+      status?: { configured?: boolean };
+      items?: { kind: string; action: string; outcome: string }[];
+    };
+    if (
+      first.status?.configured !== true ||
+      !first.items?.some((i) => i.kind === "identity" && i.outcome === "applied") ||
+      !first.items?.some((i) => i.kind === "mcp" && i.outcome === "applied")
+    )
+      throw new Error(`Installed pdb install codex first run failed: ${JSON.stringify(first)}`);
+    const rerun = JSON.parse(
+      (await runInstall(["install", "codex", "--role", "implementer", "--yes", "--json"])).stdout,
+    ) as { items?: { kind: string; outcome: string }[] };
+    if (!rerun.items?.some((i) => i.kind === "mcp" && i.outcome === "kept"))
+      throw new Error(`Installed pdb install codex rerun failed: ${JSON.stringify(rerun)}`);
+    const updated = JSON.parse(
+      (
+        await runInstall([
+          "install",
+          "codex",
+          "--transport",
+          "http",
+          "--url",
+          "https://example.com/mcp",
+          "--yes",
+          "--json",
+        ])
+      ).stdout,
+    ) as { items?: { kind: string; action: string; outcome: string }[] };
+    if (
+      !updated.items?.some(
+        (i) => i.kind === "mcp" && i.action === "replace" && i.outcome === "applied",
+      )
+    )
+      throw new Error(`Installed pdb install codex update failed: ${JSON.stringify(updated)}`);
+    const removed = JSON.parse(
+      (await runInstall(["uninstall", "codex", "--yes", "--json"])).stdout,
+    ) as { items?: { kind: string; action: string; outcome: string }[] };
+    if (
+      !removed.items?.some(
+        (i) => i.kind === "mcp" && i.action === "remove" && i.outcome === "applied",
+      )
+    )
+      throw new Error(`Installed pdb uninstall codex failed: ${JSON.stringify(removed)}`);
+    console.log(
+      "ok   installed pdb install/uninstall codex in checkout: first, rerun, http update, remove",
+    );
     const fakeDir = join(work, "fake-gh");
     await mkdir(fakeDir);
     await writeFile(join(fakeDir, "gh"), fakeGh);

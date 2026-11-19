@@ -22,6 +22,7 @@ import { crashDisclosure } from "./telemetry/crash-setting.js";
 import { initializeCrashes } from "./telemetry/crashes.js";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { createInterface } from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import {
@@ -335,7 +336,7 @@ export interface Runtime {
   firstUseHint?: (project: string, version: string) => Promise<boolean>;
   stderr?: (text: string) => void;
   /** Filesystem, git and working directory for `config`; tests never touch the real checkout. */
-  config?: ConfigRuntime;
+  config?: ConfigRuntime & { confirm?: (prompt: string) => Promise<boolean> };
   /** Filesystem, git, GitHub GraphQL API and clock for `estimate N`. */
   estimate?: EstimateRuntime;
   /** Working directory, filesystem and process probe for `doctor` (#64). */
@@ -447,11 +448,11 @@ ${crashDisclosure()}
                         How a new agent gets its own identity: a locally unique generated name
                         kept in local pdb.toml (a rerun keeps it; another harness's entry is
                         never reused; nothing is reserved remotely), then the --agent to use
-  install codex [--global] [--transport stdio|http] [--url URL] [--role R]
-                        Configure the PDB MCP connection for Codex (project default, explicit
-                        --global); current slice establishes the command surface only, no writes (install codex --help)
-  uninstall codex [--global]  Preview removal intent for PDB-managed Codex entries; this slice
-                        performs no writes and removes nothing (uninstall codex --help)
+  install codex [--global] [--transport stdio|http] [--url URL] [--role R] [--yes] [--dry-run]
+                        Configure project-local (or explicit --global) Codex identity and PDB MCP
+                        connection (--dry-run previews without writing; install codex --help)
+  uninstall codex [--global] [--yes] [--dry-run]  Remove PDB-managed Codex MCP entries in the
+                        selected scope; preserves identity and settings (uninstall codex --help)
   onboard [--repo owner/name] [--role implementer|designer] [--server URL] [--install] [--json]
                         New here? How an agent starts with pdb: rules, identity, commands and
                         a prompt to give it; --install adds the pdb section to AGENTS.md
@@ -1719,6 +1720,21 @@ async function runIssue(
   return issueCreateExitCode(result);
 }
 
+/** Prompt for y/N confirmation when attached to an interactive TTY; non-TTY returns false (#768). */
+async function ttyConfirm(prompt: string, json = false): Promise<boolean> {
+  if (!process.stdin.isTTY || !process.stdout.isTTY) return false;
+  const rl = createInterface({
+    input: process.stdin,
+    output: json ? process.stderr : process.stdout,
+  });
+  try {
+    const answer = (await rl.question(`${prompt} [y/N] `)).trim().toLowerCase();
+    return answer === "y" || answer === "yes";
+  } finally {
+    rl.close();
+  }
+}
+
 /** The command itself; `main` adds the version check around it. */
 async function run(
   args: string[],
@@ -1774,33 +1790,67 @@ async function run(
       ...runtime.quotas,
     });
   if (args[0] === "config") return runConfig(args.slice(1), output, runtime.config);
-  if (args[0] === "install" || args[0] === "uninstall") {
-    try {
-      const parsed = claudeInstallArgumentsFor(args.slice(1), args[0]);
-      if (parsed.help) {
-        await output(claudeInstallHelp(parsed.operation));
-        return 0;
-      }
-      return await runClaudeInstall(parsed, runtime.config ?? {}, output);
-    } catch (error) {
-      if (error instanceof Error && error.message.startsWith("Unsupported installer client"))
-        throw error;
-      const message = error instanceof Error ? error.message : String(error);
-      const json = args.includes("--json");
-      if (!json) throw new Error(message);
-      await output(JSON.stringify({ kind: "install-error", message }, null, 2) + "\n");
-      return 1;
-    }
-  }
   if (args[0] === "setup") return runSetup(args.slice(1), output, runtime.config);
   if (args[0] === "install" || args[0] === "uninstall") {
     const operation = args[0] === "install" ? "install" : "uninstall";
-    const parsed = installArgumentsFor(args.slice(1), operation);
-    if (parsed.help) {
-      await output(installHelp(operation));
+    const { positionals } = parseArgs({
+      args: args.slice(1),
+      options: {
+        transport: { type: "string" },
+        url: { type: "string" },
+        role: { type: "string" },
+        entry: { type: "string" },
+        harness: { type: "string" },
+        repo: { type: "string" },
+        agent: { type: "string" },
+        scope: { type: "string" },
+      },
+      strict: false,
+      allowPositionals: true,
+    });
+    const client = positionals[0];
+    if (!client && (args.includes("--help") || args.includes("-h"))) {
+      await output(`${installHelp(operation)}\n\n${claudeInstallHelp(operation)}`);
       return 0;
     }
-    return runCodexInstallSurface(parsed, runtime.config ?? {}, output);
+    const effectiveClient = client ?? "claude";
+    if (effectiveClient === "codex") {
+      const parsed = installArgumentsFor(args.slice(1), operation);
+      if (parsed.help) {
+        await output(installHelp(operation));
+        return 0;
+      }
+      const configRuntime = runtime.config ?? {};
+      return runCodexInstallSurface(
+        parsed,
+        {
+          ...configRuntime,
+          confirm: configRuntime.confirm ?? ((prompt) => ttyConfirm(prompt, parsed.json)),
+        },
+        output,
+      );
+    }
+    if (effectiveClient === "claude") {
+      try {
+        const parsed = claudeInstallArgumentsFor(args.slice(1), args[0]);
+        if (parsed.help) {
+          await output(claudeInstallHelp(parsed.operation));
+          return 0;
+        }
+        return await runClaudeInstall(parsed, runtime.config ?? {}, output);
+      } catch (error) {
+        if (error instanceof Error && error.message.startsWith("Unsupported installer client"))
+          throw error;
+        const message = error instanceof Error ? error.message : String(error);
+        const json = args.includes("--json");
+        if (!json) throw new Error(message);
+        await output(JSON.stringify({ kind: "install-error", message }, null, 2) + "\n");
+        return 1;
+      }
+    }
+    throw new Error(
+      `Unsupported installer client ${JSON.stringify(effectiveClient)}; supported: codex, claude.`,
+    );
   }
   if (args[0] === "onboard") return runOnboard(args.slice(1), output, runtime.config);
   if (args[0] === "contributors") return runContributors(args.slice(1), output, runtime.config);

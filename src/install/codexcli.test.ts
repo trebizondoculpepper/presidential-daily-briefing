@@ -116,10 +116,10 @@ describe("install codex argument surface (#768 slice 2a)", () => {
   it("help text describes the surface and uninstall limits", () => {
     expect(installHelp("install")).toContain("Usage: pdb install codex");
     expect(installHelp("install")).toContain("--global");
-    expect(installHelp("install")).toContain("performs no file writes");
+    expect(installHelp("install")).toContain("pass --yes to apply");
     expect(installHelp("uninstall")).toContain("Usage: pdb uninstall codex");
     expect(installHelp("uninstall")).toContain("--global is required to target user-wide");
-    expect(installHelp("uninstall")).toContain("performs no file writes");
+    expect(installHelp("uninstall")).toContain("preserving identity");
   });
 });
 
@@ -493,5 +493,103 @@ describe("runCodexInstallSurface (#768 slice 2a)", () => {
     };
     expect(res.dryRun).toBe(true);
     expect(res.items[0]).toMatchObject({ kind: "identity", outcome: "planned" });
+  });
+
+  it("displays preview before requesting interactive confirmation (#768)", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "pdb-codexcli-confirm-"));
+    try {
+      const { execFile } = await import("node:child_process");
+      const { promisify } = await import("node:util");
+      const exec = promisify(execFile);
+      await exec("git", ["init"], { cwd: dir });
+      await exec("git", ["remote", "add", "origin", "https://github.com/example/project.git"], {
+        cwd: dir,
+      });
+      const events: string[] = [];
+      const code = await runCodexInstallSurface(
+        installArgumentsFor(
+          ["codex", "--repo", "example/project", "--role", "implementer", "--transport", "http"],
+          "install",
+        ),
+        {
+          cwd: dir,
+          env: {},
+          confirm: async () => {
+            events.push("confirm");
+            return true;
+          },
+        },
+        async (text) => {
+          events.push(`output:${text.includes("(planned") ? "preview" : "applied"}`);
+        },
+      );
+      expect(code).toBe(0);
+      expect(events).toEqual(["output:preview", "confirm", "output:applied"]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses with CONFLICT when config changes while awaiting interactive confirmation (#768)", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "pdb-codexcli-conflict-"));
+    try {
+      const { execFile } = await import("node:child_process");
+      const { promisify } = await import("node:util");
+      const { mkdir, readFile, writeFile } = await import("node:fs/promises");
+      const exec = promisify(execFile);
+      await exec("git", ["init"], { cwd: dir });
+      await exec("git", ["remote", "add", "origin", "https://github.com/example/project.git"], {
+        cwd: dir,
+      });
+      // Install an initial HTTP entry first, then preview an uninstall whose target changes mid-prompt.
+      const setupCode = await runCodexInstallSurface(
+        installArgumentsFor(
+          [
+            "codex",
+            "--repo",
+            "example/project",
+            "--role",
+            "implementer",
+            "--transport",
+            "http",
+            "--yes",
+          ],
+          "install",
+        ),
+        { cwd: dir, env: {} },
+        async () => {},
+      );
+      expect(setupCode).toBe(0);
+      const out: string[] = [];
+      const code = await runCodexInstallSurface(
+        installArgumentsFor(["codex", "--repo", "example/project", "--json"], "uninstall"),
+        {
+          cwd: dir,
+          env: {},
+          confirm: async () => {
+            await mkdir(join(dir, ".codex"), { recursive: true });
+            await writeFile(
+              join(dir, ".codex", "config.toml"),
+              '[mcp_servers.pdb]\nurl = "https://changed.example/mcp"\n',
+              "utf8",
+            );
+            return true;
+          },
+        },
+        async (text) => void out.push(text),
+      );
+      expect(code).toBe(2);
+      const res = JSON.parse(out.join("")) as {
+        items: { kind: string; outcome: string; code: string }[];
+      };
+      expect(res.items.find((i) => i.kind === "mcp")).toMatchObject({
+        outcome: "refused",
+        code: "CONFLICT",
+      });
+      const current = await readFile(join(dir, ".codex", "config.toml"), "utf8");
+      expect(current).toContain("https://changed.example/mcp");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });

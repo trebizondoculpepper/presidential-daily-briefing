@@ -9,6 +9,7 @@
  * rather than writing a command that cannot run. Project arguments are emitted for project
  * scope only, and Windows launches the packaged script through Node.
  */
+import { readFile } from "node:fs/promises";
 import { installedVersion } from "../updates/updates.js";
 import {
   editTomlTable,
@@ -170,6 +171,43 @@ function withManifestWrite(
   };
 }
 
+/** Raw configuration and ownership-manifest snapshot bound between preview and interactive apply (#768). */
+export interface CodexInstallSnapshot {
+  configRaw: string | null;
+  manifestRaw: string | null;
+}
+
+const readOptionalFile = async (
+  path: string,
+  fs?: ManifestRuntime["fs"],
+): Promise<string | null> => {
+  try {
+    return fs ? await fs.readFile(path) : await readFile(path, "utf8");
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
+};
+
+/** Capture raw Codex `config.toml` and manifest contents for preview-to-apply conflict checks (#768). */
+export async function readCodexInstallSnapshot(
+  scope: InstallScope,
+  manifestPath: string,
+  fs?: ManifestRuntime["fs"],
+): Promise<CodexInstallSnapshot> {
+  return {
+    configRaw: await readOptionalFile(codexConfigPath(scope), fs),
+    manifestRaw: await readOptionalFile(manifestPath, fs),
+  };
+}
+
+/** Whether the raw Codex `config.toml` or ownership manifest changed since a preview snapshot (#768). */
+export const codexInstallSnapshotChanged = (
+  expected: CodexInstallSnapshot,
+  current: CodexInstallSnapshot,
+): boolean =>
+  expected.configRaw !== current.configRaw || expected.manifestRaw !== current.manifestRaw;
+
 /** Install (or keep/replace) the PDB MCP entry in the scope's Codex `config.toml`. */
 export async function installCodexMcp(params: {
   scope: InstallScope;
@@ -181,8 +219,10 @@ export async function installCodexMcp(params: {
   pdbMcp?: string | null;
   platform?: NodeJS.Platform;
   runtime?: ManifestRuntime;
+  expectedSnapshot?: CodexInstallSnapshot;
 }): Promise<CodexMcpResult> {
-  const { scope, options, manifestPath, pdbVersion, dryRun, adopt, runtime } = params;
+  const { scope, options, manifestPath, pdbVersion, dryRun, adopt, runtime, expectedSnapshot } =
+    params;
   const file = codexConfigPath(scope);
   const allowedRoot = codexConfigRoot(scope);
   // An STDIO registration without a resolvable installed command cannot run; refuse before any
@@ -210,6 +250,17 @@ export async function installCodexMcp(params: {
   // The read/edit/persist are one operation under the scope lock so a concurrent uninstall can't
   // delete an ownership record this install just saved (or vice versa).
   const guarded = await withScopeLock(manifestPath, runtime, async () => {
+    if (!dryRun && expectedSnapshot) {
+      const currentSnapshot = await readCodexInstallSnapshot(scope, manifestPath, runtime?.fs);
+      if (codexInstallSnapshotChanged(expectedSnapshot, currentSnapshot)) {
+        return {
+          mcp: refusal(
+            "CONFLICT",
+            "Codex configuration or ownership manifest changed since the preview; re-run to inspect the updated plan.",
+          ),
+        };
+      }
+    }
     const read = await readInstallManifest(manifestPath, runtime?.fs);
     if (read.status === "error")
       return {
@@ -262,12 +313,24 @@ export async function uninstallCodexMcp(params: {
   manifestPath: string;
   dryRun?: boolean;
   runtime?: ManifestRuntime;
+  expectedSnapshot?: CodexInstallSnapshot;
 }): Promise<CodexMcpResult> {
-  const { scope, manifestPath, dryRun, runtime } = params;
+  const { scope, manifestPath, dryRun, runtime, expectedSnapshot } = params;
   const file = codexConfigPath(scope);
   const allowedRoot = codexConfigRoot(scope);
   // Read/edit/persist are one operation under the scope lock (see installCodexMcp).
   const guarded = await withScopeLock(manifestPath, runtime, async () => {
+    if (!dryRun && expectedSnapshot) {
+      const currentSnapshot = await readCodexInstallSnapshot(scope, manifestPath, runtime?.fs);
+      if (codexInstallSnapshotChanged(expectedSnapshot, currentSnapshot)) {
+        return {
+          mcp: refusal(
+            "CONFLICT",
+            "Codex configuration or ownership manifest changed since the preview; re-run to inspect the updated plan.",
+          ),
+        };
+      }
+    }
     const read = await readInstallManifest(manifestPath, runtime?.fs);
     if (read.status === "error")
       return {
