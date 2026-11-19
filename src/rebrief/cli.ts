@@ -579,6 +579,8 @@ async function runNativeStop(
         throw new Error("missing repository");
       const target = await resolveIdentityTarget(cwd, repository, git).catch(() => null);
       if (!target || !target.root) throw new Error("missing repository");
+      if (values.role !== undefined && !["implementer", "designer"].includes(values.role))
+        throw new Error("invalid role");
       const role = (values.role as "implementer" | "designer") ?? "implementer";
       const effectiveIdentity = runtime.prepareIdentity
         ? await runtime.prepareIdentity({

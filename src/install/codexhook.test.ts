@@ -297,4 +297,71 @@ describe("installCodexStopHook / uninstallCodexStopHook (#770)", () => {
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  it("preserves an unrelated command co-located in the same Stop group on replace and uninstall", async () => {
+    const { dir, scope } = await tmpProject();
+    try {
+      const file = hooksFile(dir);
+      // Adopted owned entry sitting next to an unrelated command in the same group (review finding).
+      await nodeSafeFs.createSynced(
+        file,
+        JSON.stringify({
+          hooks: {
+            Stop: [
+              {
+                hooks: [
+                  { type: "command", command: "pdb rebrief codex-stop --old" },
+                  { type: "command", command: "unrelated-tool" },
+                ],
+              },
+            ],
+          },
+        }),
+      );
+      const manifest = manifestPath(scope, "codex");
+      // Adoption keeps the file untouched; a later install replaces the owned entry only.
+      const adopted = await installCodexStopHook({
+        scope,
+        options: {},
+        manifestPath: manifest,
+        pdbVersion: "0.1.0",
+        adopt: true,
+        runtime: { now: fixedNow },
+      });
+      expect(adopted.hook.outcome).toBe("adopted");
+      const replaced = await installCodexStopHook({
+        scope,
+        options: {},
+        manifestPath: manifest,
+        pdbVersion: "0.1.0",
+        runtime: { now: fixedNow },
+      });
+      expect(replaced.hook.outcome).toBe("applied");
+      const afterReplace = JSON.parse(await nodeSafeFs.readFile(file));
+      const replaceCommands = afterReplace.hooks.Stop.flatMap(
+        (g: { hooks: { command: string }[] }) => g.hooks.map((h: { command: string }) => h.command),
+      );
+      expect(replaceCommands).toContain("unrelated-tool");
+      expect(replaceCommands.filter((c: string) => c.includes("codex-stop"))).toHaveLength(1);
+
+      // Uninstall removes only the owned entry; the co-located unrelated command survives.
+      const removed = await uninstallCodexStopHook({
+        scope,
+        manifestPath: manifest,
+        runtime: { now: fixedNow },
+      });
+      expect(removed.hook).toMatchObject({
+        outcome: "applied",
+        action: "remove",
+        ownership: "owned",
+      });
+      const afterRemove = JSON.parse(await nodeSafeFs.readFile(file));
+      const removeCommands = afterRemove.hooks.Stop.flatMap((g: { hooks: { command: string }[] }) =>
+        g.hooks.map((h: { command: string }) => h.command),
+      );
+      expect(removeCommands).toEqual(["unrelated-tool"]);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });

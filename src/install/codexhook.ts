@@ -123,19 +123,26 @@ export function codexHookAdapter(command: string): JsonEntryAdapter {
         doc.hooks && typeof doc.hooks === "object" && !Array.isArray(doc.hooks)
           ? (doc.hooks as Record<string, unknown>)
           : {};
-      // Replace any owned codex-stop command entries and preserve unrelated hooks groups.
+      // Replace any owned codex-stop command entries and preserve unrelated hooks, including
+      // unrelated commands co-located in the same group (reviewed #1124 finding).
+      const isOwnedEntry = (entry: unknown): boolean =>
+        typeof entry === "object" &&
+        entry !== null &&
+        (entry as { type?: unknown }).type === "command" &&
+        typeof (entry as { command?: unknown }).command === "string" &&
+        (entry as { command: string }).command.includes("codex-stop");
       const stopGroups = Array.isArray(existingHooks[codexStopHookEvent])
-        ? (existingHooks[codexStopHookEvent] as unknown[]).filter((group) => {
-            const commands = (group as { hooks?: unknown[] } | null)?.hooks;
-            if (!Array.isArray(commands)) return true;
-            return !commands.some(
-              (entry) =>
-                typeof entry === "object" &&
-                entry !== null &&
-                (entry as { type?: unknown }).type === "command" &&
-                typeof (entry as { command?: unknown }).command === "string" &&
-                (entry as { command: string }).command.includes("codex-stop"),
-            );
+        ? (existingHooks[codexStopHookEvent] as unknown[]).flatMap((group) => {
+            if (!group || typeof group !== "object") return [group];
+            const commands = (group as { hooks?: unknown[] }).hooks;
+            if (!Array.isArray(commands)) return [group];
+            const kept = commands.filter((entry) => !isOwnedEntry(entry));
+            // A surviving group with unrelated commands is kept as-is; a group left empty is dropped.
+            return kept.length === commands.length
+              ? [group]
+              : kept.length > 0
+                ? [{ hooks: kept }]
+                : [];
           })
         : [];
       return {
@@ -151,26 +158,30 @@ export function codexHookAdapter(command: string): JsonEntryAdapter {
         doc.hooks && typeof doc.hooks === "object" && !Array.isArray(doc.hooks)
           ? (doc.hooks as Record<string, unknown>)
           : {};
+      const isOwnedEntry = (entry: unknown): boolean =>
+        typeof entry === "object" &&
+        entry !== null &&
+        (entry as { type?: unknown }).type === "command" &&
+        typeof (entry as { command?: unknown }).command === "string" &&
+        (entry as { command: string }).command.includes("codex-stop");
       const stopGroups = Array.isArray(existingHooks[codexStopHookEvent])
-        ? (existingHooks[codexStopHookEvent] as unknown[]).filter((group) => {
-            const commands = (group as { hooks?: unknown[] } | null)?.hooks;
-            if (!Array.isArray(commands)) return true;
-            return !commands.some(
-              (entry) =>
-                typeof entry === "object" &&
-                entry !== null &&
-                (entry as { type?: unknown }).type === "command" &&
-                typeof (entry as { command?: unknown }).command === "string" &&
-                (entry as { command: string }).command.includes("codex-stop"),
-            );
+        ? (existingHooks[codexStopHookEvent] as unknown[]).flatMap((group) => {
+            if (!group || typeof group !== "object") return [group];
+            const commands = (group as { hooks?: unknown[] }).hooks;
+            if (!Array.isArray(commands)) return [group];
+            const kept = commands.filter((entry) => !isOwnedEntry(entry));
+            return kept.length === commands.length
+              ? [group]
+              : kept.length > 0
+                ? [{ hooks: kept }]
+                : [];
           })
         : [];
       if (stopGroups.length === 0) {
         const next = { ...existingHooks };
         if (next[codexStopHookEvent] && Array.isArray(next[codexStopHookEvent]))
           delete next[codexStopHookEvent];
-        const hooks = Object.keys(next).length === 0 ? undefined : next;
-        return hooks ? { ...doc, hooks } : { ...doc, hooks };
+        return { ...doc, hooks: next };
       }
       return { ...doc, hooks: { ...existingHooks, [codexStopHookEvent]: stopGroups } };
     },
