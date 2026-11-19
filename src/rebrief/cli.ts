@@ -410,7 +410,8 @@ Native Claude Code Stop adapter (#771): one JSON Stop event on stdin, one native
 response on stdout. Claude Code fires Stop only when the main agent finishes a turn
 on its own (never on a user interrupt; API errors fire StopFailure), so the hook may
 pass --natural-stop-confirmed. The event is the payload's prompt_id within its
-session_id; a Stop already continued by a hook (stop_hook_active true), a missing
+session_id; a Stop already continued by a hook (stop_hook_active true), one with
+pending background_tasks or session_crons (paused, not finished), a missing
 prompt_id, missing/mismatched state, invalid input, cancellation or failure gives {}
 and exit 0, so Claude Code stops normally. A continue is returned as
 {"decision":"block","reason":BRIEFING}; writing it is not delivery receipt, so the
@@ -424,11 +425,14 @@ interface NativeStopProfile {
   help: string;
   /** The native per-Stop event identifier, or null when the payload carries none. */
   eventId: (event: Record<string, unknown>) => unknown;
+  /** Platform facts that rule a Stop out before any read (true when none apply). */
+  eligible: (event: Record<string, unknown>) => boolean;
 }
 const codexStopProfile: NativeStopProfile = {
   platform: "codex",
   help: codexHelp,
   eventId: (event) => event.turn_id,
+  eligible: () => true,
 };
 const claudeStopProfile: NativeStopProfile = {
   platform: "claude-code",
@@ -436,6 +440,12 @@ const claudeStopProfile: NativeStopProfile = {
   // Claude Code's Stop payload has no turn_id; prompt_id identifies the prompt the turn served
   // (observed in #386). A repeated value is refused by the session store as a duplicate event.
   eventId: (event) => event.prompt_id,
+  // Pending background tasks or session crons mean the session is paused for background work,
+  // not finished; a continuation would compete with it (claude-code-natural-stop.md).
+  eligible: (event) =>
+    [event.background_tasks, event.session_crons].every(
+      (work) => work === undefined || (Array.isArray(work) && work.length === 0),
+    ),
 };
 
 /** Native framing over the existing CLI/core; wrappers contain no JSON or policy logic. */
@@ -509,6 +519,7 @@ async function runNativeStop(
       !("session_id" in event) ||
       !id(event.session_id) ||
       !id(profile.eventId(event as Record<string, unknown>)) ||
+      !profile.eligible(event as Record<string, unknown>) ||
       !("stop_hook_active" in event) ||
       event.stop_hook_active !== false
     )

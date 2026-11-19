@@ -92,7 +92,9 @@ payload. Claude Code fires `Stop` only when the main agent finishes a turn on it
 (never on a user interrupt; API errors fire `StopFailure`), which is the basis for
 passing `--natural-stop-confirmed`. The payload has no `turn_id`, so the event is its
 `prompt_id` within `session_id`; a repeated value is refused as a duplicate. A Stop
-already continued by a hook (`stop_hook_active: true`) gets `{}`. A continue is
+already continued by a hook (`stop_hook_active: true`), or one with pending
+`background_tasks` or `session_crons` (paused for background work, not finished),
+gets `{}`. A continue is
 returned as `{"decision":"block","reason":…}` and stays pending: writing it is not
 receipt, because Claude Code overrides blocks at its native continuation cap (see
 [the Claude Code report](reports/agent-platforms/claude-code-stop-hooks.md)). Owned

@@ -73,6 +73,11 @@ describe("packaged Claude Code Stop adapter (#771)", () => {
       expect(await invoke({ ...event, session_id: "foreign" })).toEqual({});
       const { prompt_id: _omitted, ...noPrompt } = event;
       expect(await invoke(noPrompt)).toEqual({});
+      // Paused for background work, not finished: stop normally without a read.
+      expect(
+        await invoke({ ...event, background_tasks: [{ id: "t", status: "running" }] }),
+      ).toEqual({});
+      expect(await invoke({ ...event, session_crons: [{ id: "c", recurring: true }] })).toEqual({});
       expect(reads).toBe(0);
       const first = await invoke(event);
       expect(first.decision).toBe("block");
