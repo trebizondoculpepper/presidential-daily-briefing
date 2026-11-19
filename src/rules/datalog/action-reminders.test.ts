@@ -76,6 +76,22 @@ describe("native claim-time obligations and action-reminder selection (#1029)", 
       facts: { claimActivity: "waiting" },
     });
     expect(waitingClaim.admissionRationale.map((i) => i.id)).toEqual(["D-OWN-WAIT"]);
+
+    expect(
+      selectClaimRuleReminders({
+        role: "implementer",
+        outcome: "noop",
+        facts: { claimActivity: "resume-required" },
+      }).admissionRationale.map((i) => i.id),
+    ).toEqual(["D-OWN-RESUME"]);
+
+    expect(
+      selectClaimRuleReminders({
+        role: "implementer",
+        outcome: "noop",
+        facts: { claimActivity: "unknown" },
+      }).admissionRationale.map((i) => i.id),
+    ).toEqual(["D-OWN-UNKNOWN"]);
   });
 
   it("labels noop outcomes as no-op and includes continuation obligation", () => {

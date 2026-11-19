@@ -111,16 +111,22 @@ for (const obligation of CLAIM_OBLIGATIONS) {
   purposeText(obligation.purpose, `action-reminders:${obligation.id}`);
 }
 
-const OBLIGATIONS_HASH = createHash("sha256")
-  .update(
-    JSON.stringify({
-      obligations: CLAIM_OBLIGATIONS,
-      refusalMapper: refusalErrorToRuleId.toString(),
-    }),
-  )
-  .digest("hex");
-
-export const claimObligationsHash = (): string => OBLIGATIONS_HASH;
+let cachedObligationsHash: string | undefined;
+export function claimObligationsHash(): string {
+  if (!cachedObligationsHash) {
+    cachedObligationsHash = createHash("sha256")
+      .update(
+        JSON.stringify({
+          obligations: CLAIM_OBLIGATIONS,
+          refusalMapper: refusalErrorToRuleId.toString(),
+          ownClaimSelector: ownClaimDecisionId.toString(),
+          selector: selectClaimRuleReminders.toString(),
+        }),
+      )
+      .digest("hex");
+  }
+  return cachedObligationsHash;
+}
 
 const bundledEnglishModel = (): EnglishPolicy => englishJson as EnglishPolicy;
 
@@ -204,6 +210,19 @@ export interface ActionRuleReminders {
     unresolvedIds: string[];
     notes: string[];
   };
+}
+
+function ownClaimDecisionId(activity: ClaimReminderFactInput["claimActivity"]): string {
+  switch (activity) {
+    case "waiting":
+      return "D-OWN-WAIT";
+    case "resume-required":
+      return "D-OWN-RESUME";
+    case "unknown":
+      return "D-OWN-UNKNOWN";
+    default:
+      return "D-OWN";
+  }
 }
 
 function refusalErrorToRuleId(
@@ -366,7 +385,7 @@ export function selectClaimRuleReminders(input: SelectClaimRemindersInput): Acti
       if (facts.needsDesign) {
         addPolicyItem("D-DESIGN", "admission");
       } else if (normalizedRole === "implementer") {
-        addPolicyItem(facts.claimActivity === "waiting" ? "D-OWN-WAIT" : "D-OWN", "admission");
+        addPolicyItem(ownClaimDecisionId(facts.claimActivity), "admission");
       }
       if (facts.hasOtherClaims) {
         addPolicyItem(
@@ -468,7 +487,7 @@ export function selectClaimRuleReminders(input: SelectClaimRemindersInput): Acti
       policyVersion,
       rulesHash: modelRulesHash,
       narrationHash: modelNarrationHash,
-      obligationsHash: OBLIGATIONS_HASH,
+      obligationsHash: claimObligationsHash(),
       projectRulesHash: input.effectivePolicy?.projectRulesHash ?? null,
     },
     admissionRationale,
