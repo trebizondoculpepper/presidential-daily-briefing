@@ -1,0 +1,10 @@
+;; Claim admission scenarios (#1086): incomplete inventory parity.
+{:suite "claim-admission (#1086)"
+ :scenarios
+ [{:id "claim-deny-incomplete-inventory-with-no-observed-claim"
+   :doc "An incomplete claim inventory with no observed claim denies pickup (D-DENY-INVENTORY-UNKNOWN)."
+   :viewer {:agent "alice" :role "implementer"}
+   :facts [{:e 1 "forward-complete" true "owned-claims-complete" false}
+           {:e 100 "kind" "issue" "state" "OPEN" "number" 2 "target" "https://github.com/o/r/issues/2" "created" 1767225600000 "label" "status:ready" "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown"}]
+   :expect {:actions []
+            :denials #{[100 "D-DENY-INVENTORY-UNKNOWN"]}}}]}

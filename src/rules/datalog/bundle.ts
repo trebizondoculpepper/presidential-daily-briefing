@@ -32,6 +32,7 @@ export const requiredQueries = [
   "unknown-unlocks",
   "active-dependents",
   "denials",
+  "claim-denials",
   "other-claims",
   "active-count",
   "missing-active-count",

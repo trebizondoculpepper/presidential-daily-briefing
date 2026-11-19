@@ -15,6 +15,7 @@ import {
   resolutionProblem,
 } from "./claimactivity.js";
 import type { QuestionResolutionRecord } from "./claimactivity.js";
+import { evaluateClaimAdmission } from "../rules/datalog/engine.js";
 import { workflow } from "./definition.js";
 import { ghQuery, permissionLookup, writePermissions } from "../github/github.js";
 import type { PermissionLookup } from "../github/github.js";
@@ -762,21 +763,6 @@ async function planClaimFor(
       [`${triage} --agent ${agent}`],
     );
   const ownOther = claims.filter((c) => c.number !== number);
-  // #1083: an incomplete read of this agent's claims proves nothing about other active claims,
-  // so it refuses before any write, whether or not another claim happened to be observed. This
-  // matches the native D-DENY-INVENTORY-UNKNOWN denial the briefing applies (rules.edn).
-  if (!claimsComplete && !ownOther.length)
-    return refuse(
-      "EVIDENCE_INCOMPLETE",
-      facts,
-      `${agent}'s open claims could not be read completely, so whether ${agent} already holds a claim is unknown; nothing was written.`,
-      [
-        `pdb team --repo ${repository}`,
-        command(
-          `claim ${number} --agent ${agent}${branch ? ` --branch ${branch}` : ""}${rework ? " --rework" : ""}`,
-        ),
-      ],
-    );
   // A retained claim admits another only when every other one is verified waiting on fresh,
   // complete evidence (#412); anything else keeps the one-active-claim refusal.
   let verdict: Awaited<ReturnType<Admission>> | null = null;
@@ -967,40 +953,75 @@ async function planClaimFor(
       `Review rework needs ${claimPolicy.awaitingReview}, an open pull request, and ${agent}'s own done handoff, posted by a user with write access and recording the claim time of ${agent}'s last claim${claimedSince ? ` (${claimedSince})` : ""}, as the latest release on #${number}.${ignored.length ? ` ${ignoredNote(ignored)[0]}` : ""}`,
       [`${triage} --issue ${number}`, `${triage} --agent ${agent}`],
     );
-  if (
-    label(item, claimPolicy.question) ||
-    label(item, claimPolicy.needsDesign) ||
-    label(item, claimPolicy.decisionNeeded)
-  )
+  const restrictions = facts.labels
+    .filter((l) => l.startsWith(claimPolicy.platformPrefix))
+    .map((l) => l.slice(claimPolicy.platformPrefix.length));
+  const denials = evaluateClaimAdmission({
+    state: item.state,
+    labels: facts.labels,
+    labelsComplete: !item.labels.pageInfo?.hasNextPage,
+    nativeComplete: Boolean(item.issueDependenciesSummary),
+    openBlockers: item.issueDependenciesSummary?.blockedBy ?? 0,
+    openPrCount: openPrs.length,
+    platform,
+    platforms: restrictions,
+    ownedClaimsComplete: claimsComplete,
+    claimedByOther: others.length > 0,
+  });
+  if (denials.has("D-DENY-INVENTORY-UNKNOWN") || denials.has("CLAIM-INVENTORY-UNKNOWN"))
     return refuse(
-      "NOT_READY",
+      "EVIDENCE_INCOMPLETE",
       facts,
-      "The ticket has an outstanding question or design prerequisite.",
-      [`${triage} --issue ${number}`, `${triage} --agent ${agent}`],
+      `${agent}'s open claims could not be read completely, so whether ${agent} already holds a claim is unknown; nothing was written.`,
+      [
+        `pdb team --repo ${repository}`,
+        command(
+          `claim ${number} --agent ${agent}${branch ? ` --branch ${branch}` : ""}${rework ? " --rework" : ""}`,
+        ),
+      ],
     );
-  const held = claimPolicy.held.filter((l) => label(item, l));
-  if (held.length)
+  if (denials.has("D-DENY-PREREQUISITE")) {
+    const held = claimPolicy.held.filter((l) => label(item, l));
+    if (
+      label(item, claimPolicy.question) ||
+      label(item, claimPolicy.needsDesign) ||
+      label(item, claimPolicy.decisionNeeded)
+    )
+      return refuse(
+        "NOT_READY",
+        facts,
+        "The ticket has an outstanding question or design prerequisite.",
+        [`${triage} --issue ${number}`, `${triage} --agent ${agent}`],
+      );
     return refuse(
       "NOT_READY",
       facts,
       `The ticket is ${held.join(" and ")}; resolve that before claiming, even if a ready label remains.`,
       [`${triage} --issue ${number}`, `${triage} --agent ${agent}`],
     );
-  if (!rework && !claimPolicy.pickable.some((l) => label(item, l)))
+  }
+  if (!rework && denials.has("CLAIM-NOT-READY"))
     return refuse(
       "NOT_READY",
       facts,
       `The ticket needs ${claimPolicy.pickable.join(" or ")} to be picked up.${reworkable ? " To fix review feedback on your own pull request, reclaim it explicitly with --rework." : ""}`,
       [...(reworkable ? [reworkCommand] : []), `${triage} --agent ${agent}`],
     );
-  if (!item.issueDependenciesSummary)
+  if (denials.has("D-DENY-LABELS-UNKNOWN"))
+    return refuse(
+      "EVIDENCE_INCOMPLETE",
+      facts,
+      "Label evidence is incomplete; readiness is unknown.",
+      [`${triage} --issue ${number}`],
+    );
+  if (denials.has("D-DENY-NATIVE-UNKNOWN"))
     return refuse(
       "EVIDENCE_INCOMPLETE",
       facts,
       "Native blocker evidence is unavailable; readiness is unknown.",
       [command(`deps ${number}`)],
     );
-  if (item.issueDependenciesSummary.blockedBy > 0)
+  if (denials.has("D-DENY-BLOCKER"))
     return refuse(
       "BLOCKED",
       {
@@ -1010,7 +1031,7 @@ async function planClaimFor(
       "Open native blockers must close first.",
       [command(`deps ${number}`), `${triage} --agent ${agent}`],
     );
-  if (openPrs.length && !rework)
+  if (!rework && denials.has("D-DENY-OPEN-PR"))
     return refuse(
       "HAS_OPEN_PR",
       { ...facts, pullRequests: openPrs.map((p) => p.url) },
@@ -1020,24 +1041,21 @@ async function planClaimFor(
         ...openPrs.map((p) => `gh pr view ${p.number} --repo ${repository}`),
       ],
     );
-  const restrictions = facts.labels
-    .filter((l) => l.startsWith(claimPolicy.platformPrefix))
-    .map((l) => l.slice(claimPolicy.platformPrefix.length));
-  if (restrictions.length && !platform)
-    return refuse(
-      "PLATFORM_UNKNOWN",
-      { ...facts, platforms: restrictions },
-      `The ticket is restricted to ${restrictions.join(", ")}; state your platform with --platform.`,
-      [command(`claim ${number} --agent ${agent} --platform ${restrictions[0]}`)],
-    );
-  // platform is non-null here: an empty platform with restrictions was refused just above.
-  if (restrictions.length && !restrictions.includes(platform ?? ""))
+  if (denials.has("D-DENY-PLATFORM")) {
+    if (!platform)
+      return refuse(
+        "PLATFORM_UNKNOWN",
+        { ...facts, platforms: restrictions },
+        `The ticket is restricted to ${restrictions.join(", ")}; state your platform with --platform.`,
+        [command(`claim ${number} --agent ${agent} --platform ${restrictions[0]}`)],
+      );
     return refuse(
       "PLATFORM_MISMATCH",
       { ...facts, platforms: restrictions, platform },
       `The ticket is restricted to ${restrictions.join(", ")}.`,
       [`${triage} --agent ${agent}`],
     );
+  }
   const remove = [...claimPolicy.pickable, ...(rework ? [claimPolicy.awaitingReview] : [])].filter(
     (l) => label(item, l),
   );
