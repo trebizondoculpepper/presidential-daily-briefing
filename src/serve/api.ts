@@ -1,3 +1,6 @@
+import { readDiscussion } from "../briefing/discussion.js";
+import type { DiscussionView } from "../briefing/discussion.js";
+import { createGhService } from "../github/service/service.js";
 import {
   effectiveReadIdentity,
   withDisplayRole,
@@ -212,7 +215,8 @@ type View =
   | "who"
   | "team"
   | "ticket"
-  | "metrics";
+  | "metrics"
+  | "discussion";
 type Status = "complete" | "incomplete" | "error";
 
 /** Envelope `selection`, the MCP `selectionSchema` shape. */
@@ -382,6 +386,8 @@ function cliCommand(view: View, repository: string, number?: number): string {
     case "metrics":
       // No CLI equivalent yet (#573): the same read is only served.
       return `GET /api/v1/metrics?repo=${repository}`;
+    case "discussion":
+      return `pdb discussion ${repo} --json`;
   }
 }
 
@@ -398,6 +404,8 @@ const refreshScopes = {
   tickets: ["ticket"],
   // Pipeline metrics (#573) read their own bounded window.
   metrics: ["metrics"],
+  // The discussion view (#1102) is its own bounded read per state scope.
+  discussion: ["discussion"],
 } as const;
 
 /**
@@ -1005,6 +1013,56 @@ export function readApi(
               status: read.complete ? "complete" : "incomplete",
               // The CLI's --json briefing is the report plus its checkpoint field.
               result: { ...read.report, checkpoint: null },
+            };
+          },
+        );
+        return true;
+      }
+      if (path === "/api/v1/discussion") {
+        // #1102: the shared discussion view (#1099) in native order (#1093), through the same
+        // ServeCache collector as the served MCP tool, keyed by repository and state scope.
+        await dataRoute(
+          context,
+          "discussion",
+          ["state", "limit"],
+          undefined,
+          async (values, served) => {
+            const scope = values.get("state") ?? "open";
+            if (scope !== "open" && scope !== "closed" && scope !== "all")
+              throw invalid("state must be open, closed or all.");
+            const limit = values.has("limit") ? Number(values.get("limit")) : 20;
+            if (!Number.isInteger(limit) || limit < 1 || limit > 200)
+              throw invalid("limit must be a whole number from 1 to 200.");
+            if (!guardedQueryWith)
+              throw new CollectionError("GITHUB_UNAVAILABLE", "No GitHub reader is configured.");
+            const view = await cache.read<DiscussionView>(
+              { repository: served.repository, collector: "discussion", coverage: { scope } },
+              (inner) =>
+                readDiscussion({
+                  repository: served.repository,
+                  scope,
+                  gh: createGhService({
+                    query: guardedQueryWith(inner) as Query,
+                    ...(runtime.rest ? { rest: runtime.rest } : {}),
+                    now: runtime.now,
+                  }),
+                  signal: inner,
+                  now: runtime.now,
+                }),
+              context.signal,
+              (v) => v.coverage.complete,
+            );
+            // The display limit bounds the payload only; native order is kept and omissions counted.
+            const items = view.items.slice(0, limit);
+            return {
+              status: view.coverage.complete ? "complete" : "incomplete",
+              result: {
+                ...view,
+                items,
+                shown: items.length,
+                omitted: view.items.length - items.length,
+              },
+              warnings: view.coverage.note ? [view.coverage.note] : [],
             };
           },
         );
