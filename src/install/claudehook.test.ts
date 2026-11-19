@@ -187,6 +187,13 @@ describe("installClaudeStopHook / uninstallClaudeStopHook (#771)", () => {
       });
       expect(dry.hook.outcome).toBe("planned");
       expect(await nodeSafeFs.readFile(file)).toBe("{}");
+      // A dry run writes nothing: no ownership manifest directory or lock file is created.
+      await expect(
+        nodeSafeFs.readFile(join(dir, ".git", "pdb", "install", "claude.json")),
+      ).rejects.toMatchObject({ code: "ENOENT" });
+      await expect(nodeSafeFs.readFile(`${manifest}.op.lock`)).rejects.toMatchObject({
+        code: "ENOENT",
+      });
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

@@ -31,7 +31,7 @@ import { resolveInstalledPdb } from "./claudemcp.js";
 import { nodeSafeFs } from "../config/safejson.js";
 import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
-import { acquireFileLock, type LockTiming } from "../config/filelock.js";
+import { acquireFileLock, releaseProblem, type LockTiming } from "../config/filelock.js";
 
 /** Refuse an edit when the ownership manifest itself cannot be trusted (#970 pattern). */
 function manifestReadRefusal(
@@ -79,14 +79,21 @@ export const claudeStopHookEvent = "Stop";
 
 const LOCK_TIMING: LockTiming = { waitMs: 5_000, pollMs: 50 };
 
+/** Scope-lock result: the work value, or a refusal (held lock / lock release failure). */
+type Scoped<T> = { status: "ok"; value: T } | { status: "refused"; reason: InstallEditResult };
+
 /** Serialize read/edit/persist on the private manifest's operation lock so concurrent install and
  * uninstall cannot delete an ownership record the other just saved (reviewed #1126 finding). The
- * lock always runs on a filesystem: an injected runtime fs in tests, the real one otherwise. */
+ * lock always runs on a filesystem: an injected runtime fs in tests, the real one otherwise.
+ * A dry-run/preview never takes the writer lock and never creates the manifest directory: planning
+ * writes nothing (attended-installer-delivery.md read-only preview boundary). */
 async function withScopeLock<T>(
   manifestPath: string,
+  dryRun: boolean | undefined,
   runtime: ManifestRuntime | undefined,
   work: () => Promise<T>,
-): Promise<{ status: "ok"; value: T } | { status: "refused"; reason: InstallEditResult }> {
+): Promise<Scoped<T>> {
+  if (dryRun) return { status: "ok", value: await work() };
   const fs = runtime?.fs ?? nodeSafeFs;
   const now = runtime?.now ?? (() => new Date());
   // The lock file lives beside the private manifest; ensure its directory exists (the ownership
@@ -96,13 +103,14 @@ async function withScopeLock<T>(
   } catch {
     // A pre-existing directory is fine; refuse only on a real write failure below.
   }
+  const lock = `${manifestPath}.op.lock`;
   const held = await acquireFileLock(
     {
       readFile: (p) => fs.readFile(p),
       writeFile: (p, data) => fs.createSynced(p, data),
       unlink: (p) => fs.unlink(p),
     },
-    `${manifestPath}.op.lock`,
+    lock,
     LOCK_TIMING,
     () => now().getTime(),
     (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
@@ -115,16 +123,36 @@ async function withScopeLock<T>(
         outcome: "refused",
         ownership: "absent",
         code: "CONFLICT",
-        message: "Another Claude installer operation holds the scope lock; retry.",
+        message:
+          "Another Claude installer operation holds the scope lock; remove the stale lock and retry.",
         diff: null,
         manifestRecord: null,
       },
     };
+  let value: T;
   try {
-    return { status: "ok", value: await work() };
+    value = await work();
   } finally {
-    await held();
+    // A failed release leaves a lock that blocks later commands; surface it as an explicit partial
+    // outcome instead of discarding it (shared-write contract, reviewed #1126 finding).
+    const cleanup = await held();
+    const problem = releaseProblem(lock, cleanup);
+    if (problem) {
+      return {
+        status: "refused",
+        reason: {
+          action: "kept",
+          outcome: "committed-with-error",
+          ownership: "absent",
+          code: "WRITE_FAILED",
+          message: problem,
+          diff: null,
+          manifestRecord: null,
+        },
+      };
+    }
   }
+  return { status: "ok", value };
 }
 
 /** Native hook timeout in seconds (native default 600; an explicit short bound per the shared core). */
@@ -356,7 +384,7 @@ export async function installClaudeStopHook(params: {
       },
     };
   const command = claudeStopCommand({ ...options, pdbPath: installedPdb ?? "" });
-  const guarded = await withScopeLock(manifestPath, runtime, async () => {
+  const guarded = await withScopeLock(manifestPath, dryRun, runtime, async () => {
     const read = await readInstallManifest(manifestPath, runtime?.fs);
     const manifestBlocked = manifestReadRefusal(read, file);
     if (manifestBlocked) return { hook: manifestBlocked };
@@ -410,7 +438,7 @@ export async function uninstallClaudeStopHook(params: {
   // Classification matches the claude-stop entry by command substring, so removal works regardless
   // of the package path; no resolution is needed to delete an owned (possibly broken) hook.
   const command = claudeStopCommand({ pdbPath: "" });
-  const guarded = await withScopeLock(manifestPath, runtime, async () => {
+  const guarded = await withScopeLock(manifestPath, dryRun, runtime, async () => {
     const read = await readInstallManifest(manifestPath, runtime?.fs);
     const manifestBlocked = manifestReadRefusal(read, file);
     if (manifestBlocked) return { hook: manifestBlocked };
