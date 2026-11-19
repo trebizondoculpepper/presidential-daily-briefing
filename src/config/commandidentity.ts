@@ -163,17 +163,21 @@ export async function commandViewer(
   readonly = false,
 ): Promise<string | undefined> {
   if (!identity) return values.agent;
-  const readOnly = readonly || !!values.offline;
+  // #865 (effective-identity.md "Read-only operations"): every caller is an observational read,
+  // so it uses the non-initializing optional-viewer boundary. An explicit or verified existing
+  // agent still personalizes; with no safe selection the read continues unattributed, with no
+  // allocation, binding, identity/ignore writes or first-use setup.
+  void readonly;
   const result = await identity.select(
     {
       repository: values.repo,
       agent: values.agent,
       ...identitySelection(values),
-      intent: readOnly ? "readonly" : "normal",
+      intent: "readonly",
       offline: values.offline,
       authenticationRequired: false,
     },
-    { json: !!values.json, allowUnresolved: readOnly },
+    { json: !!values.json, allowUnresolved: true },
   );
   return result.agent ?? undefined;
 }
