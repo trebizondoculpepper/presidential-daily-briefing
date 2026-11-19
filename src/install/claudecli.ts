@@ -14,10 +14,18 @@ import { ConfigError, nodeFileSystem, type GitRunner } from "../config/config.js
 import type { ConfigRuntime } from "../config/configcli.js";
 import { prepareEffectiveIdentity, type EffectiveHuman } from "../config/effectiveidentity.js";
 import { resolveIdentityTarget } from "../config/identity.js";
+import { resolveEntry } from "../config/harness.js";
 import { createGitService, type GitService } from "../git/service.js";
 import { manifestPath, resolveProjectGitCommonDir, type InstallScope } from "./manifest.js";
 import type { InstallEditErrorCode, InstallEditOutcome, InstallItemKind } from "./manifest.js";
-import { installClaudeMcp, resolveInstalledPdbMcp, uninstallClaudeMcp } from "./claudemcp.js";
+import {
+  claudeInstallSnapshotChanged,
+  installClaudeMcp,
+  readClaudeInstallSnapshot,
+  resolveInstalledPdbMcp,
+  uninstallClaudeMcp,
+  type ClaudeInstallSnapshot,
+} from "./claudemcp.js";
 
 /** A registered installer client; only Claude is implemented by this module. */
 export type ClaudeInstallClient = "claude";
@@ -173,6 +181,8 @@ function gitService(git: GitRunner | undefined): GitService {
 export interface IdentityPrepareOutcome {
   /** The resolved logical entry key, or null when none was set up (uninstall or global). */
   entry: string | null;
+  /** Whether a new identity would be created in dry-run preview. */
+  planned?: boolean;
   /** Whether a new identity was created for this install. */
   created: boolean;
   /** A refusal message when identity could not be prepared; null otherwise. */
@@ -196,19 +206,56 @@ async function prepareIdentity(
 ): Promise<IdentityPrepareOutcome> {
   if (args.operation !== "install" || scope.kind !== "project")
     return { entry: null, created: false, refused: null, retry: null };
+  const fs = runtime.fs ?? nodeFileSystem;
+  const env = runtime.env ?? process.env;
+  let targetEntry = args.entry ?? undefined;
+  if (targetEntry === undefined) {
+    let resolution;
+    try {
+      resolution = await resolveEntry({
+        harness: args.harness ?? "claude",
+        env,
+        root: scope.root,
+        fs,
+      });
+    } catch (error) {
+      const message =
+        error instanceof ConfigError
+          ? error.message
+          : error instanceof Error
+            ? error.message
+            : String(error);
+      return {
+        entry: null,
+        created: false,
+        refused: message,
+        retry: null,
+      };
+    }
+    if (resolution.status === "unresolved") {
+      return {
+        entry: null,
+        created: false,
+        refused: `${resolution.message} No identity was borrowed: the Claude install resolves the Claude entry.`,
+        retry: null,
+      };
+    }
+    targetEntry = resolution.entry;
+  }
   const prepared = await prepareEffectiveIdentity(
     {
       project: scope.root,
       repository: scope.repository,
-      entry: args.entry ?? undefined,
-      harness: args.harness ?? undefined,
+      entry: targetEntry,
+      harness: args.entry === null ? undefined : (args.harness ?? undefined),
       role: args.role ?? undefined,
       intent: dryRun ? "dry-run" : "normal",
     },
     {
       cwd: scope.root,
-      env: runtime.env ?? process.env,
-      fs: runtime.fs ?? nodeFileSystem,
+      // Installer setup prepares the target entry without reading/rebinding any invoking session.
+      env: {},
+      fs,
       git: runtime.git,
       random: runtime.random,
       human: async (): Promise<EffectiveHuman> => ({
@@ -233,6 +280,23 @@ async function prepareIdentity(
           ? diagnostic.message
           : (diagnostic?.message ?? "IDENTITY_REQUIRED: identity could not be prepared."),
       retry: diagnostic?.recovery ?? null,
+    };
+  }
+  if (prepared.state === "proposed") {
+    if (prepared.diagnostic?.code === "identity-unresolved") {
+      return {
+        entry: null,
+        created: false,
+        refused: prepared.diagnostic.message,
+        retry: prepared.diagnostic.recovery ?? null,
+      };
+    }
+    return {
+      entry: prepared.entry,
+      planned: true,
+      created: false,
+      refused: null,
+      retry: prepared.diagnostic?.recovery ?? null,
     };
   }
   // A refused/failed setup leaves the entry unverified: report it, do not continue.
@@ -306,6 +370,253 @@ const mcpFileFor = (scope: ClaudeInstallScope): string =>
 
 export interface ClaudeRunRuntime extends ConfigRuntime {
   confirm?: (prompt: string) => Promise<boolean>;
+  stderr?: (text: string) => void | Promise<void>;
+}
+
+function formatClaudeInstallOutput(
+  result: ClaudeInstallResult,
+  scope: ClaudeInstallScope,
+  operation: ClaudeInstallArguments["operation"],
+  json: boolean,
+): string {
+  if (json) return JSON.stringify(result, null, 2) + "\n";
+  return `pdb ${operation} claude\nScope: ${scope.kind === "project" ? `project ${scope.repository} at ${scope.root}` : `global ${scope.homeDir}`}\nItems:\n${result.items
+    .map(
+      (i) =>
+        `  ${i.kind} (${i.outcome}${i.code ? `, ${i.code}` : ""}): ${i.message}${i.diff ? `\n${i.diff.trimEnd()}` : ""}${i.retry ? `\n    retry: ${i.retry}` : ""}`,
+    )
+    .join("\n")}\nNext:\n${result.next.map((n) => `  - ${n}`).join("\n")}\n`;
+}
+
+async function evaluateClaudeInstallPlan(params: {
+  args: ClaudeInstallArguments;
+  scope: ClaudeInstallScope;
+  manifestPathForScope: string;
+  mcpFile: string;
+  runtime: ClaudeRunRuntime;
+  dryRun: boolean;
+  expectedSnapshot?: ClaudeInstallSnapshot;
+}): Promise<{ result: ClaudeInstallResult; exitCode: number }> {
+  const { args, scope, manifestPathForScope, mcpFile, runtime, dryRun, expectedSnapshot } = params;
+  // A STDIO install needs the installed pdb-mcp command; refusing here avoids writing a
+  // command that cannot run (attended-installer-delivery.md "never a checkout or .mjs helper").
+  const pdbMcp =
+    args.operation === "install" && args.transport === "stdio"
+      ? await resolveInstalledPdbMcp()
+      : null;
+  if (!dryRun && args.operation === "install" && args.transport === "stdio" && !pdbMcp) {
+    const refused: ClaudeInstallResult = {
+      schemaVersion: 1,
+      kind: "install-result",
+      client: args.client,
+      operation: args.operation,
+      scope,
+      dryRun,
+      items: [
+        {
+          kind: "mcp",
+          file: mcpFile,
+          action: "kept",
+          outcome: "refused",
+          code: "UNSUPPORTED_SCOPE",
+          message:
+            "The running PDB is not an npm installation, so the installed pdb-mcp command cannot be resolved; refusing to write an entry that cannot run.",
+          diff: null,
+          retry: null,
+        },
+        {
+          kind: "hook",
+          file:
+            scope.kind === "project"
+              ? `${scope.root}/.claude/settings.local.json`
+              : `${scope.homeDir}/.claude/settings.json`,
+          action: "skipped",
+          outcome: "not-attempted",
+          code: "HOOK_NOT_AVAILABLE",
+          message:
+            "Installed hook adapter is a separate slice; withheld until it can bind a session.",
+          diff: null,
+          retry: null,
+        },
+      ],
+      status: {
+        configured: false,
+        trusted: "unknown",
+        executed: "unknown",
+        receiptVerified: "unknown",
+      },
+      next: ["Install or update PDB via npm, then re-run."],
+    };
+    return { result: refused, exitCode: 2 };
+  }
+  const conflicted =
+    !dryRun &&
+    expectedSnapshot &&
+    claudeInstallSnapshotChanged(
+      expectedSnapshot,
+      await readClaudeInstallSnapshot(scope, manifestPathForScope),
+    );
+  // Resolve/recover the per-repository identity before writing the project MCP entry so the
+  // installed server uses the intended identity (attended-installer-delivery.md). A refusal is
+  // reported as a partial outcome, never silently swallowed.
+  const identity = conflicted
+    ? { entry: null, created: false, refused: null, retry: null }
+    : await prepareIdentity(args, scope, runtime, dryRun);
+  const identityEntry = identity.entry;
+  let identityItem: ClaudeInstallItem | null = null;
+  // Refusals (ambiguous identity, needed setup without a role, or lock-cleanup failure) must
+  // appear in dry-run and non-interactive previews too, so the result always says whether
+  // installation can actually proceed (#970).
+  if (identity.refused !== null) {
+    identityItem = {
+      kind: "identity",
+      file: null,
+      action: "kept",
+      outcome: "refused",
+      code: "IDENTITY_REQUIRED",
+      message: identity.refused,
+      diff: null,
+      retry: identity.retry,
+    };
+  }
+  const identityBlocked = identityItem?.outcome === "refused";
+  const performed = conflicted
+    ? {
+        mcp: {
+          action: "kept" as const,
+          outcome: "refused" as const,
+          ownership: "absent" as const,
+          code: "CONFLICT" as const,
+          message:
+            "Claude configuration or ownership manifest changed since the preview; re-run to inspect the updated plan.",
+          diff: null,
+          manifestRecord: null,
+        },
+      }
+    : identityBlocked && scope.kind === "project" && args.operation === "install"
+      ? {
+          mcp: {
+            action: "kept" as const,
+            outcome: "not-attempted" as const,
+            ownership: "absent" as const,
+            code: "IDENTITY_REQUIRED" as const,
+            message:
+              "MCP registration withheld: the Claude identity could not be resolved; fix identity and re-run.",
+            diff: null,
+            manifestRecord: null,
+          },
+        }
+      : args.operation === "install"
+        ? await installClaudeMcp({
+            scope,
+            options: {
+              transport: args.transport,
+              url: args.url,
+              entry: identityEntry ?? args.entry,
+              projectRoot: scope.kind === "project" ? scope.root : undefined,
+            },
+            manifestPath: manifestPathForScope,
+            pdbVersion: "0.1.0",
+            dryRun,
+            expectedSnapshot,
+          })
+        : await uninstallClaudeMcp({
+            scope,
+            manifestPath: manifestPathForScope,
+            dryRun,
+            expectedSnapshot,
+          });
+  const mcp = performed.mcp;
+  const mcpConfigured =
+    args.operation === "install" &&
+    !dryRun &&
+    (mcp.outcome === "applied" || mcp.outcome === "kept" || mcp.outcome === "committed-with-error");
+  const items: ClaudeInstallItem[] = [
+    ...(identityItem
+      ? [identityItem]
+      : identityEntry && scope.kind === "project" && args.operation === "install"
+        ? [
+            {
+              kind: "identity" as const,
+              file: null,
+              action: "kept" as const,
+              outcome: identity.planned
+                ? ("planned" as const)
+                : identity.created
+                  ? ("applied" as const)
+                  : ("kept" as const),
+              code: null,
+              message: identity.planned
+                ? `Would configure [agents.${identityEntry}] in pdb.toml with role ${args.role}.`
+                : identity.created
+                  ? `Setup/reused identity entry [agents.${identityEntry}] for this repository.`
+                  : `Using existing identity entry [agents.${identityEntry}] for this repository.`,
+              diff: null,
+              retry: null,
+            },
+          ]
+        : []),
+    {
+      kind: "mcp",
+      file: mcpFile,
+      action: mcp.action,
+      outcome: mcp.outcome,
+      code: mcp.code,
+      message: mcp.message,
+      diff: mcp.diff,
+      retry: null,
+    },
+    {
+      kind: "hook",
+      file:
+        scope.kind === "project"
+          ? `${scope.root}/.claude/settings.local.json`
+          : `${scope.homeDir}/.claude/settings.json`,
+      action: "skipped",
+      outcome: "not-attempted",
+      code: "HOOK_NOT_AVAILABLE",
+      message: "Installed hook adapter is a separate slice; withheld until it can bind a session.",
+      diff: null,
+      retry: null,
+    },
+  ];
+  const result: ClaudeInstallResult = {
+    schemaVersion: 1,
+    kind: "install-result",
+    client: args.client,
+    operation: args.operation,
+    scope,
+    dryRun,
+    items,
+    status: {
+      configured: mcpConfigured,
+      trusted: "unknown",
+      executed: "unknown",
+      receiptVerified: "unknown",
+    },
+    next: [
+      scope.kind === "project"
+        ? "Configured the Claude MCP server for this project (STDIO unless --transport http)."
+        : "Configured the Claude MCP server in your user-wide Claude config.",
+      dryRun ? "Dry run: remove --dry-run (or confirm) to write." : "",
+      args.transport === "http" ? "HTTP MCP transport is unverified for Claude Code." : "",
+      args.operation === "install"
+        ? "Claude will start the PDB MCP server on the next session after you approve it."
+        : "",
+    ].filter(Boolean),
+  };
+  const refusedOrFailed = result.items.some(
+    (i) =>
+      i.outcome === "refused" ||
+      i.outcome === "failed" ||
+      i.outcome === "committed-with-error" ||
+      i.code === "IDENTITY_REQUIRED",
+  );
+  const appliedOrCurrent = result.items.some(
+    (i) => i.outcome === "applied" || i.outcome === "kept" || i.outcome === "adopted",
+  );
+  const exitCode = refusedOrFailed ? 2 : !appliedOrCurrent && !args.dryRun ? 1 : 0;
+  return { result, exitCode };
 }
 
 /**
@@ -379,202 +690,62 @@ export async function runClaudeInstall(
     return 2;
   }
   // Confirmation contract: --dry-run always previews; --yes applies directly; otherwise a TTY
-  // shows the preview and asks for confirmation, and a non-TTY without --yes behaves as a dry
-  // run (never writes identity, MCP config or ownership records unconfirmed).
-  let apply = !args.dryRun;
-  if (apply && !args.yes) {
-    if (runtime.confirm) {
-      apply = await runtime.confirm(
-        `Apply pdb ${args.operation} claude in ${scope.kind === "project" ? scope.root : scope.homeDir}?`,
-      );
+  // shows the read-only preview first and requests confirmation before applying, while a non-TTY
+  // without --yes behaves as a dry run (never writes unconfirmed).
+  if (args.dryRun || (!args.yes && !runtime.confirm)) {
+    const preview = await evaluateClaudeInstallPlan({
+      args,
+      scope,
+      manifestPathForScope,
+      mcpFile,
+      runtime,
+      dryRun: true,
+    });
+    await output(formatClaudeInstallOutput(preview.result, scope, args.operation, args.json));
+    return preview.exitCode;
+  }
+  let expectedSnapshot: ClaudeInstallSnapshot | undefined;
+  if (!args.yes && runtime.confirm) {
+    expectedSnapshot = await readClaudeInstallSnapshot(scope, manifestPathForScope);
+    const preview = await evaluateClaudeInstallPlan({
+      args,
+      scope,
+      manifestPathForScope,
+      mcpFile,
+      runtime,
+      dryRun: true,
+    });
+    if (preview.exitCode === 2) {
+      await output(formatClaudeInstallOutput(preview.result, scope, args.operation, args.json));
+      return 2;
+    }
+    const previewText = formatClaudeInstallOutput(preview.result, scope, args.operation, false);
+    if (!args.json) {
+      await output(previewText);
+    } else if (runtime.stderr) {
+      await runtime.stderr(previewText);
     } else {
-      apply = false;
+      process.stderr.write(previewText);
+    }
+    const approved = await runtime.confirm(
+      `Apply pdb ${args.operation} claude in ${scope.kind === "project" ? scope.root : scope.homeDir}?`,
+    );
+    if (!approved) {
+      if (args.json) {
+        await output(formatClaudeInstallOutput(preview.result, scope, args.operation, true));
+      }
+      return preview.exitCode;
     }
   }
-  const dryRun = args.dryRun || !apply;
-  // A STDIO install needs the installed pdb-mcp command; refusing here avoids writing a
-  // command that cannot run (attended-installer-delivery.md "never a checkout or .mjs helper").
-  const pdbMcp =
-    args.operation === "install" && args.transport === "stdio"
-      ? await resolveInstalledPdbMcp()
-      : null;
-  if (!dryRun && args.operation === "install" && args.transport === "stdio" && !pdbMcp) {
-    const refused: ClaudeInstallResult = {
-      schemaVersion: 1,
-      kind: "install-result",
-      client: args.client,
-      operation: args.operation,
-      scope,
-      dryRun,
-      items: [
-        {
-          kind: "mcp",
-          file: mcpFile,
-          action: "kept",
-          outcome: "refused",
-          code: "UNSUPPORTED_SCOPE",
-          message:
-            "The running PDB is not an npm installation, so the installed pdb-mcp command cannot be resolved; refusing to write an entry that cannot run.",
-          diff: null,
-          retry: null,
-        },
-        {
-          kind: "hook",
-          file:
-            scope.kind === "project"
-              ? `${scope.root}/.claude/settings.local.json`
-              : `${scope.homeDir}/.claude/settings.json`,
-          action: "skipped",
-          outcome: "not-attempted",
-          code: "HOOK_NOT_AVAILABLE",
-          message:
-            "Installed hook adapter is a separate slice; withheld until it can bind a session.",
-          diff: null,
-          retry: null,
-        },
-      ],
-      status: {
-        configured: false,
-        trusted: "unknown",
-        executed: "unknown",
-        receiptVerified: "unknown",
-      },
-      next: ["Install or update PDB via npm, then re-run."],
-    };
-    if (args.json) await output(JSON.stringify(refused, null, 2) + "\n");
-    else
-      await output(
-        `pdb install claude: refused (UNSUPPORTED_SCOPE).\n${refused.items
-          .map((i) => `  ${i.kind} (${i.outcome}, ${i.code}): ${i.message}`)
-          .join("\n")}\nNext:\n  ${refused.next.join("\n  ")}\n`,
-      );
-    return 2;
-  }
-  // Resolve/recover the per-repository identity before writing the project MCP entry so the
-  // installed server uses the intended identity (attended-installer-delivery.md). A refusal is
-  // reported as a partial outcome, never silently swallowed.
-  const identity = await prepareIdentity(args, scope, runtime, dryRun);
-  const identityEntry = identity.entry;
-  let identityItem: ClaudeInstallItem | null = null;
-  // Refusals (ambiguous identity, needed setup without a role, or lock-cleanup failure) must
-  // appear in dry-run and non-interactive previews too, so the result always says whether
-  // installation can actually proceed (#970).
-  if (identity.refused !== null) {
-    identityItem = {
-      kind: "identity",
-      file: null,
-      action: "kept",
-      outcome: "refused",
-      code: "IDENTITY_REQUIRED",
-      message: identity.refused,
-      diff: null,
-      retry: identity.retry,
-    };
-  }
-  const performed =
-    args.operation === "install"
-      ? await installClaudeMcp({
-          scope,
-          options: {
-            transport: args.transport,
-            url: args.url,
-            entry: identityEntry ?? args.entry,
-            projectRoot: scope.kind === "project" ? scope.root : undefined,
-          },
-          manifestPath: manifestPathForScope,
-          pdbVersion: "0.1.0",
-          dryRun,
-        })
-      : await uninstallClaudeMcp({
-          scope,
-          manifestPath: manifestPathForScope,
-          dryRun,
-        });
-  const mcp = performed.mcp;
-  const items: ClaudeInstallItem[] = [
-    ...(identityItem
-      ? [identityItem]
-      : identityEntry && scope.kind === "project" && args.operation === "install"
-        ? [
-            {
-              kind: "identity" as const,
-              file: null,
-              action: "kept" as const,
-              outcome: identity.created ? ("applied" as const) : ("kept" as const),
-              code: null,
-              message: identity.created
-                ? `Setup/reused identity entry [agents.${identityEntry}] for this repository.`
-                : `Using existing identity entry [agents.${identityEntry}] for this repository.`,
-              diff: null,
-              retry: null,
-            },
-          ]
-        : []),
-    {
-      kind: "mcp",
-      file: mcpFile,
-      action: mcp.action,
-      outcome: mcp.outcome,
-      code: mcp.code,
-      message: mcp.message,
-      diff: mcp.diff,
-      retry: null,
-    },
-    {
-      kind: "hook",
-      file:
-        scope.kind === "project"
-          ? `${scope.root}/.claude/settings.local.json`
-          : `${scope.homeDir}/.claude/settings.json`,
-      action: "skipped",
-      outcome: "not-attempted",
-      code: "HOOK_NOT_AVAILABLE",
-      message: "Installed hook adapter is a separate slice; withheld until it can bind a session.",
-      diff: null,
-      retry: null,
-    },
-  ];
-  const result: ClaudeInstallResult = {
-    schemaVersion: 1,
-    kind: "install-result",
-    client: args.client,
-    operation: args.operation,
+  const applied = await evaluateClaudeInstallPlan({
+    args,
     scope,
-    dryRun,
-    items,
-    status: {
-      configured: false,
-      trusted: "unknown",
-      executed: "unknown",
-      receiptVerified: "unknown",
-    },
-    next: [
-      scope.kind === "project"
-        ? "Configured the Claude MCP server for this project (STDIO unless --transport http)."
-        : "Configured the Claude MCP server in your user-wide Claude config.",
-      dryRun ? "Dry run: remove --dry-run (or confirm) to write." : "",
-      args.transport === "http" ? "HTTP MCP transport is unverified for Claude Code." : "",
-      args.operation === "install"
-        ? "Claude will start the PDB MCP server on the next session after you approve it."
-        : "",
-    ].filter(Boolean),
-  };
-  // Exit code comes from the requested item outcomes: 0 when everything applied/kept, 2 when any
-  // item was refused, failed, or committed-with-error (partial), matching the installer contract.
-  const exitCode = result.items.some(
-    (i) =>
-      i.outcome === "refused" || i.outcome === "failed" || i.outcome === "committed-with-error",
-  )
-    ? 2
-    : 0;
-  if (args.json) {
-    await output(JSON.stringify(result, null, 2) + "\n");
-    return exitCode;
-  }
-  await output(
-    `pdb ${args.operation} claude\nScope: ${scope.kind === "project" ? `project ${scope.repository} at ${scope.root}` : `global ${scope.homeDir}`}\nItems:\n${result.items
-      .map((i) => `  ${i.kind} (${i.outcome}${i.code ? `, ${i.code}` : ""}): ${i.message}`)
-      .join("\n")}\nNext:\n${result.next.map((n) => `  - ${n}`).join("\n")}\n`,
-  );
-  return exitCode;
+    manifestPathForScope,
+    mcpFile,
+    runtime,
+    dryRun: false,
+    expectedSnapshot,
+  });
+  await output(formatClaudeInstallOutput(applied.result, scope, args.operation, args.json));
+  return applied.exitCode;
 }
