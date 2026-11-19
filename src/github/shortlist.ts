@@ -316,6 +316,11 @@ export async function collectShortlist(
   const gone = new Set<string>();
   const unhydratable = new Map<string, NotHydratedReason>();
   const hydratedOrder: string[] = [];
+  /**
+   * #1105 review: every item hydration read, including ones later withdrawn. Their discovery
+   * labels may be older than what hydration saw, so they never prove a claim absent.
+   */
+  const everHydrated = new Set<string>();
   const isHydrated = (url: string) => hydratedIssues.has(url) || hydratedPrs.has(url);
 
   /** Discovered open items whose full snapshot fields were not read, in discovery order. */
@@ -330,7 +335,7 @@ export async function collectShortlist(
           url,
           kind,
           reason: unhydratable.get(url) ?? "not-shortlisted",
-          ...(kind === "issue"
+          ...(kind === "issue" && !everHydrated.has(url)
             ? {
                 claimLabels: stub.labels.nodes
                   .map((l) => l.name)
@@ -568,6 +573,7 @@ export async function collectShortlist(
           warnings.push(`${issue.url}: labels exceed 100; label analysis incomplete.`);
         hydratedIssues.set(url, issue);
         hydratedOrder.push(url);
+        everHydrated.add(url);
         meter.cover("issue", subject, "complete");
       }
     }
@@ -624,6 +630,7 @@ export async function collectShortlist(
     const copy = structuredClone(facts);
     for (const value of copy.issues) {
       if (!hydratedIssues.has(value.url)) hydratedOrder.push(value.url);
+      everHydrated.add(value.url);
       hydratedIssues.set(value.url, value);
     }
     for (const url of copy.gone) gone.add(url);
@@ -651,6 +658,7 @@ export async function collectShortlist(
       if (pr) {
         hydratedPrs.set(url, pr);
         hydratedOrder.push(url);
+        everHydrated.add(url);
         continue;
       }
       const last = meter.coverage.findLast(

@@ -495,6 +495,12 @@ describe("routine briefing: discover all, rank, hydrate only the shortlist (#368
       expect(fake.calls.pullRequests).toEqual([9]);
       expect(snapshot.pullRequests).toEqual([]);
       expect(snapshot.shortlist!.hydrated).not.toContain(p.url);
+      // #1105 review: an issue hydration read and then withdrew never carries discovery-label
+      // proof that a claim is absent; its newer labels were seen and are not in the snapshot.
+      const withdrawnIssue = snapshot.shortlist!.notHydrated.find((i) => i.number === 1);
+      expect(fake.calls.issueBatches.flat()).toContain(1);
+      expect(withdrawnIssue).toBeDefined();
+      expect(withdrawnIssue).not.toHaveProperty("labelsComplete");
       expect(snapshot.shortlist!.notHydrated).toEqual(
         expect.arrayContaining([expect.objectContaining({ number: 9, reason: "hydration-cap" })]),
       );
