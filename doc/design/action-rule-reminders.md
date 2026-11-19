@@ -5,6 +5,13 @@ policy and engineering tickets. This is an architectural contract, not a claim
 that action-time obligations are already fully represented in the native engine.
 Follow [policy-first delivery](../architecture.md#10-policy-before-integration-and-ticket-types).
 
+The [19 November native-obligation addendum](native-action-obligations.md)
+supersedes the separate TypeScript procedural-obligation allowance below. Native
+policy must own obligation semantics, applicability and display ordering; the
+shared English generator narrates those actual rules. The current hybrid claim
+implementation remains migration debt until its policy/integration slices land.
+The addendum also defines the early-push/draft-PR duty for pickup guidance.
+
 ## Principle and first scope
 
 After a modifying action, where practical, present the applicable current rules in
