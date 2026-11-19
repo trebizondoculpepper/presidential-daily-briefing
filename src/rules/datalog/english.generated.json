@@ -1,8 +1,8 @@
 {
   "modelVersion": 2,
   "policyVersion": 1,
-  "rulesHash": "4d033c289a546989293fb0249aaa0b28ffe4012e50fb7a7b3eb0312bd8ec0ae2",
-  "narrationHash": "3a62984c6e4e8e38c2acc3b47c96bd238f4f3da8912541fe8d2a3935ccb0ffab",
+  "rulesHash": "9b13f00684ba9ae5e46e789b6235cb0165f98b4a771feb6c4f6c7e7b31c021c9",
+  "narrationHash": "c7fc6d5b8bb8305e5f480475f003a9f557b99f571564c6adbd0705c31ea35112",
   "sources": [
     "policy/schema.edn",
     "policy/rules.edn",
@@ -6527,7 +6527,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 203
+            "index": 205
           }
         }
       ],
@@ -16130,30 +16130,13 @@
           "params": ["?t"],
           "clauses": [
             {
-              "type": "fact",
-              "scope": "entity",
-              "entity": {
-                "var": "?t"
-              },
-              "attribute": "refinement",
-              "value": {
-                "var": "?q"
-              },
-              "phrase": "refinement request",
-              "many": false
-            },
-            {
-              "type": "fact",
-              "scope": "entity",
-              "entity": {
-                "var": "?q"
-              },
-              "attribute": "refinement-state",
-              "value": {
-                "lit": "unknown"
-              },
-              "phrase": "refinement state",
-              "many": false
+              "type": "call",
+              "predicate": "refinement-unknown",
+              "args": [
+                {
+                  "var": "?t"
+                }
+              ]
             }
           ],
           "source": {
@@ -16162,7 +16145,7 @@
           }
         }
       ],
-      "calls": ["refinement-open"],
+      "calls": ["refinement-open", "refinement-unknown"],
       "set": "rules"
     },
     {
@@ -16456,11 +16439,63 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 196
+            "index": 198
           }
         }
       ],
       "calls": ["needs-refinement", "refinement-unknown"],
+      "set": "rules"
+    },
+    {
+      "name": "refinement-known",
+      "params": ["?q"],
+      "alternatives": [
+        {
+          "params": ["?q"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?q"
+              },
+              "attribute": "refinement-state",
+              "value": {
+                "lit": "open"
+              },
+              "phrase": "refinement state",
+              "many": false
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 195
+          }
+        },
+        {
+          "params": ["?q"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?q"
+              },
+              "attribute": "refinement-state",
+              "value": {
+                "lit": "resolved"
+              },
+              "phrase": "refinement state",
+              "many": false
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 196
+          }
+        }
+      ],
+      "calls": [],
       "set": "rules"
     },
     {
@@ -16484,26 +16519,28 @@
               "many": false
             },
             {
-              "type": "fact",
-              "scope": "entity",
-              "entity": {
-                "var": "?q"
-              },
-              "attribute": "refinement-state",
-              "value": {
-                "lit": "unknown"
-              },
-              "phrase": "refinement state",
-              "many": false
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "call",
+                  "predicate": "refinement-known",
+                  "args": [
+                    {
+                      "var": "?q"
+                    }
+                  ]
+                }
+              ]
             }
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 195
+            "index": 197
           }
         }
       ],
-      "calls": [],
+      "calls": ["refinement-known"],
       "set": "rules"
     },
     {
@@ -16525,7 +16562,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 197
+            "index": 199
           }
         },
         {
@@ -16543,7 +16580,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 198
+            "index": 200
           }
         },
         {
@@ -16565,7 +16602,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 199
+            "index": 201
           }
         }
       ],
@@ -16609,7 +16646,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 200
+            "index": 202
           }
         }
       ],
@@ -16686,7 +16723,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 201
+            "index": 203
           }
         }
       ],
@@ -16767,7 +16804,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 202
+            "index": 204
           }
         }
       ],
@@ -21748,8 +21785,8 @@
   ],
   "coverage": {
     "decisions": 55,
-    "predicates": 108,
-    "alternatives": 236,
+    "predicates": 109,
+    "alternatives": 238,
     "denials": 12,
     "queries": 24,
     "keyQueries": 4,
@@ -21757,6 +21794,6 @@
     "overrides": 4,
     "constants": 14,
     "attributes": 119,
-    "clauses": 1354
+    "clauses": 1356
   }
 }

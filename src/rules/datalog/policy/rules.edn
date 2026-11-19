@@ -233,7 +233,7 @@
 ;; a newer open request after an earlier resolution reopens it.
 [(refinement-open ?t ?q) [?t "refinement" ?q] [?q "refinement-state" "open"]]
 [(needs-refinement ?t) (refinement-open ?t ?q)]
-[(needs-refinement ?t) [?t "refinement" ?q] [?q "refinement-state" "unknown"]]
+[(needs-refinement ?t) (refinement-unknown ?t)]
 [(refinement-pending ?q) [?q "refinement-question" ?r] (not (record-settled ?r))]
 ;; Only a trusted record settles a blocking question; an unverified or unknown author leaves it pending.
 [(refinement-pending ?q) [?q "refinement-question" ?r] (not [?r "record-trust" "trusted"])]
@@ -244,7 +244,10 @@
 ;; Answered only on complete evidence: an unread request or question is never treated as settled.
 [(refinement-answered ?t) (refinement-open ?t ?q) (refinement-asks ?q) (not (refinement-pending ?q)) (not [?t "refinement-complete" false]) (not (refinement-unknown ?t))]
 [(refinement-incomplete ?t) (needs-refinement ?t) [?t "refinement-complete" false]]
-[(refinement-unknown ?t) [?t "refinement" ?q] [?q "refinement-state" "unknown"]]
+;; Only an explicit open or resolved state is known; unknown, missing or unrecognised fails closed.
+[(refinement-known ?q) [?q "refinement-state" "open"]]
+[(refinement-known ?q) [?q "refinement-state" "resolved"]]
+[(refinement-unknown ?t) [?t "refinement" ?q] (not (refinement-known ?q))]
 [(refinement-incomplete ?t) (refinement-unknown ?t)]
 [(refinement-hold ?t) (needs-refinement ?t)]
 [(refinement-hold ?t) (awaiting-reestimate ?t)]
