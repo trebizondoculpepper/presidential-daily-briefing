@@ -144,11 +144,12 @@ export function codexHookAdapter(command: string): JsonEntryAdapter {
             const commands = (group as { hooks?: unknown[] }).hooks;
             if (!Array.isArray(commands)) return [group];
             const kept = commands.filter((entry) => !isOwnedEntry(entry));
-            // A surviving group with unrelated commands is kept as-is; a group left empty is dropped.
+            // A surviving group with unrelated commands keeps its other metadata (matcher,
+            // permissions, comments) and only replaces the hooks array; an emptied group is dropped.
             return kept.length === commands.length
               ? [group]
               : kept.length > 0
-                ? [{ hooks: kept }]
+                ? [{ ...group, hooks: kept }]
                 : [];
           })
         : [];
@@ -180,7 +181,7 @@ export function codexHookAdapter(command: string): JsonEntryAdapter {
             return kept.length === commands.length
               ? [group]
               : kept.length > 0
-                ? [{ hooks: kept }]
+                ? [{ ...group, hooks: kept }]
                 : [];
           })
         : [];
