@@ -99,12 +99,27 @@ export function refineArgumentsFor(
   };
 }
 
-/** The designer's next step, from the native rule that will offer it. */
+/**
+ * The designer's next step, from the native rule that offers it. It is stated only when this run
+ * established it, by planning or writing a new request whose questions are therefore unanswered.
+ * A replay of an already recorded request says so instead, because its questions may since have
+ * been answered and a different rule may apply (#1136 review).
+ */
 export function refineGuidance(result: ClaimPlan | ClaimResult) {
   if (!result.ok) return null;
+  const request = result.questionOpId ?? null;
+  const recordedNow = result.changes.some((c) => c.step === "comment");
+  if (!recordedNow)
+    return {
+      request,
+      nextActor: null,
+      rule: null,
+      next: "This request was already recorded; its questions may have been answered since. Read the ticket for its current state.",
+      pickup: null,
+    };
   const rule = decisionGuidance("D-REFINE");
   return {
-    request: result.questionOpId ?? null,
+    request,
     nextActor: "designer",
     rule: rule?.id ?? "D-REFINE",
     next: rule?.why ?? "",
@@ -130,7 +145,11 @@ export function refineText(result: ClaimPlan | ClaimResult, dryRun: boolean): st
   const lines = [claimText(result as ClaimResult, dryRun).trimEnd()];
   if (guidance) {
     if (guidance.request) lines.push(`Refinement request: ${guidance.request}`);
-    lines.push(`Next (${guidance.nextActor}, ${guidance.rule}): ${guidance.next}`);
+    lines.push(
+      guidance.rule
+        ? `Next (${guidance.nextActor}, ${guidance.rule}): ${guidance.next}`
+        : `Next: ${guidance.next}`,
+    );
     if (guidance.pickup) lines.push(guidance.pickup);
   }
   return lines.join("\n") + "\n";

@@ -152,4 +152,39 @@ describe("refine request: service wiring (#1095)", () => {
     expect(w.issues.get(1)!.comments).toHaveLength(1);
     expect(w.issues.get(1)!.labels).toContain(refinementLabel);
   });
+
+  it("previews both the record and the label in a dry run, and the label repair after a partial write (#1136 review)", async () => {
+    const w = world();
+    w.add(1);
+    const dry = await run(w, [...base, "--question", "Which engine?", "--dry-run", "--json"]);
+    expect(JSON.parse(dry.text).changes.map((c: { step: string }) => c.step)).toEqual([
+      "comment",
+      "create-label",
+      "labels",
+    ]);
+    expect(w.issues.get(1)!.comments).toHaveLength(0);
+    w.failing.add("labels");
+    await run(w, [...base, "--question", "Which engine?"]);
+    w.failing.delete("labels");
+    const repair = JSON.parse(
+      (await run(w, [...base, "--question", "Which engine?", "--dry-run", "--json"])).text,
+    );
+    expect(repair.noop).toBe(false);
+    expect(repair.changes.map((c: { step: string }) => c.step)).toEqual(["labels"]);
+  });
+
+  it("does not claim the next step on a replay, since the questions may have been answered (#1136 review)", async () => {
+    const w = world();
+    w.add(1);
+    await run(w, [...base, "--question", "Which engine?"]);
+    await w.answer(1, w.questionOf(1));
+    const replay = await run(w, [...base, "--question", "Which engine?"]);
+    expect(replay.code).toBe(0);
+    expect(replay.text).not.toContain("D-REFINE");
+    expect(replay.text).toContain("already recorded");
+    const json = JSON.parse(
+      (await run(w, [...base, "--question", "Which engine?", "--json"])).text,
+    );
+    expect(json.guidance).toMatchObject({ rule: null, nextActor: null });
+  });
 });

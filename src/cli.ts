@@ -52,7 +52,7 @@ import {
 import { briefingRoleNames, roleSectionIds } from "./briefing/roles.js";
 import { labelsFromSnapshot, normalizeLabelRequest } from "./github/labels.js";
 import { doctorStaleHours } from "./workflow/ticketdoctor.js";
-import { planRefinementRequest, requestRefinement } from "./workflow/refinement.js";
+import { previewRefinementRequest, requestRefinement } from "./workflow/refinement.js";
 import {
   refineArgumentsFor,
   refineHelp,
@@ -2107,7 +2107,7 @@ async function run(
     // Read live immediately before writing; never act on a cached snapshot.
     const result = values.dryRun
       ? await (async () => {
-          const plan = await planRefinementRequest(repository, input, query, permission);
+          const plan = await previewRefinementRequest(repository, input, query, permission);
           return { ...plan, exitCode: plan.ok ? 0 : 1 };
         })()
       : await requestRefinement(repository, input, {

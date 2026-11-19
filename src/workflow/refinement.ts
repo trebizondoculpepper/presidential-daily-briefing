@@ -738,6 +738,77 @@ async function writeThenIndex(
   };
 }
 
+/**
+ * A read-only preview of `requestRefinement`: the record step, then the index-label steps a real
+ * run would make after it. A new request makes one outstanding, so the label is added when absent;
+ * an already recorded request previews the current reconciliation (e.g. repairing a label a
+ * failed write left out). Nothing is written.
+ */
+export async function previewRefinementRequest(
+  repository: string,
+  input: RefinementRequestInput,
+  query: GraphQuery | TicketReads,
+  permission: PermissionLookup,
+): Promise<ClaimPlan> {
+  const plan = await planRefinementRequest(repository, input, query, permission);
+  if (!plan.ok) return plan;
+  if (plan.noop) {
+    const label = await planRefinementLabel(
+      repository,
+      input.number,
+      input.agent,
+      query,
+      permission,
+    );
+    if (!label.ok) return label;
+    return {
+      ...plan,
+      noop: label.noop,
+      changes: label.changes,
+      ...(label.noop
+        ? {}
+        : {
+            notes: [
+              `Request ${plan.questionOpId} is already recorded; ${refinementLabel} is repaired.`,
+            ],
+          }),
+    };
+  }
+  const present = (plan.facts.labels ?? []).includes(refinementLabel);
+  if (present) return plan;
+  const { repoLabels } = await readTicket(
+    repository,
+    input.number,
+    input.agent,
+    query,
+    "",
+    refinementLabel,
+  );
+  return {
+    ...plan,
+    changes: [
+      ...plan.changes,
+      ...(repoLabels.has(refinementLabel)
+        ? []
+        : [
+            writeStep("create-label", {
+              kind: "label-create",
+              repository,
+              name: refinementLabel,
+              color: "d4c5f9",
+            }),
+          ]),
+      writeStep("labels", {
+        kind: "labels-edit",
+        repository,
+        number: input.number,
+        add: [refinementLabel],
+        remove: [],
+      }),
+    ],
+  };
+}
+
 /** Request refinement: write the record (if not already recorded), then reconcile the label. */
 export async function requestRefinement(
   repository: string,
