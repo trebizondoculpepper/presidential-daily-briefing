@@ -6,6 +6,8 @@
 ;; [[winner loser]] tuples, so no rule ID is written into a query.
 {:check-ready [:find ?t :in $ % :where (requirements-satisfied ?t)]
  :check-blockers [:find ?t ?code ?reason :in $ % :where (check-blocker ?t ?code ?reason)]
+ :discussion-ranked [:find ?t ?key ?number ?why :in $ % :where (discussion-ranked ?t ?key ?number ?why)]
+ :discussion-unknown [:find ?t ?number :in $ % :where (discussion-unknown ?t ?number)]
  :pr-blockers [:find ?t ?code ?reason :in $ % :where (pr-blocker ?t ?code ?reason)]
  :review-head-reviewed [:find ?t :in $ % :where (review-coverage-satisfied ?t)]
  :review-head-findings [:find ?t :in $ % :where (head-findings ?t)]

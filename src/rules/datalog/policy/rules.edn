@@ -210,4 +210,14 @@
 [(pr-blocker ?t ?code ?reason) [?t "closed-label" ?l] (not [?t "state" "OPEN"]) [(str "PR-CLOSED") ?code] [(str "pull request is " ?l) ?reason]]
 [(pr-blocker ?t ?code ?reason) [?t "state" "OPEN"] (pr-specific-blocker ?t ?code ?reason)]
 [(pr-blocker ?t ?code ?reason) [?t "state" "OPEN"] [?t "merge-state" "BLOCKED"] (not (has-pr-specific-blocker ?t)) [(str "PR-BLOCKED") ?code] [(str "GitHub reports merging is blocked (branch protection); inspect the rules") ?reason]]
+;; #1093 discussion view (estimation-refinement-loop.md): a rough discussion-volume proxy over
+;; typed issue facts, never semantic controversy. Scope "open", "closed" or "all".
+[(discussion-in-scope ?t) [?t "discussion-subject" true] [1 "discussion-scope" "all"]]
+[(discussion-in-scope ?t) [?t "discussion-subject" true] [1 "discussion-scope" "open"] [?t "state" "OPEN"]]
+[(discussion-in-scope ?t) [?t "discussion-subject" true] [1 "discussion-scope" "closed"] [?t "state" "CLOSED"]]
+;; Discussion-bearing: a known count above zero. Answered or resolved discussion stays included.
+;; Keys sort ascending: more comments first, then the lower issue number (deterministic ties).
+[(discussion-ranked ?t ?key ?number ?why) (discussion-in-scope ?t) [?t "comment-count-known" true] [?t "comment-count" ?n] [(> ?n 0)] [(- 0 ?n) ?key] [?t "number" ?number] [(str ?n " comments: ranked by discussion volume, a rough proxy that does not imply disagreement.") ?why]]
+;; An unread count is unknown, never zero, and is listed separately rather than ranked.
+[(discussion-unknown ?t ?number) (discussion-in-scope ?t) [?t "comment-count-known" false] [?t "number" ?number]]
 ]

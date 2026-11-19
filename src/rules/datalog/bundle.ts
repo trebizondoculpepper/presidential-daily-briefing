@@ -13,6 +13,8 @@ import type { Schema } from "datascript";
 export const requiredQueries = [
   "check-ready",
   "check-blockers",
+  "discussion-ranked",
+  "discussion-unknown",
   "pr-blockers",
   "review-head-reviewed",
   "review-head-findings",
