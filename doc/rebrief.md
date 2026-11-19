@@ -120,8 +120,25 @@ already continued by a hook (`stop_hook_active: true`), or one with pending
 gets `{}`. A continue is
 returned as `{"decision":"block","reason":…}` and stays pending: writing it is not
 receipt, because Claude Code overrides blocks at its native continuation cap (see
-[the Claude Code report](reports/agent-platforms/claude-code-stop-hooks.md)). Owned
-hook registration by `pdb install claude` is a separate slice.
+[the Claude Code report](reports/agent-platforms/claude-code-stop-hooks.md)).
+
+`pdb install claude` registers the owned Stop hook in the scope's Claude settings
+file (project `.claude/settings.local.json`, user `settings.json`) invoking
+
+```text
+pdb rebrief claude-stop --installed [--role implementer|designer] [--entry KEY] --deadline-ms 4000
+```
+
+The installed adapter needs no `--state-dir` or `--repo` and does not require
+`--natural-stop-confirmed`. It derives the private state directory itself
+(owner-only, under the OS temporary directory) keyed by repository and session,
+resolves the repository and identity from the event `cwd`'s verified Git root and
+remote, and initializes a v2 session once with eligible-event evidence before the
+shared continuation decision runs. Missing/mismatched state, unresolved
+repository or identity, reentry, pending background work or session crons,
+cancellation, an unknown schema or an unusable directory stop normally
+(`{}`, exit 0). Only the owned `hooks.Stop` entry is created or removed by the
+installer; the Claude workspace trust dialog approves the exact definition.
 
 After stopping your adapter, remove only its native definition and private state
 directory. Preserve unrelated hooks and sessions. No global hook was installed.

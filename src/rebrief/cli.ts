@@ -697,7 +697,7 @@ async function runNativeStop(
         { ...runtime, signal: controller.signal },
       );
     }
-  } catch (error) {
+  } catch {
     response = {};
   } finally {
     if (timer) clearTimeout(timer);

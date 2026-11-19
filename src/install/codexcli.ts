@@ -50,7 +50,6 @@ export type InstallErrorCode =
   | "LOCKED"
   | "OWNED_ENTRY_EDITED"
   | "FOREIGN_ENTRY"
-  | "HOOK_NOT_AVAILABLE"
   | "WRITE_FAILED";
 
 export type InstallItemAction = "create" | "replace" | "remove" | "kept" | "absent" | "skipped";
