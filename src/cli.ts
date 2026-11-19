@@ -312,6 +312,14 @@ export interface Runtime {
   ghRun?: GhRun;
   planMigration?: typeof planMigration;
   migrationRuntime?: Parameters<typeof planMigration>[1];
+  /** Optional claim-reminder selector/renderer override for failure-after-write tests (#1030). */
+  renderClaimReminders?: (
+    result: ClaimPlan | ClaimResult,
+    role: string | null,
+  ) => Promise<{
+    reminders: import("./rules/datalog/datalog.js").ActionRuleReminders;
+    text: string;
+  }>;
   query?: Query;
   /** Read-only REST boundary; claim and release use it for comment authors' permissions (#212). */
   rest?: Rest;
@@ -2174,6 +2182,66 @@ async function run(
           )
         : null;
     const exitCode = membership && membership.exitCode !== 0 ? 2 : result.exitCode;
+    const isClaim = args[0] === "claim" && !("questions" in values) && !("outcome" in values);
+    let ruleReminders: import("./rules/datalog/datalog.js").ActionRuleReminders | undefined;
+    let ruleRemindersText = "";
+    let ruleRemindersWarning: string | undefined;
+    if (isClaim && !values.dryRun) {
+      const role = values.role ?? identity?.result?.role ?? null;
+      try {
+        if (runtime.renderClaimReminders) {
+          const rendered = await runtime.renderClaimReminders(result, role);
+          ruleReminders = rendered.reminders;
+          ruleRemindersText = rendered.text;
+        } else {
+          const rules = await import("./rules/datalog/datalog.js");
+          const outcome = !result.ok
+            ? "denied"
+            : exitCode !== 0 ||
+                ("conflict" in result && Boolean(result.conflict)) ||
+                ("unverified" in result && Boolean(result.unverified))
+              ? "partial"
+              : result.noop
+                ? "noop"
+                : "claimed";
+          const labels = result.facts.labels ?? [];
+          const hasPrerequisite = labels.some((l) =>
+            [
+              "status:needs-design",
+              "question",
+              "design:decision-needed",
+              "status:blocked",
+              "status:parked",
+            ].includes(l),
+          );
+          const waitingCount = result.ok ? (result.recheck?.waiting?.length ?? 0) : 0;
+          const activeKnown =
+            result.facts.activeClaims !== undefined ||
+            (result.ok && result.recheck?.waiting !== undefined);
+          const totalOtherClaims = (result.facts.activeClaims?.length ?? 0) + waitingCount;
+          ruleReminders = rules.selectClaimRuleReminders({
+            role,
+            outcome,
+            contextResolved: outcome === "claimed" || outcome === "denied",
+            facts: {
+              error: result.ok ? undefined : result.error,
+              hasOtherClaims: activeKnown ? totalOtherClaims > 0 : undefined,
+              otherClaimCount: activeKnown ? totalOtherClaims : undefined,
+              inventoryComplete: outcome === "claimed" && activeKnown ? true : undefined,
+              hasOpenPr: (result.facts.pullRequests?.length ?? 0) > 0,
+              hasBlockers: (result.facts.openBlockers?.length ?? 0) > 0,
+              needsDesign: labels.includes("status:needs-design"),
+              hasPrerequisite,
+              claimObserved: outcome === "claimed" || outcome === "noop" ? true : undefined,
+            },
+          });
+          ruleRemindersText = rules.formatActionRuleRemindersText(ruleReminders);
+        }
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        ruleRemindersWarning = `Could not render rule reminders: ${msg}`;
+      }
+    }
     await output(
       values.json
         ? JSON.stringify(
@@ -2181,11 +2249,16 @@ async function run(
               schemaVersion: 1,
               ...result,
               ...(membership ? { reworkMembership: membership, exitCode } : {}),
+              ...(ruleReminders ? { ruleReminders } : {}),
+              ...(ruleRemindersWarning ? { ruleRemindersWarning } : {}),
             },
             null,
             2,
           ) + "\n"
-        : claimText(result, values.dryRun) + (membership ? deliverablesText(membership) : ""),
+        : claimText(result, values.dryRun) +
+            (membership ? deliverablesText(membership) : "") +
+            ruleRemindersText +
+            (ruleRemindersWarning ? `\nWarning: ${ruleRemindersWarning}\n` : ""),
     );
     return exitCode;
   }
