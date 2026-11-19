@@ -43,6 +43,7 @@ import {
   ContinuationSession,
   contextKey,
   defaults,
+  hash as sessionHash,
   initializeV2,
   maxUserBudget,
   RebriefSession,
@@ -51,10 +52,50 @@ import {
 import type { ReadRuntime } from "../briefing/service.js";
 import type { Context, Input, Result, Transport } from "./core.js";
 import { httpMcpTransport, serviceTransport } from "./transports.js";
-import { withSessionStore } from "./state.js";
+import { ensureSession, withSessionStore } from "./state.js";
+import { mkdir } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 const legacyNotice =
   "Legacy v1 session: at most three continuation offers. Start a new session (pdb rebrief init in a new private directory) to continue without a default limit.";
+
+/** Shared service/http-mcp transport wiring for a rebrief input (used by check and installed mode). */
+function buildTransport(
+  input: Input,
+  values: { transport?: string },
+  runtime: CliRuntime,
+  gh: GhService,
+  legacyGit: GitRunner | undefined,
+): Transport {
+  if (values.transport === "http-mcp") return httpMcpTransport;
+  return (
+    runtime.transport?.(input) ??
+    serviceTransport({
+      collect: (repo, opts, injected, now) =>
+        injected ? collect(repo, opts, injected, now) : gh.snapshot.collect(repo, opts, now),
+      collectShortlist: (repo, opts, injected, now) =>
+        injected
+          ? collectShortlist(repo, opts, injected, now)
+          : gh.snapshot.collectShortlist(repo, opts, now),
+      dependencyReport,
+      gh,
+      ...(runtime.gh || runtime.read?.gh
+        ? {}
+        : {
+            rest: ghRest,
+            queryWith: runtime.read ? undefined : ghQueryWith,
+          }),
+      ...runtime.read,
+      ...(input.project
+        ? {
+            guide: { cwd: input.project, fs: runtime.fs, git: legacyGit },
+            estimation: { cwd: input.project, fs: runtime.fs, git: legacyGit },
+          }
+        : noLocalProject(input.repository)),
+    })
+  );
+}
 export const rebriefHelp = `Usage: pdb rebrief init|check|ack --json --state-dir PATH --session ID
        (--repo owner/name | --project /absolute/checkout) --platform NAME
        --role implementer|designer [--agent NAME] [--entry KEY | --harness NAME]
@@ -90,6 +131,47 @@ export interface CliRuntime {
   read?: ReadRuntime;
   state?: typeof withSessionStore;
 }
+
+/** Build the cancellation-aware legacy git runner, typed Git service and GitHub service (shared by all rebrief modes). */
+function rebriefServices(
+  runtime: CliRuntime,
+  controller: AbortController,
+): { legacyGit: GitRunner | undefined; git: GitService; gh: GhService } {
+  const signal = controller.signal;
+  const legacyGit: GitRunner | undefined =
+    typeof runtime.git === "function"
+      ? (args, cwd) => {
+          signal.throwIfAborted();
+          return (runtime.git as GitRunner)(args, cwd, signal);
+        }
+      : typeof runtime.git === "object"
+        ? async (args, cwd) => {
+            signal.throwIfAborted();
+            const svc = runtime.git as GitService;
+            if (args[0] === "rev-parse" && args[1] === "--show-toplevel")
+              return `${(await svc.workingTreeRoot({ cwd, signal })) ?? ""}\n`;
+            if (args[0] === "remote" && args[1] === "-v")
+              return (await svc.remotes({ cwd, signal }))
+                .map((r) => `${r.name}\t${r.url} (fetch)\n`)
+                .join("");
+            throw new Error(`Unsupported git args in rebrief adapter: ${args.join(" ")}`);
+          }
+        : undefined;
+  const git: GitService = bindGitSignal(
+    typeof runtime.git === "object"
+      ? runtime.git
+      : createGitService(legacyGit ? { git: legacyGit } : {}),
+    signal,
+  );
+  const gh =
+    runtime.gh ??
+    runtime.read?.gh ??
+    createGhService({
+      ...(runtime.read?.rest ? { rest: runtime.read.rest } : {}),
+      ...(runtime.read?.query && !runtime.read.queryWith ? { query: runtime.read.query } : {}),
+    });
+  return { legacyGit, git, gh };
+}
 export async function runRebrief(
   args: string[],
   output: (text: string) => Promise<void>,
@@ -119,6 +201,7 @@ export async function runRebrief(
     );
   const controller = new AbortController();
   const abort = () => controller.abort();
+  const { legacyGit, git, gh } = rebriefServices(runtime, controller);
   runtime.signal?.addEventListener("abort", abort, { once: true });
   if (runtime.signal?.aborted) abort();
   if (!runtime.signal) {
@@ -138,38 +221,6 @@ export async function runRebrief(
       controller.signal.removeEventListener("abort", cancel);
     }
   };
-  const legacyGit: GitRunner | undefined =
-    typeof runtime.git === "function"
-      ? (args, cwd) => {
-          controller.signal.throwIfAborted();
-          return (runtime.git as GitRunner)(args, cwd, controller.signal);
-        }
-      : typeof runtime.git === "object"
-        ? async (args, cwd) => {
-            controller.signal.throwIfAborted();
-            const svc = runtime.git as GitService;
-            if (args[0] === "rev-parse" && args[1] === "--show-toplevel")
-              return `${(await svc.workingTreeRoot({ cwd, signal: controller.signal })) ?? ""}\n`;
-            if (args[0] === "remote" && args[1] === "-v")
-              return (await svc.remotes({ cwd, signal: controller.signal }))
-                .map((r) => `${r.name}\t${r.url} (fetch)\n`)
-                .join("");
-            throw new Error(`Unsupported git args in rebrief adapter: ${args.join(" ")}`);
-          }
-        : undefined;
-  const git: GitService = bindGitSignal(
-    typeof runtime.git === "object"
-      ? runtime.git
-      : createGitService(legacyGit ? { git: legacyGit } : {}),
-    controller.signal,
-  );
-  const gh =
-    runtime.gh ??
-    runtime.read?.gh ??
-    createGhService({
-      ...(runtime.read?.rest ? { rest: runtime.read.rest } : {}),
-      ...(runtime.read?.query && !runtime.read.queryWith ? { query: runtime.read.query } : {}),
-    });
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     const mode = args[0];
@@ -330,35 +381,7 @@ export async function runRebrief(
           if (accepted && v1 && stored.version === 1) await stored.save(v1.state!);
           return legacy(stopped(input, accepted ? "acknowledged" : "acknowledgement-refused"));
         }
-        const transport =
-          values.transport === "http-mcp"
-            ? httpMcpTransport
-            : (runtime.transport?.(input) ??
-              serviceTransport({
-                collect: (repo, opts, injected, now) =>
-                  injected
-                    ? collect(repo, opts, injected, now)
-                    : gh.snapshot.collect(repo, opts, now),
-                collectShortlist: (repo, opts, injected, now) =>
-                  injected
-                    ? collectShortlist(repo, opts, injected, now)
-                    : gh.snapshot.collectShortlist(repo, opts, now),
-                dependencyReport,
-                gh,
-                ...(runtime.gh || runtime.read?.gh
-                  ? {}
-                  : {
-                      rest: ghRest,
-                      queryWith: runtime.read ? undefined : ghQueryWith,
-                    }),
-                ...runtime.read,
-                ...(input.project
-                  ? {
-                      guide: { cwd: input.project, fs: runtime.fs, git: legacyGit },
-                      estimation: { cwd: input.project, fs: runtime.fs, git: legacyGit },
-                    }
-                  : noLocalProject(input.repository)),
-              }));
+        const transport = buildTransport(input, values, runtime, gh, legacyGit);
         const decision = v1
           ? await v1.evaluate(input, { transport }, controller.signal)
           : await v2!.evaluate(input, { transport }, controller.signal);
@@ -387,19 +410,28 @@ export async function runRebrief(
   }
 }
 
-const codexHelp = `Usage: pdb rebrief codex-stop --state-dir PATH --repo owner/name
+const codexHelp = `Usage: pdb rebrief codex-stop [--installed | --state-dir PATH --repo owner/name]
        --role implementer|designer [--agent NAME] [--project PATH]
-       [--entry KEY | --harness NAME] --natural-stop-confirmed
+       [--entry KEY | --harness NAME] [--natural-stop-confirmed]
        [--deadline-ms 1..10000] [--cap N] [--transport service|http-mcp]
 Experimental native Codex adapter: one JSON Stop event on stdin, one native JSON
-response on stdout. Requires explicit rebrief init for the actual session, same
-selection and --platform codex, in a private temporary state directory.
+response on stdout. Trial mode requires explicit rebrief init for the actual
+session, same selection and --platform codex, in a private temporary state
+directory, and --natural-stop-confirmed. Installed mode (pdb install codex) omits
+--state-dir/--repo/--natural-stop-confirmed: the repository is resolved from the
+event cwd's verified Git root and remote, the identity through resolveReadIdentity,
+and the private state directory is derived (owner-only, under the OS temporary
+directory) keyed by repository and session, initializing once on the first
+eligible Stop with verified native context. Codex Stop carries no cause field, so
+installed mode treats the event as unknown provenance and stops normally until a
+release-specific native provenance mechanism is verified; it never fabricates a
+natural stop.
 Without controlled natural-stop confirmation, missing/mismatched state, reentry,
 invalid input, cancellation or failure: {} and exit 0. No transcript access,
-implicit initialization, retries, update check or delivery acknowledgement.
-HTTP MCP lacks fresh-read capability and permits normal stop. Native timeout must
-exceed the package deadline. Exact hook definition requires normal native trust.
-No hook is installed. See doc/rebrief.md for setup/removal and trial limits.
+implicit repository inference beyond the verified event cwd, retries, update check
+or delivery acknowledgement. HTTP MCP lacks fresh-read capability and permits
+normal stop. Native timeout must exceed the package deadline. Exact hook definition
+requires normal native trust. See doc/rebrief.md for setup/removal and trial limits.
 `;
 
 const claudeHelp = `Usage: pdb rebrief claude-stop --state-dir PATH --repo owner/name
@@ -427,13 +459,23 @@ interface NativeStopProfile {
   eventId: (event: Record<string, unknown>) => unknown;
   /** Platform facts that rule a Stop out before any read (true when none apply). */
   eligible: (event: Record<string, unknown>) => boolean;
+  /**
+   * Whether a qualifying Stop natively attests natural completion. Claude Code fires Stop only on
+   * a natural turn end (StopFailure is separate), so it may continue. Codex Stop carries no cause
+   * field, so a qualifying Stop's provenance is unknown and it must stop normally (owner decision:
+   * "unknown native stop cause is not natural completion"; codex-natural-stop-semantics.md).
+   */
+  naturalStop: boolean;
 }
 const codexStopProfile: NativeStopProfile = {
   platform: "codex",
   help: codexHelp,
   eventId: (event) => event.turn_id,
   eligible: () => true,
+  naturalStop: false,
 };
+/** Installed-mode adapter deadline default (codex-installer.md "Hook definition"). */
+const codexInstalledDeadlineMs = 4000;
 const claudeStopProfile: NativeStopProfile = {
   platform: "claude-code",
   help: claudeHelp,
@@ -446,6 +488,8 @@ const claudeStopProfile: NativeStopProfile = {
     [event.background_tasks, event.session_crons].every(
       (work) => work === undefined || (Array.isArray(work) && work.length === 0),
     ),
+  // Claude Code documents that Stop fires only when the main agent finishes a turn on its own.
+  naturalStop: true,
 };
 
 /** Native framing over the existing CLI/core; wrappers contain no JSON or policy logic. */
@@ -479,6 +523,7 @@ async function runNativeStop(
     const { values } = parseArgs({
       args,
       options: {
+        installed: { type: "boolean" },
         "state-dir": { type: "string" },
         repo: { type: "string" },
         project: { type: "string" },
@@ -492,13 +537,20 @@ async function runNativeStop(
         transport: { type: "string" },
       },
     });
-    const deadline = Number(values["deadline-ms"] ?? defaults.deadlineMs);
+    const installed = values.installed === true;
+    // Installed-mode binding (#770) is Codex-specific; Claude installed registration is a
+    // separate slice and must not silently reuse the Codex cwd-derived binding.
+    if (installed && profile.platform !== "codex") throw new Error("unsupported installed mode");
+    const deadline = Number(
+      values["deadline-ms"] ?? (installed ? codexInstalledDeadlineMs : defaults.deadlineMs),
+    );
     if (!Number.isInteger(deadline) || deadline < 1 || deadline > defaults.deadlineMs)
       throw new Error("invalid deadline");
-    if (!values["natural-stop-confirmed"] || runtime.signal?.aborted)
+    if (!installed && (!values["natural-stop-confirmed"] || runtime.signal?.aborted))
       throw new Error("not natural");
-    // Repository selection must be explicit even when a local project supplies identity.
-    if (!values.repo) throw new Error("missing repository");
+    // Trial mode requires an explicit repository and a pre-initialized state directory. Installed
+    // mode resolves the repository from the event cwd and derives its own state directory.
+    if (!installed && !values.repo) throw new Error("missing repository");
     timer = setTimeout(abort, deadline);
     let raw = "";
     let bytes = 0;
@@ -524,30 +576,122 @@ async function runNativeStop(
       event.stop_hook_active !== false
     )
       throw new Error("ineligible event");
-    const check = [
-      "check",
-      "--json",
-      "--enabled",
-      "--reason",
-      "natural",
-      "--platform",
-      profile.platform,
-      "--session",
-      event.session_id,
-      "--event",
-      String(profile.eventId(event as Record<string, unknown>)),
-    ];
-    for (const [key, value] of Object.entries(values))
-      if (typeof value === "string") check.push(`--${key}`, value);
-    await runRebrief(
-      check,
-      async (text) => {
-        const result = JSON.parse(text) as Result;
-        response = codexResponse(result);
-      },
-      { ...runtime, signal: controller.signal },
-    );
-  } catch {
+    if (installed) {
+      // Installed mode resolves the repository from the event cwd's verified Git root and remote,
+      // derives its own private state directory keyed by repository and session, and initializes
+      // once with eligible-event evidence (codex-installer.md "Hook definition"). Any resolution,
+      // identity or state failure is a normal stop: {} and exit 0.
+      const eventRecord = event as Record<string, unknown>;
+      if (controller.signal.aborted || runtime.signal?.aborted) throw new Error("aborted");
+      const cwd = typeof eventRecord["cwd"] === "string" ? eventRecord["cwd"] : null;
+      if (!cwd || !isAbsolute(cwd)) throw new Error("missing repository");
+      const { git, gh, legacyGit } = rebriefServices(runtime, controller);
+      const repository =
+        (await runtime.currentRepository?.(cwd, controller.signal)) ??
+        (await gh.repos.fromCheckout(cwd, controller.signal).catch(() => ""));
+      if (!repository || !/^[\w.-]+\/[\w.-]+$/.test(repository))
+        throw new Error("missing repository");
+      const target = await resolveIdentityTarget(cwd, repository, git).catch(() => null);
+      if (!target || !target.root) throw new Error("missing repository");
+      if (values.role !== undefined && !["implementer", "designer"].includes(values.role))
+        throw new Error("invalid role");
+      const requestedRole = values.role as "implementer" | "designer" | undefined;
+      const effectiveIdentity = runtime.prepareIdentity
+        ? await runtime.prepareIdentity({
+            project: target.root,
+            repository,
+            agent: values.agent,
+            entry: values.entry,
+            harness: values.harness,
+            role: requestedRole,
+            requireProject: true,
+            intent: "readonly",
+          })
+        : undefined;
+      const identity = effectiveIdentity
+        ? effectiveReadIdentity(effectiveIdentity, "tool")
+        : await resolveReadIdentity({
+            toolAgent: values.agent,
+            project: target.root,
+            repository,
+            entry: values.entry,
+            harness: values.harness,
+            env: runtime.env ?? process.env,
+            fs: runtime.fs,
+            git,
+          });
+      if (!identity.agent) throw new Error("missing identity");
+      // An explicit --role wins; otherwise the stored identity's triage role decides the view
+      // rather than a hardcoded implementer default (reviewed #1124 finding).
+      const resolvedRole: "implementer" | "designer" =
+        (values.role as "implementer" | "designer") ??
+        (identity.triageRole === "designer" ? "designer" : "implementer");
+      const context: Context = {
+        repository,
+        project: target.root,
+        agent: identity.agent,
+        role: resolvedRole,
+        platform: profile.platform,
+        session: String(eventRecord["session_id"]),
+      };
+      const stateDir = join(
+        tmpdir(),
+        `pdb-rebrief-${sessionHash(`${repository}|${context.session}`)}`,
+      );
+      await mkdir(stateDir, { recursive: true, mode: 0o700 });
+      const cap = values.cap === undefined ? undefined : Number(values.cap);
+      if (cap !== undefined && (!Number.isInteger(cap) || cap < 1 || cap > maxUserBudget))
+        throw new Error("invalid cap");
+      const ensured = await ensureSession(
+        stateDir,
+        context,
+        { kind: "eligible-event", verified: true },
+        (store) =>
+          new ContinuationSession(store).evaluate(
+            {
+              ...context,
+              eventId: String(profile.eventId(eventRecord)),
+              reason: profile.naturalStop ? "natural" : "unknown",
+              enabled: true,
+              deadlineMs: deadline,
+              ...(cap !== undefined ? { cap } : {}),
+            },
+            { transport: buildTransport({ ...context } as Input, values, runtime, gh, legacyGit) },
+            controller.signal,
+          ),
+        cap ?? null,
+        runtime.state ?? withSessionStore,
+      );
+      if (ensured.state === "created" || ensured.state === "reused") {
+        response = codexResponse(ensured.result);
+      }
+      // legacy/unavailable are normal stops ({}).
+    } else {
+      const check = [
+        "check",
+        "--json",
+        "--enabled",
+        "--reason",
+        "natural",
+        "--platform",
+        profile.platform,
+        "--session",
+        event.session_id,
+        "--event",
+        String(profile.eventId(event as Record<string, unknown>)),
+      ];
+      for (const [key, value] of Object.entries(values))
+        if (typeof value === "string") check.push(`--${key}`, value);
+      await runRebrief(
+        check,
+        async (text) => {
+          const result = JSON.parse(text) as Result;
+          response = codexResponse(result);
+        },
+        { ...runtime, signal: controller.signal },
+      );
+    }
+  } catch (error) {
     response = {};
   } finally {
     if (timer) clearTimeout(timer);

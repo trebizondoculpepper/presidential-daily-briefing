@@ -226,8 +226,9 @@ export async function ensureSession<T>(
   evidence: SessionStartEvidence | null,
   work: (store: SessionStore) => Promise<T>,
   budget: number | null = null,
+  open: typeof withSessionStore = withSessionStore,
 ): Promise<EnsuredSession<T>> {
-  return withSessionStore(directory, async (stored, create): Promise<EnsuredSession<T>> => {
+  return open(directory, async (stored, create): Promise<EnsuredSession<T>> => {
     if (stored.version === 1) return { state: "legacy" };
     if (stored.version === 2) {
       const meta = await stored.store.meta();

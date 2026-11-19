@@ -1,19 +1,20 @@
 import { execFile } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
+import { Readable } from "node:stream";
 import type { GitRunner } from "../config/config.js";
 import { describe, expect, it } from "vite-plus/test";
 import { chmod, lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { main } from "../cli.js";
-import { runRebrief } from "./cli.js";
+import { runRebrief, type CliRuntime } from "./cli.js";
 import { initialize, initializeV2, memoryStore, RebriefSession } from "./core.js";
 import type { SessionStore } from "./core.js";
 import type { Context, Transport } from "./core.js";
 const noCreate = async (): Promise<SessionStore> => {
   throw new Error("unexpected create");
 };
-import { withPrivateState } from "./state.js";
+import { withPrivateState, withSessionStore } from "./state.js";
 import { read as fixtureRead } from "./fixtures.js";
 import { serviceTransport } from "./transports.js";
 import { snapshot, issue, pr, repo, clock } from "../testing/snapshots.js";
@@ -775,5 +776,106 @@ describe("approved continuation through the CLI (#657 slice 2)", () => {
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("codex-stop --installed binding (#770)", () => {
+  const eventInput = (event: Record<string, unknown>) =>
+    Readable.from([`${JSON.stringify(event)}\n`]);
+  const gitRunner: GitRunner = async (args) => {
+    if (args[0] === "rev-parse" && args[1] === "--show-toplevel") return "/work/project\n";
+    if (args[0] === "remote" && args[1] === "-v")
+      return "origin\thttps://github.com/o/r.git (fetch)\norigin\thttps://github.com/o/r.git (push)\n";
+    throw new Error(`unexpected git ${args.join(" ")}`);
+  };
+  const ready = (): Transport => {
+    let n = 0;
+    return {
+      freshRead: true,
+      read: async () => {
+        const r = fixtureRead();
+        const report = r.report as {
+          freshness: { startedAt: string; fetchedAt: string };
+          decisionEngine: { rulesHash: string };
+          repository: string;
+          role: { name: string };
+        };
+        const at = new Date().toISOString();
+        report.freshness.startedAt = at;
+        report.freshness.fetchedAt = at;
+        report.decisionEngine.rulesHash = `rules${n++}`;
+        report.repository = "o/r";
+        report.role.name = "implementer";
+        return {
+          ...r,
+          selection: { repository: "o/r", agent: "tester", role: "implementer", platform: "codex" },
+        };
+      },
+    };
+  };
+
+  it("resolves the repository from the event cwd, initializes once on an eligible Stop, and returns the native offer", async () => {
+    let text = "";
+    const accept = (_path: string, work: Parameters<typeof withSessionStore>[1]) =>
+      work({ version: "none" }, async (meta) => memoryStore(meta));
+    const runtime: CliRuntime = {
+      input: eventInput({
+        hook_event_name: "Stop",
+        session_id: context.session,
+        turn_id: "turn-1",
+        stop_hook_active: false,
+        cwd: "/work/project",
+      }),
+      git: gitRunner,
+      env: {},
+      currentRepository: async () => "o/r",
+      transport: () => ready(),
+      state: accept as typeof withSessionStore,
+      prepareIdentity: (async () =>
+        ({
+          schemaVersion: 1,
+          state: "resolved",
+          agent: "tester",
+          entry: null,
+          source: "explicit-agent",
+          store: null,
+          bindingProvider: null,
+          triageRole: "implementer",
+          role: "implementer",
+          roleSource: "explicit",
+          human: null,
+          diagnostic: null,
+          setup: { state: "not-needed", changed: null, persisted: null, notices: [] },
+        }) as unknown) as NonNullable<CliRuntime["prepareIdentity"]>,
+    };
+    const code = await runRebrief(
+      ["codex-stop", "--installed", "--role", "implementer"],
+      async (s) => void (text = s),
+      runtime,
+    );
+    expect(code, text).toBe(0);
+    // Codex Stop carries no cause field: unknown provenance means a normal stop, never a
+    // fabricated natural continuation (owner decision codex-natural-stop-semantics.md).
+    expect(JSON.parse(text)).toEqual({});
+  });
+
+  it("fails closed with {} and exit 0 when the event cwd is not a resolvable repository", async () => {
+    const git: GitRunner = async () => {
+      throw new Error("not a repo");
+    };
+    let text = "";
+    const code = await runRebrief(["codex-stop", "--installed"], async (s) => void (text = s), {
+      input: eventInput({
+        hook_event_name: "Stop",
+        session_id: context.session,
+        turn_id: "turn-2",
+        stop_hook_active: false,
+        cwd: "/nowhere/project",
+      }),
+      git,
+      env: {},
+    });
+    expect(code).toBe(0);
+    expect(JSON.parse(text)).toEqual({});
   });
 });

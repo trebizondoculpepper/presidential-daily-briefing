@@ -83,6 +83,9 @@ export interface CodexMcpResult {
 /** The Codex `config.toml` path within a project or user-wide scope. */
 const codexConfigPath = (scope: InstallScope): string =>
   scope.kind === "project" ? `${scope.root}/.codex/config.toml` : `${scope.homeDir}/config.toml`;
+/** The Codex `hooks.json` path within a project or user-wide scope. */
+const codexHooksPath = (scope: InstallScope): string =>
+  scope.kind === "project" ? `${scope.root}/.codex/hooks.json` : `${scope.homeDir}/hooks.json`;
 /** The root files are allowed to be written under (project root or user home). */
 const codexConfigRoot = (scope: InstallScope): string =>
   scope.kind === "project" ? scope.root : scope.homeDir;
@@ -97,7 +100,7 @@ export interface InstallEditResultLike {
 }
 
 /** A refusal with a fixed (redacted) message; never echoes paths or raw errors. */
-function refusal(
+export function refusal(
   code: InstallEditErrorCode | "UNSUPPORTED_SCOPE",
   message: string,
 ): InstallEditResult {
@@ -120,7 +123,7 @@ const LOCK_TIMING: LockTiming = { waitMs: 5_000, pollMs: 50 };
  * saved (or vice versa). The lock file lives beside the private manifest, never on the native
  * config.
  */
-async function withScopeLock<T>(
+export async function withScopeLock<T>(
   manifestPath: string,
   runtime: ManifestRuntime | undefined,
   work: () => Promise<T>,
@@ -153,19 +156,19 @@ async function withScopeLock<T>(
   }
 }
 
-/** Propagate an ownership-manifest persistence failure as an explicit partial outcome. */
-function withManifestWrite(
+/** Propagate an ownership-manifest persistence failure as an explicit partial outcome (#770 reusable). */
+export function withManifestWrite(
   outcome: Awaited<ReturnType<typeof writeInstallManifestRecord>>,
-  mcp: InstallEditResult,
+  edit: InstallEditResult,
+  subject: string,
 ): InstallEditResult {
-  if (outcome.status === "written" || outcome.status === "committed-with-error") return mcp;
+  if (outcome.status === "written" || outcome.status === "committed-with-error") return edit;
   return {
-    action: mcp.action,
+    action: edit.action,
     outcome: "refused",
-    ownership: mcp.ownership,
+    ownership: edit.ownership,
     code: "WRITE_FAILED",
-    message:
-      "The Codex MCP configuration was updated, but the private ownership record could not be saved; rerun to complete ownership tracking.",
+    message: `${subject} was updated, but the private ownership record could not be saved; rerun to complete ownership tracking.`,
     diff: null,
     manifestRecord: null,
   };
@@ -174,6 +177,8 @@ function withManifestWrite(
 /** Raw configuration and ownership-manifest snapshot bound between preview and interactive apply (#768). */
 export interface CodexInstallSnapshot {
   configRaw: string | null;
+  /** Raw Codex `hooks.json`, so a query–apply boundary also detects a concurrent hook change. */
+  hooksRaw: string | null;
   manifestRaw: string | null;
 }
 
@@ -189,7 +194,7 @@ const readOptionalFile = async (
   }
 };
 
-/** Capture raw Codex `config.toml` and manifest contents for preview-to-apply conflict checks (#768). */
+/** Capture raw Codex `config.toml`, `hooks.json` and manifest contents for preview-to-apply conflict checks (#768). */
 export async function readCodexInstallSnapshot(
   scope: InstallScope,
   manifestPath: string,
@@ -197,16 +202,19 @@ export async function readCodexInstallSnapshot(
 ): Promise<CodexInstallSnapshot> {
   return {
     configRaw: await readOptionalFile(codexConfigPath(scope), fs),
+    hooksRaw: await readOptionalFile(codexHooksPath(scope), fs),
     manifestRaw: await readOptionalFile(manifestPath, fs),
   };
 }
 
-/** Whether the raw Codex `config.toml` or ownership manifest changed since a preview snapshot (#768). */
+/** Whether the raw Codex `config.toml`, `hooks.json` or ownership manifest changed since a preview snapshot (#768). */
 export const codexInstallSnapshotChanged = (
   expected: CodexInstallSnapshot,
   current: CodexInstallSnapshot,
 ): boolean =>
-  expected.configRaw !== current.configRaw || expected.manifestRaw !== current.manifestRaw;
+  expected.configRaw !== current.configRaw ||
+  expected.hooksRaw !== current.hooksRaw ||
+  expected.manifestRaw !== current.manifestRaw;
 
 /** Install (or keep/replace) the PDB MCP entry in the scope's Codex `config.toml`. */
 export async function installCodexMcp(params: {
@@ -299,7 +307,7 @@ export async function installCodexMcp(params: {
         mcp.manifestRecord,
         runtime,
       );
-      return { mcp: withManifestWrite(wrote, mcp) };
+      return { mcp: withManifestWrite(wrote, mcp, "The Codex MCP configuration") };
     }
     return { mcp };
   });
@@ -353,7 +361,7 @@ export async function uninstallCodexMcp(params: {
     // persistence failure is an explicit partial outcome.
     if (!dryRun && (mcp.outcome === "applied" || mcp.outcome === "committed-with-error")) {
       const wrote = await writeInstallManifestRecord(manifestPath, "codex", file, null, runtime);
-      return { mcp: withManifestWrite(wrote, mcp) };
+      return { mcp: withManifestWrite(wrote, mcp, "The Codex MCP configuration") };
     }
     return { mcp };
   });

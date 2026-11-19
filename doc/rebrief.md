@@ -79,6 +79,29 @@ because fresh-read/platform support remains unavailable. Emitting feedback does
 not acknowledge receipt. Unknown Stop causes must not be called natural;
 `--natural-stop-confirmed` is restricted to controlled trial provenance.
 
+### Installed Stop hook (#770)
+
+`pdb install codex` registers the owned Stop hook (`hooks.json`) invoking
+
+```text
+pdb rebrief codex-stop --installed [--role implementer|designer] [--entry KEY] --deadline-ms 4000
+```
+
+The installed adapter needs no `--state-dir`, `--repo` or
+`--natural-stop-confirmed`. It derives the private state directory itself
+(owner-only, under the OS temporary directory) keyed by repository and session,
+resolves the repository and identity from the event `cwd`'s verified Git root and
+remote, and initializes a v2 session once with eligible-event evidence. Codex Stop
+carries no cause field, so installed mode treats a qualifying Stop as unknown
+provenance and stops normally (`{}`, exit 0); only a release-specific native
+provenance mechanism may enable automatic continuation later (owner decision,
+codex-natural-stop-semantics.md). Missing/mismatched state, unresolved
+repository or identity, reentry, cancellation, an unknown schema or an unusable
+directory stop normally (`{}`, exit 0). A legacy v1 state directory keeps its own
+documented three-offer restriction and is never upgraded implicitly. Only the
+owned hook entry is created or removed by the installer; native review/trust of
+the exact definition happens through the Codex `/hooks` controls.
+
 The successful macOS native nonce trial used experimental bundled scaffolding,
 not this packaged entry. See [the native report](reports/agent-platforms/codex-stop-hook-prototype.md)
 for observed and untested boundaries. Its original two-completion allowance was

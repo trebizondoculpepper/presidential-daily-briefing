@@ -201,7 +201,7 @@ describe("install codex scope resolution (#768 slice 2a)", () => {
 });
 
 describe("runCodexInstallSurface (#768 slice 2a)", () => {
-  it("returns a versioned install-result with planned MCP, identity decision and withheld hook", async () => {
+  it("returns a versioned install-result with planned MCP, identity decision and identity-gated hook", async () => {
     const git: GitRunner = async (args, _cwd) => {
       if (args[0] === "rev-parse" && args[1] === "--show-toplevel") return SYNTHETIC_ROOT + "\n";
       if (args[0] === "remote") return "origin\thttps://github.com/example/project.git (fetch)\n";
@@ -242,7 +242,12 @@ describe("runCodexInstallSurface (#768 slice 2a)", () => {
       code: "IDENTITY_REQUIRED",
     });
     expect(result.items[1].file).toBe(".codex/config.toml");
-    expect(result.items[2]).toMatchObject({ outcome: "not-attempted", code: "HOOK_NOT_AVAILABLE" });
+    // The Stop hook is withheld when the identity step refused (identity-first order, and the
+    // installed Stop hook requires the resolved identity/role for its command).
+    expect(result.items[2]).toMatchObject({
+      outcome: "not-attempted",
+      code: "IDENTITY_REQUIRED",
+    });
     expect(result.status).toEqual({
       configured: false,
       trusted: "unknown",

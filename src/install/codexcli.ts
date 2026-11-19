@@ -26,6 +26,7 @@ import {
   uninstallCodexMcp,
   type CodexInstallSnapshot,
 } from "./codexmcp.js";
+import { installCodexStopHook, uninstallCodexStopHook } from "./codexhook.js";
 
 /** A registered installer client; only Codex is implemented in this slice. */
 export type InstallClient = "codex";
@@ -664,6 +665,48 @@ async function evaluateCodexInstallPlan(
             dryRun,
             expectedSnapshot,
           });
+  const hook = conflicted
+    ? {
+        hook: {
+          action: "kept" as const,
+          outcome: "refused" as const,
+          ownership: "absent" as const,
+          code: "CONFLICT" as const,
+          message:
+            "Codex configuration or ownership manifest changed since the preview; re-run to inspect the updated plan.",
+          diff: null,
+          manifestRecord: null,
+        },
+      }
+    : identityBlocked && internal.kind === "project" && args.operation === "install"
+      ? {
+          hook: {
+            action: "kept" as const,
+            outcome: "not-attempted" as const,
+            ownership: "absent" as const,
+            code: "IDENTITY_REQUIRED" as const,
+            message:
+              "Stop-hook registration withheld: the Codex identity could not be resolved; fix identity and re-run.",
+            diff: null,
+            manifestRecord: null,
+          },
+        }
+      : args.operation === "uninstall"
+        ? await uninstallCodexStopHook({
+            scope,
+            manifestPath: manifest,
+            dryRun,
+          })
+        : await installCodexStopHook({
+            scope,
+            options: {
+              role: internal.kind === "project" ? args.role : undefined,
+              entry: internal.kind === "project" ? (identityEntry ?? args.entry) : undefined,
+            },
+            manifestPath: manifest,
+            pdbVersion: "0.1.0",
+            dryRun,
+          });
   const mcpFailed =
     mcp.mcp.outcome === "refused" ||
     mcp.mcp.outcome === "failed" ||
@@ -692,12 +735,17 @@ async function evaluateCodexInstallPlan(
     {
       kind: "hook",
       file: redacted.targets.hooks,
-      action: "skipped",
-      outcome: "not-attempted",
-      code: "HOOK_NOT_AVAILABLE",
-      message: "Installed hook adapter is a separate slice; withheld until it can bind a session.",
-      diff: null,
-      retry: null,
+      action: hook.hook.action,
+      outcome: hook.hook.outcome,
+      code: hook.hook.code,
+      message: hook.hook.message,
+      diff: redactMcpDiff(hook.hook.diff, internal, redacted),
+      retry:
+        hook.hook.outcome === "refused" ||
+        hook.hook.outcome === "failed" ||
+        hook.hook.outcome === "committed-with-error"
+          ? retryCmd
+          : null,
     },
   ];
   const result: InstallResult = {
@@ -731,8 +779,8 @@ async function evaluateCodexInstallPlan(
       args.operation === "install" && args.transport === "http"
         ? "HTTP MCP transport is unverified for Codex (#397)."
         : "",
-      args.operation === "install"
-        ? "Hook setup is withheld until the installed adapter slice; run /hooks in Codex once hook support is installed."
+      hook.hook.outcome === "applied" || hook.hook.outcome === "kept"
+        ? "Open Codex in the project, run /hooks, then review and trust the PDB Stop hook (native exact-definition trust; a changed definition needs normal review again)."
         : "",
     ].filter(Boolean),
   };
