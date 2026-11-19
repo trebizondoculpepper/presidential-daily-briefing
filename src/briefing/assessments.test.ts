@@ -498,3 +498,29 @@ describe("legacy complexity and estimation stay byte-compatible (#247)", () => {
     expect(report.schemaVersion).toBe(2);
   });
 });
+
+describe("invalid metric inspections offer the Ticket Doctor repair (#1067)", () => {
+  it("--replace-invalid for one invalid metric; a plain inspection when both are invalid", async () => {
+    const snapshot = await collector(() => [
+      issue(10, ["status:ready", "impact:L", "complexity:huge"]),
+      issue(11, ["status:ready", "impact:high", "complexity:huge"]),
+    ])(repo);
+    const presented = await presentBriefing(
+      snapshot,
+      { limit: 20, maxChars: 100000, agent: "me", role: "implementer" },
+      estimation(),
+      new Date(time),
+      undefined,
+      markerTrust(permissionLookup(repo, permissions())),
+    );
+    const items = (presented.report as CompactBriefing).rankedActions!.items;
+    const row = (n: number) =>
+      items.find((i) => i.kind === "inspect-assessment" && i.target.endsWith(`/${n}`));
+    expect(row(10)?.nextCommand).toBe(
+      `pdb estimate 10 --metric complexity --size SIZE --rationale TEXT --replace-invalid --repo ${repo}`,
+    );
+    // One command cannot repair both metrics, so the combined row reads the ticket.
+    expect(row(11)?.why?.ruleIds).toEqual(["D-BAD-ASSESSMENTS"]);
+    expect(row(11)?.nextCommand).toBe(`pdb --repo ${repo} --issue 11 --json`);
+  });
+});

@@ -283,13 +283,14 @@ describe("designer impact queue through collect() (#246)", () => {
     expect(items.find((i) => i.target === url(2))).toMatchObject({
       kind: "inspect-assessment",
       impact: { state: "invalid", size: null },
-      // #1050: the native D-BAD-IMPACT row inspects the ticket (#1067 tracks restoring the
-      // Ticket Doctor --replace-invalid fix as its next command).
-      nextCommand: `pdb --repo ${repo} --issue 2 --json`,
+      // #1067: invalid labels offer the one-step Ticket Doctor repair.
+      nextCommand: `pdb estimate 2 --metric impact --size SIZE --rationale TEXT --replace-invalid --repo ${repo}`,
       why: { ruleIds: ["D-BAD-IMPACT"] },
     });
     const conflict = items.find((i) => i.target === url(3));
     expect(conflict?.kind).toBe("inspect-assessment");
+    // Conflicting evidence needs a choice between sizes: a plain inspection, never --replace-invalid.
+    expect(conflict?.nextCommand).toBe(`pdb --repo ${repo} --issue 3 --json`);
     expect(conflict?.reasonCodes).not.toContain("cross-role-boost");
   });
 
