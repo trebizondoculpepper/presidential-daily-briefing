@@ -39,3 +39,20 @@ export { starterProjectRules } from "./project/starter.js";
 export { projectionSubjects, projectionLimits, protectedBands } from "./project/projection.js";
 export { workerLimits } from "./project/worker.js";
 export { projectionVocabulary } from "./project/grammar.js";
+export {
+  selectClaimRuleReminders,
+  claimObligationsHash,
+  CLAIM_OBLIGATIONS,
+  RULE_REMINDERS_SCHEMA_VERSION,
+  RULE_REMINDERS_MAX_ITEMS,
+  RULE_REMINDERS_MAX_CODE_POINTS,
+  type ReminderAction,
+  type ClaimOutcome,
+  type RuleReminderCategory,
+  type RuleReminderSourceKind,
+  type ProceduralObligation,
+  type ClaimReminderFactInput,
+  type SelectClaimRemindersInput,
+  type RuleReminderItem,
+  type ActionRuleReminders,
+} from "./action-reminders.js";

@@ -337,6 +337,11 @@ describe("purpose-first rule presentation (#578)", () => {
     expect(html).toContain('data-rule-id="D-FUTURE"');
     expect(html).toContain("D-FUTURE: action addressed-response");
     expect(html).toContain("Purpose not supplied");
+
+    const oblDoc = rulesDocument(declaredRulesContext(), { rule: "O-CLAIM-NOOP-CONTINUE" });
+    const oblHtml = rulesPageHtml(oblDoc, rulesFormalText(oblDoc), page);
+    expect(oblHtml).toContain('data-rule-id="O-CLAIM-NOOP-CONTINUE"');
+    expect(oblHtml).toContain("Procedural obligations (1)");
   });
 
   it("uses metadata from the exact compiled revision and escapes it as literal text", () => {
