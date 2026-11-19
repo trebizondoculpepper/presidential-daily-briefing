@@ -705,7 +705,18 @@ async function writeThenIndex(
     if (written.exitCode !== 0) return written;
     steps.push(...(written.steps ?? []));
   }
-  const label = await planRefinementLabel(repository, number, agent, query, permission);
+  // The record is already written: a failed re-read must not discard its receipt.
+  let label: ClaimPlan;
+  try {
+    label = await planRefinementLabel(repository, number, agent, query, permission);
+  } catch (error) {
+    label = refuse(
+      "EVIDENCE_INCOMPLETE",
+      plan.facts,
+      `the ticket could not be re-read (${error instanceof Error ? error.message : String(error)})`,
+      [`pdb --repo ${repository} --issue ${number}`],
+    );
+  }
   let exitCode = 0;
   let unverified: string | null = null;
   if (!label.ok) {

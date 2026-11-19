@@ -160,6 +160,7 @@ function world(viewer = "kavya") {
     failing,
     add,
     comment,
+    run,
     query,
     permission,
     apply,
@@ -417,5 +418,26 @@ describe("resolving refinement (#1094)", () => {
     const outsider = world("outsider");
     outsider.add(1);
     expect(outcome(await outsider.planResolve(1, "bbbbbbbbbbbbbbbb"))).toBe("MARKER_UNVERIFIED");
+  });
+
+  it("keeps the record's receipt when the label re-read fails (#1135 review)", async () => {
+    const w = world();
+    w.add(1);
+    let reads = 0;
+    const flaky: GraphQuery = async (source, variables) => {
+      // Fail every ticket read after the record is written (viewer reads still succeed).
+      if (!source.startsWith("query{viewer") && w.issues.get(1)!.comments.length && ++reads > 0)
+        throw new Error("GitHub unavailable");
+      return w.query(source, variables);
+    };
+    const result = await requestRefinement(
+      repo,
+      { number: 1, agent: "kavya", designer: "nicole", why: "Unclear.", questions: ["Q?"] },
+      { run: w.run, query: flaky, permission: w.permission },
+    );
+    expect(outcome(result)).toBe("exit 2");
+    expect(stepsOf(result)).toEqual(["comment:done"]);
+    expect(result.ok && result.unverified).toMatch(/could not be re-read \(GitHub unavailable\)/);
+    expect(w.issues.get(1)!.comments).toHaveLength(1);
   });
 });
