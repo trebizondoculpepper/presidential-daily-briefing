@@ -11,6 +11,10 @@ Prioritize these questions:
 - Does composition wire shared instances while controllers remain transport adapters?
 - Does application Git/GH access stay inside the typed services and private adapters?
 - Are workflow decisions native, APIs presentation-neutral, and frontend rendering separate?
+- For a new/migrated serve page, does Svelte consume versioned domain APIs on the
+  existing serve origin, while internal Node callers reuse services without HTTP
+  loopback? Report backend HTML/domain injection, browser-side policy copies or a
+  new hidden data path; do not demand a wholesale migration of existing pages.
 - Are identity/context, freshness, completeness, guarded writes and unknown results preserved?
 
 For each finding, identify a changed line, the architectural principle or contract,
