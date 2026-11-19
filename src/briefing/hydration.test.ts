@@ -87,3 +87,20 @@ describe("bounded project-preference hydration (#652 review)", () => {
     expect(subjects).toEqual([0, 1, 2, 70].map((n) => `https://github.com/o/r/issues/${n}`));
   });
 });
+
+describe("interleaved role prefixes (#652 review)", () => {
+  it("alternates the two roles' prefixes so a shared cap cannot crowd one out", async () => {
+    const { hydrationSubjects } = await import("./service.js");
+    const { HYDRATION_POOL } = await import("../briefing/compact.js");
+    const { RANK_PARTITION } = await import("../rules/datalog/engine.js");
+    // Implementer ranks favour 0-3, designer ranks favour 4-7: disjoint prefixes.
+    const pool = Array.from({ length: 8 }, (_, i) => ({
+      [RANK_PARTITION]: `1/1/0/shared/${i}/${(i + 4) % 8}`,
+      id: String(i),
+      target: `u${i}`,
+      band: 6,
+    }));
+    const subjects = hydrationSubjects({ [HYDRATION_POOL]: pool, subjects: [] } as never, 2);
+    expect(subjects).toEqual(["u0", "u4", "u1", "u5"]);
+  });
+});

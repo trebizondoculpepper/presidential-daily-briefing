@@ -961,11 +961,15 @@ export function hydrationSubjects(report: PresentedBriefing["report"], limit: nu
   const add = (target: string) => {
     if (!subjects.includes(target)) subjects.push(target);
   };
-  for (const field of [4, 5] as const)
-    for (const item of [...pool]
-      .sort((a, b) => rank(a, field) - rank(b, field))
-      .slice(0, Math.max(0, limit)))
-      add(item.target);
+  // Interleave the two roles' prefixes: the collector hydrates selection units in order under a
+  // shared cap, so neither role's first activities can be crowded out by the other's.
+  const prefix = (field: 4 | 5) =>
+    [...pool].sort((a, b) => rank(a, field) - rank(b, field)).slice(0, Math.max(0, limit));
+  const [implementer, designer] = [prefix(4), prefix(5)];
+  for (let i = 0; i < Math.max(implementer.length, designer.length); i++) {
+    if (implementer[i]) add(implementer[i]!.target);
+    if (designer[i]) add(designer[i]!.target);
+  }
   // Project-preferred activities, bounded like a prefix: highest project priority first, then a
   // role-independent native rank, so a broad preference cannot exhaust the hydration budget.
   const priority = (item: Item) =>
