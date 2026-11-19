@@ -9,7 +9,8 @@ import { BriefingArgumentError, compactBriefing, compactText } from "./compact.j
 import { presentBriefing } from "./service.js";
 import { argumentsFor } from "../cli.js";
 import type { Snapshot } from "../github/types.js";
-import { issue, snapshot, time } from "../testing/snapshots.js";
+import { issue, repo, snapshot, time } from "../testing/snapshots.js";
+import { emptyFileSystem, fakeGit, SYNTHETIC_ROOT } from "../../scripts/benchmark-isolation.js";
 
 const compact = (data: Snapshot, options: { limit: number; role?: string; section?: string }) =>
   compactBriefing(
@@ -140,5 +141,50 @@ describe("--section (#311)", () => {
       focus: { section: string; total: number };
     };
     expect(pickup.focus).toMatchObject({ section: "pickup", total: 8 });
+  });
+
+  it("projects a section from the native ranking, never a second TypeScript ranking (#1088)", async () => {
+    // #1 is unfavorable (impact XS, complexity XL) and older; #3 is an easy win (impact L,
+    // complexity S). The native policy ranks #3 first; the TypeScript pickup order is oldest-first.
+    // #2 is restricted to another platform, so the native policy denies its pickup for this viewer.
+    const data = snapshot(
+      [
+        issue(1, ["status:ready", "impact:XS", "complexity:XL"]),
+        issue(2, ["status:ready", "platform:codex"]),
+        issue(3, ["status:ready", "impact:L", "complexity:S"]),
+      ],
+      [],
+    );
+    const present = (section?: string) =>
+      presentBriefing(
+        data,
+        {
+          limit: 10,
+          maxChars: 100000,
+          role: "implementer",
+          agent: "me",
+          platform: "claude-code",
+          ...(section ? { section } : {}),
+        },
+        { cwd: SYNTHETIC_ROOT, git: fakeGit(repo), fs: emptyFileSystem },
+        new Date(time),
+      );
+    const plain = (await present()).report as {
+      rankedActions: { items: { kind: string; target: string }[] };
+    };
+    const nativePickup = plain.rankedActions.items
+      .filter((i) => i.kind === "implement")
+      .map((i) => i.target);
+    expect(nativePickup.some((t) => t.endsWith("/2"))).toBe(false);
+    expect(nativePickup.findIndex((t) => t.endsWith("/3"))).toBeLessThan(
+      nativePickup.findIndex((t) => t.endsWith("/1")),
+    );
+    const focused = (await present("pickup")).report as {
+      focus: { items: { url: string }[]; total: number };
+    };
+    expect(focused.focus.items.map((r) => r.url)).toEqual(nativePickup);
+    expect(focused.focus.total).toBe(nativePickup.length);
+    // A section with no single native kind is refused, not re-ranked.
+    await expect(present("stale-claims")).rejects.toThrow(BriefingArgumentError);
   });
 });
