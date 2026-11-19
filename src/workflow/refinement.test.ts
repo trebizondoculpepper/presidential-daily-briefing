@@ -325,4 +325,51 @@ describe("resolving refinement (#1094)", () => {
     outsider.add(1);
     expect(outcome(await outsider.resolve(1, "bbbbbbbbbbbbbbbb"))).toBe("MARKER_UNVERIFIED");
   });
+
+  it("repairs the label when retrying a resolve whose label removal failed (#1135 review)", async () => {
+    const w = world();
+    w.add(1);
+    const plan = await w.request(1);
+    await w.apply(plan);
+    await w.answer(1, String(w.issues.get(1)!.comments[0]!.databaseId));
+    w.failing.add("labels");
+    expect((await w.apply(await w.resolve(1, opOf(plan)))).exitCode).toBe(2);
+    expect((await w.facts(1)).complete).toBe(false);
+    w.failing.delete("labels");
+    const retry = await w.resolve(1, opOf(plan));
+    expect(outcome(retry)).toBe("ok");
+    expect(retry.ok && retry.changes.map((c) => c.step)).toEqual(["labels"]);
+    await w.apply(retry);
+    expect(w.issues.get(1)!.labels).not.toContain(refinementLabel);
+    expect((await w.facts(1)).complete).toBe(true);
+    expect(outcome(await w.resolve(1, opOf(plan)))).toBe("noop");
+  });
+
+  it("refuses a resolve reason its own reader would reject (#1135 review)", async () => {
+    const w = world();
+    w.add(1);
+    const plan = await w.request(1);
+    await w.apply(plan);
+    await w.answer(1, String(w.issues.get(1)!.comments[0]!.databaseId));
+    const long = await planRefinementResolve(
+      repo,
+      { number: 1, agent: "kavya", request: opOf(plan), why: "x".repeat(1001) },
+      w.query,
+      w.permission,
+    );
+    expect(outcome(long)).toBe("INVALID_RECORD");
+    expect(w.issues.get(1)!.comments).toHaveLength(2);
+  });
+
+  it("does not restore the label when an already resolved request is replayed (#1135 review)", async () => {
+    const w = world();
+    w.add(1);
+    const plan = await w.request(1);
+    await w.apply(plan);
+    await w.answer(1, String(w.issues.get(1)!.comments[0]!.databaseId));
+    await w.apply(await w.resolve(1, opOf(plan)));
+    expect(outcome(await w.request(1))).toBe("noop");
+    expect(w.issues.get(1)!.labels).not.toContain(refinementLabel);
+    expect((await w.facts(1)).complete).toBe(true);
+  });
 });

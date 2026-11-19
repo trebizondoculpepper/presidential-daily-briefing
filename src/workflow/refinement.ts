@@ -388,18 +388,38 @@ export async function planRefinementRequest(
     );
   const already = await mineIn(history.comments);
   const hasLabel = item.labels.nodes.some((l) => l.name === refinementLabel);
+  // A replay of a recorded request repairs the label only while some request is outstanding:
+  // after a resolve, the cleared state (no label) is correct and must not be undone.
+  let outstanding = true;
+  if (already) {
+    const fold = await foldRefinement(repository, number, history.comments, permission);
+    if (fold.unknown.length)
+      return refuse(
+        "EVIDENCE_INCOMPLETE",
+        facts,
+        `Refinement or question records could not be verified (${fold.unknown.join("; ")}); nothing is changed.`,
+        [`${triage} --issue ${number}`],
+      );
+    outstanding = fold.requests.some((q) => !q.resolved);
+  }
+  const record: RefinementRequestRecord = {
+    v: 1,
+    op: "request",
+    opId,
+    repository,
+    issue: number,
+    agent,
+    questionOpId: opId,
+    dependencies,
+  };
+  // Never publish a record its own reader would reject.
+  const problem = refinementProblem(record);
+  if (problem)
+    return refuse("INVALID_RECORD", facts, `The request record would be invalid: ${problem}.`, [
+      `${triage} --issue ${number}`,
+    ]);
   const changes: PlanStep[] = [];
   if (!already) {
-    const record: RefinementRequestRecord = {
-      v: 1,
-      op: "request",
-      opId,
-      repository,
-      issue: number,
-      agent,
-      questionOpId: opId,
-      dependencies,
-    };
     changes.push(
       writeStep("comment", {
         kind: "comment",
@@ -419,7 +439,7 @@ export async function planRefinementRequest(
       }),
     );
   }
-  if (!hasLabel) {
+  if (!hasLabel && outstanding) {
     if (!repoLabels.has(refinementLabel))
       changes.push(
         writeStep("create-label", {
@@ -444,9 +464,11 @@ export async function planRefinementRequest(
     noop: !changes.length,
     facts,
     changes,
-    notes: already
-      ? [`Request ${opId} is already recorded; only the index label is repaired.`]
-      : [],
+    notes: !already
+      ? []
+      : outstanding
+        ? [`Request ${opId} is already recorded; only the index label is repaired.`]
+        : [`Request ${opId} is already recorded and resolved; nothing is changed.`],
     questionOpId: opId,
   };
 }
@@ -531,17 +553,38 @@ export async function planRefinementResolve(
       [`${triage} --issue ${number}`],
     );
   const opId = opIdOf(["refinement-resolve", repository.toLowerCase(), number, request]);
+  const hasLabel = item.labels.nodes.some((l) => l.name === refinementLabel);
+  const othersOutstanding = fold.requests.some((q) => q !== target && !q.resolved);
+  // Removed only when nothing stays outstanding: the label always means "some request is open".
+  const removeLabel = (): PlanStep[] =>
+    hasLabel && !othersOutstanding
+      ? [
+          writeStep("labels", {
+            kind: "labels-edit",
+            repository,
+            number,
+            add: [],
+            remove: [refinementLabel],
+          }),
+        ]
+      : [];
   if (target.resolved) {
     const mine = history.comments.find((c) => String(c.databaseId) === target.resolved!.comment);
     const parsed = mine ? parseRefinementComment(mine.body ?? "") : null;
-    if (parsed?.kind === "record" && parsed.record.opId === opId)
+    if (parsed?.kind === "record" && parsed.record.opId === opId) {
+      // A retry after a partial write: the resolve is recorded, so only the label is repaired.
+      const repair = removeLabel();
       return {
         ok: true,
-        noop: true,
+        noop: !repair.length,
         facts,
         reason: `Already resolved: request ${request} (comment ${target.resolved.comment}).`,
-        changes: [],
+        changes: repair,
+        ...(repair.length
+          ? { notes: [`The resolve is already recorded; only ${refinementLabel} is removed.`] }
+          : {}),
       };
+    }
     return refuse(
       "REQUEST_ALREADY_RESOLVED",
       facts,
@@ -568,7 +611,6 @@ export async function planRefinementResolve(
       `A newer refinement request is unresolved (${newerOpen.map((q) => q.opId).join(", ")}); clearing ${request} now would be stale.`,
       [`${triage} --issue ${number}`],
     );
-  const othersOutstanding = fold.requests.some((q) => q !== target && !q.resolved);
   const record: RefinementResolveRecord = {
     v: 1,
     op: "resolve",
@@ -579,6 +621,12 @@ export async function planRefinementResolve(
     request,
     reason: why,
   };
+  // Never publish a record its own reader would reject: it would be authoritative yet unusable.
+  const problem = refinementProblem(record);
+  if (problem)
+    return refuse("INVALID_RECORD", facts, `The resolve record would be invalid: ${problem}.`, [
+      `${triage} --issue ${number}`,
+    ]);
   const changes: PlanStep[] = [
     writeStep("comment", {
       kind: "comment",
@@ -594,18 +642,8 @@ export async function planRefinementResolve(
         refinementMarker(record),
       ].join("\n"),
     }),
+    ...removeLabel(),
   ];
-  const hasLabel = item.labels.nodes.some((l) => l.name === refinementLabel);
-  if (hasLabel && !othersOutstanding)
-    changes.push(
-      writeStep("labels", {
-        kind: "labels-edit",
-        repository,
-        number,
-        add: [],
-        remove: [refinementLabel],
-      }),
-    );
   return {
     ok: true,
     noop: false,
