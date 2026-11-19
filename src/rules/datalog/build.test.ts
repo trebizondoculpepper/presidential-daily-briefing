@@ -34,8 +34,9 @@ describe("rules build (#348)", () => {
   it("builds the EDN sources and the committed artifact is current", () => {
     const artifact = buildPolicy();
     expect(JSON.parse(readFileSync(artifactPath, "utf8"))).toEqual(JSON.parse(serialize(artifact)));
-    // 30 agent decisions (seven for retained claims/inventory, #413) plus eight human decisions (#457, #414).
-    expect(artifact.definitions).toHaveLength(55);
+    // 30 agent decisions (seven for retained claims/inventory, #413) plus eight human decisions (#457, #414)
+    // plus the released-unowned adoption decision (#1018).
+    expect(artifact.definitions).toHaveLength(51);
   });
 
   it("rejects a second top-level form that DataScript would silently ignore", () => {
@@ -193,6 +194,7 @@ describe("rules build (#348)", () => {
       { winner: "D-UNFAVORABLE", loser: "D-ORDINARY" },
       { winner: "D-OWN-EASY", loser: "D-OWN" },
       { winner: "D-OWN-UNFAVORABLE", loser: "D-OWN" },
+      { winner: "D-ADOPT", loser: "D-ORDINARY" },
     ]);
     for (const q of [...Object.values(bundle.queries), bundle.sortClauses])
       expect(q).not.toMatch(/"D-[A-Z-]+"/);

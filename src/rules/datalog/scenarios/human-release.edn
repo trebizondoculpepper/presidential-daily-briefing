@@ -1,0 +1,65 @@
+;; Human-directed responsibility release (#1018, doc/design/human-responsibility-release.md).
+;; The host asserts a release direction per issue URL ('deliverables N unassign --from AGENT')
+;; with trust provenance, the released agent and the preserved open PRs. Only a trusted direction
+;; is a human release. Preserved unowned PR work is adoptable existing work for an otherwise
+;; eligible agent; the removed agent never reclaims automatically. Ordinary new-implementation
+;; admission still duplicates no open PR, and a replaced owner is a conflict, never silently
+;; removed again.
+{:suite "human-release"
+ :scenarios
+ [
+ {:id "unowned-preserved-pr-work-is-adoptable-after-human-release"
+  :doc "A trusted human release cleared the agent; preserved open PR work is adoptable by an otherwise eligible agent."
+  :viewer {:role "implementer" :agent "me"}
+  :facts [{:e 1 "forward-complete" true}
+          {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1 "label" "status:ready" "labels-complete" true "native-complete" true "reverse-complete" true "blocking-complete" true "open-blockers" 0 "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "release" 200}
+          {:e 200 "release-trust" "trusted" "release-from" "previous" "release-pr" 210}
+          {:e 210 "state" "OPEN" "closes" 100}]
+  :expect {:actions [{:subject 100 :rule "D-ADOPT" :kind "implement" :band 6
+              :why "Preserved unowned PR work: a human-directed release cleared previous from this ticket; an open PR continues it. Adopt it and become responsible. Impact M (current), complexity M (current)."
+              :facts {"impact" "M" "complexity" "M" "impactState" "current" "complexityState" "current" "head" "not-a-pr" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "readiness" "status:ready" "releaseFrom" "previous"}
+              :overridden ["D-ORDINARY"] :unlocks 0 :unknown [] :other-claims []}]
+           :denials #{}}}
+
+ {:id "removed-agent-never-reclaims-automatically"
+  :doc "The released agent sees no adoption row: it is denied on both the preserved-open-PR work and ordinary pickup until a fresh direction."
+  :viewer {:role "implementer" :agent "previous"}
+  :facts [{:e 1 "forward-complete" true}
+          {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1 "label" "status:ready" "labels-complete" true "native-complete" true "reverse-complete" true "blocking-complete" true "open-blockers" 0 "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "release" 200}
+          {:e 200 "release-trust" "trusted" "release-from" "previous" "release-pr" 210}
+          {:e 210 "state" "OPEN"}]
+  :expect {:actions []
+           :denials #{[100 "D-DENY-REMOVED-AGENT-RECLAIM"]}}}
+
+ {:id "untrusted-direction-stays-an-ordinary-open-pr-denial"
+  :doc "An unverified or unknown-trust direction is not a human release: adoption is not offered and the open-PR deny stays."
+  :viewer {:role "implementer" :agent "me"}
+  :facts [{:e 1 "forward-complete" true}
+          {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1 "label" "status:ready" "labels-complete" true "native-complete" true "reverse-complete" true "blocking-complete" true "open-blockers" 0 "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "release" 200}
+          {:e 200 "release-trust" "unverified" "release-from" "previous" "release-pr" 210}
+          {:e 210 "state" "OPEN" "closes" 100}]
+  :expect {:actions []
+           :denials #{[100 "D-DENY-OPEN-PR"]}}}
+
+ {:id "already-unowned-without-pr-is-ordinary-for-elsewhere"
+  :doc "A trusted release with no preserved open PR leaves an unowned ticket: ordinary pickup applies for other agents (no adoption row, no special deny)."
+  :viewer {:role "implementer" :agent "me"}
+  :facts [{:e 1 "forward-complete" true}
+          {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1 "label" "status:ready" "labels-complete" true "native-complete" true "reverse-complete" true "blocking-complete" true "open-blockers" 0 "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "release" 200}
+          {:e 200 "release-trust" "trusted" "release-from" "previous"}]
+  :expect {:actions [{:subject 100 :rule "D-ORDINARY" :kind "implement" :band 6
+              :why "Eligible implementation: impact M (current), complexity M (current)."
+              :facts {"impact" "M" "complexity" "M" "impactState" "current" "complexityState" "current" "head" "not-a-pr" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "readiness" "status:ready"}
+              :overridden [] :unlocks 0 :unknown [] :other-claims []}]
+           :denials #{}}}
+
+ {:id "replaced-owner-is-a-conflict-never-silently-removed"
+  :doc "After a release, another agent claimed the ticket: adoption is denied (already claimed), not silently reassigned again."
+  :viewer {:role "implementer" :agent "me"}
+  :facts [{:e 1 "forward-complete" true}
+          {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1 "label" "status:ready" "labels-complete" true "native-complete" true "reverse-complete" true "blocking-complete" true "open-blockers" 0 "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "release" 200 "owner" "other"}
+          {:e 200 "release-trust" "trusted" "release-from" "previous" "release-pr" 210}
+          {:e 210 "state" "OPEN"}]
+  :expect {:actions []
+           :denials #{[100 "D-DENY-CLAIM"]}}}
+ ]}

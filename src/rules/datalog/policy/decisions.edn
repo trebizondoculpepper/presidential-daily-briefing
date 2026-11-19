@@ -229,6 +229,18 @@
    :why "Eligible implementation: impact {impact} ({impactState}), complexity {complexity} ({complexityState})."
    :codes ["ordinary"]}
 
+  {:id "D-ADOPT"
+   :purpose "Offer preserved unowned PR work after a human-directed responsibility release, so an otherwise eligible agent may continue it."
+   :kind "implement"
+   :band 6
+   :preference 1
+   :affinity "implementer"
+   :owned false
+   :when [[1 "role" ?role] [(not= ?role "human")] (adoptable ?t)]
+   :why "Preserved unowned PR work: a human-directed release cleared {releaseFrom} from this ticket; an open PR continues it. Adopt it and become responsible. Impact {impact} ({impactState}), complexity {complexity} ({complexityState})."
+   :codes ["ordinary" "adopt-unowned"]
+   :witnesses {"releaseFrom" [[?t "release" ?r] (human-release ?t ?r) [?r "release-from" ?rfrom] [(str ?rfrom) ?value]]}}
+
   {:id "D-OWN"
    :purpose "Keep an agent's active implementation claim visible as continuation work."
    :kind "continue-implementation"

@@ -2,7 +2,7 @@
 ;; Each witness is a vector of where-clauses binding ?value for subject ?t.
 {:policy-version 1
  :many
- ["required-evidence-gap" "missing-required" "label" "owner" "responsible" "platform" "attention" "blocker" "dependent" "closes" "closing" "check" "review" "receipt" "provider-review" "provider-finding" "thread" "matched" "overridden" "unlocks-dependent" "permit" "deny" "unknown" "unlock-unknown" "question-record"]
+ ["required-evidence-gap" "missing-required" "label" "owner" "responsible" "platform" "attention" "blocker" "dependent" "closes" "closing" "check" "review" "receipt" "provider-review" "provider-finding" "thread" "matched" "overridden" "unlocks-dependent" "permit" "deny" "unknown" "unlock-unknown" "question-record" "release"]
  :constants
  {"small" ["XS" "S"]
   "large" ["L" "XL" "XXL"]
@@ -115,6 +115,10 @@
    "refinement-estimated" "estimate recorded after resolution"
    "refinement-question" "blocking question"
    "refinement-state" "refinement state"
+   "release" "human-directed responsibility release direction"
+   "release-trust" "release direction trust level"
+   "release-from" "agent whose responsibility a release direction clears"
+   "release-pr" "preserved pull request of a release"
    "resolved" "resolved flag"
    "responsible" "responsible agent"
    "review-coverage" "declared review coverage"

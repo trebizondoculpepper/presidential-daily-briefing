@@ -45,11 +45,28 @@ export interface QuestionRecordFact {
   version?: 1 | 2;
   outcome?: "none" | "resolved" | "withdrawn" | "unknown";
 }
+
+/**
+ * One human-directed responsibility release direction (#1018,
+ * doc/design/human-responsibility-release.md). The host records an explicit release decision
+ * ('deliverables N unassign --from AGENT') with direction trust, the released agent and the
+ * preserved open PRs. Only a trusted direction is a human release; plain agent strings or shared
+ * logins never are. Per-issue additive; absent means no release direction was read (not "none").
+ */
+export interface ReleaseDirectionFact {
+  trust: "trusted" | "unverified" | "unknown";
+  /** The agent whose ticket/member responsibility the direction clears. */
+  from: string;
+  /** Preserved open pull requests that continue the unowned work. */
+  preservedPrs: readonly string[];
+}
 export interface DatalogOptions {
   /** `human` is the human briefing role (#457); its decisions are not agent actions. */
   role: BlendedRole | "human";
   /** Human role only: question records per issue URL. Absent for the agent roles. */
   questionRecords?: ReadonlyMap<string, readonly QuestionRecordFact[]>;
+  /** Per-issue human-directed responsibility releases (#1018). Absent: not read. */
+  releaseDirections?: ReadonlyMap<string, readonly ReleaseDirectionFact[]>;
   agent?: string;
   platform?: string;
   order?: PickupOrder;
@@ -301,6 +318,18 @@ function normalize(
       put(r, "record-to", record.to);
       if (record.version !== undefined) put(r, "record-version", record.version);
       if (record.outcome !== undefined) put(r, "record-outcome", record.outcome);
+    }
+    for (const direction of options.releaseDirections?.get(s.url) ?? []) {
+      const r = nextId++;
+      put(id, "release", r);
+      put(r, "release-trust", direction.trust);
+      put(r, "release-from", direction.from);
+      for (const preserved of direction.preservedPrs) {
+        const p = ids.get(preserved) ?? nextId++;
+        put(r, "release-pr", p);
+        // The preserved PR continues the unowned work; assert the open state the host read.
+        if (!ids.has(preserved)) put(p, "state", "OPEN");
+      }
     }
     if (pr) {
       const rollup = pr.commits?.nodes?.[0]?.commit.statusCheckRollup;

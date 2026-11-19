@@ -112,7 +112,12 @@ describe("pdb rules document (#416)", () => {
   it("selects one rule with the predicates it needs and its precedence context", () => {
     const easy = rulesDocument(context, { rule: "D-EASY" });
     expect(easy.scope.selected).toEqual({ id: "D-EASY", type: "decision" });
-    expect(easy.decisions.map((d) => d.id)).toEqual(["D-EASY", "D-ORDINARY", "D-UNFAVORABLE"]);
+    expect(easy.decisions.map((d) => d.id)).toEqual([
+      "D-EASY",
+      "D-ORDINARY",
+      "D-ADOPT",
+      "D-UNFAVORABLE",
+    ]);
     expect(easy.ordering.overrides).toEqual([{ winner: "D-EASY", loser: "D-ORDINARY" }]);
     const names = easy.predicates.map((p) => p.name);
     for (const needed of ["eligible", "easy", "implementation-deny", "large-impact", "platform-ok"])

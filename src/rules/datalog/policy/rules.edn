@@ -12,6 +12,21 @@
 [(mine-linked ?t) [1 "agent" ?a] [?t "responsible" ?a]]
 [(mine-linked ?t) [?t "closes" ?i] (mine ?i)]
 [(addressed ?t) [1 "agent" ?a] [?t "attention" ?a]]
+;; #1018 (doc/design/human-responsibility-release.md): an explicit human-directed release of a
+;; selected agent's ticket responsibility. The host asserts one release record per direction with
+;; its trust level, the released agent, optional claim-start/responsibility revisions and the
+;; preserved open PRs; only a trusted record is a human direction. Facts represent explicit
+;; direction separately from agent/client strings; an arbitrary flag or shared login is never it.
+;; Absent or unknown trust is not a trusted direction: the ordinary open-PR deny stays in force.
+[(human-release ?t ?r) [?t "release" ?r] [?r "release-trust" "trusted"]]
+[(released-unowned ?t) (human-release ?t ?r) (not (claimed ?t)) (not [?t "responsible" _])]
+[(preserved-pr ?t) (human-release ?t ?r) [?t "release" ?r] [?r "release-pr" ?p] [?p "state" "OPEN"]]
+;; An otherwise-eligible agent may continue existing unowned work with a preserved open PR after
+;; a human-directed release: ordinary new-implementation admission must not duplicate an open PR
+;; (D-DENY-OPEN-PR stays for ordinary work), but preserved unowned work is the explicit exception.
+;; Clearing ownership does not exclude the former owner (owner correction, #1130): release/removal
+;; alone creates no cooldown or fresh-direction requirement for the former owner to claim or adopt.
+[(adoptable ?t) (issue ?t) (open ?t) (released-unowned ?t) (preserved-pr ?t)]
 [(parked ?t) [?t "label" "status:parked"]]
 [(foreground ?t) (open ?t) (not (parked ?t))]
 ;; Repository-level recovery is context, never a fabricated owned issue.
@@ -46,9 +61,10 @@
 [(blocked ?t) [?t "open-blockers" ?n] [(> ?n 0)]]
 [(blocked ?t) [?t "blocker" ?i] [?i "state" "OPEN"]]
 [(implementation-permit ?t) (issue ?t) (open ?t) (available ?t)]
+[(implementation-permit ?t) (adoptable ?t)]
 [(implementation-deny ?t ?r) (issue ?t) (claimed ?t) [(str "D-DENY-CLAIM") ?r]]
 [(implementation-deny ?t ?r) (issue ?t) (prerequisite ?t) [(str "D-DENY-PREREQUISITE") ?r]]
-[(implementation-deny ?t ?r) (issue ?t) (has-closing ?t) [(str "D-DENY-OPEN-PR") ?r]]
+[(implementation-deny ?t ?r) (issue ?t) (has-closing ?t) (not (adoptable ?t)) [(str "D-DENY-OPEN-PR") ?r]]
 [(implementation-deny ?t ?r) (issue ?t) (blocked ?t) [(str "D-DENY-BLOCKER") ?r]]
 [(implementation-deny ?t ?r) (issue ?t) [?t "labels-complete" false] [(str "D-DENY-LABELS-UNKNOWN") ?r]]
 [(implementation-deny ?t ?r) (issue ?t) [?t "native-complete" false] [(str "D-DENY-NATIVE-UNKNOWN") ?r]]
