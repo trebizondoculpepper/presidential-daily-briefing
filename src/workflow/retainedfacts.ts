@@ -55,7 +55,14 @@ export function ownedClaims(snapshot: Snapshot, agent: string): RetainedFacts["o
   const inventoryWhole =
     !shortlist ||
     (shortlist.discovered.complete &&
-      shortlist.notHydrated.every((n) => n.kind !== "issue" || present.has(n.url)));
+      shortlist.notHydrated.every(
+        (n) =>
+          n.kind !== "issue" ||
+          present.has(n.url) ||
+          // #1105: an unhydrated issue whose discovered labels were read whole and carry no claim
+          // by this agent cannot hide its claim; one that carries it (or was cut short) can.
+          (n.labelsComplete === true && !(n.claimLabels ?? []).includes(label)),
+      ));
   return {
     urls: mine.map((i) => i.url),
     complete: inventoryWhole && open.every((i) => !i.labels.pageInfo.hasNextPage),

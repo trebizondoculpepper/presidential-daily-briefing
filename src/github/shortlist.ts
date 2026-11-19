@@ -57,6 +57,12 @@ export interface ShortlistRecord {
     url: string;
     kind: "issue" | "pull-request";
     reason: NotHydratedReason;
+    /**
+     * #1105: an issue's discovered `agent:*` claim labels and whether its label read was whole,
+     * so an unhydrated issue can be proven not to hold a viewer's claim. Absent on pull requests.
+     */
+    claimLabels?: string[];
+    labelsComplete?: boolean;
   }[];
   /** Ranking rounds run (each re-ranks after hydration). */
   rounds: number;
@@ -310,18 +316,41 @@ export async function collectShortlist(
   const gone = new Set<string>();
   const unhydratable = new Map<string, NotHydratedReason>();
   const hydratedOrder: string[] = [];
+  /**
+   * #1105 review: every item hydration read, including ones later withdrawn. Their discovery
+   * labels may be older than what hydration saw, so they never prove a claim absent.
+   */
+  const everHydrated = new Set<string>();
   const isHydrated = (url: string) => hydratedIssues.has(url) || hydratedPrs.has(url);
 
   /** Discovered open items whose full snapshot fields were not read, in discovery order. */
   const notHydrated = (): ShortlistRecord["notHydrated"] =>
     order
       .filter((url) => !isHydrated(url) && !gone.has(url))
-      .map((url) => ({
-        number: stubs.get(url)!.number,
-        url,
-        kind: kinds.get(url)!,
-        reason: unhydratable.get(url) ?? "not-shortlisted",
-      }));
+      .map((url) => {
+        const stub = stubs.get(url)!;
+        const kind = kinds.get(url)!;
+        const reason = unhydratable.get(url) ?? "not-shortlisted";
+        // Discovery labels prove a claim absent only for an issue hydration never attempted (left
+        // out or capped). A read that failed, was unavailable or was stopped by quota, or a read
+        // later withdrawn, keeps the claim inventory incomplete (#1105 review).
+        const neverAttempted =
+          (reason === "not-shortlisted" || reason === "hydration-cap") && !everHydrated.has(url);
+        return {
+          number: stub.number,
+          url,
+          kind,
+          reason,
+          ...(kind === "issue" && neverAttempted
+            ? {
+                claimLabels: stub.labels.nodes
+                  .map((l) => l.name)
+                  .filter((name) => name.startsWith("agent:")),
+                labelsComplete: stub.labels.pageInfo.hasNextPage === false,
+              }
+            : {}),
+        };
+      });
   const discoveredComplete = () => issueInventory.complete && prInventory.complete;
   /** The omission notice, or null when every item was hydrated. */
   const shortlistNotice = (items: ShortlistRecord["notHydrated"]): string | null => {
@@ -550,6 +579,7 @@ export async function collectShortlist(
           warnings.push(`${issue.url}: labels exceed 100; label analysis incomplete.`);
         hydratedIssues.set(url, issue);
         hydratedOrder.push(url);
+        everHydrated.add(url);
         meter.cover("issue", subject, "complete");
       }
     }
@@ -606,6 +636,7 @@ export async function collectShortlist(
     const copy = structuredClone(facts);
     for (const value of copy.issues) {
       if (!hydratedIssues.has(value.url)) hydratedOrder.push(value.url);
+      everHydrated.add(value.url);
       hydratedIssues.set(value.url, value);
     }
     for (const url of copy.gone) gone.add(url);
@@ -633,6 +664,7 @@ export async function collectShortlist(
       if (pr) {
         hydratedPrs.set(url, pr);
         hydratedOrder.push(url);
+        everHydrated.add(url);
         continue;
       }
       const last = meter.coverage.findLast(

@@ -252,6 +252,14 @@ describe("routine briefing: discover all, rank, hydrate only the shortlist (#368
     const hydrated = new Set(shortlist.hydrated);
     for (const subject of report.subjects) expect(hydrated.has(subject.url)).toBe(true);
     expect(shortlist.notHydrated.length).toBe(122 - shortlist.hydrated.length);
+    // #1105: each unhydrated issue keeps its discovered claim labels and label completeness.
+    expect(
+      shortlist.notHydrated.every(
+        (i) =>
+          (i as { labelsComplete?: boolean }).labelsComplete === true &&
+          Array.isArray((i as { claimLabels?: unknown }).claimLabels),
+      ),
+    ).toBe(true);
     expect(shortlist.provisional).toBe(true);
     // Request count: discovery pages, issue batches and PR reads, nothing else.
     expect(report.collection?.telemetry.requests).toBe(
@@ -487,6 +495,12 @@ describe("routine briefing: discover all, rank, hydrate only the shortlist (#368
       expect(fake.calls.pullRequests).toEqual([9]);
       expect(snapshot.pullRequests).toEqual([]);
       expect(snapshot.shortlist!.hydrated).not.toContain(p.url);
+      // #1105 review: an issue hydration read and then withdrew never carries discovery-label
+      // proof that a claim is absent; its newer labels were seen and are not in the snapshot.
+      const withdrawnIssue = snapshot.shortlist!.notHydrated.find((i) => i.number === 1);
+      expect(fake.calls.issueBatches.flat()).toContain(1);
+      expect(withdrawnIssue).toBeDefined();
+      expect(withdrawnIssue).not.toHaveProperty("labelsComplete");
       expect(snapshot.shortlist!.notHydrated).toEqual(
         expect.arrayContaining([expect.objectContaining({ number: 9, reason: "hydration-cap" })]),
       );
@@ -760,6 +774,8 @@ describe("routine briefing: discover all, rank, hydrate only the shortlist (#368
         [2, "unavailable"],
       ]);
       expect(snapshot.warnings.at(-1)).toContain("unavailable for 2 item(s) (#1, #2)");
+      // #1105 review: a failed or unavailable read never proves a claim absent from discovery labels.
+      expect(unread.every((i) => !("labelsComplete" in i))).toBe(true);
       const failed = snapshot.collection!.coverage.filter((c) => c.state === "failed");
       expect(failed.map((c) => [c.subject, c.failure])).toEqual([
         [`${repo}#1`, "unavailable"],
