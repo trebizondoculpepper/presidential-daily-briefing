@@ -269,6 +269,20 @@ describe("declared, legacy, undeclared and unknown policy", () => {
       evaluateReviewPolicy(legacy, evidence({ reviews: [rabbitReview("CHANGES_REQUESTED")] }))
         .headFindings,
     ).toBe(false);
+    const noStatusFindings = {
+      author: bot("chatgpt-codex-connector"),
+      body: `<!-- codex-review-state:v1 ${JSON.stringify({ code_review: { commit_sha: head, has_unresolved_findings: true } })} -->`,
+      url: "https://github.com/o/r/pull/1#codex-no-status",
+    };
+    const legacyVetoed = evaluateReviewPolicy(
+      legacy,
+      evidence({
+        reviews: [rabbitReview("APPROVED", head, user("someone"))],
+        comments: [noStatusFindings],
+      }),
+    );
+    expect(legacyVetoed.headFindings).toBe(true);
+    expect(legacyVetoed.headReviewed).toBe(false);
   });
   it("explicit legacy is distinguishable from absent configuration", () => {
     expect(reviewPolicyText(evaluateReviewPolicy(legacy, humanApproved).detail)).toMatch(

@@ -7,6 +7,8 @@
 {:check-ready [:find ?t :in $ % :where (requirements-satisfied ?t)]
  :check-blockers [:find ?t ?code ?reason :in $ % :where (check-blocker ?t ?code ?reason)]
  :pr-blockers [:find ?t ?code ?reason :in $ % :where (pr-blocker ?t ?code ?reason)]
+ :review-head-reviewed [:find ?t :in $ % :where (review-coverage-satisfied ?t)]
+ :review-head-findings [:find ?t :in $ % :where (head-findings ?t)]
  :human-sections [:find ?t ?section ?code ?reason :in $ % :where (human-attention-section ?t ?section ?code ?reason)]
  :q0
  [:find ?t ?r :where [?t "matched" ?r] [?t "matched" ?o] [?r "kind" ?k] [?o "kind" ?k] (or-join [?r ?o] (and [?r "band" ?b] [?o "band" ?b] [?r "preference" ?p] [?o "preference" ?p] [(< ?o ?r)]) (and [?r "band" ?b] [?o "band" ?b] [?r "preference" ?p] [?o "preference" ?op] [(< ?op ?p)]))]

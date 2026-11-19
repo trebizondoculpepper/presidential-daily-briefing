@@ -18,9 +18,8 @@ import {
   codexMarker,
   codexReceiptMatchesPrefix,
   codexReviewReceipt,
-  headAccepted,
-  headCodexFindings,
 } from "./reviewevidence.js";
+import { evaluateReviewCoverage } from "../rules/datalog/engine.js";
 import { prEvidenceGaps } from "../github/previdence.js";
 import type { PullRequest, Snapshot } from "../github/types.js";
 
@@ -332,23 +331,6 @@ export function evaluateReviewPolicy(
   declared: DeclaredReviewPolicy,
   e: ReviewEvidence,
 ): PolicyReview {
-  const codexStates = e.comments.map((c) => ({
-    by: login(c.author),
-    state: codexMarker(c.body)?.code_review,
-  }));
-  const codexReceipts = e.comments.map((c) => ({
-    by: login(c.author),
-    receipt: codexReviewReceipt(c.body),
-  }));
-  const legacy = {
-    headReviewed: headAccepted(
-      e.head,
-      e.reviews.map((r) => ({ state: r.state, commit: r.commit })),
-      codexStates,
-      codexReceipts,
-    ),
-    headFindings: headCodexFindings(e.head, codexStates),
-  };
   const effective = effectivePolicy(declared);
   const unknowns: string[] = [];
   const activeProviders =
@@ -366,20 +348,65 @@ export function evaluateReviewPolicy(
   const findings = counted
     .filter((o) => o.state === "findings")
     .map((o) => ({ provider: o.provider, source: o.source ?? "" }));
-  let headReviewed: boolean;
-  let headFindings: boolean;
-  if (effective === "legacy") ({ headReviewed, headFindings } = legacy);
-  else {
-    // Only authenticated, head-bound findings veto a declared policy; an unattributed marker is
-    // reported in unknowns as ignored. Unknown policy: findings still block; nothing is accepted.
-    // Incomplete evidence never yields accepted coverage (headReviewed agrees with coverage).
-    headFindings = findings.length > 0;
-    headReviewed =
-      effective !== "unknown" &&
-      e.complete &&
-      !headFindings &&
-      counted.some((o) => o.state === "accepted");
+
+  const codexAccount = reviewProviders.codex.accounts[0];
+  const codexComments = e.comments.filter(
+    (c) => login(c.author).replace(/\[bot\]$/, "") === codexAccount,
+  );
+  const codexStates = codexComments.map((c) => codexMarker(c.body)?.code_review);
+  const hasRunningHead = codexStates.some(
+    (s) => s?.commit_sha === e.head && typeof s.status === "string" && s.status !== "completed",
+  );
+  const parsedReceipts = codexComments.map((c) => codexReviewReceipt(c.body));
+  const knownCommits = [
+    ...e.reviews.map((r) => r.commit),
+    ...codexStates.map((s) => s?.commit_sha),
+    ...parsedReceipts.map((r) => r?.commitSha),
+  ];
+  const receipts: { commit: string; status: string; findings: boolean }[] = [];
+  for (let i = 0; i < codexComments.length; i++) {
+    const s = codexStates[i];
+    if (s && typeof s.commit_sha === "string" && typeof s.has_unresolved_findings === "boolean") {
+      receipts.push({
+        commit: s.commit_sha,
+        status: typeof s.status === "string" ? s.status : "",
+        findings: s.has_unresolved_findings,
+      });
+    }
+    const r = parsedReceipts[i];
+    if (
+      r?.clean === true &&
+      (codexCommitMatches(e.head, r.commitSha) ||
+        (hasRunningHead && codexReceiptMatchesPrefix(e.head, r.commitSha, knownCommits)))
+    ) {
+      receipts.push({ commit: e.head, status: "completed", findings: false });
+    }
   }
+
+  const reviewCoverage: ReviewCoverageMode =
+    effective === "legacy"
+      ? "legacy"
+      : effective === "unknown"
+        ? "unknown"
+        : reviewPolicies[effective].coverage;
+  const native = evaluateReviewCoverage({
+    head: e.head,
+    complete: e.complete,
+    reviewCoverage,
+    ...(reviewCoverage === "legacy"
+      ? {
+          reviews: e.reviews.map((r) => ({ state: r.state, commit: r.commit })),
+          receipts,
+        }
+      : {
+          providers: counted.map((o) => ({
+            provider: o.provider,
+            state: o.state,
+            commit: o.head,
+          })),
+        }),
+  });
+  const { headReviewed, headFindings, coverage } = native;
   const satisfiedBy =
     effective === "unknown" || effective === "legacy" || !headReviewed
       ? []
@@ -391,12 +418,7 @@ export function evaluateReviewPolicy(
       schemaVersion: 1,
       declared,
       effective,
-      coverage:
-        effective === "unknown" || !e.complete
-          ? "unknown"
-          : headReviewed
-            ? "satisfied"
-            : "unsatisfied",
+      coverage,
       satisfiedBy,
       findings: effective === "legacy" ? [] : findings,
       providers,

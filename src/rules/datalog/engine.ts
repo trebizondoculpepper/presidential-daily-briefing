@@ -418,6 +418,68 @@ export function evaluateCheckPolicy(input: import("./check-types.js").CheckEvide
   };
 }
 
+export interface ReviewCoverageInput {
+  head: string;
+  complete: boolean;
+  reviewCoverage: "legacy" | "any" | "unknown";
+  reviews?: readonly { state: string; commit: string | null }[];
+  receipts?: readonly { commit: string; status: string; findings: boolean }[];
+  providers?: readonly { provider: string; state: string; commit: string | null }[];
+}
+
+/** Pure review-coverage diagnostic seam (#709); all acceptance/finding rules live in native EDN. */
+export function evaluateReviewCoverage(input: ReviewCoverageInput): {
+  headReviewed: boolean;
+  headFindings: boolean;
+  coverage: "satisfied" | "unsatisfied" | "unknown";
+} {
+  const facts: Datom[] = [
+    [1, "review-coverage", input.reviewCoverage],
+    [100, "head", input.head],
+    [100, "pr-complete", input.complete],
+  ];
+  let nextId = 101;
+  for (const r of input.reviews ?? []) {
+    const id = nextId++;
+    facts.push([100, "review", id], [id, "review-state", r.state]);
+    if (r.commit) facts.push([id, "review-commit", r.commit]);
+  }
+  for (const c of input.receipts ?? []) {
+    const id = nextId++;
+    facts.push(
+      [100, "receipt", id],
+      [id, "receipt-commit", c.commit],
+      [id, "receipt-status", c.status],
+      [id, "receipt-findings", c.findings],
+    );
+  }
+  for (const p of input.providers ?? []) {
+    if (!p.commit) continue;
+    const id = nextId++;
+    facts.push(
+      [100, "provider-review", id],
+      [id, "provider", p.provider],
+      [id, "provider-state", p.state],
+      [id, "provider-commit", p.commit],
+    );
+  }
+  const db = ds.init_db(facts, bundle.schema);
+  const reviewed = ds.q(bundle.queries["review-head-reviewed"], db, bundle.clauses) as unknown[][];
+  const findings = ds.q(bundle.queries["review-head-findings"], db, bundle.clauses) as unknown[][];
+  const headReviewed = reviewed.some(([id]) => id === 100);
+  const headFindings = findings.some(([id]) => id === 100);
+  return {
+    headReviewed,
+    headFindings,
+    coverage:
+      input.reviewCoverage === "unknown" || !input.complete
+        ? "unknown"
+        : headReviewed
+          ? "satisfied"
+          : "unsatisfied",
+  };
+}
+
 export interface PrReadinessInput {
   state: string;
   closedLabel: string;
