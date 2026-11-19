@@ -140,6 +140,8 @@ export interface ClaimReminderFactInput {
   hasOtherClaims?: boolean;
   /** Number of other active claims when known (D-REVIEW-OWNED requires > 1). */
   otherClaimCount?: number;
+  /** Whether a claim on this ticket was observed after a partial write. */
+  claimObserved?: boolean;
   inventoryComplete?: boolean;
   labelsComplete?: boolean;
   closingComplete?: boolean;
@@ -370,6 +372,7 @@ export function selectClaimRuleReminders(input: SelectClaimRemindersInput): Acti
 
   let unresolvedEvidenceCategory = false;
   let unmappedRefusal = false;
+  let unverifiedPartialOwnership = false;
   if (!policyMismatch) {
     if (input.outcome === "denied") {
       const explicitDenials = facts.denialIds ?? [];
@@ -383,7 +386,11 @@ export function selectClaimRuleReminders(input: SelectClaimRemindersInput): Acti
       for (const id of facts.decisionIds ?? []) addPolicyItem(id, "admission");
     } else if (input.outcome === "partial") {
       for (const id of facts.denialIds ?? []) addPolicyItem(id, "admission");
-      if (facts.inventoryComplete === false) addPolicyItem("D-OWNED-INCOMPLETE", "admission");
+      if (facts.inventoryComplete === false) {
+        if (facts.claimObserved === true) addPolicyItem("D-OWNED-INCOMPLETE", "admission");
+        else if (facts.claimObserved === false) addPolicyItem("D-INVENTORY-UNKNOWN", "admission");
+        else unverifiedPartialOwnership = true;
+      }
       for (const id of facts.decisionIds ?? []) addPolicyItem(id, "admission");
     } else {
       // claimed or noop
@@ -471,6 +478,11 @@ export function selectClaimRuleReminders(input: SelectClaimRemindersInput): Acti
       `Refusal ${facts.error ? sanitizeText(facts.error) : "reason"} has no single mapped Datalog denial rule; see the refusal prerequisite.`,
     );
   }
+  if (unverifiedPartialOwnership) {
+    notes.push(
+      "Partial claim outcome did not establish whether ownership was written; verify live ticket state.",
+    );
+  }
   if (unresolvedIds.length > 0) {
     notes.push(`Unresolved rule ID(s) absent from the English model: ${unresolvedIds.join(", ")}.`);
   }
@@ -485,6 +497,7 @@ export function selectClaimRuleReminders(input: SelectClaimRemindersInput): Acti
           missingPurposes.length > 0 ||
           unresolvedEvidenceCategory ||
           unmappedRefusal ||
+          unverifiedPartialOwnership ||
           unresolvedIds.length > 0
         ? "partial"
         : "complete";

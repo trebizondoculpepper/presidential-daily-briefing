@@ -140,7 +140,7 @@ describe("native claim-time obligations and action-reminder selection (#1029)", 
     const res = selectClaimRuleReminders({
       role: "implementer",
       outcome: "partial",
-      facts: { inventoryComplete: false },
+      facts: { inventoryComplete: false, claimObserved: true },
     });
     expect(res.label).toBe("partial");
     expect(res.admissionRationale.map((i) => i.id)).toEqual(["D-OWNED-INCOMPLETE"]);
@@ -150,6 +150,21 @@ describe("native claim-time obligations and action-reminder selection (#1029)", 
       "O-CLAIM-PARTIAL-RECOVERY",
     ]);
     expect(res.selectedIds).not.toContain("O-CLAIM-ACCEPTANCE");
+
+    const unownedPartial = selectClaimRuleReminders({
+      role: "implementer",
+      outcome: "partial",
+      facts: { inventoryComplete: false, claimObserved: false },
+    });
+    expect(unownedPartial.admissionRationale.map((i) => i.id)).toEqual(["D-INVENTORY-UNKNOWN"]);
+
+    const unknownPartial = selectClaimRuleReminders({
+      role: "implementer",
+      outcome: "partial",
+      facts: { inventoryComplete: false },
+    });
+    expect(unknownPartial.admissionRationale).toEqual([]);
+    expect(unknownPartial.coverage.status).toBe("partial");
   });
 
   it("handles missing purposes without inventing prose", () => {
