@@ -5,9 +5,8 @@
  * from the native policy (`evaluateDiscussion`, #1093). CLI, MCP and serve render this result;
  * none recomputes it. Caching belongs to the consuming transport's shared cache, as for metrics.
  */
-import { discussionPage } from "../github/service/snapshot.js";
 import type { DiscussionNode } from "../github/service/snapshot.js";
-import type { Query } from "../github/github.js";
+import type { GhService } from "../github/service/service.js";
 import { evaluateDiscussion } from "../rules/datalog/engine.js";
 
 export type DiscussionScope = "open" | "closed" | "all";
@@ -50,7 +49,8 @@ export interface DiscussionView {
 export interface DiscussionOptions {
   repository: string;
   scope: DiscussionScope;
-  query: Query;
+  /** The application's GH facade (only the discussion read is used). */
+  gh: { snapshot: Pick<GhService["snapshot"], "discussionPage"> };
   /** Bounded read: at most `maxPages` pages of `pageSize` issues. */
   bounds?: { maxPages?: number; pageSize?: number };
   now?: () => Date;
@@ -71,8 +71,7 @@ export async function readDiscussion(options: DiscussionOptions): Promise<Discus
   let more = true;
   while (more && pagesRead < maxPages) {
     options.signal?.throwIfAborted();
-    const page = await discussionPage(
-      options.query,
+    const page = await options.gh.snapshot.discussionPage(
       options.repository,
       options.scope,
       pageSize,
@@ -84,7 +83,7 @@ export async function readDiscussion(options: DiscussionOptions): Promise<Discus
       if (node) nodes.push(node);
       else unreadable++;
     }
-    more = page.pageInfo.hasNextPage && page.pageInfo.endCursor !== null;
+    more = page.pageInfo.hasNextPage;
     cursor = page.pageInfo.endCursor;
   }
   options.signal?.throwIfAborted();
@@ -101,6 +100,11 @@ export async function readDiscussion(options: DiscussionOptions): Promise<Discus
         ]
       : []),
     ...(unreadable ? [`${unreadable} issue(s) could not be read and are not ranked.`] : []),
+    ...(native.unknown.length
+      ? [
+          `${native.unknown.length} issue(s) have an unknown comment count and are not ranked, so the ranking may omit them.`,
+        ]
+      : []),
   ];
   return {
     schemaVersion: 1,
@@ -125,7 +129,7 @@ export async function readDiscussion(options: DiscussionOptions): Promise<Discus
       return { number, title: node.title, url: node.url };
     }),
     coverage: {
-      complete: !capped && unreadable === 0,
+      complete: !capped && unreadable === 0 && native.unknown.length === 0,
       pagesRead,
       issuesRead: nodes.length,
       unreadable,

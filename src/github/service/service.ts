@@ -70,8 +70,8 @@ import { issueCapabilities, postOverTransport } from "./issues.js";
 import type { IssueCapabilities, RestPost } from "./issues.js";
 import { closedQuestionsCapabilities } from "./closedquestions.js";
 import type { ClosedQuestionCapabilities } from "./closedquestions.js";
-import { discoveryPage, issueCommentsPage, issuesByNumber } from "./snapshot.js";
-import type { Issue } from "./snapshot.js";
+import { discoveryPage, discussionPage, issueCommentsPage, issuesByNumber } from "./snapshot.js";
+import type { DiscussionPage, Issue } from "./snapshot.js";
 import type { Query } from "../github.js";
 import type { RateLimitAnswer } from "./ratelimits.js";
 import type { CheckReads } from "./checks.js";
@@ -171,6 +171,14 @@ export interface GhService {
       cursor: string,
       signal?: AbortSignal,
     ): Promise<unknown>;
+    /** One page of issues in a state scope with GitHub's total comment counts (#1099). */
+    discussionPage(
+      repository: string,
+      scope: "open" | "closed" | "all",
+      pageSize: number,
+      cursor: string | null,
+      signal?: AbortSignal,
+    ): Promise<DiscussionPage>;
     collect(repository: string, options?: CollectOptions, now?: () => Date): Promise<Snapshot>;
     collectShortlist(
       repository: string,
@@ -383,6 +391,7 @@ export function createGhService(options: GhServiceOptions = {}): GhService {
       discoveryPage: (...args) => discoveryPage(query as Query, ...args),
       issuesByNumber: (...args) => issuesByNumber(query as Query, ...args),
       issueCommentsPage: (...args) => issueCommentsPage(query as Query, ...args),
+      discussionPage: (...args) => discussionPage(query as Query, ...args),
       collect: (repository, collectOptions = {}, now) =>
         collect(
           repository,

@@ -60,6 +60,12 @@ export interface DiscussionNode {
   comments: number | null;
 }
 
+/** One discussion page as validated: nodes (null when unreadable) and established pagination. */
+export interface DiscussionPage {
+  nodes: (DiscussionNode | null)[];
+  pageInfo: { hasNextPage: boolean; endCursor: string | null };
+}
+
 /**
  * One page of issues in the requested state scope with their total comment counts (#1099),
  * most recently updated first. Malformed nodes are returned as null so the caller can count them
@@ -72,10 +78,7 @@ export async function discussionPage(
   pageSize: number,
   cursor: string | null,
   signal?: AbortSignal,
-): Promise<{
-  nodes: (DiscussionNode | null)[];
-  pageInfo: { hasNextPage: boolean; endCursor: string | null };
-}> {
+): Promise<DiscussionPage> {
   signal?.throwIfAborted();
   const states = scope === "open" ? "[OPEN]" : scope === "closed" ? "[CLOSED]" : "[OPEN, CLOSED]";
   const source = `query($owner:String!,$name:String!,$cursor:String){repository(owner:$owner,name:$name){issues(first:${pageSize},after:$cursor,orderBy:{field:UPDATED_AT,direction:DESC},states:${states}){nodes{number title url state comments{totalCount}} ${pageInfoFields}}}}`;
@@ -84,6 +87,15 @@ export async function discussionPage(
   if (!isRecord(issues) || !Array.isArray(issues.nodes) || !isRecord(issues.pageInfo))
     throw new Error(`Malformed issue page for ${repository}`);
   const info = issues.pageInfo;
+  // Completeness must be established, never assumed: a page that cannot say whether more exist,
+  // or claims more without a cursor to reach them, is malformed rather than the end.
+  if (
+    typeof info.hasNextPage !== "boolean" ||
+    (info.hasNextPage && (typeof info.endCursor !== "string" || info.endCursor === ""))
+  )
+    throw new Error(
+      `Malformed issue page for ${repository}: pagination cannot establish completeness`,
+    );
   const nodes = issues.nodes.map((node): DiscussionNode | null => {
     if (!isRecord(node)) return null;
     const { number, title, url, state, comments } = node;
@@ -106,7 +118,7 @@ export async function discussionPage(
   return {
     nodes,
     pageInfo: {
-      hasNextPage: info.hasNextPage === true,
+      hasNextPage: info.hasNextPage,
       endCursor: typeof info.endCursor === "string" ? info.endCursor : null,
     },
   };

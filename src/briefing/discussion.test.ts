@@ -2,6 +2,16 @@
 import { describe, expect, it } from "vite-plus/test";
 import { readDiscussion } from "./discussion.js";
 import type { Query } from "../github/github.js";
+import { discussionPage } from "../github/service/snapshot.js";
+
+/** The GH facade slice the service uses, over an injected GraphQL boundary. */
+const gh = (query: Query) => ({
+  snapshot: {
+    discussionPage: (
+      ...args: [string, "open" | "closed" | "all", number, string | null, AbortSignal?]
+    ) => discussionPage(query, ...args),
+  },
+});
 
 const repo = "o/r";
 const node = (number: number, comments: number | null, state = "OPEN") => ({
@@ -41,7 +51,7 @@ describe("shared discussion view (#1099)", () => {
       [node(1, 4), node(2, 9)],
       [node(3, 4), node(4, 0)],
     ]);
-    const view = await readDiscussion({ repository: repo, scope: "open", query: f.query, now });
+    const view = await readDiscussion({ repository: repo, scope: "open", gh: gh(f.query), now });
     expect(f.calls.map((c) => c.cursor)).toEqual([null, "1"]);
     expect(f.calls.every((c) => c.states === "[OPEN]")).toBe(true);
     expect(view.items.map((i) => [i.rank, i.number, i.comments])).toEqual([
@@ -69,13 +79,14 @@ describe("shared discussion view (#1099)", () => {
 
   it("keeps unknown counts and unreadable nodes visible, never as zero", async () => {
     const f = fake([[node(1, null), node(2, 2), { number: "bad" }]]);
-    const view = await readDiscussion({ repository: repo, scope: "open", query: f.query, now });
+    const view = await readDiscussion({ repository: repo, scope: "open", gh: gh(f.query), now });
     expect(view.items.map((i) => i.number)).toEqual([2]);
     expect(view.unknown).toEqual([
       { number: 1, title: "Ticket 1", url: `https://github.com/${repo}/issues/1` },
     ]);
     expect(view.coverage).toMatchObject({ complete: false, unreadable: 1 });
     expect(view.coverage.note).toContain("could not be read");
+    expect(view.coverage.note).toContain("unknown comment count");
   });
 
   it("stops at the page bound and says the ranking is not repository-wide", async () => {
@@ -83,7 +94,7 @@ describe("shared discussion view (#1099)", () => {
     const view = await readDiscussion({
       repository: repo,
       scope: "all",
-      query: f.query,
+      gh: gh(f.query),
       bounds: { maxPages: 2, pageSize: 1 },
       now,
     });
@@ -96,7 +107,12 @@ describe("shared discussion view (#1099)", () => {
 
   it("includes closed discussion in the closed scope and honours cancellation", async () => {
     const f = fake([[node(8, 20, "CLOSED")]]);
-    const closed = await readDiscussion({ repository: repo, scope: "closed", query: f.query, now });
+    const closed = await readDiscussion({
+      repository: repo,
+      scope: "closed",
+      gh: gh(f.query),
+      now,
+    });
     expect(f.calls[0]!.states).toBe("[CLOSED]");
     expect(closed.items.map((i) => i.number)).toEqual([8]);
     const controller = new AbortController();
@@ -105,9 +121,26 @@ describe("shared discussion view (#1099)", () => {
       readDiscussion({
         repository: repo,
         scope: "open",
-        query: f.query,
+        gh: gh(f.query),
         signal: controller.signal,
       }),
     ).rejects.toThrow();
+  });
+
+  it("marks coverage incomplete for an unknown count even when every page was read", async () => {
+    const f = fake([[node(1, 3), node(2, null)]]);
+    const view = await readDiscussion({ repository: repo, scope: "open", gh: gh(f.query), now });
+    expect(view.unknown.map((u) => u.number)).toEqual([2]);
+    expect(view.coverage.complete).toBe(false);
+  });
+
+  it("rejects pagination that cannot establish completeness", async () => {
+    for (const pageInfo of [{}, { hasNextPage: true }, { hasNextPage: true, endCursor: "" }]) {
+      const query: Query = async () =>
+        ({ repository: { issues: { nodes: [node(1, 2)], pageInfo } } }) as never;
+      await expect(
+        readDiscussion({ repository: repo, scope: "open", gh: gh(query), now }),
+      ).rejects.toThrow("pagination cannot establish completeness");
+    }
   });
 });
