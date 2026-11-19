@@ -9,6 +9,14 @@
       "owned-claims": "number of implementation claims you retain",
       "owned-claims-complete": "completeness of your claim inventory",
       "owned-review-subject": "the claim the owned-work review is attached to",
+      "unassign-subject": "human unassign evaluation subject",
+      "unassign-agent": "agent claim targeted by human unassign",
+      "claim-present": "whether the target agent claim label is currently present",
+      "claim-start": "recorded timestamp when the target agent claim began",
+      "claim-history-complete": "completeness of claim label and timeline history",
+      "trusted-human-context": "verified same-origin explicit human-mode request",
+      "permission": "verified repository write permission for the serving user",
+      "override-unknown-history": "explicit human override when claim history is incomplete",
       "active-count": "number of active dependents",
       "active-dependent": "active dependent",
       "assessment-kind": "assessment action kind",
@@ -909,6 +917,135 @@
       "codes": ["inferred"],
       "query": "[:find ?t :in $ % :where (foreground ?t) [1 \"role\" \"human\"] (open ?t) (accepted-pr ?t) (clean-pr ?t)]",
       "witnesses": {}
+    },
+    {
+      "id": "D-UNASSIGN-REFUSE-CONTEXT",
+      "purpose": "Refuse Human-view Unassign without a verified explicit human-mode request.",
+      "kind": "unassign-refuse-context",
+      "band": 1,
+      "preference": 1,
+      "affinity": "human",
+      "owned": false,
+      "clauses": "[1 \"role\" \"human\"] [?t \"unassign-subject\" true] [1 \"trusted-human-context\" false]",
+      "why": "Unassign requires a trusted explicit human-mode request for {agent}; a role selector or agent name is never authorization.",
+      "codes": ["unassign", "refuse"],
+      "query": "[:find ?t :in $ % :where (foreground ?t) [1 \"role\" \"human\"] [?t \"unassign-subject\" true] [1 \"trusted-human-context\" false]]",
+      "witnesses": {
+        "agent": "[:find ?value :in $ % ?t :where [?t \"unassign-agent\" ?value]]"
+      }
+    },
+    {
+      "id": "D-UNASSIGN-REFUSE-PERMISSION-DENIED",
+      "purpose": "Refuse Human-view Unassign when the serving GitHub account lacks write, maintain or admin permission.",
+      "kind": "unassign-refuse-permission-denied",
+      "band": 1,
+      "preference": 1,
+      "affinity": "human",
+      "owned": false,
+      "clauses": "[1 \"role\" \"human\"] [?t \"unassign-subject\" true] [1 \"trusted-human-context\" true] [1 \"permission\" \"deny\"]",
+      "why": "The serving GitHub account does not have write, maintain or admin permission to release {agent}.",
+      "codes": ["unassign", "refuse"],
+      "query": "[:find ?t :in $ % :where (foreground ?t) [1 \"role\" \"human\"] [?t \"unassign-subject\" true] [1 \"trusted-human-context\" true] [1 \"permission\" \"deny\"]]",
+      "witnesses": {
+        "agent": "[:find ?value :in $ % ?t :where [?t \"unassign-agent\" ?value]]"
+      }
+    },
+    {
+      "id": "D-UNASSIGN-REFUSE-PERMISSION-UNKNOWN",
+      "purpose": "Refuse Human-view Unassign when repository write permission for the serving GitHub account cannot be verified.",
+      "kind": "unassign-refuse-permission-unknown",
+      "band": 1,
+      "preference": 1,
+      "affinity": "human",
+      "owned": false,
+      "clauses": "[1 \"role\" \"human\"] [?t \"unassign-subject\" true] [1 \"trusted-human-context\" true] [1 \"permission\" \"unknown\"]",
+      "why": "Repository write permission for the serving GitHub account could not be verified; refusing to release {agent}.",
+      "codes": ["unassign", "refuse"],
+      "query": "[:find ?t :in $ % :where (foreground ?t) [1 \"role\" \"human\"] [?t \"unassign-subject\" true] [1 \"trusted-human-context\" true] [1 \"permission\" \"unknown\"]]",
+      "witnesses": {
+        "agent": "[:find ?value :in $ % ?t :where [?t \"unassign-agent\" ?value]]"
+      }
+    },
+    {
+      "id": "D-UNASSIGN-NOOP",
+      "purpose": "Report an idempotent no-op when the selected agent claim is already absent and history is complete.",
+      "kind": "unassign-noop",
+      "band": 1,
+      "preference": 1,
+      "affinity": "human",
+      "owned": false,
+      "clauses": "[1 \"role\" \"human\"] [?t \"unassign-subject\" true] [1 \"trusted-human-context\" true] [1 \"permission\" \"allow\"] [?t \"claim-present\" false] [?t \"claim-history-complete\" true]",
+      "why": "Agent {agent} no longer holds an active claim; human owners and ticket state are preserved.",
+      "codes": ["unassign", "noop"],
+      "query": "[:find ?t :in $ % :where (foreground ?t) [1 \"role\" \"human\"] [?t \"unassign-subject\" true] [1 \"trusted-human-context\" true] [1 \"permission\" \"allow\"] [?t \"claim-present\" false] [?t \"claim-history-complete\" true]]",
+      "witnesses": {
+        "agent": "[:find ?value :in $ % ?t :where [?t \"unassign-agent\" ?value]]"
+      }
+    },
+    {
+      "id": "D-UNASSIGN-REFUSE-EVIDENCE-INCOMPLETE",
+      "purpose": "Refuse Human-view Unassign when claim history is incomplete and no explicit human override was given.",
+      "kind": "unassign-refuse-evidence",
+      "band": 1,
+      "preference": 1,
+      "affinity": "human",
+      "owned": false,
+      "clauses": "[1 \"role\" \"human\"] [?t \"unassign-subject\" true] [1 \"trusted-human-context\" true] [1 \"permission\" \"allow\"] [1 \"override-unknown-history\" false] [?t \"claim-history-complete\" false]",
+      "why": "Claim history for {agent} is incomplete; inspect the ticket or confirm with an explicit human override.",
+      "codes": ["unassign", "refuse"],
+      "query": "[:find ?t :in $ % :where (foreground ?t) [1 \"role\" \"human\"] [?t \"unassign-subject\" true] [1 \"trusted-human-context\" true] [1 \"permission\" \"allow\"] [1 \"override-unknown-history\" false] [?t \"claim-history-complete\" false]]",
+      "witnesses": {
+        "agent": "[:find ?value :in $ % ?t :where [?t \"unassign-agent\" ?value]]"
+      }
+    },
+    {
+      "id": "D-UNASSIGN-REFUSE-CLAIM-START-MISSING",
+      "purpose": "Refuse Human-view Unassign when claim start timestamp is unknown and no explicit human override was given.",
+      "kind": "unassign-refuse-evidence",
+      "band": 1,
+      "preference": 1,
+      "affinity": "human",
+      "owned": false,
+      "clauses": "[1 \"role\" \"human\"] [?t \"unassign-subject\" true] [1 \"trusted-human-context\" true] [1 \"permission\" \"allow\"] [1 \"override-unknown-history\" false] [?t \"claim-present\" true] [?t \"claim-history-complete\" true] [?t \"claim-start\" \"\"]",
+      "why": "Claim start timestamp for {agent} is unknown; inspect the ticket or confirm with an explicit human override.",
+      "codes": ["unassign", "refuse"],
+      "query": "[:find ?t :in $ % :where (foreground ?t) [1 \"role\" \"human\"] [?t \"unassign-subject\" true] [1 \"trusted-human-context\" true] [1 \"permission\" \"allow\"] [1 \"override-unknown-history\" false] [?t \"claim-present\" true] [?t \"claim-history-complete\" true] [?t \"claim-start\" \"\"]]",
+      "witnesses": {
+        "agent": "[:find ?value :in $ % ?t :where [?t \"unassign-agent\" ?value]]"
+      }
+    },
+    {
+      "id": "D-UNASSIGN-ALLOW",
+      "purpose": "Allow Human-view Unassign of the verified claim while preserving human assignees, blockers, questions and ticket state.",
+      "kind": "unassign-allow",
+      "band": 1,
+      "preference": 1,
+      "affinity": "human",
+      "owned": false,
+      "clauses": "[1 \"role\" \"human\"] [?t \"unassign-subject\" true] [1 \"trusted-human-context\" true] [1 \"permission\" \"allow\"] [1 \"override-unknown-history\" false] [?t \"claim-present\" true] [?t \"claim-history-complete\" true] [?t \"claim-start\" ?cs] [(not= ?cs \"\")]",
+      "why": "Release only agent:{agent} (started {claimStart}); preserve all human assignees, readiness labels, blockers, questions and other agents' claims.",
+      "codes": ["unassign", "allow"],
+      "query": "[:find ?t :in $ % :where (foreground ?t) [1 \"role\" \"human\"] [?t \"unassign-subject\" true] [1 \"trusted-human-context\" true] [1 \"permission\" \"allow\"] [1 \"override-unknown-history\" false] [?t \"claim-present\" true] [?t \"claim-history-complete\" true] [?t \"claim-start\" ?cs] [(not= ?cs \"\")]]",
+      "witnesses": {
+        "agent": "[:find ?value :in $ % ?t :where [?t \"unassign-agent\" ?value]]",
+        "claimStart": "[:find ?value :in $ % ?t :where [?t \"claim-start\" ?value]]"
+      }
+    },
+    {
+      "id": "D-UNASSIGN-ALLOW-OVERRIDE",
+      "purpose": "Allow Human-view Unassign with explicit human override when claim history is incomplete or start is unknown.",
+      "kind": "unassign-allow",
+      "band": 1,
+      "preference": 1,
+      "affinity": "human",
+      "owned": false,
+      "clauses": "[1 \"role\" \"human\"] [?t \"unassign-subject\" true] [1 \"trusted-human-context\" true] [1 \"permission\" \"allow\"] [1 \"override-unknown-history\" true] [?t \"claim-present\" true]",
+      "why": "Release only agent:{agent} under explicit human override; preserve all human assignees, readiness labels, blockers, questions and other agents' claims.",
+      "codes": ["unassign", "allow", "override"],
+      "query": "[:find ?t :in $ % :where (foreground ?t) [1 \"role\" \"human\"] [?t \"unassign-subject\" true] [1 \"trusted-human-context\" true] [1 \"permission\" \"allow\"] [1 \"override-unknown-history\" true] [?t \"claim-present\" true]]",
+      "witnesses": {
+        "agent": "[:find ?value :in $ % ?t :where [?t \"unassign-agent\" ?value]]"
+      }
     }
   ],
   "denials": {

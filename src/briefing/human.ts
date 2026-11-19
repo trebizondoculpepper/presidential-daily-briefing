@@ -212,6 +212,8 @@ export interface HumanItem {
   addressed: boolean;
   routedTo: string[];
   raisedBy: string[];
+  /** Current active claim agents (`agent:NAME` labels) on issue targets (#588). */
+  claims?: string[];
   requested: string[];
   reason: string;
   blocks: { subjects: string[]; unknown: string[] };
@@ -404,6 +406,13 @@ export function humanBriefing(
             .filter(Boolean),
         ),
       ],
+      claims: isPr(subject)
+        ? []
+        : subject.labels.nodes
+            .map((l) => l.name)
+            .filter((name) => name.startsWith("agent:"))
+            .map((name) => name.slice("agent:".length))
+            .filter(Boolean),
       requested,
       reason: shorten(record?.why || matched[0].why.text),
       blocks,

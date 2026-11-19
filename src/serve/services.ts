@@ -28,6 +28,7 @@ import type { ServeOptions } from "./options.js";
 import { applyLiveApplication, invalidationPlan } from "./liveapp.js";
 import { verifySavedRoot } from "./registration.js";
 import { revisionOf } from "./appstate.js";
+import { unassignRoutes } from "./unassign-routes.js";
 
 /** Production read boundaries: authenticated gh through the existing argument-array runners. */
 export const defaultReadRuntime = (serve: ServeRuntime): ServeReadRuntime => ({
@@ -171,12 +172,14 @@ export function readServices(
             : undefined,
       gh,
     });
+    const unassign = unassignRoutes(options, serve, cache, gh)(facts);
     return {
       routes: async (context) => {
         if (context.url.pathname === "/mcp") {
           await mcp.handle(context);
           return true;
         }
+        if (await unassign(context)) return true;
         if (await diagnostics(context)) return true;
         if (await activeDiagnostics.routes(context)) return true;
         if (await quotas(context)) return true;

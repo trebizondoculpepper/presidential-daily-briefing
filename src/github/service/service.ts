@@ -127,6 +127,8 @@ export interface GhService {
   delivery: DeliveryReads;
   /** Claim-workflow guard and pull-request state reads (#942). */
   tickets: TicketReads;
+  /** Shared gh write runner bound to this service's transport, query and environment (#588). */
+  run: GhRun;
   /** Issue reference reads (#951). */
   references: ReferenceReads;
   /** Pull request review-history reads (#950). */
@@ -307,6 +309,7 @@ export function createGhService(options: GhServiceOptions = {}): GhService {
     },
     history: historyReads(query),
     tickets: ticketReads(query),
+    run,
     references: referenceReads(query as Query),
     reviewHistory: reviewHistoryReads(query as Query),
     prStatus: prStatusReads(query as Query),

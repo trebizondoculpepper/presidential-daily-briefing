@@ -341,7 +341,7 @@ interface MarkerVerdicts<T> {
  * The newest trusted candidate, checking newest first and stopping there, so permission lookups
  * are bounded by the distinct authors (and editors) of the markers newer than it.
  */
-async function newestTrusted<T>(
+export async function newestTrusted<T>(
   candidates: T[],
   comment: (c: T) => Comment,
   permission: PermissionLookup,

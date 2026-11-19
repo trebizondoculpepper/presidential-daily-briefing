@@ -109,6 +109,14 @@ const audience: Record<
   "D-HUMAN-ORPHANED-YOU": { role: "human", kind: "issue" },
   "D-HUMAN-ORPHANED": { role: "human", kind: "issue" },
   "D-HUMAN-ORPHANED-UNKNOWN": { role: "human", kind: "issue" },
+  "D-UNASSIGN-REFUSE-CONTEXT": { role: "human", kind: "any" },
+  "D-UNASSIGN-REFUSE-PERMISSION-DENIED": { role: "human", kind: "any" },
+  "D-UNASSIGN-REFUSE-PERMISSION-UNKNOWN": { role: "human", kind: "any" },
+  "D-UNASSIGN-NOOP": { role: "human", kind: "any" },
+  "D-UNASSIGN-REFUSE-EVIDENCE-INCOMPLETE": { role: "human", kind: "any" },
+  "D-UNASSIGN-REFUSE-CLAIM-START-MISSING": { role: "human", kind: "any" },
+  "D-UNASSIGN-ALLOW": { role: "human", kind: "any" },
+  "D-UNASSIGN-ALLOW-OVERRIDE": { role: "human", kind: "any" },
 };
 const roles = ["implementer", "designer", "human"] as const;
 

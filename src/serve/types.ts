@@ -94,6 +94,12 @@ export interface ServeRuntime {
   signals: SignalSource;
   /** Immediate exit for a second signal during shutdown. */
   exit: (code: number) => void;
+  /** Injected Human-view Unassign boundaries (#588); production uses ghQuery/permissionLookup/ghRun. */
+  unassign?: {
+    query?: Query | import("../github/service/tickets.js").TicketReads;
+    permission?: (repository: string) => import("../github/github.js").PermissionLookup;
+    run?: import("../github/dependencies.js").GhRun;
+  };
   version: () => Promise<string | null>;
   /** Optional trusted process metadata, captured once; absent fields remain unknown. */
   buildIdentity?: () => Promise<Partial<BuildIdentity>>;

@@ -1,0 +1,74 @@
+;; Human-view Unassign decisions (doc/design/human-unassign.md, #588).
+{:suite "human-unassign"
+ :scenarios
+ [{:id "unassign-refuse-context"
+   :doc "refuses Unassign without trusted human-mode context"
+   :viewer {:role "human" :agent ""}
+   :facts [{:e 1 "trusted-human-context" false "permission" "allow" "override-unknown-history" false}
+           {:e 100 "unassign-subject" true "kind" "unassign" "state" "OPEN" "number" 42 "target" "issue:42" "created" 0 "labels-complete" true "native-complete" true "reverse-complete" true "open-blockers" 0 "blocking-complete" true "impact-size" "unknown" "impact-state" "unknown" "complexity-size" "unknown" "complexity-state" "unknown" "head" "not-a-pr" "unassign-agent" "kavya" "claim-present" true "claim-history-complete" true "claim-start" "2026-11-18T10:00:00Z"}]
+   :expect {:actions [{:subject 100 :rule "D-UNASSIGN-REFUSE-CONTEXT" :kind "unassign-refuse-context" :band 1
+               :why "Unassign requires a trusted explicit human-mode request for kavya; a role selector or agent name is never authorization."
+               :overridden []}] :denials []}}
+
+  {:id "unassign-refuse-permission-denied"
+   :doc "refuses Unassign when serving user lacks write permission"
+   :viewer {:role "human" :agent ""}
+   :facts [{:e 1 "trusted-human-context" true "permission" "deny" "override-unknown-history" false}
+           {:e 100 "unassign-subject" true "kind" "unassign" "state" "OPEN" "number" 42 "target" "issue:42" "created" 0 "labels-complete" true "native-complete" true "reverse-complete" true "open-blockers" 0 "blocking-complete" true "impact-size" "unknown" "impact-state" "unknown" "complexity-size" "unknown" "complexity-state" "unknown" "head" "not-a-pr" "unassign-agent" "kavya" "claim-present" true "claim-history-complete" true "claim-start" "2026-11-18T10:00:00Z"}]
+   :expect {:actions [{:subject 100 :rule "D-UNASSIGN-REFUSE-PERMISSION-DENIED" :kind "unassign-refuse-permission-denied" :band 1
+               :why "The serving GitHub account does not have write, maintain or admin permission to release kavya."
+               :overridden []}] :denials []}}
+
+  {:id "unassign-refuse-permission-unknown"
+   :doc "refuses Unassign when repository write permission cannot be verified"
+   :viewer {:role "human" :agent ""}
+   :facts [{:e 1 "trusted-human-context" true "permission" "unknown" "override-unknown-history" false}
+           {:e 100 "unassign-subject" true "kind" "unassign" "state" "OPEN" "number" 42 "target" "issue:42" "created" 0 "labels-complete" true "native-complete" true "reverse-complete" true "open-blockers" 0 "blocking-complete" true "impact-size" "unknown" "impact-state" "unknown" "complexity-size" "unknown" "complexity-state" "unknown" "head" "not-a-pr" "unassign-agent" "kavya" "claim-present" true "claim-history-complete" true "claim-start" "2026-11-18T10:00:00Z"}]
+   :expect {:actions [{:subject 100 :rule "D-UNASSIGN-REFUSE-PERMISSION-UNKNOWN" :kind "unassign-refuse-permission-unknown" :band 1
+               :why "Repository write permission for the serving GitHub account could not be verified; refusing to release kavya."
+               :overridden []}] :denials []}}
+
+  {:id "unassign-noop"
+   :doc "returns noop when selected claim is absent and history is complete"
+   :viewer {:role "human" :agent ""}
+   :facts [{:e 1 "trusted-human-context" true "permission" "allow" "override-unknown-history" false}
+           {:e 100 "unassign-subject" true "kind" "unassign" "state" "OPEN" "number" 42 "target" "issue:42" "created" 0 "labels-complete" true "native-complete" true "reverse-complete" true "open-blockers" 0 "blocking-complete" true "impact-size" "unknown" "impact-state" "unknown" "complexity-size" "unknown" "complexity-state" "unknown" "head" "not-a-pr" "unassign-agent" "kavya" "claim-present" false "claim-history-complete" true "claim-start" ""}]
+   :expect {:actions [{:subject 100 :rule "D-UNASSIGN-NOOP" :kind "unassign-noop" :band 1
+               :why "Agent kavya no longer holds an active claim; human owners and ticket state are preserved."
+               :overridden []}] :denials []}}
+
+  {:id "unassign-refuse-evidence-incomplete"
+   :doc "refuses Unassign when claim history is incomplete without override"
+   :viewer {:role "human" :agent ""}
+   :facts [{:e 1 "trusted-human-context" true "permission" "allow" "override-unknown-history" false}
+           {:e 100 "unassign-subject" true "kind" "unassign" "state" "OPEN" "number" 42 "target" "issue:42" "created" 0 "labels-complete" true "native-complete" true "reverse-complete" true "open-blockers" 0 "blocking-complete" true "impact-size" "unknown" "impact-state" "unknown" "complexity-size" "unknown" "complexity-state" "unknown" "head" "not-a-pr" "unassign-agent" "kavya" "claim-present" true "claim-history-complete" false "claim-start" ""}]
+   :expect {:actions [{:subject 100 :rule "D-UNASSIGN-REFUSE-EVIDENCE-INCOMPLETE" :kind "unassign-refuse-evidence" :band 1
+               :why "Claim history for kavya is incomplete; inspect the ticket or confirm with an explicit human override."
+               :overridden []}] :denials []}}
+
+  {:id "unassign-refuse-claim-start-missing"
+   :doc "refuses Unassign when claim start is unknown without override"
+   :viewer {:role "human" :agent ""}
+   :facts [{:e 1 "trusted-human-context" true "permission" "allow" "override-unknown-history" false}
+           {:e 100 "unassign-subject" true "kind" "unassign" "state" "OPEN" "number" 42 "target" "issue:42" "created" 0 "labels-complete" true "native-complete" true "reverse-complete" true "open-blockers" 0 "blocking-complete" true "impact-size" "unknown" "impact-state" "unknown" "complexity-size" "unknown" "complexity-state" "unknown" "head" "not-a-pr" "unassign-agent" "kavya" "claim-present" true "claim-history-complete" true "claim-start" ""}]
+   :expect {:actions [{:subject 100 :rule "D-UNASSIGN-REFUSE-CLAIM-START-MISSING" :kind "unassign-refuse-evidence" :band 1
+               :why "Claim start timestamp for kavya is unknown; inspect the ticket or confirm with an explicit human override."
+               :overridden []}] :denials []}}
+
+  {:id "unassign-allow"
+   :doc "allows Unassign when context, permission, claim start and history are verified"
+   :viewer {:role "human" :agent ""}
+   :facts [{:e 1 "trusted-human-context" true "permission" "allow" "override-unknown-history" false}
+           {:e 100 "unassign-subject" true "kind" "unassign" "state" "OPEN" "number" 42 "target" "issue:42" "created" 0 "labels-complete" true "native-complete" true "reverse-complete" true "open-blockers" 0 "blocking-complete" true "impact-size" "unknown" "impact-state" "unknown" "complexity-size" "unknown" "complexity-state" "unknown" "head" "not-a-pr" "unassign-agent" "kavya" "claim-present" true "claim-history-complete" true "claim-start" "2026-11-18T10:00:00Z"}]
+   :expect {:actions [{:subject 100 :rule "D-UNASSIGN-ALLOW" :kind "unassign-allow" :band 1
+               :why "Release only agent:kavya (started 2026-11-18T10:00:00Z); preserve all human assignees, readiness labels, blockers, questions and other agents' claims."
+               :overridden []}] :denials []}}
+
+  {:id "unassign-allow-override"
+   :doc "allows Unassign under explicit human override when history is incomplete"
+   :viewer {:role "human" :agent ""}
+   :facts [{:e 1 "trusted-human-context" true "permission" "allow" "override-unknown-history" true}
+           {:e 100 "unassign-subject" true "kind" "unassign" "state" "OPEN" "number" 42 "target" "issue:42" "created" 0 "labels-complete" true "native-complete" true "reverse-complete" true "open-blockers" 0 "blocking-complete" true "impact-size" "unknown" "impact-state" "unknown" "complexity-size" "unknown" "complexity-state" "unknown" "head" "not-a-pr" "unassign-agent" "kavya" "claim-present" true "claim-history-complete" false "claim-start" ""}]
+   :expect {:actions [{:subject 100 :rule "D-UNASSIGN-ALLOW-OVERRIDE" :kind "unassign-allow" :band 1
+               :why "Release only agent:kavya under explicit human override; preserve all human assignees, readiness labels, blockers, questions and other agents' claims."
+               :overridden []}] :denials []}}]}

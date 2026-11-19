@@ -45,6 +45,8 @@ export interface ServeOptions {
   port: number;
   host: string;
   allowRemote: boolean;
+  /** Opt-in Human-view Unassign / served write routes (#588); disabled by default. */
+  allowEdits?: boolean;
   ttlMs: number;
   repos: string[];
   /** Absolute project checkouts, in the order given. */
@@ -73,6 +75,7 @@ authenticated gh and Node 26+. Never changes GitHub. Stop it with Ctrl-C.
                         Loopback addresses are always allowed; any other needs --allow-remote
   --allow-remote        Allow a non-loopback --host. The server has no authentication: anyone
                         who can reach it can read what your gh login can see
+  --allow-edits         Enable opt-in Human-view Unassign write routes with same-origin CSRF session
   --ttl DURATION        How long a collected result is reused, 1m to 10m (default 5m)
   --agent NAME          Default agent for focused reads (a request's agent wins)
   --entry KEY           Without an agent, use [agents.KEY] of the project's pdb.toml
@@ -128,6 +131,7 @@ export function serveArguments(
         port: { type: "string" },
         host: { type: "string" },
         "allow-remote": { type: "boolean" },
+        "allow-edits": { type: "boolean" },
         ttl: { type: "string" },
         repo: { type: "string", multiple: true },
         project: { type: "string", multiple: true },
@@ -151,9 +155,14 @@ export function serveArguments(
   if (host !== "localhost" && isIP(host) === 0)
     throw new ServeUsageError("--host must be a literal IP address or localhost.");
   const allowRemote = !!values["allow-remote"];
+  const allowEdits = !!values["allow-edits"];
   if (!isLoopback(host) && !allowRemote)
     throw new ServeUsageError(
       `--host ${host} is reachable from other machines; pass --allow-remote to accept that (no authentication is offered).`,
+    );
+  if (allowEdits && allowRemote)
+    throw new ServeUsageError(
+      "--allow-edits cannot be combined with --allow-remote: served writes have no authentication.",
     );
   let ttlMs = DEFAULT_TTL_MS;
   if (values.ttl !== undefined) {
@@ -192,6 +201,7 @@ export function serveArguments(
     port: Number(port),
     host,
     allowRemote,
+    allowEdits: !!values["allow-edits"],
     ttlMs,
     given: { port: values.port !== undefined, ttl: values.ttl !== undefined },
     repos,
