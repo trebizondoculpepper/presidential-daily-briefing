@@ -234,6 +234,8 @@
 [(refinement-open ?t ?q) [?t "refinement" ?q] [?q "refinement-state" "open"]]
 [(needs-refinement ?t) (refinement-open ?t ?q)]
 [(needs-refinement ?t) (refinement-unknown ?t)]
+;; Incomplete evidence on a ticket with refinement records cannot rule out an unread open request.
+[(needs-refinement ?t) [?t "refinement" _] [?t "refinement-complete" false]]
 [(refinement-pending ?q) [?q "refinement-question" ?r] (not (record-settled ?r))]
 ;; Only a trusted record settles a blocking question; an unverified or unknown author leaves it pending.
 [(refinement-pending ?q) [?q "refinement-question" ?r] (not [?r "record-trust" "trusted"])]
