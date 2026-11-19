@@ -582,6 +582,7 @@ async function runNativeStop(
       // once with eligible-event evidence (codex-installer.md "Hook definition"). Any resolution,
       // identity or state failure is a normal stop: {} and exit 0.
       const eventRecord = event as Record<string, unknown>;
+      if (controller.signal.aborted || runtime.signal?.aborted) throw new Error("aborted");
       const cwd = typeof eventRecord["cwd"] === "string" ? eventRecord["cwd"] : null;
       if (!cwd || !isAbsolute(cwd)) throw new Error("missing repository");
       const { git, gh, legacyGit } = rebriefServices(runtime, controller);
@@ -594,7 +595,7 @@ async function runNativeStop(
       if (!target || !target.root) throw new Error("missing repository");
       if (values.role !== undefined && !["implementer", "designer"].includes(values.role))
         throw new Error("invalid role");
-      const role = (values.role as "implementer" | "designer") ?? "implementer";
+      const requestedRole = values.role as "implementer" | "designer" | undefined;
       const effectiveIdentity = runtime.prepareIdentity
         ? await runtime.prepareIdentity({
             project: target.root,
@@ -602,7 +603,7 @@ async function runNativeStop(
             agent: values.agent,
             entry: values.entry,
             harness: values.harness,
-            role,
+            role: requestedRole,
             requireProject: true,
             intent: "readonly",
           })
@@ -620,11 +621,16 @@ async function runNativeStop(
             git,
           });
       if (!identity.agent) throw new Error("missing identity");
+      // An explicit --role wins; otherwise the stored identity's triage role decides the view
+      // rather than a hardcoded implementer default (reviewed #1124 finding).
+      const resolvedRole: "implementer" | "designer" =
+        (values.role as "implementer" | "designer") ??
+        (identity.triageRole === "designer" ? "designer" : "implementer");
       const context: Context = {
         repository,
         project: target.root,
         agent: identity.agent,
-        role,
+        role: resolvedRole,
         platform: profile.platform,
         session: String(eventRecord["session_id"]),
       };
