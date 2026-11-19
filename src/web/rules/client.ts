@@ -92,8 +92,16 @@ export function rulesLoader(
 ) {
   let current: AbortController | null = null;
   let sequence = 0;
+  let loaded: string | null = null;
   return {
+    /**
+     * Load the rules for `search`. An unchanged query (e.g. Back/Forward between the section
+     * links, which changes only the fragment) keeps the shown rules, their open details and the
+     * section targets; it reloads nothing.
+     */
     async load(search: string): Promise<void> {
+      if (search === loaded) return;
+      loaded = search;
       current?.abort();
       const controller = new AbortController();
       current = controller;

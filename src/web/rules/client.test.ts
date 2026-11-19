@@ -80,6 +80,29 @@ describe("rules client (#853)", () => {
   });
 });
 
+describe("rules loader history (#1138 review)", () => {
+  it("does not reload or reset the page when only the fragment changes", async () => {
+    const calls: string[] = [];
+    const states: State[] = [];
+    const loader = rulesLoader(
+      "/api/v1/rules",
+      (async (input: RequestInfo | URL) => {
+        calls.push(String(input));
+        return reply(200, body("a/b"));
+      }) as typeof fetch,
+      (s) => states.push(s),
+    );
+    await loader.load("?repo=a%2Fb");
+    // Back/Forward between #section links: the same query again.
+    await loader.load("?repo=a%2Fb");
+    expect(calls).toEqual(["/api/v1/rules?repo=a%2Fb"]);
+    expect(states.map((s) => s.status)).toEqual(["loading", "ready"]);
+    // A real query change still reloads.
+    await loader.load("?repo=a%2Fb&role=designer");
+    expect(calls).toHaveLength(2);
+  });
+});
+
 describe("rules page states (#853)", () => {
   it("renders loading, error and empty states, escaping error text", () => {
     expect(html({ status: "loading" })).toContain('role="status">Loading the rules…');
