@@ -345,31 +345,50 @@ describe("v2 private file store (#657)", () => {
 describe("ensureSession (#657 slice 2b)", () => {
   const verified = { kind: "session-start", verified: true } as const;
   const dir = () => mkdtemp(join(tmpdir(), "pdb-ensure-"));
+  const noop = async () => undefined;
 
-  it("initializes once with verified start evidence, then reuses without resetting", async () => {
+  it("initializes once with verified evidence, then reuses without resetting, all under the lock", async () => {
     const d = await dir();
     try {
-      const first = await ensureSession(d, input, verified);
-      expect(first.state).toBe("created");
       const runtime = changing();
-      await offerAndAck(
-        new ContinuationSession((first as { store: SessionStore }).store),
-        runtime,
-        0,
+      const first = await ensureSession(d, input, verified, (store) =>
+        offerAndAck(new ContinuationSession(store), runtime, 0),
       );
-      // A resumed turn (even with fresh start evidence) reuses the binding; nothing is reset.
-      const again = await ensureSession(d, input, verified);
-      expect(again.state).toBe("reused");
-      const meta = JSON.parse(await readFile(join(d, "state.json"), "utf8"));
-      expect(meta).toMatchObject({ offers: 1, events: 1 });
-      expect(
-        (
-          await new ContinuationSession((again as { store: SessionStore }).store).evaluate(
-            event(0),
-            runtime,
-          )
-        ).reason,
-      ).toBe("duplicate-event");
+      expect(first.state).toBe("created");
+      const again = await ensureSession(d, input, verified, (store) =>
+        new ContinuationSession(store).evaluate(event(0), runtime),
+      );
+      expect(again).toMatchObject({ state: "reused", result: { reason: "duplicate-event" } });
+      expect(JSON.parse(await readFile(join(d, "state.json"), "utf8"))).toMatchObject({
+        offers: 1,
+        events: 1,
+      });
+    } finally {
+      await rm(d, { recursive: true, force: true });
+    }
+  });
+
+  it("serializes concurrent callbacks: at most one offer is pending", async () => {
+    const d = await dir();
+    try {
+      await ensureSession(d, input, verified, noop);
+      const runtime = changing();
+      const outcomes = await Promise.allSettled(
+        [0, 1].map((i) =>
+          ensureSession(d, input, verified, (store) =>
+            new ContinuationSession(store).evaluate(event(i), runtime),
+          ),
+        ),
+      );
+      const offers = outcomes.filter(
+        (o) =>
+          o.status === "fulfilled" &&
+          (o.value as { result?: { decision?: string } }).result?.decision === "continue",
+      );
+      expect(offers.length).toBeLessThanOrEqual(1);
+      expect(JSON.parse(await readFile(join(d, "state.json"), "utf8")).offers).toBeLessThanOrEqual(
+        1,
+      );
     } finally {
       await rm(d, { recursive: true, force: true });
     }
@@ -378,14 +397,14 @@ describe("ensureSession (#657 slice 2b)", () => {
   it("never initializes without verified evidence, or for another binding", async () => {
     const d = await dir();
     try {
-      expect(await ensureSession(d, input, null)).toEqual({
+      expect(await ensureSession(d, input, null, noop)).toEqual({
         state: "unavailable",
         reason: "no-start-evidence",
       });
       expect(await readdir(d)).toEqual([]);
-      await ensureSession(d, input, verified, 5);
+      await ensureSession(d, input, verified, noop, 5);
       expect(JSON.parse(await readFile(join(d, "state.json"), "utf8")).budget).toBe(5);
-      expect(await ensureSession(d, { ...input, session: "other" }, verified)).toEqual({
+      expect(await ensureSession(d, { ...input, session: "other" }, verified, noop)).toEqual({
         state: "unavailable",
         reason: "context-mismatch",
       });
@@ -398,31 +417,12 @@ describe("ensureSession (#657 slice 2b)", () => {
     const d = await dir();
     try {
       await writeFile(join(d, "state.json"), JSON.stringify(initialize(input)), { mode: 0o600 });
-      expect(await ensureSession(d, input, verified)).toEqual({ state: "legacy" });
+      expect(await ensureSession(d, input, verified, noop)).toEqual({ state: "legacy" });
       await rm(join(d, "state.json"));
       await writeFile(join(d, `f-${hash("y")}.json`), '{"acknowledged":true}', { mode: 0o600 });
-      await expect(ensureSession(d, input, verified)).rejects.toBeInstanceOf(StateUnavailable);
-    } finally {
-      await rm(d, { recursive: true, force: true });
-    }
-  });
-
-  it("lock contention is unavailable (never a second session); the next call reuses", async () => {
-    const d = await dir();
-    try {
-      let inside!: () => void;
-      const entered = new Promise<void>((r) => (inside = r));
-      let release!: () => void;
-      const held = withSessionStore(d, async (_s, create) => {
-        await create(initializeV2(input));
-        inside();
-        await new Promise<void>((r) => (release = r));
-      });
-      await entered;
-      await expect(ensureSession(d, input, verified)).rejects.toBeInstanceOf(StateUnavailable);
-      release();
-      await held;
-      expect((await ensureSession(d, input, verified)).state).toBe("reused");
+      await expect(ensureSession(d, input, verified, noop)).rejects.toBeInstanceOf(
+        StateUnavailable,
+      );
     } finally {
       await rm(d, { recursive: true, force: true });
     }

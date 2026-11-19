@@ -206,35 +206,36 @@ export interface SessionStartEvidence {
   verified: true;
 }
 
-export type EnsuredSession =
-  | { state: "created"; store: SessionStore }
-  | { state: "reused"; store: SessionStore }
+export type EnsuredSession<T> =
+  | { state: "created" | "reused"; result: T }
   | { state: "legacy" }
   | { state: "unavailable"; reason: "context-mismatch" | "no-start-evidence" };
 
 /**
- * Ensure the v2 session for one native binding, under the directory's lock: reuse a matching
- * session (a concurrent winner or a resumed turn) without resetting it, initialize an empty
- * directory once with verified start evidence, and otherwise report why not. A legacy v1
- * directory is reported, never upgraded; leftover records with lost metadata, an unknown schema
- * or an unusable directory raise StateUnavailable. Nothing here selects a work budget beyond the
- * caller's explicit `budget`.
+ * Ensure the v2 session for one native binding and run `work` on it, all under the directory's
+ * exclusive lock, so the store is never used after the lock is released (the state holder owns
+ * synchronization; one pending offer). A matching session (a resumed turn or a concurrent
+ * winner) is reused without reset; an empty directory is initialized once only with verified
+ * start evidence; otherwise the reason is reported. A legacy v1 directory is reported, never
+ * upgraded; leftover records with lost metadata, an unknown schema, an unusable directory or
+ * lock contention raise StateUnavailable. No budget is selected beyond the caller's `budget`.
  */
-export async function ensureSession(
+export async function ensureSession<T>(
   directory: string,
   context: Context,
   evidence: SessionStartEvidence | null,
+  work: (store: SessionStore) => Promise<T>,
   budget: number | null = null,
-): Promise<EnsuredSession> {
-  return withSessionStore(directory, async (stored, create) => {
+): Promise<EnsuredSession<T>> {
+  return withSessionStore(directory, async (stored, create): Promise<EnsuredSession<T>> => {
     if (stored.version === 1) return { state: "legacy" };
     if (stored.version === 2) {
       const meta = await stored.store.meta();
       return meta?.context === contextKey(context)
-        ? { state: "reused", store: stored.store }
+        ? { state: "reused", result: await work(stored.store) }
         : { state: "unavailable", reason: "context-mismatch" };
     }
     if (!evidence?.verified) return { state: "unavailable", reason: "no-start-evidence" };
-    return { state: "created", store: await create(initializeV2(context, budget)) };
+    return { state: "created", result: await work(await create(initializeV2(context, budget))) };
   });
 }
