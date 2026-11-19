@@ -8,10 +8,10 @@
  * cache. `node:http` messages are converted to web `Request`/`Response` directly; no framework
  * or Node adapter package is added. The stdio `pdb-mcp` is untouched.
  */
+import { createGhService } from "../github/service/service.js";
 import type { Query } from "../github/github.js";
 import { readDiscussion } from "../briefing/discussion.js";
 import type { DiscussionView } from "../briefing/discussion.js";
-import { discussionPage } from "../github/service/snapshot.js";
 import { randomUUID } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { Readable } from "node:stream";
@@ -117,19 +117,13 @@ export function cachedMcpRuntime(
                 readDiscussion({
                   repository,
                   scope,
-                  gh: {
-                    snapshot: {
-                      discussionPage: (repo, state, size, cursor, pageSignal) =>
-                        discussionPage(
-                          guardedQueryWith(pageSignal ?? inner) as Query,
-                          repo,
-                          state,
-                          size,
-                          cursor,
-                          pageSignal ?? inner,
-                        ),
-                    },
-                  },
+                  // The typed GH service from the composition factory, over this server's guarded,
+                  // signal-bound executor: no raw adapter call (#1118 review).
+                  gh: createGhService({
+                    query: guardedQueryWith(inner) as Query,
+                    ...(read.rest ? { rest: read.rest } : {}),
+                    ...(read.now ? { now: read.now } : {}),
+                  }),
                   signal: inner,
                   ...(read.now ? { now: read.now } : {}),
                 }),

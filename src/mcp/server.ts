@@ -1,6 +1,5 @@
 import { readDiscussion } from "../briefing/discussion.js";
 import type { DiscussionView } from "../briefing/discussion.js";
-import { discussionPage } from "../github/service/snapshot.js";
 import {
   startLocalIdentity,
   withDisplayRole,
@@ -400,25 +399,15 @@ export const dependenciesInput = z.strictObject({
  * The GH facade slice the discussion read uses (#1101): the runtime's composed facade, else a
  * signal-bound executor from the injected query boundary, else the default production facade.
  */
-function discussionGhOf(rt: McpRuntime): {
-  snapshot: Pick<GhService["snapshot"], "discussionPage">;
-} {
+function discussionGhOf(
+  rt: McpRuntime,
+  signal: AbortSignal,
+): { snapshot: Pick<GhService["snapshot"], "discussionPage"> } {
   if (rt.gh) return rt.gh;
-  if (rt.queryWith || rt.query)
-    return {
-      snapshot: {
-        discussionPage: (repository, scope, pageSize, cursor, signal) =>
-          discussionPage(
-            (rt.queryWith?.(signal) ?? rt.query) as Query,
-            repository,
-            scope,
-            pageSize,
-            cursor,
-            signal,
-          ),
-      },
-    };
-  return createGhService();
+  // The typed GH service from the composition factory over the injected, signal-bound boundary;
+  // never a raw adapter call (#1118 review).
+  const query = rt.queryWith?.(signal) ?? rt.query;
+  return createGhService(query ? { query: query as Query } : {});
 }
 
 /** The discussion view (#1101): validated at the adapter; the shared service owns the result. */
@@ -1033,7 +1022,7 @@ export function createServer(
             : await readDiscussion({
                 repository: selection.repository,
                 scope: args.state,
-                gh: discussionGhOf(rt),
+                gh: discussionGhOf(rt, ctx.mcpReq.signal),
                 signal: ctx.mcpReq.signal,
                 ...(rt.now ? { now: rt.now } : {}),
               });
