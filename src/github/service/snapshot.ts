@@ -50,6 +50,80 @@ export async function discoveryPage(
   return repositoryOf(data, repository)[field];
 }
 
+/** One issue's discussion facts (#1099): GitHub's total comment count, never downloaded comments. */
+export interface DiscussionNode {
+  number: number;
+  title: string;
+  url: string;
+  state: "OPEN" | "CLOSED";
+  /** GitHub's `comments.totalCount`; null when the answer did not carry it. */
+  comments: number | null;
+}
+
+/** One discussion page as validated: nodes (null when unreadable) and established pagination. */
+export interface DiscussionPage {
+  nodes: (DiscussionNode | null)[];
+  pageInfo: { hasNextPage: boolean; endCursor: string | null };
+}
+
+/**
+ * One page of issues in the requested state scope with their total comment counts (#1099),
+ * most recently updated first. Malformed nodes are returned as null so the caller can count them
+ * as unread rather than dropping them; a missing repository is an error, never empty.
+ */
+export async function discussionPage(
+  query: Query,
+  repository: string,
+  scope: "open" | "closed" | "all",
+  pageSize: number,
+  cursor: string | null,
+  signal?: AbortSignal,
+): Promise<DiscussionPage> {
+  signal?.throwIfAborted();
+  const states = scope === "open" ? "[OPEN]" : scope === "closed" ? "[CLOSED]" : "[OPEN, CLOSED]";
+  const source = `query($owner:String!,$name:String!,$cursor:String){repository(owner:$owner,name:$name){issues(first:${pageSize},after:$cursor,orderBy:{field:UPDATED_AT,direction:DESC},states:${states}){nodes{number title url state comments{totalCount}} ${pageInfoFields}}}}`;
+  const data = await query(source, { ...ownerName(repository), ...(cursor ? { cursor } : {}) });
+  const issues = repositoryOf(data, repository).issues;
+  if (!isRecord(issues) || !Array.isArray(issues.nodes) || !isRecord(issues.pageInfo))
+    throw new Error(`Malformed issue page for ${repository}`);
+  const info = issues.pageInfo;
+  // Completeness must be established, never assumed: a page that cannot say whether more exist,
+  // or claims more without a cursor to reach them, is malformed rather than the end.
+  if (
+    typeof info.hasNextPage !== "boolean" ||
+    (info.hasNextPage && (typeof info.endCursor !== "string" || info.endCursor === ""))
+  )
+    throw new Error(
+      `Malformed issue page for ${repository}: pagination cannot establish completeness`,
+    );
+  const nodes = issues.nodes.map((node): DiscussionNode | null => {
+    if (!isRecord(node)) return null;
+    const { number, title, url, state, comments } = node;
+    if (
+      typeof number !== "number" ||
+      typeof title !== "string" ||
+      typeof url !== "string" ||
+      (state !== "OPEN" && state !== "CLOSED")
+    )
+      return null;
+    const total = isRecord(comments) ? comments.totalCount : undefined;
+    return {
+      number,
+      title,
+      url,
+      state,
+      comments: typeof total === "number" && Number.isInteger(total) && total >= 0 ? total : null,
+    };
+  });
+  return {
+    nodes,
+    pageInfo: {
+      hasNextPage: info.hasNextPage,
+      endCursor: typeof info.endCursor === "string" ? info.endCursor : null,
+    },
+  };
+}
+
 /**
  * Several issues by number in one aliased request, in order. Each entry is the issue as returned
  * or null when absent; the caller validates every node (null or malformed is unknown, not closed).
