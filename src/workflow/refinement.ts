@@ -845,3 +845,106 @@ export async function resolveRefinement(
   const plan = await planRefinementResolve(repository, input, writes.query, writes.permission);
   return writeThenIndex(repository, plan, input.number, input.agent, writes);
 }
+
+/**
+ * A read-only preview of `resolveRefinement` (#1096): the resolve record, then the label removal a
+ * real run would make if no other request stays outstanding; for an already recorded resolve,
+ * the current label reconciliation. Nothing is written.
+ */
+export async function previewRefinementResolve(
+  repository: string,
+  input: RefinementResolveInput,
+  query: GraphQuery | TicketReads,
+  permission: PermissionLookup,
+): Promise<ClaimPlan> {
+  const plan = await planRefinementResolve(repository, input, query, permission);
+  if (!plan.ok) return plan;
+  if (plan.noop) {
+    const label = await planRefinementLabel(
+      repository,
+      input.number,
+      input.agent,
+      query,
+      permission,
+    );
+    if (!label.ok) return label;
+    return { ...plan, noop: label.noop, changes: label.changes };
+  }
+  const read = await readComplete(repository, input.number, input.agent, query);
+  if (isRefusal(read)) return read;
+  const fold = await foldRefinement(repository, input.number, read.comments, permission);
+  const othersOutstanding = fold.requests.some((q) => q.opId !== input.request && !q.resolved);
+  const present = read.item.labels.nodes.some((l) => l.name === refinementLabel);
+  return present && !othersOutstanding
+    ? {
+        ...plan,
+        changes: [
+          ...plan.changes,
+          writeStep("labels", {
+            kind: "labels-edit",
+            repository,
+            number: input.number,
+            add: [],
+            remove: [refinementLabel],
+          }),
+        ],
+      }
+    : plan;
+}
+
+/** One request as `pdb refine status` lists it. */
+export interface RefinementStatusRequest {
+  request: string;
+  /** The request's question: its comment URL is the question ID `pdb question` takes. */
+  question: string;
+  /** The question's first trusted explicit outcome, or none. */
+  outcome: "none" | "resolve" | "withdraw";
+  state: "open" | "resolved";
+  /** The resolve record's comment URL, when resolved. */
+  resolvedBy: string | null;
+  dependencies: string[];
+}
+export type RefinementStatus =
+  | {
+      ok: true;
+      facts: ClaimFacts;
+      requests: RefinementStatusRequest[];
+      /** Records that could not be verified: the listing is incomplete, never settled. */
+      unknown: string[];
+      rejected: string[];
+      labelPresent: boolean;
+    }
+  | ClaimRefusal;
+
+/**
+ * Read one ticket's refinement requests (#1096): each request's question ID, outcome and state,
+ * from the trusted records. Read-only; unknown records are reported, never treated as settled.
+ */
+export async function readRefinementStatus(
+  repository: string,
+  number: number,
+  agent: string,
+  query: GraphQuery | TicketReads,
+  permission: PermissionLookup,
+): Promise<RefinementStatus> {
+  const read = await readComplete(repository, number, agent, query);
+  if (isRefusal(read)) return read;
+  const fold = await foldRefinement(repository, number, read.comments, permission);
+  const url = (id: string) =>
+    `https://github.com/${repository}/issues/${number}#issuecomment-${id}`;
+  return {
+    ok: true,
+    facts: read.facts,
+    requests: fold.requests.map((q) => ({
+      request: q.opId,
+      question: url(q.comment),
+      outcome: q.outcome,
+      state: q.resolved ? "resolved" : "open",
+      resolvedBy: q.resolved ? url(q.resolved.comment) : null,
+      dependencies: q.dependencies,
+    })),
+    unknown: fold.unknown,
+    rejected: fold.rejected,
+    labelPresent: read.item.labels.nodes.some((l) => l.name === refinementLabel),
+  };
+}
