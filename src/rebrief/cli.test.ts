@@ -7,9 +7,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { main } from "../cli.js";
 import { runRebrief } from "./cli.js";
-import { initialize, RebriefSession } from "./core.js";
+import { initialize, initializeV2, memoryStore, RebriefSession } from "./core.js";
+import type { SessionStore } from "./core.js";
 import type { Context, Transport } from "./core.js";
+const noCreate = async (): Promise<SessionStore> => {
+  throw new Error("unexpected create");
+};
 import { withPrivateState } from "./state.js";
+import { read as fixtureRead } from "./fixtures.js";
 import { serviceTransport } from "./transports.js";
 import { snapshot, issue, pr, repo, clock } from "../testing/snapshots.js";
 import { dependencyReport } from "../github/dependencies.js";
@@ -404,7 +409,13 @@ describe("rebrief CLI/private state", () => {
           signal: controller.signal,
           transport: () => transport,
           state: async (_path, work) => {
-            const result = await work(initialize({ ...context, repository: repo }), async () => {});
+            const result = await work(
+              {
+                version: 2,
+                store: memoryStore(initializeV2({ ...context, repository: repo })),
+              },
+              noCreate,
+            );
             offered =
               !!result &&
               typeof result === "object" &&
@@ -503,7 +514,13 @@ describe("rebrief CLI/private state", () => {
             {
               git,
               state: async (_path, work) =>
-                work(initialize({ ...context, project: "/project" }), async () => {}),
+                work(
+                  {
+                    version: 2,
+                    store: memoryStore(initializeV2({ ...context, project: "/project" })),
+                  },
+                  noCreate,
+                ),
               fs: {
                 readText: async () => null,
                 writeText: async () => {
@@ -657,5 +674,106 @@ describe("rebrief default Git boundary (#933)", () => {
     );
     expect(source).not.toMatch(/\bnodeGit\b/);
     expect(source).toMatch(/createGitService\(\)/);
+  });
+});
+
+describe("approved continuation through the CLI (#657 slice 2)", () => {
+  /** A fresh, valid read for the CLI context whose queue changes on every call. */
+  const changingTransport = (): Transport => {
+    let n = 0;
+    return {
+      freshRead: true,
+      read: async () => {
+        const r = fixtureRead();
+        const report = r.report as {
+          freshness: { startedAt: string; fetchedAt: string };
+          decisionEngine: { rulesHash: string };
+        };
+        const at = new Date().toISOString();
+        report.freshness.startedAt = at;
+        report.freshness.fetchedAt = at;
+        report.decisionEngine.rulesHash = `rules${n++}`;
+        return { ...r, selection: { ...r.selection, agent: context.agent } };
+      },
+    };
+  };
+  async function run(args: string[], transport?: Transport) {
+    let text = "";
+    expect(
+      await runRebrief(
+        args,
+        async (t) => void (text = t),
+        transport ? { transport: () => transport } : {},
+      ),
+    ).toBe(0);
+    return JSON.parse(text) as {
+      decision: string;
+      reason: string;
+      fingerprint: string | null;
+      legacy?: string;
+    };
+  }
+  const check = (args: string[], event: string, transport: Transport, extra: string[] = []) =>
+    run(
+      ["check", ...args, "--event", event, "--reason", "natural", "--enabled", ...extra],
+      transport,
+    );
+  const ack = (args: string[], event: string, fingerprint: string) =>
+    run(["ack", ...args, "--event", event, "--fingerprint", fingerprint]);
+
+  it("init creates a v2 session with no default limit: more than three acknowledged offers", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "pdb-rebrief-"));
+    const args = [...common, "--state-dir", dir];
+    const transport = changingTransport();
+    try {
+      expect((await run(["init", ...args])).reason).toBe("initialized");
+      const meta = JSON.parse(await readFile(join(dir, "state.json"), "utf8"));
+      expect(meta).toMatchObject({ schemaVersion: 2, budget: null });
+      for (let i = 0; i < 5; i++) {
+        const offered = await check(args, `event-${i}`, transport);
+        expect(offered.decision, offered.reason).toBe("continue");
+        expect(offered.legacy).toBeUndefined();
+        expect((await ack(args, `event-${i}`, offered.fingerprint!)).reason).toBe("acknowledged");
+      }
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps an explicit --cap budget, including values above the old limit of three", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "pdb-rebrief-"));
+    const args = [...common, "--state-dir", dir];
+    const transport = changingTransport();
+    try {
+      await run(["init", ...args, "--cap", "4"]);
+      expect(JSON.parse(await readFile(join(dir, "state.json"), "utf8")).budget).toBe(4);
+      for (let i = 0; i < 4; i++) {
+        const offered = await check(args, `event-${i}`, transport);
+        await ack(args, `event-${i}`, offered.fingerprint!);
+      }
+      expect((await check(args, "event-4", transport)).reason).toBe("continuation-cap");
+      expect((await check(args, "event-5", transport, ["--cap", "100"])).reason).toBe(
+        "continuation-cap",
+      );
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("reports a legacy v1 session's limit and recovery, without upgrading it", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "pdb-rebrief-"));
+    const args = [...common, "--state-dir", dir];
+    try {
+      await withPrivateState(dir, async (_s, save) => save(initialize(context)));
+      const before = await readFile(join(dir, "state.json"), "utf8");
+      const result = await check(args, "event-0", changingTransport());
+      expect(result.decision).toBe("continue");
+      expect(result.legacy).toContain("Legacy v1 session: at most three continuation offers");
+      expect(JSON.parse(await readFile(join(dir, "state.json"), "utf8")).schemaVersion).toBe(1);
+      expect(before).toContain('"schemaVersion":1');
+      expect((await run(["init", ...args])).reason).toBe("state-exists");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });

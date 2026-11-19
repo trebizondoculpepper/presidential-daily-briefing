@@ -40,7 +40,8 @@ Reuse the thin Codex adapter and shared #506 core. One fresh bounded service rea
 no retries or update checks. An explicit `--transport http-mcp` retains the shared
 core's stop/defer behavior while fresh-read capability is unavailable; do not
 silently downgrade that request to a service read. Optional `--deadline-ms` and
-`--cap` can only lower shared bounds (10 seconds and three continuations). The
+`--cap` select explicit bounds: the deadline can only lower 10 seconds, and `--cap N`
+is a finite user budget (no default total limit since #657). The
 native timeout must exceed the selected package deadline by a small cleanup
 margin. Signal handling covers stdin, identity/state setup and the read; cancelled
 results must not become blocking feedback.
