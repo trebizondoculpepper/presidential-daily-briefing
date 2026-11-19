@@ -362,9 +362,9 @@ export const help = `Usage: pdb [options]
        (from a source checkout: npm run pdb -- [options])
 Presidential Daily Briefing: evidence-linked actions for coding agents. Requires authenticated gh and Node 26+.
 Next-action default: Datalog, implementer view; --role designer selects design work.
-Normal CLI first use: pass --role implementer|designer to safely initialize a missing local
-identity and continue. Configured sessions reuse it. --entry/--harness select local identity;
-explicit reads and dry-runs do not initialize. JSON adds effectiveIdentity; diagnostics use stderr.
+Briefings and other reads never create an agent identity (#865): without one they show
+the requested view unattributed. Create one with pdb setup identity --role implementer|designer;
+configured sessions reuse it, and --entry/--harness select a local identity. JSON adds effectiveIdentity; diagnostics use stderr.
 The native policy is the only next-action scheduler.
 ${crashDisclosure()}
   briefing [--last 24h | --since ISO | --checkpoint PATH]  Read-only repository catch-up:
@@ -2650,11 +2650,12 @@ async function run(
             entry: options.entry,
             harness: options.harness,
             role: options.role === "human" ? undefined : options.role,
-            intent: options.role === "human" || options.offline ? "readonly" : "normal",
+            // #865: a briefing is an observational read; it never initializes an identity.
+            intent: "readonly",
             offline: !!options.offline,
             authenticationRequired: false,
           },
-          { json: !!options.json, allowUnresolved: options.role === "human" || !!options.offline },
+          { json: !!options.json, allowUnresolved: true },
         )
       : undefined);
   // A human view's agent flag is its existing routing filter, never an execution-agent override.

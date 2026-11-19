@@ -136,7 +136,9 @@ const unknownHuman: HumanContext = {
 const selectionError = (
   message: string,
   recovery = "Select the intended logical entry with --entry KEY; supply --role implementer|designer when creating a new identity.",
-) => new ConfigError("identity-unresolved", message, recovery);
+  /** #865: `identity-absent` marks genuine absence only; broken or invalid bindings keep `identity-unresolved`. */
+  code: "identity-unresolved" | "identity-absent" = "identity-unresolved",
+) => new ConfigError(code, message, recovery);
 const problem = (error: unknown): NonNullable<EffectiveIdentity["diagnostic"]> =>
   error instanceof ConfigError
     ? error.code === "not-a-repository" || error.code === "repository-mismatch"
@@ -289,7 +291,16 @@ export async function prepareEffectiveIdentity(
         newSession = true;
         record = await readIdentity(target.root, entry, fs);
       }
-    } else throw selectionError("No verified per-agent binding is available for this invocation.");
+    } else
+      throw selectionError(
+        "No verified per-agent binding is available for this invocation.",
+        // #865: a read continues unattributed and never suggests creating an identity; an
+        // attributed operation still gets the selection and setup recovery.
+        options.intent === "readonly"
+          ? "The read continues without an agent attribution; --agent or --entry KEY personalizes it."
+          : undefined,
+        "identity-absent",
+      );
 
     if (record.problems.length) throw selectionError(record.problems.join(" "));
     if ((record.entryExists || record.name !== null) && (!record.name || !isAgentName(record.name)))
@@ -301,8 +312,11 @@ export async function prepareEffectiveIdentity(
     const needsWrite = !record.name || record.source === "legacy-not-imported" || bindingNeeded;
     if (options.intent === "readonly") {
       if (!record.name)
+        // #865: a read never suggests creating an identity; it continues unattributed.
         throw selectionError(
           "The selected identity has not been initialized; this read did not initialize it.",
+          "The read continues without an agent attribution.",
+          "identity-absent",
         );
       return resolved(record, {
         state: "reused",

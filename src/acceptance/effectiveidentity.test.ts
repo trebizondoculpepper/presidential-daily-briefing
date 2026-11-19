@@ -40,6 +40,22 @@ const runtimeFor = (f: IdentityFixture, stderr: string[]): Runtime => ({
       },
     ),
 });
+/**
+ * #865: reads never create an identity, so tests create one the way an attributed first-use
+ * operation does: normal-intent preparation over the same injected fixture and environment.
+ */
+const create = async (f: IdentityFixture, role: "implementer" | "designer") =>
+  prepareEffectiveIdentity(
+    { project: f.root, role, intent: "normal" },
+    {
+      env,
+      fs: f.fs,
+      git: f.git,
+      random: f.random,
+      human: async () => ({ context: human, authenticationFailed: false }),
+    },
+  );
+
 const invoke = async (runtime: Runtime, flags: string[]) => {
   const writes: string[] = [];
   const code = await main(
@@ -68,36 +84,31 @@ const invoke = async (runtime: Runtime, flags: string[]) => {
 };
 
 describe("effective identity in actual CLI results (#677)", () => {
-  it("creates on normal first use, then reuses without --agent or a manual lookup", async () =>
+  it("never creates an identity from a briefing, and reuses one created by an attributed operation (#865)", async () =>
     fixture(async (f) => {
       const stderr: string[] = [];
       const runtime = runtimeFor(f, stderr);
-      const first = await invoke(runtime, ["--json", "--role", "implementer"]);
-      expect(first.document.effectiveIdentity).toMatchObject({
-        agent: expect.any(String),
-        human,
-        setup: { state: "created", persisted: true },
-      });
-      expect(first.document.employingHuman).toEqual(human);
-      expect(stderr.join("")).toContain(
-        `created agent identity ${first.document.effectiveIdentity.agent}`,
-      );
-      // #681: optional next-step guidance appears only on first creation, with exact commands.
-      expect(stderr.join("")).toContain("Optional next steps (nothing runs automatically):");
-      expect(stderr.join("")).toContain("pdb doctor");
+      const unattributed = await invoke(runtime, ["--json", "--role", "implementer"]);
+      expect(unattributed.code).toBe(0);
+      expect(unattributed.document.effectiveIdentity).toMatchObject({ agent: null });
+      expect(unattributed.document.employingHuman).toEqual(human);
+      expect(stderr.join("")).not.toContain("created agent identity");
+      expect(stderr.join("")).not.toContain("Optional next steps");
+      expect(await f.fs.readText(f.file)).toBeNull();
+      const created = await create(f, "implementer");
+      expect(created.agent).toEqual(expect.any(String));
       stderr.length = 0;
       const again = await invoke(runtime, ["--json"]);
       expect(again.document.effectiveIdentity).toMatchObject({
-        agent: first.document.effectiveIdentity.agent,
+        agent: created.agent,
         roleSource: "stored",
         setup: { state: "reused", notices: [] },
       });
       expect(stderr.join("")).not.toContain("created agent identity");
-      expect(stderr.join("")).not.toContain("Optional next steps");
-      expect(JSON.stringify(first.document)).not.toContain(env.CODEX_THREAD_ID);
+      expect(JSON.stringify(again.document)).not.toContain(env.CODEX_THREAD_ID);
     }));
 
-  it("reports missing role as a setup result before collection and writes nothing", async () =>
+  it("shows an ordinary unattributed briefing with no identity and writes nothing (#865)", async () =>
     fixture(async (f) => {
       const stderr: string[] = [];
       let collects = 0;
@@ -111,17 +122,15 @@ describe("effective identity in actual CLI results (#677)", () => {
         },
         ["--json"],
       );
-      expect(result.code).toBe(2);
-      expect(result.document).toMatchObject({
-        kind: "identity-preparation",
-        effectiveIdentity: { state: "unresolved", agent: null },
-      });
-      expect(stderr.join("")).toContain("--role implementer|designer");
-      expect(collects).toBe(0);
+      expect(result.code).toBe(0);
+      expect(result.document.kind).not.toBe("identity-preparation");
+      expect(result.document.effectiveIdentity).toMatchObject({ agent: null });
+      expect(stderr.join("")).not.toContain("--role implementer|designer");
+      expect(collects).toBe(1);
       expect(await readdir(f.root)).toEqual([]);
     }));
 
-  it("keeps a successfully persisted identity when the original command fails", async () =>
+  it("a failing briefing neither creates nor changes an identity (#865)", async () =>
     fixture(async (f) => {
       const stderr: string[] = [];
       const runtime = runtimeFor(f, stderr);
@@ -141,20 +150,15 @@ describe("effective identity in actual CLI results (#677)", () => {
         ),
       ).rejects.toThrow("original collection failed");
       expect(writes).toEqual([]);
-      expect(stderr.join("")).toContain("created agent identity");
-      const raw = await f.fs.readText(f.file);
-      stderr.length = 0;
-      const retried = await invoke(runtime, ["--json"]);
-      expect(retried.document.effectiveIdentity.setup.state).toBe("reused");
-      expect(await f.fs.readText(f.file)).toBe(raw);
       expect(stderr.join("")).not.toContain("created agent identity");
+      expect(await f.fs.readText(f.file)).toBeNull();
     }));
 
   it("retains human attention and routing while reporting separate execution metadata", async () =>
     fixture(async (f) => {
       const stderr: string[] = [];
       const runtime = runtimeFor(f, stderr);
-      await invoke(runtime, ["--json", "--role", "designer"]);
+      await create(f, "designer");
       const raw = await f.fs.readText(f.file);
       const report = await invoke(runtime, ["--json", "--role", "human", "--agent", "owner"]);
       expect(report.document.decisionEngine?.role?.used).toBe("human");
@@ -166,7 +170,7 @@ describe("effective identity in actual CLI results (#677)", () => {
       expect(await f.fs.readText(f.file)).toBe(raw);
     }));
 
-  it("puts first-use diagnostics on stderr and keeps text stdout as the report", async () =>
+  it("prints no identity-creation diagnostics for a read, and keeps text stdout as the report (#865)", async () =>
     fixture(async (f) => {
       const stderr: string[] = [];
       let stdout = "";
@@ -177,7 +181,7 @@ describe("effective identity in actual CLI results (#677)", () => {
         },
         runtimeFor(f, stderr),
       );
-      expect(stderr.join("")).toContain("created agent identity");
+      expect(stderr.join("")).not.toContain("created agent identity");
       expect(stdout).not.toContain("created agent identity");
       expect(stdout).toContain("Working for: owner");
     }));
@@ -185,7 +189,7 @@ describe("effective identity in actual CLI results (#677)", () => {
   it("does not advance a checkpoint before the attributed JSON reaches stdout", async () =>
     fixture(async (f) => {
       const runtime = runtimeFor(f, []);
-      await invoke(runtime, ["--json", "--role", "implementer"]);
+      await create(f, "implementer");
       const path = f.root + "/checkpoint.json";
       let flush: (() => void) | undefined;
       let written: (() => void) | undefined;
@@ -221,7 +225,7 @@ describe("effective identity in actual CLI results (#677)", () => {
   it("passes the bound actor into a live claim plan without --agent", async () =>
     fixture(async (f) => {
       const runtime = runtimeFor(f, []);
-      const first = await invoke(runtime, ["--json", "--role", "implementer"]);
+      const first = { document: { effectiveIdentity: await create(f, "implementer") } };
       const before = await f.fs.readText(f.file);
       const labels: unknown[] = [];
       let writes = 0;
@@ -292,10 +296,42 @@ describe("effective identity in actual CLI results (#677)", () => {
     fixture(async (f) => {
       const report = await invoke(runtimeFor(f, []), ["briefing", "--json", "--role", "designer"]);
       expect(report.document.kind).toBe("repository-briefing");
-      expect(report.document.effectiveIdentity).toMatchObject({
-        role: "designer",
-        setup: { state: "created" },
-      });
+      // #865: the catch-up read is observational: it never creates an identity.
+      expect(report.document.effectiveIdentity).toMatchObject({ agent: null });
+      expect(report.document.effectiveIdentity.setup?.state).not.toBe("created");
+      expect(await f.fs.readText(f.file)).toBeNull();
+    }));
+
+  it("still refuses a read with an invalid explicit selector (#865 review)", async () =>
+    fixture(async (f) => {
+      for (const flags of [
+        ["--json", "--role", "implementer", "--agent", "invalid name"],
+        ["--json", "--role", "implementer", "--entry", "codex", "--harness", "claude"],
+      ]) {
+        const result = await invoke(runtimeFor(f, []), flags).catch((error: Error) => ({
+          code: 1,
+          document: { kind: `refused: ${error.message}` } as { kind?: string },
+        }));
+        expect(result.code).not.toBe(0);
+        expect(result.document.kind).not.toBe("briefing");
+        expect(await f.fs.readText(f.file)).toBeNull();
+      }
+    }));
+
+  it("still requires attribution for a claim when no identity exists (#865)", async () =>
+    fixture(async (f) => {
+      const blocked = async (): Promise<never> => {
+        throw new Error("an unattributed claim must not plan or write");
+      };
+      const result = await invoke({ ...runtimeFor(f, []), query: blocked, ghRun: blocked }, [
+        "claim",
+        "7",
+        "--json",
+      ]);
+      expect(result.code).toBe(2);
+      expect(result.document.kind).toBe("identity-preparation");
+      expect(result.document.effectiveIdentity).toMatchObject({ agent: null });
+      expect(await f.fs.readText(f.file)).toBeNull();
     }));
 
   it("uses the bound agent in an issue-creation preview without POSTing", async () =>
@@ -303,7 +339,7 @@ describe("effective identity in actual CLI results (#677)", () => {
       await mkdir(f.root + "/.github");
       await f.fs.writeText(f.root + "/.github/triage.toml", "schemaVersion = 1\n");
       const runtime = runtimeFor(f, []);
-      const first = await invoke(runtime, ["--json", "--role", "implementer"]);
+      const first = { document: { effectiveIdentity: await create(f, "implementer") } };
       let posts = 0;
       const report = await invoke(
         {
@@ -386,7 +422,7 @@ describe("effective identity in actual CLI results (#677)", () => {
   it("follows a transfer with the verified invocation identity and no destination setup", async () =>
     fixture(async (f) => {
       const runtime = runtimeFor(f, []);
-      const first = await invoke(runtime, ["--json", "--role", "designer"]);
+      const first = { document: { effectiveIdentity: await create(f, "designer") } };
       const raw = await f.fs.readText(f.file);
       const prepared: (string | undefined)[] = [];
       const collected: string[] = [];
@@ -435,8 +471,9 @@ describe("effective identity in actual CLI results (#677)", () => {
     }));
 
   it.each(
+    // Attributed operations only: a read never prepares an identity (#865), so it is covered by
+    // the unattributed-briefing tests rather than this setup-refusal matrix.
     [
-      [],
       ["claim", "7"],
       ["complete", "7"],
       ["submit", "7"],
@@ -478,7 +515,7 @@ describe("effective identity in actual CLI results (#677)", () => {
   it("scopes offline identity to the cache repository without live target lookup", async () =>
     fixture(async (f) => {
       const runtime = runtimeFor(f, []);
-      await invoke(runtime, ["--json", "--role", "implementer"]);
+      await create(f, "implementer");
       const before = await f.fs.readText(f.file);
       const cache = f.root + "/snapshot.json";
       const repository = "another/repository";

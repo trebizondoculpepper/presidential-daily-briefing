@@ -88,7 +88,20 @@ export class CommandIdentity {
     }
     if (result.diagnostic)
       this.stderr(`pdb: ${result.diagnostic.message} ${result.diagnostic.recovery}\n`);
-    if (!presentation.allowUnresolved && (result.state === "failed" || !result.agent))
+    // #865: a read may continue unattributed only when the identity is merely missing: no explicit
+    // selector was given and the diagnostic reports absence. An invalid explicit selector, corrupt
+    // configuration or filesystem failure still refuses, as the effective-identity contract keeps.
+    const explicit = !!(options.agent || options.entry || options.harness);
+    const missingOnly =
+      !explicit &&
+      (result.diagnostic === null ||
+        ["identity-absent", "not-a-repository", "repository-mismatch"].includes(
+          result.diagnostic.code,
+        ));
+    if (
+      (result.state === "failed" || !result.agent) &&
+      !(presentation.allowUnresolved && missingOnly)
+    )
       throw new IdentityPreparationRequired(result);
     return result;
   }
@@ -163,17 +176,21 @@ export async function commandViewer(
   readonly = false,
 ): Promise<string | undefined> {
   if (!identity) return values.agent;
-  const readOnly = readonly || !!values.offline;
+  // #865 (effective-identity.md "Read-only operations"): every caller is an observational read,
+  // so it uses the non-initializing optional-viewer boundary. An explicit or verified existing
+  // agent still personalizes; with no safe selection the read continues unattributed, with no
+  // allocation, binding, identity/ignore writes or first-use setup.
+  void readonly;
   const result = await identity.select(
     {
       repository: values.repo,
       agent: values.agent,
       ...identitySelection(values),
-      intent: readOnly ? "readonly" : "normal",
+      intent: "readonly",
       offline: values.offline,
       authenticationRequired: false,
     },
-    { json: !!values.json, allowUnresolved: readOnly },
+    { json: !!values.json, allowUnresolved: true },
   );
   return result.agent ?? undefined;
 }
