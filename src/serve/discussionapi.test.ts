@@ -1,6 +1,7 @@
 /** GET /api/v1/discussion (#1102): shared-service parity, validation, partial states. No GitHub. */
 import { EventEmitter } from "node:events";
 import { request } from "node:http";
+import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { describe, expect, it } from "vite-plus/test";
 import { readDiscussion } from "../briefing/discussion.js";
 import { discussionPage } from "../github/service/snapshot.js";
@@ -138,6 +139,23 @@ describe("GET /api/v1/discussion (#1102)", () => {
       expect(reply.body.result.items.map((i: { number: number }) => i.number)).toEqual([8, 1]);
       expect(reply.body.warnings.join(" ")).toContain("unknown comment count");
     } finally {
+      await running.close();
+    }
+  });
+
+  it("shares one cached reader between the JSON API and HTTP MCP (#1120 review)", async () => {
+    const counter = { n: 0 };
+    const running = await serve([node(1, 3), node(2, 9)], counter);
+    const client = new Client({ name: "discussion-share", version: "1" });
+    await client.connect(
+      new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${running.port}/mcp`)),
+    );
+    try {
+      expect((await get(running.port, `/api/v1/discussion?repo=${repo}`)).status).toBe(200);
+      await client.callTool({ name: "triage_discussion", arguments: { repo } });
+      expect(counter.n).toBe(1);
+    } finally {
+      await client.close();
       await running.close();
     }
   });

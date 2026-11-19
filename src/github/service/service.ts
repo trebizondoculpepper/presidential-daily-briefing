@@ -234,6 +234,12 @@ export interface GhServiceOptions {
   post?: RestPost;
   /** The GraphQL executor behind query capabilities; by default one over this transport and env. */
   query?: GraphQuery;
+  /**
+   * A signal-bound GraphQL executor builder (#1120): when given, every query capability that takes
+   * a signal runs through it, so one facade per application keeps cancellation reaching the host's
+   * own executor (pdb serve's guarded reader).
+   */
+  queryWith?: (signal?: AbortSignal) => GraphQuery;
   /** Guarded `gh` write runner behind completion step execution; defaults to `ghRun` (or transport). */
   run?: GhRun;
   /** Clock for observation times. */
@@ -257,15 +263,22 @@ export function createGhService(options: GhServiceOptions = {}): GhService {
   // capability honours the same execution context (host, account, injected transport).
   const rest = options.rest ?? restOverTransport(transport, env);
   const post = options.post ?? postOverTransport(transport, env);
-  const query: GraphQuery = options.query ?? ghQueryWith(undefined, {}, { transport, env });
+  // Construction reads nothing: a signal-bound builder is only called when a query runs.
+  const query: GraphQuery =
+    options.query ??
+    (options.queryWith
+      ? (q, vars) => options.queryWith!(undefined)(q, vars)
+      : ghQueryWith(undefined, {}, { transport, env }));
   const run: GhRun = options.run ?? runOverTransport(transport, query as Query, env);
   const queryForSignal = (signal?: AbortSignal): GraphQuery =>
-    options.query
-      ? (q, vars) => {
-          signal?.throwIfAborted();
-          return options.query!(q, vars);
-        }
-      : ghQueryWith(signal, {}, { transport, env });
+    options.queryWith
+      ? options.queryWith(signal)
+      : options.query
+        ? (q, vars) => {
+            signal?.throwIfAborted();
+            return options.query!(q, vars);
+          }
+        : ghQueryWith(signal, {}, { transport, env });
   return {
     account: {
       async current(signal) {
