@@ -124,7 +124,7 @@ async function withScopeLock<T>(
         ownership: "absent",
         code: "CONFLICT",
         message:
-          "Another Claude installer operation holds the scope lock; remove the stale lock and retry.",
+          "Another Claude installer operation holds the scope lock; wait for it to finish or verify no writer is active before removing the lock.",
         diff: null,
         manifestRecord: null,
       },
