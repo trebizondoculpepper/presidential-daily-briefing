@@ -235,6 +235,8 @@
 [(needs-refinement ?t) (refinement-open ?t ?q)]
 [(needs-refinement ?t) [?t "refinement" ?q] [?q "refinement-state" "unknown"]]
 [(refinement-pending ?q) [?q "refinement-question" ?r] (not (record-settled ?r))]
+;; Only a trusted record settles a blocking question; an unverified or unknown author leaves it pending.
+[(refinement-pending ?q) [?q "refinement-question" ?r] (not [?r "record-trust" "trusted"])]
 [(refinement-asks ?q) [?q "refinement-question" _]]
 ;; Pending questions await answers; all settled is ready to resolve; none recorded is malformed
 ;; (the boundary refuses it) and is inspected.

@@ -1,8 +1,8 @@
 {
   "modelVersion": 2,
   "policyVersion": 1,
-  "rulesHash": "5365adc274ca204061d3e3e68b3989ac0f3fa2b890578112f5b5c72727299e0e",
-  "narrationHash": "86491148f3dd4f410fb9e7eb3fb1f9b96255548d986979e9c3f5cc9d53662356",
+  "rulesHash": "4d033c289a546989293fb0249aaa0b28ffe4012e50fb7a7b3eb0312bd8ec0ae2",
+  "narrationHash": "3a62984c6e4e8e38c2acc3b47c96bd238f4f3da8912541fe8d2a3935ccb0ffab",
   "sources": [
     "policy/schema.edn",
     "policy/rules.edn",
@@ -2310,7 +2310,7 @@
     {
       "id": "D-REFINE-EMPTY",
       "purpose": "Inspect an open refinement request that records no blocking question; the boundary should have refused it.",
-      "kind": "inspect",
+      "kind": "refine",
       "band": 4,
       "preference": 1,
       "codes": ["designer-duty"],
@@ -2416,7 +2416,7 @@
     {
       "id": "D-REFINE-INCOMPLETE",
       "purpose": "Inspect refinement whose evidence could not be read completely instead of presenting it as answered.",
-      "kind": "inspect",
+      "kind": "refine",
       "band": 4,
       "preference": 1,
       "codes": ["designer-duty"],
@@ -6527,7 +6527,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 202
+            "index": 203
           }
         }
       ],
@@ -16205,6 +16205,47 @@
             "file": "policy/rules.edn",
             "index": 189
           }
+        },
+        {
+          "params": ["?q"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?q"
+              },
+              "attribute": "refinement-question",
+              "value": {
+                "var": "?r"
+              },
+              "phrase": "blocking question",
+              "many": false
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "fact",
+                  "scope": "entity",
+                  "entity": {
+                    "var": "?r"
+                  },
+                  "attribute": "record-trust",
+                  "value": {
+                    "lit": "trusted"
+                  },
+                  "phrase": "trust level",
+                  "many": false
+                }
+              ]
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 190
+          }
         }
       ],
       "calls": ["record-settled"],
@@ -16233,7 +16274,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 190
+            "index": 191
           }
         }
       ],
@@ -16271,7 +16312,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 191
+            "index": 192
           }
         }
       ],
@@ -16358,7 +16399,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 192
+            "index": 193
           }
         }
       ],
@@ -16397,7 +16438,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 193
+            "index": 194
           }
         },
         {
@@ -16415,7 +16456,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 195
+            "index": 196
           }
         }
       ],
@@ -16458,7 +16499,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 194
+            "index": 195
           }
         }
       ],
@@ -16484,7 +16525,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 196
+            "index": 197
           }
         },
         {
@@ -16502,7 +16543,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 197
+            "index": 198
           }
         },
         {
@@ -16524,7 +16565,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 198
+            "index": 199
           }
         }
       ],
@@ -16568,7 +16609,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 199
+            "index": 200
           }
         }
       ],
@@ -16645,7 +16686,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 200
+            "index": 201
           }
         }
       ],
@@ -16726,7 +16767,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 201
+            "index": 202
           }
         }
       ],
@@ -21708,7 +21749,7 @@
   "coverage": {
     "decisions": 55,
     "predicates": 108,
-    "alternatives": 235,
+    "alternatives": 236,
     "denials": 12,
     "queries": 24,
     "keyQueries": 4,
@@ -21716,6 +21757,6 @@
     "overrides": 4,
     "constants": 14,
     "attributes": 119,
-    "clauses": 1351
+    "clauses": 1354
   }
 }

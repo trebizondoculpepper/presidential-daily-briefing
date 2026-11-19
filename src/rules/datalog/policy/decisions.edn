@@ -264,7 +264,7 @@
 
   {:id "D-REFINE-EMPTY"
    :purpose "Inspect an open refinement request that records no blocking question; the boundary should have refused it."
-   :kind "inspect"
+   :kind "refine"
    :band 4
    :preference 1
    :affinity "designer"
@@ -275,7 +275,7 @@
 
   {:id "D-REFINE-INCOMPLETE"
    :purpose "Inspect refinement whose evidence could not be read completely instead of presenting it as answered."
-   :kind "inspect"
+   :kind "refine"
    :band 4
    :preference 1
    :affinity "designer"
