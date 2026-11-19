@@ -561,7 +561,7 @@ async function evaluateClaudeInstallPlan(params: {
         : await installClaudeStopHook({
             scope,
             options: {
-              role: scope.kind === "project" ? (identityEntry ?? args.role) : undefined,
+              role: scope.kind === "project" ? args.role : undefined,
               entry: scope.kind === "project" ? (identityEntry ?? args.entry) : undefined,
             },
             manifestPath: manifestPathForScope,
