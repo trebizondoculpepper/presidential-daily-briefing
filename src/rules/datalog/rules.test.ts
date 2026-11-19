@@ -90,6 +90,7 @@ const audience: Record<
   "D-REFINE-RESOLVE": { role: "agents", kind: "issue" },
   "D-REFINE-EMPTY": { role: "agents", kind: "issue" },
   "D-REESTIMATE": { role: "agents", kind: "issue" },
+  "D-REFINE-INCOMPLETE": { role: "agents", kind: "issue" },
   "D-UNFAVORABLE": { role: "agents", kind: "issue" },
   "D-OWN-UNFAVORABLE": { role: "agents", kind: "issue" },
   "D-INSPECT": { role: "agents", kind: "issue" },

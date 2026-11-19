@@ -269,8 +269,19 @@
    :preference 1
    :affinity "designer"
    :owned false
-   :when [[1 "role" ?role] [(not= ?role "human")] (refinement-work ?t) (refinement-empty ?t) (not (refinement-unanswered ?t)) (not (refinement-answered ?t))]
+   :when [[1 "role" ?role] [(not= ?role "human")] (refinement-work ?t) (refinement-empty ?t) (not (refinement-unanswered ?t)) (not (refinement-answered ?t)) (not (refinement-incomplete ?t))]
    :why "A refinement request records no blocking question; inspect it and record the concrete question or withdraw the request."
+   :codes ["designer-duty"]}
+
+  {:id "D-REFINE-INCOMPLETE"
+   :purpose "Inspect refinement whose evidence could not be read completely instead of presenting it as answered."
+   :kind "inspect"
+   :band 4
+   :preference 1
+   :affinity "designer"
+   :owned false
+   :when [[1 "role" ?role] [(not= ?role "human")] (refinement-work ?t) (refinement-incomplete ?t) (not (refinement-unanswered ?t))]
+   :why "Refinement evidence is incomplete; inspect the ticket before treating its questions as settled."
    :codes ["designer-duty"]}
 
   {:id "D-REESTIMATE"
@@ -389,7 +400,7 @@
    :when [[1 "role" ?role] [(not= ?role "human")] (own-held-back ?t)]
    :why "Your claim is held back by {heldBack}; inspect it, then advance the blocker or question, hand over, or release the claim. It is not ready to continue."
    :codes ["owned-blocked" "own-claim"]
-   :witnesses {"heldBack" [(or-join [?t ?value] (and [?t "label" ?value] [1 "prerequisite" ?value]) (and [?t "open-blockers" ?n] [(> ?n 0)] [(str ?n " open native blocker(s)") ?value]) (and [?t "blocker" ?i] [?i "state" "OPEN"] [?i "number" ?b] [(str "open blocker #" ?b) ?value]))]}}
+   :witnesses {"heldBack" [(or-join [?t ?value] (and [?t "label" ?value] [1 "prerequisite" ?value]) (and [?t "open-blockers" ?n] [(> ?n 0)] [(str ?n " open native blocker(s)") ?value]) (and [?t "blocker" ?i] [?i "state" "OPEN"] [?i "number" ?b] [(str "open blocker #" ?b) ?value]) (and (needs-refinement ?t) [(str "open refinement") ?value]) (and (awaiting-reestimate ?t) [(str "resolved refinement awaiting re-estimation") ?value]) (and [?t "refinement-complete" false] [(str "unknown refinement evidence") ?value]))]}}
 
   {:id "D-OWN-UNKNOWN"
    :purpose "Surface a retained claim whose activity or wait evidence cannot be established."

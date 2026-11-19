@@ -1,8 +1,8 @@
 {
   "modelVersion": 2,
   "policyVersion": 1,
-  "rulesHash": "668528d542f08c722d192698df55d9a4f98de967c70fc73dcb673bd238cbb251",
-  "narrationHash": "a5c1d0d714fc6fa7b459aee63fdf0b12341335406cf9f4c3c4647d4e33aca18e",
+  "rulesHash": "94bd1b02382494db1758faced5f1f1dda2d4ac1a1f0912b99e0bddcff880a6e0",
+  "narrationHash": "75ca88a677836d9a953b09413b47c50a4fda747715842fff4e8dd00806f67fd1",
   "sources": [
     "policy/schema.edn",
     "policy/rules.edn",
@@ -2376,6 +2376,21 @@
               ]
             }
           ]
+        },
+        {
+          "type": "not",
+          "join": null,
+          "body": [
+            {
+              "type": "call",
+              "predicate": "refinement-incomplete",
+              "args": [
+                {
+                  "var": "?t"
+                }
+              ]
+            }
+          ]
         }
       ],
       "templateClauses": 1,
@@ -2384,12 +2399,98 @@
         "refinement-work",
         "refinement-empty",
         "refinement-unanswered",
-        "refinement-answered"
+        "refinement-answered",
+        "refinement-incomplete"
       ],
       "evidence": [],
       "source": {
         "file": "policy/decisions.edn",
         "index": 22
+      }
+    },
+    {
+      "id": "D-REFINE-INCOMPLETE",
+      "purpose": "Inspect refinement whose evidence could not be read completely instead of presenting it as answered.",
+      "kind": "inspect",
+      "band": 4,
+      "preference": 1,
+      "codes": ["designer-duty"],
+      "roles": null,
+      "clauses": [
+        {
+          "type": "call",
+          "predicate": "foreground",
+          "args": [
+            {
+              "var": "?t"
+            }
+          ]
+        },
+        {
+          "type": "fact",
+          "scope": "viewer",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "role",
+          "value": {
+            "var": "?role"
+          },
+          "phrase": "role",
+          "many": false
+        },
+        {
+          "type": "compare",
+          "op": "not=",
+          "args": [
+            {
+              "var": "?role"
+            },
+            {
+              "lit": "human"
+            }
+          ]
+        },
+        {
+          "type": "call",
+          "predicate": "refinement-work",
+          "args": [
+            {
+              "var": "?t"
+            }
+          ]
+        },
+        {
+          "type": "call",
+          "predicate": "refinement-incomplete",
+          "args": [
+            {
+              "var": "?t"
+            }
+          ]
+        },
+        {
+          "type": "not",
+          "join": null,
+          "body": [
+            {
+              "type": "call",
+              "predicate": "refinement-unanswered",
+              "args": [
+                {
+                  "var": "?t"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "templateClauses": 1,
+      "calls": ["foreground", "refinement-work", "refinement-incomplete", "refinement-unanswered"],
+      "evidence": [],
+      "source": {
+        "file": "policy/decisions.edn",
+        "index": 23
       }
     },
     {
@@ -2483,7 +2584,7 @@
       "evidence": [],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 23
+        "index": 24
       }
     },
     {
@@ -2574,7 +2675,7 @@
       ],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 24
+        "index": 25
       }
     },
     {
@@ -2657,7 +2758,7 @@
       "evidence": [],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 25
+        "index": 26
       }
     },
     {
@@ -2727,7 +2828,7 @@
       "evidence": [],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 26
+        "index": 27
       }
     },
     {
@@ -2821,7 +2922,7 @@
       ],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 27
+        "index": 28
       }
     },
     {
@@ -2953,7 +3054,7 @@
       ],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 28
+        "index": 29
       }
     },
     {
@@ -3085,7 +3186,7 @@
       ],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 29
+        "index": 30
       }
     },
     {
@@ -3176,7 +3277,7 @@
       "evidence": [],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 30
+        "index": 31
       }
     },
     {
@@ -3276,7 +3377,7 @@
       "evidence": [],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 31
+        "index": 32
       }
     },
     {
@@ -3464,6 +3565,73 @@
                     ],
                     "result": "?value"
                   }
+                ],
+                [
+                  {
+                    "type": "call",
+                    "predicate": "needs-refinement",
+                    "args": [
+                      {
+                        "var": "?t"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "bind",
+                    "fn": "str",
+                    "args": [
+                      {
+                        "lit": "open refinement"
+                      }
+                    ],
+                    "result": "?value"
+                  }
+                ],
+                [
+                  {
+                    "type": "call",
+                    "predicate": "awaiting-reestimate",
+                    "args": [
+                      {
+                        "var": "?t"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "bind",
+                    "fn": "str",
+                    "args": [
+                      {
+                        "lit": "resolved refinement awaiting re-estimation"
+                      }
+                    ],
+                    "result": "?value"
+                  }
+                ],
+                [
+                  {
+                    "type": "fact",
+                    "scope": "entity",
+                    "entity": {
+                      "var": "?t"
+                    },
+                    "attribute": "refinement-complete",
+                    "value": {
+                      "lit": false
+                    },
+                    "phrase": "refinement evidence completeness",
+                    "many": false
+                  },
+                  {
+                    "type": "bind",
+                    "fn": "str",
+                    "args": [
+                      {
+                        "lit": "unknown refinement evidence"
+                      }
+                    ],
+                    "result": "?value"
+                  }
                 ]
               ]
             }
@@ -3472,7 +3640,7 @@
       ],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 32
+        "index": 33
       }
     },
     {
@@ -3566,7 +3734,7 @@
       ],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 33
+        "index": 34
       }
     },
     {
@@ -3627,7 +3795,7 @@
       "evidence": [],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 34
+        "index": 35
       }
     },
     {
@@ -3688,7 +3856,7 @@
       "evidence": [],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 35
+        "index": 36
       }
     },
     {
@@ -3782,7 +3950,7 @@
       ],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 36
+        "index": 37
       }
     },
     {
@@ -3972,7 +4140,7 @@
       ],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 37
+        "index": 38
       }
     },
     {
@@ -4062,7 +4230,7 @@
       ],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 38
+        "index": 39
       }
     },
     {
@@ -4158,7 +4326,7 @@
       ],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 39
+        "index": 40
       }
     },
     {
@@ -4249,7 +4417,7 @@
       ],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 40
+        "index": 41
       }
     },
     {
@@ -4331,7 +4499,7 @@
       ],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 41
+        "index": 42
       }
     },
     {
@@ -4412,7 +4580,7 @@
       ],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 42
+        "index": 43
       }
     },
     {
@@ -4508,7 +4676,7 @@
       ],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 43
+        "index": 44
       }
     },
     {
@@ -4589,7 +4757,7 @@
       ],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 44
+        "index": 45
       }
     },
     {
@@ -4656,7 +4824,7 @@
       "evidence": [],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 45
+        "index": 46
       }
     },
     {
@@ -4742,7 +4910,7 @@
       ],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 46
+        "index": 47
       }
     },
     {
@@ -4841,7 +5009,7 @@
       ],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 47
+        "index": 48
       }
     },
     {
@@ -4940,7 +5108,7 @@
       ],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 48
+        "index": 49
       }
     },
     {
@@ -5065,7 +5233,7 @@
       ],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 49
+        "index": 50
       }
     },
     {
@@ -5190,7 +5358,7 @@
       ],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 50
+        "index": 51
       }
     },
     {
@@ -5341,7 +5509,7 @@
       ],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 51
+        "index": 52
       }
     },
     {
@@ -5523,7 +5691,7 @@
       ],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 52
+        "index": 53
       }
     },
     {
@@ -5648,7 +5816,7 @@
       ],
       "source": {
         "file": "policy/decisions.edn",
-        "index": 53
+        "index": 54
       }
     }
   ],
@@ -6329,9 +6497,36 @@
             "file": "policy/rules.edn",
             "index": 18
           }
+        },
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
+              "type": "call",
+              "predicate": "own-active",
+              "args": [
+                {
+                  "var": "?t"
+                }
+              ]
+            },
+            {
+              "type": "call",
+              "predicate": "refinement-hold",
+              "args": [
+                {
+                  "var": "?t"
+                }
+              ]
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 200
+          }
         }
       ],
-      "calls": ["own-active", "blocked", "prerequisite"],
+      "calls": ["own-active", "blocked", "prerequisite", "refinement-hold"],
       "set": "rules"
     },
     {
@@ -6379,6 +6574,21 @@
                   ]
                 }
               ]
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "call",
+                  "predicate": "refinement-hold",
+                  "args": [
+                    {
+                      "var": "?t"
+                    }
+                  ]
+                }
+              ]
             }
           ],
           "source": {
@@ -6387,7 +6597,7 @@
           }
         }
       ],
-      "calls": ["own-active", "blocked", "prerequisite"],
+      "calls": ["own-active", "blocked", "prerequisite", "refinement-hold"],
       "set": "rules"
     },
     {
@@ -16089,6 +16299,25 @@
                   ]
                 }
               ]
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "fact",
+                  "scope": "entity",
+                  "entity": {
+                    "var": "?t"
+                  },
+                  "attribute": "refinement-complete",
+                  "value": {
+                    "lit": false
+                  },
+                  "phrase": "refinement evidence completeness",
+                  "many": false
+                }
+              ]
             }
           ],
           "source": {
@@ -16098,6 +16327,111 @@
         }
       ],
       "calls": ["refinement-open", "refinement-asks", "refinement-pending"],
+      "set": "rules"
+    },
+    {
+      "name": "refinement-incomplete",
+      "params": ["?t"],
+      "alternatives": [
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
+              "type": "call",
+              "predicate": "needs-refinement",
+              "args": [
+                {
+                  "var": "?t"
+                }
+              ]
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "refinement-complete",
+              "value": {
+                "lit": false
+              },
+              "phrase": "refinement evidence completeness",
+              "many": false
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 193
+          }
+        }
+      ],
+      "calls": ["needs-refinement"],
+      "set": "rules"
+    },
+    {
+      "name": "refinement-hold",
+      "params": ["?t"],
+      "alternatives": [
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
+              "type": "call",
+              "predicate": "needs-refinement",
+              "args": [
+                {
+                  "var": "?t"
+                }
+              ]
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 194
+          }
+        },
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
+              "type": "call",
+              "predicate": "awaiting-reestimate",
+              "args": [
+                {
+                  "var": "?t"
+                }
+              ]
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 195
+          }
+        },
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "refinement-complete",
+              "value": {
+                "lit": false
+              },
+              "phrase": "refinement evidence completeness",
+              "many": false
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 196
+          }
+        }
+      ],
+      "calls": ["needs-refinement", "awaiting-reestimate"],
       "set": "rules"
     },
     {
@@ -16137,7 +16471,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 193
+            "index": 197
           }
         }
       ],
@@ -16208,7 +16542,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 194
+            "index": 198
           }
         }
       ],
@@ -16289,7 +16623,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 195
+            "index": 199
           }
         }
       ],
@@ -16830,19 +17164,6 @@
               "entity": {
                 "var": "?t"
               },
-              "attribute": "urgency-key",
-              "value": {
-                "var": "?u"
-              },
-              "phrase": "urgency sort key",
-              "many": false
-            },
-            {
-              "type": "fact",
-              "scope": "entity",
-              "entity": {
-                "var": "?t"
-              },
               "attribute": "own-key",
               "value": {
                 "var": "?own"
@@ -16888,6 +17209,66 @@
               },
               "phrase": "kind",
               "many": false
+            },
+            {
+              "type": "or",
+              "join": ["?t", "?k", "?u"],
+              "alternatives": [
+                [
+                  {
+                    "type": "compare",
+                    "op": "=",
+                    "args": [
+                      {
+                        "var": "?k"
+                      },
+                      {
+                        "lit": "refine"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "bind",
+                    "fn": "+",
+                    "args": [
+                      {
+                        "lit": 0
+                      },
+                      {
+                        "lit": 0
+                      }
+                    ],
+                    "result": "?u"
+                  }
+                ],
+                [
+                  {
+                    "type": "compare",
+                    "op": "not=",
+                    "args": [
+                      {
+                        "var": "?k"
+                      },
+                      {
+                        "lit": "refine"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "fact",
+                    "scope": "entity",
+                    "entity": {
+                      "var": "?t"
+                    },
+                    "attribute": "urgency-key",
+                    "value": {
+                      "var": "?u"
+                    },
+                    "phrase": "urgency sort key",
+                    "many": false
+                  }
+                ]
+              ]
             },
             {
               "type": "or",
@@ -21175,9 +21556,9 @@
     }
   ],
   "coverage": {
-    "decisions": 54,
-    "predicates": 105,
-    "alternatives": 228,
+    "decisions": 55,
+    "predicates": 107,
+    "alternatives": 233,
     "denials": 12,
     "queries": 24,
     "keyQueries": 4,
@@ -21185,6 +21566,6 @@
     "overrides": 4,
     "constants": 14,
     "attributes": 119,
-    "clauses": 1315
+    "clauses": 1339
   }
 }

@@ -29,7 +29,7 @@
 ;; outstanding question or design need) is managed, never continued as implementation.
 [(own-held-back ?t) (own-active ?t) (blocked ?t)]
 [(own-held-back ?t) (own-active ?t) (prerequisite ?t)]
-[(own-continuable ?t) (own-active ?t) (not (blocked ?t)) (not (prerequisite ?t))]
+[(own-continuable ?t) (own-active ?t) (not (blocked ?t)) (not (prerequisite ?t)) (not (refinement-hold ?t))]
 ;; A closed source stays in the human view while a trusted question on it is unsettled (#414).
 [(foreground ?t) [1 "role" "human"] (orphan-source ?t)]
 [(platform-ok ?t) [?t "labels-complete" true] (not [?t "platform" _])]
@@ -239,9 +239,17 @@
 ;; Pending questions await answers; all settled is ready to resolve; none recorded is malformed
 ;; (the boundary refuses it) and is inspected.
 [(refinement-unanswered ?t) (refinement-open ?t ?q) (refinement-pending ?q)]
-[(refinement-answered ?t) (refinement-open ?t ?q) (refinement-asks ?q) (not (refinement-pending ?q))]
+;; Answered only on complete evidence: an unread request or question is never treated as settled.
+[(refinement-answered ?t) (refinement-open ?t ?q) (refinement-asks ?q) (not (refinement-pending ?q)) (not [?t "refinement-complete" false])]
+[(refinement-incomplete ?t) (needs-refinement ?t) [?t "refinement-complete" false]]
+[(refinement-hold ?t) (needs-refinement ?t)]
+[(refinement-hold ?t) (awaiting-reestimate ?t)]
+[(refinement-hold ?t) [?t "refinement-complete" false]]
 [(refinement-empty ?t) (refinement-open ?t ?q) (not (refinement-asks ?q))]
 ;; Resolved without a later estimate: back to estimation, still not implementable.
 [(awaiting-reestimate ?t) [?t "refinement" ?q] [?q "refinement-state" "resolved"] [?q "refinement-estimated" false] (not (needs-refinement ?t))]
 [(refinement-work ?t) (issue ?t) (open ?t) (needs-refinement ?t) [?t "labels-complete" true] (platform-ok ?t) (not (claimed ?t))]
+;; #1092: needs refinement, awaiting re-estimate or unknown refinement holds an owned claim too;
+;; the claim is kept, never continued as implementation.
+[(own-held-back ?t) (own-active ?t) (refinement-hold ?t)]
 ]

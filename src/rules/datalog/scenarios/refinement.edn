@@ -93,4 +93,39 @@
   :expect {:actions [{:subject 101 :rule "D-REFINE" :kind "refine" :band 4 :unlocks 1}
             {:subject 100 :rule "D-REFINE" :kind "refine" :band 4 :unlocks 0}
             {:subject 102 :rule "D-REFINE" :kind "refine" :band 4 :unlocks 0}]
+           :denials #{[103 "D-DENY-BLOCKER"]}}}
+
+ {:id "r8-owned-claim-held-back-by-refinement"
+  :doc "The viewer's active claim is kept but not continued while its item needs refinement"
+  :viewer {:role "implementer" :agent "me"}
+  :facts [{:e 1 "forward-complete" true "agent" "me" "owned-claims-complete" true}
+          {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "status:ready" "owner" "me" "refinement" 200}
+          {:e 200 "refinement-state" "open" "refinement-question" 300}
+          {:e 300 "record-trust" "trusted" "record-version" 2 "record-outcome" "none"}]
+  :expect {:actions [{:subject 100 :rule "D-OWN-HELD-BACK" :kind "inspect" :band 3 :why "Your claim is held back by open refinement; inspect it, then advance the blocker or question, hand over, or release the claim. It is not ready to continue."}]
+           :denials #{[100 "D-DENY-CLAIM"] [100 "D-DENY-REFINEMENT"]}}}
+
+ {:id "r9-incomplete-evidence-is-inspected-not-answered"
+  :doc "Settled observed questions with incomplete refinement evidence are inspected, never offered for resolution"
+  :viewer {:role "designer"}
+  :facts [{:e 1 "forward-complete" true}
+          {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "current" "complexity-size" "S" "head" "not-a-pr" "refinement-complete" false "refinement" 200}
+          {:e 200 "refinement-state" "open" "refinement-question" 300}
+          {:e 300 "record-trust" "trusted" "record-version" 2 "record-outcome" "resolved"}]
+  :expect {:actions [{:subject 100 :rule "D-REFINE-INCOMPLETE" :kind "inspect" :band 4 :why "Refinement evidence is incomplete; inspect the ticket before treating its questions as settled."}]
+           :denials #{}}}
+
+ {:id "r10-unlocks-outrank-urgency-in-refinement"
+  :doc "A high-urgency refinement unlocking nothing ranks after a normal one that unlocks a dependent"
+  :viewer {:role "designer"}
+  :facts [{:e 1 "forward-complete" true}
+          {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "not-a-pr" "label" "urgency:high" "refinement" 200}
+          {:e 200 "refinement-state" "open" "refinement-question" 300}
+          {:e 300 "record-trust" "trusted" "record-version" 2 "record-outcome" "none"}
+          {:e 101 "kind" "issue" "state" "OPEN" "number" 2 "target" "https://github.com/o/r/issues/2" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "not-a-pr" "refinement" 201 "dependent" 103}
+          {:e 201 "refinement-state" "open" "refinement-question" 301}
+          {:e 301 "record-trust" "trusted" "record-version" 2 "record-outcome" "none"}
+          {:e 103 "kind" "issue" "state" "OPEN" "number" 4 "target" "https://github.com/o/r/issues/4" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 1 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "not-a-pr" "label" "status:ready" "blocker" 101}]
+  :expect {:actions [{:subject 101 :rule "D-REFINE" :kind "refine" :band 4 :unlocks 1}
+            {:subject 100 :rule "D-REFINE" :kind "refine" :band 4 :unlocks 0}]
            :denials #{[103 "D-DENY-BLOCKER"]}}}]}
