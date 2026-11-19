@@ -187,6 +187,7 @@ export type ConfigErrorCode =
   | "tracked"
   | "not-ignored"
   | "identity-unresolved"
+  | "identity-absent"
   | "duplicate-config"
   | "partial-conversion"
   | "unsafe-path"

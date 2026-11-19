@@ -136,7 +136,9 @@ const unknownHuman: HumanContext = {
 const selectionError = (
   message: string,
   recovery = "Select the intended logical entry with --entry KEY; supply --role implementer|designer when creating a new identity.",
-) => new ConfigError("identity-unresolved", message, recovery);
+  /** #865: `identity-absent` marks genuine absence only; broken or invalid bindings keep `identity-unresolved`. */
+  code: "identity-unresolved" | "identity-absent" = "identity-unresolved",
+) => new ConfigError(code, message, recovery);
 const problem = (error: unknown): NonNullable<EffectiveIdentity["diagnostic"]> =>
   error instanceof ConfigError
     ? error.code === "not-a-repository" || error.code === "repository-mismatch"
@@ -297,6 +299,7 @@ export async function prepareEffectiveIdentity(
         options.intent === "readonly"
           ? "The read continues without an agent attribution; --agent or --entry KEY personalizes it."
           : undefined,
+        "identity-absent",
       );
 
     if (record.problems.length) throw selectionError(record.problems.join(" "));
@@ -313,6 +316,7 @@ export async function prepareEffectiveIdentity(
         throw selectionError(
           "The selected identity has not been initialized; this read did not initialize it.",
           "The read continues without an agent attribution.",
+          "identity-absent",
         );
       return resolved(record, {
         state: "reused",

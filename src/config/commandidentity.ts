@@ -95,7 +95,7 @@ export class CommandIdentity {
     const missingOnly =
       !explicit &&
       (result.diagnostic === null ||
-        ["identity-unresolved", "not-a-repository", "repository-mismatch"].includes(
+        ["identity-absent", "not-a-repository", "repository-mismatch"].includes(
           result.diagnostic.code,
         ));
     if (
