@@ -74,6 +74,7 @@ The owner accepts a recent Node requirement: [the current Node LTS](runtime.md),
 - [Delivery lifecycle](delivery-lifecycle.md): reviewed architecture contract for claims, responsibility and verified completion (#188), refining #189–#192 and #182.
 
 - [Designer impact estimation direction](impact-estimation-direction.md): approved mirror-image metric and staged analysis/delivery, #244–#248.
+- [Estimation review, refinement and the discussion view](estimation-refinement-loop.md): the needs-refinement admission rule, designer refinement priority and the comment-count discussion view (#1091; runtime #1092–#1103).
 
 [Rules component](rules-component.md) is the #348 contract for native EDN policy sources, the rules build, the typed facts-in/decisions-out engine boundary and isolated rule tests.
 
