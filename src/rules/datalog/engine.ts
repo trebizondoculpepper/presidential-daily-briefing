@@ -524,6 +524,55 @@ export function evaluateReviewCoverage(input: ReviewCoverageInput): {
   };
 }
 
+export interface DeliveryFollowUpFacts {
+  draft: boolean;
+  complete: boolean;
+  failing: boolean;
+  pending: boolean;
+  unknownChecks: boolean;
+  verified: boolean;
+  changesRequested: boolean;
+  unresolvedThreads: boolean;
+  mergeable: string;
+  mergeState: string;
+  headReviewed: boolean;
+  headFindings: boolean;
+}
+
+/** Pure delivery follow-up classifier (#708); all precedence and reasons live in native EDN. */
+export function evaluateDeliveryFollowUp(
+  f: DeliveryFollowUpFacts,
+): ["actionable" | "waiting" | "unknown", string] {
+  const facts: Datom[] = [];
+  for (const [attr, vals] of Object.entries(bundle.constants)) {
+    for (const v of vals) facts.push([1, attr, v]);
+  }
+  facts.push(
+    [100, "draft", f.draft],
+    [100, "pr-complete", f.complete],
+    [100, "followup-failing", f.failing],
+    [100, "followup-pending", f.pending],
+    [100, "followup-unknown-checks", f.unknownChecks],
+    [100, "native-checks-satisfied", f.verified],
+    [100, "review-decision", f.changesRequested ? "CHANGES_REQUESTED" : ""],
+    [100, "followup-threads", f.unresolvedThreads],
+    [100, "mergeable", f.mergeable],
+    [100, "merge-state", f.mergeState],
+    [100, "followup-reviewed", f.headReviewed],
+    [100, "followup-findings", f.headFindings],
+  );
+  const db = ds.init_db(facts, bundle.schema);
+  const rows = ds.q(bundle.queries["delivery-follow-up"], db, bundle.clauses) as [
+    number,
+    number,
+    "actionable" | "waiting" | "unknown",
+    string,
+  ][];
+  const mine = rows.filter(([id]) => id === 100).sort((a, b) => a[1] - b[1]);
+  const best = mine[0];
+  return best ? [best[2], best[3]] : ["waiting", "awaiting current-head review"];
+}
+
 export interface PrReadinessInput {
   state: string;
   closedLabel: string;

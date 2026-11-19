@@ -8,7 +8,8 @@ import { resolveReviewPolicy } from "../config/review-setting.js";
 import { prStatus, prStatusText } from "./prstatus.js";
 import { evaluateDatalog } from "../rules/datalog/datalog.js";
 import { briefing } from "../briefing/briefing.js";
-import { snapshotFollowUpFacts, classifyFollowUp } from "./deliveryread.js";
+import { evaluateDeliveryFollowUp } from "../rules/datalog/engine.js";
+import { snapshotFollowUpFacts } from "./deliveryread.js";
 import { datalogReviewFacts } from "./reviewpolicy.js";
 import type { DeclaredReviewPolicy } from "./reviewpolicy.js";
 import type { Page, PullRequest, Snapshot } from "../github/types.js";
@@ -445,7 +446,7 @@ describe("briefing engines and delivery follow-up agree under the declared polic
     const typescript = briefing(s, { limit: 50 }).actions.items.some(
       (a) => a.rule === "pr-integrate",
     );
-    const [, why] = classifyFollowUp(
+    const [, why] = evaluateDeliveryFollowUp(
       snapshotFollowUpFacts(s.pullRequests[0], s.warnings, s.reviewPolicy),
     );
     return { datalog, typescript, delivery: why.startsWith("accepted") };

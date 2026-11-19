@@ -7,8 +7,9 @@
  */
 import { describe, expect, it } from "vite-plus/test";
 import { evaluateDatalog } from "../rules/datalog/datalog.js";
+import { evaluateDeliveryFollowUp } from "../rules/datalog/engine.js";
 import { page, pr, snapshot } from "../testing/snapshots.js";
-import { classifyFollowUp, snapshotFollowUpFacts, type FollowUpFacts } from "./deliveryread.js";
+import { snapshotFollowUpFacts, type FollowUpFacts } from "./deliveryread.js";
 
 const base: FollowUpFacts = {
   draft: false,
@@ -40,7 +41,7 @@ const incompleteFailedPr = (failed: boolean) => {
 
 describe("observed failure with incomplete evidence (#502)", () => {
   it("is actionable, naming both the failure and the incomplete evidence", () => {
-    const [state, why] = classifyFollowUp({ ...base, complete: false, failing: true });
+    const [state, why] = evaluateDeliveryFollowUp({ ...base, complete: false, failing: true });
     expect(state).toBe("actionable");
     expect(why).toContain("failing checks on the current head");
     expect(why).toContain("incomplete");
@@ -48,24 +49,28 @@ describe("observed failure with incomplete evidence (#502)", () => {
   });
 
   it("stays unknown without an observed failure, whatever else looks clean", () => {
-    expect(classifyFollowUp({ ...base, complete: false })).toEqual([
+    expect(evaluateDeliveryFollowUp({ ...base, complete: false })).toEqual([
       "unknown",
       "check, thread or review evidence is incomplete",
     ]);
     expect(
-      classifyFollowUp({ ...base, complete: false, headReviewed: true, mergeState: "CLEAN" })[0],
+      evaluateDeliveryFollowUp({
+        ...base,
+        complete: false,
+        headReviewed: true,
+        mergeState: "CLEAN",
+      })[0],
     ).toBe("unknown");
   });
 
   it("leaves complete evidence and drafts unchanged", () => {
-    expect(classifyFollowUp({ ...base, failing: true })).toEqual([
+    expect(evaluateDeliveryFollowUp({ ...base, failing: true })).toEqual([
       "actionable",
       "failing checks on the current head",
     ]);
-    expect(classifyFollowUp({ ...base, draft: true, complete: false, failing: true })).toEqual([
-      "actionable",
-      "draft: the responsible agent finishes it",
-    ]);
+    expect(
+      evaluateDeliveryFollowUp({ ...base, draft: true, complete: false, failing: true }),
+    ).toEqual(["actionable", "draft: the responsible agent finishes it"]);
   });
 
   it("agrees with the briefing engine on the same snapshot PR", () => {
@@ -75,7 +80,7 @@ describe("observed failure with incomplete evidence (#502)", () => {
       const facts = snapshotFollowUpFacts(p, warnings);
       expect(facts.complete).toBe(false);
       expect(facts.failing).toBe(failed);
-      const [state] = classifyFollowUp(facts);
+      const [state] = evaluateDeliveryFollowUp(facts);
       const result = evaluateDatalog(snapshot([], [p]), new Map(), {
         role: "implementer",
         limit: 50,
@@ -87,5 +92,72 @@ describe("observed failure with incomplete evidence (#502)", () => {
       expect(prFail).toBe(failed);
       expect(state).toBe(failed ? "actionable" : "unknown");
     }
+  });
+});
+
+describe("native delivery follow-up cascade and BEHIND alignment (#708)", () => {
+  it("keeps unaccepted BEHIND in waiting and accepted BEHIND as actionable integration", () => {
+    expect(
+      evaluateDeliveryFollowUp({ ...base, mergeState: "BEHIND", headReviewed: false }),
+    ).toEqual(["waiting", "awaiting current-head review"]);
+    expect(evaluateDeliveryFollowUp({ ...base, mergeState: "BEHIND", headReviewed: true })).toEqual(
+      [
+        "actionable",
+        "accepted on the current head but behind its base: update the branch (integrate)",
+      ],
+    );
+  });
+
+  it("evaluates every cascade branch in precedence order", () => {
+    expect(evaluateDeliveryFollowUp({ ...base, failing: true })).toEqual([
+      "actionable",
+      "failing checks on the current head",
+    ]);
+    expect(evaluateDeliveryFollowUp({ ...base, changesRequested: true })).toEqual([
+      "actionable",
+      "changes requested",
+    ]);
+    expect(evaluateDeliveryFollowUp({ ...base, unresolvedThreads: true })).toEqual([
+      "actionable",
+      "unresolved review threads",
+    ]);
+    expect(evaluateDeliveryFollowUp({ ...base, headFindings: true })).toEqual([
+      "actionable",
+      "Codex reports unresolved findings on the current head",
+    ]);
+    expect(evaluateDeliveryFollowUp({ ...base, mergeable: "CONFLICTING" })).toEqual([
+      "actionable",
+      "merge conflict",
+    ]);
+    expect(evaluateDeliveryFollowUp({ ...base, pending: true })).toEqual([
+      "waiting",
+      "awaiting checks",
+    ]);
+    expect(evaluateDeliveryFollowUp({ ...base, unknownChecks: true })).toEqual([
+      "unknown",
+      "required-check evidence is unproven",
+    ]);
+    expect(evaluateDeliveryFollowUp({ ...base, verified: false })).toEqual([
+      "unknown",
+      "required-check evidence is unproven",
+    ]);
+    expect(evaluateDeliveryFollowUp({ ...base, headReviewed: true, mergeable: "UNKNOWN" })).toEqual(
+      ["actionable", "accepted on the current head: refresh mergeability (integrate)"],
+    );
+    expect(evaluateDeliveryFollowUp({ ...base, headReviewed: true, mergeState: "CLEAN" })).toEqual([
+      "actionable",
+      "accepted on the current head but not merged: inspect, then consider merge",
+    ]);
+    expect(
+      evaluateDeliveryFollowUp({ ...base, headReviewed: true, mergeState: "BLOCKED" }),
+    ).toEqual([
+      "actionable",
+      "accepted on the current head but merge state is BLOCKED: inspect the branch rules",
+    ]);
+    expect(evaluateDeliveryFollowUp({ ...base, mergeState: "CLEAN" })).toEqual([
+      "actionable",
+      "clean merge state: inspect the current head, then consider merge",
+    ]);
+    expect(evaluateDeliveryFollowUp(base)).toEqual(["waiting", "awaiting current-head review"]);
   });
 });

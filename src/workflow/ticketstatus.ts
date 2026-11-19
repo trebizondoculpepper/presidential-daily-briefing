@@ -25,7 +25,8 @@ import type { MetricView } from "../briefing/assessments.js";
 import { complexityMetric, impactMetric } from "../estimation/metrics.js";
 import { closureOf } from "./deliverydoctor.js";
 import type { Closure } from "./deliverydoctor.js";
-import { classifyFollowUp, memberFollowUp, reportFollowUpFacts } from "./deliveryread.js";
+import { evaluateDeliveryFollowUp } from "../rules/datalog/engine.js";
+import { memberFollowUp, reportFollowUpFacts } from "./deliveryread.js";
 import type { DeliverableView, DeliveryView, FollowUp } from "./deliveryread.js";
 import { excerpt, pullRequestStatus } from "./prstatus.js";
 import type { PrStatusReport } from "./prstatus.js";
@@ -309,7 +310,7 @@ function withStatus(
   const [followUp, followUpWhy]: [FollowUp | null, string | null] = member
     ? memberFollowUp(member, closure, open, facts)
     : open
-      ? classifyFollowUp(facts)
+      ? evaluateDeliveryFollowUp(facts)
       : [null, null];
   const legacyCodexFindings =
     r.headFindings && !r.reviewPolicy.findings.length
