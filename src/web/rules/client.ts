@@ -23,15 +23,85 @@ export type RulesState =
 const isObject = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
 
+const isString = (v: unknown): v is string => typeof v === "string";
+const isStrings = (v: unknown): v is string[] => Array.isArray(v) && v.every(isString);
+const isFormal = (v: unknown): boolean => isObject(v) && isString(v.label) && isStrings(v.lines);
+const isRule = (v: unknown): boolean =>
+  isObject(v) &&
+  isString(v.id) &&
+  (v.purpose === null || isString(v.purpose)) &&
+  (v.formal === null || isStrings(v.formal));
+
+/** One section in a shape the page renders (src/serve/rules-page.ts RulesSectionView). */
+function validSection(v: unknown): boolean {
+  if (!isObject(v) || !isString(v.title)) return false;
+  switch (v.kind) {
+    case "text":
+      return isStrings(v.lines);
+    case "formal":
+      return isFormal(v.formal);
+    case "decisions":
+      return (
+        isString(v.introduction) &&
+        Array.isArray(v.bands) &&
+        v.bands.every(
+          (b) =>
+            isObject(b) &&
+            typeof b.band === "number" &&
+            Array.isArray(b.rules) &&
+            b.rules.every(isRule),
+        )
+      );
+    case "rules":
+      return (
+        (v.before === null || isFormal(v.before)) &&
+        (v.after === null || isFormal(v.after)) &&
+        Array.isArray(v.rules) &&
+        v.rules.every(isRule)
+      );
+    default:
+      return false;
+  }
+}
+
+/** Every field the page reads, so a malformed view is a format error, never a broken render. */
+function validView(v: unknown): boolean {
+  if (!isObject(v)) return false;
+  const { policy, effectivePolicy, scope, narration, effectiveSettings, sections } = v;
+  return (
+    isObject(policy) &&
+    (isString(policy.policyVersion) || typeof policy.policyVersion === "number") &&
+    isString(policy.rulesHash) &&
+    (policy.narrationHash === null ||
+      policy.narrationHash === undefined ||
+      isString(policy.narrationHash)) &&
+    isStrings(policy.sources) &&
+    (isString(policy.englishModelVersion) || typeof policy.englishModelVersion === "number") &&
+    isObject(effectivePolicy) &&
+    isString(effectivePolicy.state) &&
+    (effectivePolicy.state !== "error" ||
+      (isString(effectivePolicy.reason) && isStrings(effectivePolicy.next))) &&
+    isObject(scope) &&
+    typeof scope.complete === "boolean" &&
+    isObject(narration) &&
+    typeof narration.supplied === "number" &&
+    typeof narration.total === "number" &&
+    isString(narration.scope) &&
+    isString(narration.note) &&
+    isStrings(narration.missing) &&
+    isObject(effectiveSettings) &&
+    isString(effectiveSettings.status) &&
+    Array.isArray(sections) &&
+    sections.every(validSection)
+  );
+}
+
 /** The response, or null when it is not a rules document of a version this page reads. */
 export function parseRulesResponse(body: unknown): RulesResponse | null {
   if (!isObject(body) || body.schemaVersion !== 1 || body.kind !== "rules") return null;
   if (body.selected !== null && typeof body.selected !== "string") return null;
   if (!isObject(body.filters) || !isObject(body.view)) return null;
-  const view = body.view;
-  if (!Array.isArray(view.sections) || !isObject(view.policy) || !isObject(view.narration))
-    return null;
-  return body as unknown as RulesResponse;
+  return validView(body.view) ? (body as unknown as RulesResponse) : null;
 }
 
 /** The API's error envelope message, or a generic one: never a page fragment. */

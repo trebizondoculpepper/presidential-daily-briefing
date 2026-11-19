@@ -39,6 +39,25 @@ describe("rules client (#853)", () => {
     expect(ok.status).toBe("ready");
     expect(parseRulesResponse({ schemaVersion: 2, kind: "rules" })).toBeNull();
     expect(parseRulesResponse("<section>html</section>")).toBeNull();
+    // #1138 review: valid outer fields with an unrenderable nested view are a format error.
+    expect(
+      parseRulesResponse({
+        schemaVersion: 1,
+        kind: "rules",
+        selected: null,
+        filters: {},
+        view: { sections: [{}], policy: {}, narration: {} },
+      }),
+    ).toBeNull();
+    const good = body("a/b");
+    expect(parseRulesResponse(good)).not.toBeNull();
+    const badSection = structuredClone(good);
+    (badSection.view.sections as unknown[]).push({ kind: "decisions", title: "x", bands: [{}] });
+    expect(parseRulesResponse(badSection)).toBeNull();
+    const badRule = structuredClone(good);
+    const rules = badRule.view.sections.find((x) => x.kind === "rules")!;
+    if (rules.kind === "rules") (rules.rules as unknown[]).push({ id: 7 });
+    expect(parseRulesResponse(badRule)).toBeNull();
     const wrong = await fetchRules("/api/v1/rules", "", async () => reply(200, { kind: "other" }));
     expect(wrong).toMatchObject({ status: "error" });
   });
