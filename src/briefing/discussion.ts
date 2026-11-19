@@ -139,3 +139,43 @@ export async function readDiscussion(options: DiscussionOptions): Promise<Discus
     rulesHash: native.rulesHash,
   };
 }
+
+export const discussionHelp = `Usage: pdb discussion [--state open|closed|all] [--limit N] [--json] [--repo owner/name]
+Read-only discussion view (#1100): issues ranked by GitHub comment count, a rough proxy for
+where discussion is happening. Being listed is neither a blocker nor proof of disagreement;
+answered discussions stay listed. --state selects open (default), closed (history) or all
+issues; --limit (1..200, default 20) bounds the display only, never the native order.
+Issues whose comment count could not be read are listed as unknown, never as zero. A partial
+read says so and exits 2. No agent identity is needed or created, and nothing is written.
+`;
+
+/** Plain-text rendering of a discussion view; order and reasons come from the result as given. */
+export function discussionText(
+  view: DiscussionView,
+  shown: readonly DiscussionItem[],
+  limit: number,
+): string {
+  const lines = [
+    `Discussion view: ${view.repository} (${view.scope} issues; fetched ${view.fetchedAt})`,
+    "Ranked by comment count, a rough proxy for discussion; listing is not a blocker or proof of disagreement.",
+    "",
+  ];
+  if (!shown.length) lines.push("No issues with comments in this scope.");
+  for (const item of shown) {
+    lines.push(
+      `${item.rank}. #${item.number} ${item.title} (${item.comments} comment${item.comments === 1 ? "" : "s"}${item.state === "CLOSED" ? ", closed" : ""})`,
+      `   ${item.why}`,
+      `   ${item.url}`,
+    );
+  }
+  const omitted = view.items.length - shown.length;
+  if (omitted > 0)
+    lines.push("", `${omitted} more ranked item(s) not shown; raise --limit (now ${limit}).`);
+  if (view.unknown.length)
+    lines.push(
+      "",
+      `Unknown comment count, not ranked: ${view.unknown.map((u) => `#${u.number}`).join(", ")}`,
+    );
+  if (view.coverage.note) lines.push("", `INCOMPLETE: ${view.coverage.note}`);
+  return `${lines.join("\n")}\n`;
+}
