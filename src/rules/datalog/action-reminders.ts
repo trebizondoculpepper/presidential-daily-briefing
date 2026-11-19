@@ -138,6 +138,8 @@ export interface ClaimReminderFactInput {
   /** Explicit native decision IDs (e.g. D-OWN, D-PR-FAIL, D-REVIEW-OWNED). */
   decisionIds?: readonly string[];
   hasOtherClaims?: boolean;
+  /** Number of other active claims when known (D-REVIEW-OWNED requires > 1). */
+  otherClaimCount?: number;
   inventoryComplete?: boolean;
   labelsComplete?: boolean;
   closingComplete?: boolean;
@@ -233,7 +235,10 @@ function refusalErrorToRuleId(
     case "OWNED_BY_OTHER":
       return "D-DENY-CLAIM";
     case "OTHER_ACTIVE_CLAIM":
-      return facts.inventoryComplete === false ? "D-REVIEW-OWNED-PARTIAL" : "D-REVIEW-OWNED";
+      if ((facts.otherClaimCount ?? 0) > 1) {
+        return facts.inventoryComplete === false ? "D-REVIEW-OWNED-PARTIAL" : "D-REVIEW-OWNED";
+      }
+      return null;
     case "EVIDENCE_INCOMPLETE":
       if (facts.labelsComplete === false) return "D-DENY-LABELS-UNKNOWN";
       if (facts.closingComplete === false) return "D-DENY-CLOSING-UNKNOWN";

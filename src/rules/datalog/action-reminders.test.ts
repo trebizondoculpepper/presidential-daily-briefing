@@ -280,6 +280,22 @@ describe("native claim-time obligations and action-reminder selection (#1029)", 
     expect(reworkNoPr.admissionRationale).toEqual([]);
     expect(reworkNoPr.coverage.status).toBe("partial");
 
+    const singleOtherClaim = selectClaimRuleReminders({
+      role: "implementer",
+      outcome: "denied",
+      facts: { error: "OTHER_ACTIVE_CLAIM", otherClaimCount: 1 },
+    });
+    expect(singleOtherClaim.admissionRationale).toEqual([]);
+    expect(singleOtherClaim.coverage.status).toBe("partial");
+
+    expect(
+      selectClaimRuleReminders({
+        role: "implementer",
+        outcome: "denied",
+        facts: { error: "OTHER_ACTIVE_CLAIM", otherClaimCount: 2 },
+      }).admissionRationale.map((i) => i.id),
+    ).toEqual(["D-REVIEW-OWNED"]);
+
     const unknownId = selectClaimRuleReminders({
       role: "implementer",
       outcome: "denied",
