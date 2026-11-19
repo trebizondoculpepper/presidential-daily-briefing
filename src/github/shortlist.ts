@@ -330,12 +330,18 @@ export async function collectShortlist(
       .map((url) => {
         const stub = stubs.get(url)!;
         const kind = kinds.get(url)!;
+        const reason = unhydratable.get(url) ?? "not-shortlisted";
+        // Discovery labels prove a claim absent only for an issue hydration never attempted (left
+        // out or capped). A read that failed, was unavailable or was stopped by quota, or a read
+        // later withdrawn, keeps the claim inventory incomplete (#1105 review).
+        const neverAttempted =
+          (reason === "not-shortlisted" || reason === "hydration-cap") && !everHydrated.has(url);
         return {
           number: stub.number,
           url,
           kind,
-          reason: unhydratable.get(url) ?? "not-shortlisted",
-          ...(kind === "issue" && !everHydrated.has(url)
+          reason,
+          ...(kind === "issue" && neverAttempted
             ? {
                 claimLabels: stub.labels.nodes
                   .map((l) => l.name)

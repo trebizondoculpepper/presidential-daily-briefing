@@ -774,6 +774,8 @@ describe("routine briefing: discover all, rank, hydrate only the shortlist (#368
         [2, "unavailable"],
       ]);
       expect(snapshot.warnings.at(-1)).toContain("unavailable for 2 item(s) (#1, #2)");
+      // #1105 review: a failed or unavailable read never proves a claim absent from discovery labels.
+      expect(unread.every((i) => !("labelsComplete" in i))).toBe(true);
       const failed = snapshot.collection!.coverage.filter((c) => c.state === "failed");
       expect(failed.map((c) => [c.subject, c.failure])).toEqual([
         [`${repo}#1`, "unavailable"],
