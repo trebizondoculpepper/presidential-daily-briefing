@@ -359,6 +359,17 @@
    :codes ["own-claim" "inspection"]
    :witnesses {"waitReason" [[?t "wait-reason" ?value]]}}
 
+  {:id "D-OWN-PR-INCOMPLETE"
+   :purpose "Inspect an owned PR whose checks, reviews or threads were not read completely, instead of treating it as clean or waiting (#651)."
+   :kind "inspect"
+   :band 3
+   :preference 2
+   :affinity "shared"
+   :owned true
+   :when [[1 "role" ?role] [(not= ?role "human")] (own-pr-incomplete ?t)]
+   :why "Your PR's checks, reviews or threads were not read completely at head {head}; inspect it before treating it as waiting or clean."
+   :codes ["own-pr" "evidence-incomplete"]}
+
   {:id "D-OWN-PR-WAIT"
    :purpose "Keep an owned PR that only waits on its checks visible as an owned wait, without inventing repair work (#651)."
    :kind "inspect"
