@@ -258,7 +258,7 @@
    :preference 1
    :affinity "designer"
    :owned false
-   :when [[1 "role" ?role] [(not= ?role "human")] (refinement-work ?t) (refinement-answered ?t) (not (refinement-unanswered ?t))]
+   :when [[1 "role" ?role] [(not= ?role "human")] (refinement-work ?t) (refinement-answered ?t) (not (refinement-unanswered ?t)) (not (refinement-empty ?t))]
    :why "Every blocking question is settled: resolve the refinement so the item returns for estimation. Resolving does not make it ready."
    :codes ["designer-duty"]}
 
@@ -269,7 +269,7 @@
    :preference 1
    :affinity "designer"
    :owned false
-   :when [[1 "role" ?role] [(not= ?role "human")] (refinement-work ?t) (refinement-empty ?t) (not (refinement-unanswered ?t)) (not (refinement-answered ?t)) (not (refinement-incomplete ?t))]
+   :when [[1 "role" ?role] [(not= ?role "human")] (refinement-work ?t) (refinement-empty ?t) (not (refinement-unanswered ?t)) (not (refinement-incomplete ?t))]
    :why "A refinement request records no blocking question; inspect it and record the concrete question or withdraw the request."
    :codes ["designer-duty"]}
 

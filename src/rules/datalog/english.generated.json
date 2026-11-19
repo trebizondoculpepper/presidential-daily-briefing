@@ -1,8 +1,8 @@
 {
   "modelVersion": 2,
   "policyVersion": 1,
-  "rulesHash": "94bd1b02382494db1758faced5f1f1dda2d4ac1a1f0912b99e0bddcff880a6e0",
-  "narrationHash": "75ca88a677836d9a953b09413b47c50a4fda747715842fff4e8dd00806f67fd1",
+  "rulesHash": "7279fd5b267b536a370394d1b4ec6225101eec0d7cbeb53c283e2d223645f07f",
+  "narrationHash": "673ec5549d835e498f47f1a399cb973ec18b06ed31b4fbab5a5f454886bdde50",
   "sources": [
     "policy/schema.edn",
     "policy/rules.edn",
@@ -2276,10 +2276,31 @@
               ]
             }
           ]
+        },
+        {
+          "type": "not",
+          "join": null,
+          "body": [
+            {
+              "type": "call",
+              "predicate": "refinement-empty",
+              "args": [
+                {
+                  "var": "?t"
+                }
+              ]
+            }
+          ]
         }
       ],
       "templateClauses": 1,
-      "calls": ["foreground", "refinement-work", "refinement-answered", "refinement-unanswered"],
+      "calls": [
+        "foreground",
+        "refinement-work",
+        "refinement-answered",
+        "refinement-unanswered",
+        "refinement-empty"
+      ],
       "evidence": [],
       "source": {
         "file": "policy/decisions.edn",
@@ -2368,21 +2389,6 @@
           "body": [
             {
               "type": "call",
-              "predicate": "refinement-answered",
-              "args": [
-                {
-                  "var": "?t"
-                }
-              ]
-            }
-          ]
-        },
-        {
-          "type": "not",
-          "join": null,
-          "body": [
-            {
-              "type": "call",
               "predicate": "refinement-incomplete",
               "args": [
                 {
@@ -2399,7 +2405,6 @@
         "refinement-work",
         "refinement-empty",
         "refinement-unanswered",
-        "refinement-answered",
         "refinement-incomplete"
       ],
       "evidence": [],
@@ -17177,19 +17182,6 @@
               "entity": {
                 "var": "?t"
               },
-              "attribute": "incomplete-key",
-              "value": {
-                "var": "?inc"
-              },
-              "phrase": "incomplete-label sort key",
-              "many": false
-            },
-            {
-              "type": "fact",
-              "scope": "entity",
-              "entity": {
-                "var": "?t"
-              },
               "attribute": "created",
               "value": {
                 "var": "?created"
@@ -17265,6 +17257,66 @@
                       "var": "?u"
                     },
                     "phrase": "urgency sort key",
+                    "many": false
+                  }
+                ]
+              ]
+            },
+            {
+              "type": "or",
+              "join": ["?t", "?k", "?inc"],
+              "alternatives": [
+                [
+                  {
+                    "type": "compare",
+                    "op": "=",
+                    "args": [
+                      {
+                        "var": "?k"
+                      },
+                      {
+                        "lit": "refine"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "bind",
+                    "fn": "+",
+                    "args": [
+                      {
+                        "lit": 0
+                      },
+                      {
+                        "lit": 0
+                      }
+                    ],
+                    "result": "?inc"
+                  }
+                ],
+                [
+                  {
+                    "type": "compare",
+                    "op": "not=",
+                    "args": [
+                      {
+                        "var": "?k"
+                      },
+                      {
+                        "lit": "refine"
+                      }
+                    ]
+                  },
+                  {
+                    "type": "fact",
+                    "scope": "entity",
+                    "entity": {
+                      "var": "?t"
+                    },
+                    "attribute": "incomplete-key",
+                    "value": {
+                      "var": "?inc"
+                    },
+                    "phrase": "incomplete-label sort key",
                     "many": false
                   }
                 ]
@@ -21566,6 +21618,6 @@
     "overrides": 4,
     "constants": 14,
     "attributes": 119,
-    "clauses": 1339
+    "clauses": 1343
   }
 }

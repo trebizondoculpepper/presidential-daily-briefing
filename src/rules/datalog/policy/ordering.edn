@@ -21,9 +21,9 @@
  [(fixed-key ?t ?r ?b ?g ?p) [?t "ownership-inventory" true] [?r "band" ?b] [(= ?b 3)] [?r "preference" ?g] [(+ 0 0) ?p]]
  [(fixed-key ?t ?r ?b ?g ?p) [?r "band" ?b] [(= ?b 3)] [?r "preference" ?g] [?t "active-count" ?n] [(- 0 ?n) ?p]]
  [(keys ?t ?r ?b ?g ?p ?u ?un ?own ?inc ?created) (selected ?t ?r) [?r "band" ?b] [(> ?b 3)] (age ?t ?r ?created) [(+ 0 1) ?g] [(+ 0 0) ?p] [(+ 0 0) ?u] [(+ 0 0) ?un] [(+ 0 0) ?own] [(+ 0 0) ?inc]]
- [(keys ?t ?r ?b ?g ?p ?u ?un ?own ?inc ?created) (selected ?t ?r) [?r "band" ?b] [(> ?b 3)] (not (age ?t ?r _)) [(+ 0 0) ?g] [?r "preference" ?p] [?t "own-key" ?own] [?t "incomplete-key" ?inc] [?t "created" ?created] [?r "kind" ?k] (or-join [?t ?k ?u] (and [(= ?k "refine")] [(+ 0 0) ?u]) (and [(not= ?k "refine")] [?t "urgency-key" ?u])) (or-join [?t ?k ?un] (and [1 "assessment-kind" ?k] [(+ 0 0) ?un]) (and (not [1 "assessment-kind" ?k]) [?t "unlock-count" ?n] [(- 0 ?n) ?un]))]
- ;; #1092: refinement ranks by native downstream unlocks, then age and number; urgency labels do
- ;; not reorder it (doc/design/estimation-refinement-loop.md).
+ [(keys ?t ?r ?b ?g ?p ?u ?un ?own ?inc ?created) (selected ?t ?r) [?r "band" ?b] [(> ?b 3)] (not (age ?t ?r _)) [(+ 0 0) ?g] [?r "preference" ?p] [?t "own-key" ?own] [?t "created" ?created] [?r "kind" ?k] (or-join [?t ?k ?u] (and [(= ?k "refine")] [(+ 0 0) ?u]) (and [(not= ?k "refine")] [?t "urgency-key" ?u])) (or-join [?t ?k ?inc] (and [(= ?k "refine")] [(+ 0 0) ?inc]) (and [(not= ?k "refine")] [?t "incomplete-key" ?inc])) (or-join [?t ?k ?un] (and [1 "assessment-kind" ?k] [(+ 0 0) ?un]) (and (not [1 "assessment-kind" ?k]) [?t "unlock-count" ?n] [(- 0 ?n) ?un]))]
+ ;; #1092: refinement ranks by native downstream unlocks, then age and number; urgency and
+ ;; status:incomplete do not reorder it (doc/design/estimation-refinement-loop.md).
  ;; #651/#652: one activity pool for both roles, ranked ownership first, then directed attention,
  ;; then role affinity, then the existing lifecycle bands. Owned obligations precede all new work.
  ;; Ownership without rule negation (#652 performance): declared owned obligations, or a
