@@ -6,6 +6,11 @@ page contracts to assemble HTML/JavaScript strings in backend TypeScript. Existi
 renderers are migration debt, not proof that every page already follows this
 boundary. No runtime is changed by this document.
 
+Owner clarification, 19 November 2026: Svelte is the selected component approach
+for new and migrated pages, including #853. The owner authorizes its dependency
+and the focused frontend build setup needed for that migration. This supersedes
+the earlier statement that Svelte was only a candidate pending the preview.
+
 ## Ownership boundary
 
 - Shared backend services own facts, configuration, English/formal rules content,
@@ -29,6 +34,13 @@ results rather than a second implementation of them. CLI and MCP continue callin
 shared backend services directly; they are not required to loop through HTTP.
 This preserves the configuration/application-state split in
 [serve-configuration-layers.md](serve-configuration-layers.md).
+
+The browser calls APIs on the existing PDB serve origin/HTTP port. Internal Node
+callers use the canonical domain-service interface directly; an HTTP endpoint is
+a thin adapter over that service, not the only way to invoke it. No additional
+backend process, listening port or external network service is required. The
+Svelte website exercises the API's domain capabilities rather than relying on a
+second hidden data path or duplicating decisions in the frontend.
 
 ## First migration: Rules
 
@@ -65,11 +77,11 @@ use this boundary; their backend services and APIs stay separate from frontend
 rendering. Their existing business acceptance and native prerequisites remain.
 
 The [Svelte Work preview](svelte-work-spike.md) remains a read-only secondary
-comparison page using the same data/native ranking as Work. It is a compatible
-first frontend experiment, not automatic promotion of Svelte to every page or a
-requirement for CLI/server consumers to depend on browser tooling. Its result and
-the developer-server spike determine reusable frontend build details. Follow the
-existing source-language and packed-asset rules for any selected component format.
+comparison page using the same data/native ranking as Work. Svelte is now selected
+for subsequent new/migrated pages; this does not promote the preview to replace
+Work, require a wholesale rewrite, or make CLI/service consumers depend on browser
+tooling. Reuse compatible preview/build research when implementing the focused
+frontend build. Follow existing TypeScript and packed-asset boundaries.
 
 Preserve shared shell layout/navigation behavior, account/project distinctions,
 existing endpoint compatibility, freshness, useful omission notices, bounded lazy

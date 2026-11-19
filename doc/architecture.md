@@ -134,6 +134,14 @@ decisions. Versioned data/text APIs expose them independently of presentation.
 Frontend components own markup and interaction state; they display supplied
 content instead of regenerating rules or workflow logic.
 
+Owner direction: use Svelte for new and migrated serve pages. Its browser code
+consumes versioned backend APIs over the existing PDB serve HTTP port; exercising
+those APIs through the website is part of validating their capabilities. Internal
+Node services, CLI and MCP call the same shared domain services directly, without
+HTTP loopback. This requires no extra server process, port or external service.
+Generic UI labels, component structure and local interaction state remain frontend
+concerns. Existing pages are not required to migrate all at once.
+
 New/migrated pages use built frontend assets/static bootstrap, not backend HTML
 strings or browser `innerHTML` assembly of domain content. Existing generated
 pages migrate incrementally. Keep project/identity context isolated, lazy reads,
