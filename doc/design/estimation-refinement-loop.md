@@ -49,19 +49,19 @@ Refinement is recorded on the ticket as comments, reusing the needs-human questi
   - the evidence was read completely.
 - **Return for estimation.** An estimate recorded after the resolve record (a complexity-estimate v2 marker newer than it) sets `refinement-estimated true`. Otherwise the item awaits re-estimation. Clearing never adds `status:ready`, never closes the ticket, and never changes assignment, claims, estimates, native edges or unrelated labels.
 - **Index label.** `refinement:needed` is added with a request and removed with its resolve, so the briefing can find candidates without reading every ticket's comments.
-  - A label that disagrees with the records is incomplete evidence (`refinement-complete false`), never a decision on its own.
+  - The label is compared with _outstanding_ (unresolved trusted) requests, not with history: a disagreement is incomplete evidence (`refinement-complete false`), never a decision on its own. A resolved request with its label removed is the normal cleared state.
   - Trust is decided by the existing marker rules: only a write-authorised author's request or resolve counts, and an unverifiable author is reported, not obeyed.
 - **Writes.** Writes reuse the existing planner shape: one deterministic operation id per request, retry suppression by a trusted marker with the same id, ordered steps, and truthful partial or uncertain receipts. The comment is written first and the label second; a failed label write leaves the records authoritative and is reported.
 
 Native facts come from the fold of these records:
 
-| Fact                        | Source                                                                                                 |
-| --------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `refinement`                | one entity per trusted request                                                                         |
-| `refinement-state`          | `resolved` if a trusted resolve names it, otherwise `open`                                             |
-| `refinement-question`       | the request's question record                                                                          |
-| `refinement-estimated`      | from estimates newer than the resolve                                                                  |
-| `refinement-complete false` | incomplete history, unverifiable authors, or an index label without a trusted request (or the reverse) |
+| Fact                        | Source                                                                                                                                                                                                                                                                              |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `refinement`                | one entity per trusted request                                                                                                                                                                                                                                                      |
+| `refinement-state`          | `resolved` if a trusted resolve names it, otherwise `open`                                                                                                                                                                                                                          |
+| `refinement-question`       | the request's question record                                                                                                                                                                                                                                                       |
+| `refinement-estimated`      | from estimates newer than the resolve                                                                                                                                                                                                                                               |
+| `refinement-complete false` | incomplete history, unverifiable authors, or an index label that disagrees with the _outstanding_ requests (label without an unresolved trusted request, or an unresolved trusted request without the label); a resolved request with its label removed is the normal cleared state |
 
 ## Designer priority
 
