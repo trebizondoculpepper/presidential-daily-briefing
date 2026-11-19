@@ -48,8 +48,8 @@ Refinement is recorded on the ticket as comments, reusing the needs-human questi
   - no newer trusted request on the ticket is unsettled;
   - the evidence was read completely.
 - **Return for estimation.** An estimate recorded after the resolve record (a complexity-estimate v2 marker newer than it) sets `refinement-estimated true`. Otherwise the item awaits re-estimation. Clearing never adds `status:ready`, never closes the ticket, and never changes assignment, claims, estimates, native edges or unrelated labels.
-- **Index label.** `refinement:needed` is added with a request and removed with its resolve, so the briefing can find candidates without reading every ticket's comments.
-  - The label is compared with _outstanding_ (unresolved trusted) requests, not with history: a disagreement is incomplete evidence (`refinement-complete false`), never a decision on its own. A resolved request with its label removed is the normal cleared state.
+- **Index label.** `refinement:needed` is added with a request. A resolve removes it only when no other unresolved trusted request remains on the ticket; while one does, the label stays. This keeps the label equal to "some request is outstanding", so the briefing can find candidates without reading every ticket's comments.
+  - The label is compared with _outstanding_ (unresolved trusted) requests, not with history: a disagreement is incomplete evidence (`refinement-complete false`), never a decision on its own. A ticket whose requests are all resolved, with the label removed, is the normal cleared state.
   - Trust is decided by the existing marker rules: only a write-authorised author's request or resolve counts, and an unverifiable author is reported, not obeyed.
 - **Writes.** Writes reuse the existing planner shape: one deterministic operation id per request, retry suppression by a trusted marker with the same id, ordered steps, and truthful partial or uncertain receipts. The comment is written first and the label second; a failed label write leaves the records authoritative and is reported.
 
