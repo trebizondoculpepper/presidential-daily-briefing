@@ -51,6 +51,16 @@ export const servedPages: readonly ServedPage[] = [
     section: "work",
   },
   {
+    id: "pipeline",
+    path: "/pipeline",
+    label: "Pipeline",
+    scope: "project",
+    parameters: ["repo"],
+    carries: [],
+    shipped: true,
+  },
+
+  {
     id: "rules",
     path: "/rules",
     label: "Rules",

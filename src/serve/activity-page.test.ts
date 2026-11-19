@@ -18,6 +18,7 @@ import { startServe } from "../serve.js";
 import type { ServeRuntime } from "../serve.js";
 import type { ServeReadRuntime } from "./api.js";
 import { activityRenderers, activityScript } from "./activity-page.js";
+import { pipelineScript } from "./pipeline-page.js";
 import { dashboardRenderers, dashboardSecurityPolicy } from "./dashboard.js";
 import { serveArguments } from "./options.js";
 import { readServices } from "./services.js";
@@ -667,5 +668,27 @@ describe("activity browser script (#456)", () => {
     await settle();
     expect(b.elements.get("window")!.value).toBe("2");
     expect(b.fetched.at(-1)!.path).toContain("staleHours=48"); // 2 days
+  });
+});
+
+describe("pipeline page route is served (#684)", () => {
+  it("serves /pipeline and /pipeline.js with the dashboard CSP and no GitHub read", async () => {
+    const s = await setup();
+    try {
+      const reply = await get(s.running.port, `/pipeline?repo=${encodeURIComponent(repo)}`);
+      expect(reply.status).toBe(200);
+      expect(reply.headers["content-security-policy"]).toBe(dashboardSecurityPolicy);
+      expect(reply.headers["cache-control"]).toBe("no-store");
+      expect(reply.body).toContain(`data-repo="${repo}"`);
+      expect(reply.body).toContain('<script src="/pipeline.js" defer></script>');
+      expect(reply.body).not.toMatch(/<script>|<style|style=/);
+      const script = await get(s.running.port, "/pipeline.js");
+      expect(script.headers["content-type"]).toBe("text/javascript; charset=utf-8");
+      expect(script.body).toBe(pipelineScript());
+      expect((await get(s.running.port, "/pipeline")).body).toContain("No project selected");
+      expect(s.collected).toEqual([]);
+    } finally {
+      await s.running.close();
+    }
   });
 });
