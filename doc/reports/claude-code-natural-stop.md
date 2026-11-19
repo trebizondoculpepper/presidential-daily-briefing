@@ -37,7 +37,7 @@ Documented `Stop` input: `session_id`, `transcript_path`, `cwd`, `permission_mod
 
 - **Session binding:** `session_id` is the native session identity the shared core's `session` needs; `cwd` gives the project checkout for `--project`.
 - **Event identity:** the payload carries **no documented per-Stop event ID**. A unique `--event` must be derived from documented fields (for example `session_id` plus `prompt_id`, if present, plus a monotonic per-session counter kept by the adapter). This is the main open item; see "Unknown".
-- **Delivery evidence:** returning `decision: "block"` with `reason` (or exit 2 with stderr, or `hookSpecificOutput.additionalContext`) is documented to deliver that text to the model as the reason to continue. Observed in this session: the text appears in the next model turn as `Stop hook feedback`. This is the closest thing to model-visible receipt Claude Code offers; it is synchronous with the hook's own response, not a later acknowledgement.
+- **Delivery evidence:** returning `decision: "block"` with `reason` (or exit 2 with stderr, or `hookSpecificOutput.additionalContext`) is documented to deliver that text to the model as the reason to continue. Observed in this session: the text appears in the next model turn as `Stop hook feedback`. Writing the response is **not** receipt: at the native cap Claude Code overrides the block and the text never reaches the model. **Unresolved:** no documented receipt signal exists; the next `Stop` with `stop_hook_active: true` is the only candidate and needs verification.
 - **Not trusted:** `last_assistant_message` and the transcript are model output, not authority; `transcript_path` may not yet contain the final message at Stop time (documented). PDB should not read either.
 - **Busy versus done:** `background_tasks` and `session_crons` distinguish a session that is paused waiting for background work from one that is finished (documented). A continuation offer while background work is pending would compete with it; the adapter should stop normally then.
 
@@ -56,7 +56,7 @@ Claude Code's eight-consecutive-continuation cap is a **native constraint, not a
 A thin command hook, with all policy in shared PDB:
 
 1. `SessionStart` (`startup`/`fork`) → `ensureSession` with verified session-start evidence; `resume`/`compact`/`clear` → reuse only.
-2. `Stop` → `pdb rebrief check --reason natural` with the session binding and a derived unique event ID; on `continue`, return `decision: "block"` with the briefing as `reason`, then acknowledge that exact event/fingerprint; on any other result, exit 0 with no output so Claude Code stops normally.
+2. `Stop` → `pdb rebrief check --reason natural` with the session binding and a derived unique event ID; on `continue`, return `decision: "block"` with the briefing as `reason` and leave the offer **pending**; on any other result, exit 0 with no output so Claude Code stops normally. Do **not** acknowledge when the response is written: at the native cap Claude Code overrides the block, so writing the response is not receipt. The only candidate receipt evidence is the next `Stop` of the same session arriving with `stop_hook_active: true` (the continued turn ran); acknowledge the pending event/fingerprint then, and otherwise leave it pending (`delivery-unacknowledged`). That mechanism is unverified and is step 5 of the owner test.
 3. `StopFailure` → no PDB call (no decision control; nothing to deliver).
 4. Pending `background_tasks` → stop normally without a PDB read.
 5. No hook for interrupts: none is delivered, and none is needed.
@@ -65,7 +65,7 @@ Installation, trust and settings writes belong to the attended installer work (#
 
 ## Unknown, and the exact owner test
 
-Unknown: a documented per-Stop event identifier; whether `Stop` or `StopFailure` fires on a crash or disconnection; whether `/clear` keeps `session_id`; whether the acknowledgement-by-response model holds when the hook process is killed at its timeout.
+Unknown: a documented per-Stop event identifier; a verified native delivery receipt (whether the next `Stop` with `stop_hook_active: true` reliably proves the continuation reached the model, including at the native cap); whether `Stop` or `StopFailure` fires on a crash or disconnection; whether `/clear` keeps `session_id`; whether the acknowledgement-by-response model holds when the hook process is killed at its timeout.
 
 Exact manual test (attended, disposable project, no live ticket writes):
 
@@ -73,5 +73,5 @@ Exact manual test (attended, disposable project, no live ticket writes):
 2. Ask for a short task and let it finish: expect exactly one `Stop` record with `stop_hook_active: false`.
 3. Start a long task and press Esc mid-turn: expect **no** `Stop` record.
 4. Run `/clear`, then a task: record whether `session_id` changed.
-5. Change the hook to return `decision: "block"` once with a fixed reason: expect the model to see `Stop hook feedback`, and the following `Stop` to carry `stop_hook_active: true`.
+5. Change the hook to return `decision: "block"` once with a fixed reason: expect the model to see `Stop hook feedback`, and the following `Stop` to carry `stop_hook_active: true`. Then block on every Stop with a text-only task and confirm that after the eighth consecutive continuation the override ends the turn **without** a later `stop_hook_active: true` Stop, so the receipt rule leaves that offer pending.
 6. Remove the hook file and the temp file.
