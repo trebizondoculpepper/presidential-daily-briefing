@@ -1,8 +1,8 @@
 {
   "modelVersion": 2,
   "policyVersion": 1,
-  "rulesHash": "2d93b8438fdd9563e3b2e2cde13396b298c6e8e7411cd5deb9579515d6ec7e6d",
-  "narrationHash": "43a05848363ea5170ff8a6d93cdf16ada2eb01598d855b5479a8e996c3ed8e02",
+  "rulesHash": "fcb1600822f2e890cbb31878b9fc76b782431d33654404b6f019e5b0eb862c1d",
+  "narrationHash": "282f738b1f866445aa7ef27c12aad850d8a3a22a47376aaf1ffa43eddc9c4d5c",
   "sources": [
     "policy/schema.edn",
     "policy/rules.edn",
@@ -16153,19 +16153,6 @@
               "entity": {
                 "var": "?t"
               },
-              "attribute": "refinement",
-              "value": {
-                "wild": true
-              },
-              "phrase": "refinement request",
-              "many": false
-            },
-            {
-              "type": "fact",
-              "scope": "entity",
-              "entity": {
-                "var": "?t"
-              },
               "attribute": "refinement-complete",
               "value": {
                 "lit": false
@@ -21829,6 +21816,6 @@
     "overrides": 4,
     "constants": 14,
     "attributes": 119,
-    "clauses": 1358
+    "clauses": 1357
   }
 }
