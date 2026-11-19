@@ -35,6 +35,34 @@ Decisions:
 - **Re-estimation:** `D-REESTIMATE` offers a complexity estimate after resolution. It never grants readiness.
 - **Unchanged:** claims, human assignment and native blockers. A blocked item can still be refined.
 
+### Records (#1094)
+
+Refinement is recorded on the ticket as comments, reusing the needs-human question machinery rather than a parallel question store. The comments are authoritative; a label only indexes them.
+
+- **Request.** One comment holds both:
+  - A needs-human v2 question record (`questionRecordBody` plus the existing v2 marker bound to this repository and issue), listing at least one non-blank blocking question. Its operation id identifies the question. The existing `pdb question resolve|withdraw`, folds and human views therefore apply unchanged.
+  - A refinement marker, `<!-- github-triage:refinement v1 {"v":1,"op":"request","opId":…,"repository":…,"issue":…,"agent":…,"questionOpId":…,"dependencies":[…]} -->`. `dependencies` lists optional suggested blockers as `owner/name#N` references. They are suggestions only and are never applied as native edges.
+- **Answers.** A question is answered or withdrawn by the existing trusted question-resolution v1 record. The refinement service adds no answer format.
+- **Clearing.** A refinement v1 `op:"resolve"` record names the request `opId`. It is written only when:
+  - that request's question is settled by a trusted resolve or withdraw;
+  - no newer trusted request on the ticket is unsettled;
+  - the evidence was read completely.
+- **Return for estimation.** An estimate recorded after the resolve record (a complexity-estimate v2 marker newer than it) sets `refinement-estimated true`. Otherwise the item awaits re-estimation. Clearing never adds `status:ready`, never closes the ticket, and never changes assignment, claims, estimates, native edges or unrelated labels.
+- **Index label.** `refinement:needed` is added with a request and removed with its resolve, so the briefing can find candidates without reading every ticket's comments.
+  - A label that disagrees with the records is incomplete evidence (`refinement-complete false`), never a decision on its own.
+  - Trust is decided by the existing marker rules: only a write-authorised author's request or resolve counts, and an unverifiable author is reported, not obeyed.
+- **Writes.** Writes reuse the existing planner shape: one deterministic operation id per request, retry suppression by a trusted marker with the same id, ordered steps, and truthful partial or uncertain receipts. The comment is written first and the label second; a failed label write leaves the records authoritative and is reported.
+
+Native facts come from the fold of these records:
+
+| Fact                        | Source                                                                                                 |
+| --------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `refinement`                | one entity per trusted request                                                                         |
+| `refinement-state`          | `resolved` if a trusted resolve names it, otherwise `open`                                             |
+| `refinement-question`       | the request's question record                                                                          |
+| `refinement-estimated`      | from estimates newer than the resolve                                                                  |
+| `refinement-complete false` | incomplete history, unverifiable authors, or an index label without a trusted request (or the reverse) |
+
 ## Designer priority
 
 In the designer's queue, refinement work comes **after** direct human requests and the designer's own PR follow-up, and **before** ordinary new design work. Within the refinement bucket, items that unlock the most downstream work come first, using existing native dependency evidence, with deterministic ties.
