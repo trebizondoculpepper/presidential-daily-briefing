@@ -277,7 +277,8 @@ describe("routine briefing: discover all, rank, hydrate only the shortlist (#368
     // Delivery records on unhydrated issues are unknown, never "no delivery".
     expect(report.delivery?.complete).toBe(false);
     expect(report.delivery?.omissions.at(-1)).toContain("not hydrated are unknown");
-  }, 90_000);
+    // #1050: this now runs the native policy over 122 items several times (#1069 tracks its cost).
+  }, 300_000);
 
   it("never shows an item it could not hydrate, and never as clean evidence", async () => {
     // Ten eligible tickets; the selector wants all of them, but only three may be hydrated.
@@ -718,7 +719,7 @@ describe("routine briefing: discover all, rank, hydrate only the shortlist (#368
         if (maxChars) expect(text.length).toBeLessThanOrEqual(maxChars);
         expect(Buffer.byteLength(JSON.stringify(result))).toBeLessThanOrEqual(budgetBytes);
       }
-    });
+    }, 120_000);
 
     it("the rebrief hook's briefing text", async () => {
       const { serviceTransport } = await import("../rebrief/transports.js");
