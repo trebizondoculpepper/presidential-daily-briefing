@@ -7,9 +7,11 @@
  * trusted record and no newer trusted request is unsettled. `refinement:needed` indexes
  * tickets with an outstanding request; the records stay authoritative.
  *
- * This module owns the mutation mechanics (planning) and the fold to native facts. It writes
- * through the shared planner shape (`ClaimPlan` + `applyPlan`), so retries, ordered steps and
- * partial receipts are the existing ones. It adds no CLI or browser flow (#1095, #1096).
+ * This module owns the mutation mechanics and the fold to native facts. Each operation writes its
+ * record through the shared planner shape (`ClaimPlan` + `applyPlan`), then reconciles the index
+ * label from a fresh read, so the label follows the outstanding requests at that moment even when
+ * another request lands concurrently or an earlier label write failed. It adds no CLI or browser
+ * flow (#1095, #1096).
  */
 import { createHash } from "node:crypto";
 import {
@@ -21,6 +23,7 @@ import {
 } from "./claimactivity.js";
 import type { ActivityComment, Classified, Parsed } from "./claimactivity.js";
 import {
+  applyPlan,
   commentAuthority,
   commentHistory,
   questionMarker,
@@ -31,7 +34,16 @@ import {
   viewerAuthority,
   writeStep,
 } from "./claims.js";
-import type { ClaimFacts, ClaimPlan, Comment, GraphQuery, PlanStep } from "./claims.js";
+import type {
+  ClaimFacts,
+  ClaimPlan,
+  ClaimRefusal,
+  ClaimResult,
+  Comment,
+  GhRun,
+  GraphQuery,
+  PlanStep,
+} from "./claims.js";
 import type { PermissionLookup } from "../github/github.js";
 import type { TicketReads } from "../github/service/tickets.js";
 
@@ -119,6 +131,9 @@ export const refinementMarker = (record: RefinementRecord): string =>
 
 const opIdOf = (parts: unknown[]): string =>
   createHash("sha256").update(JSON.stringify(parts)).digest("hex").slice(0, 16);
+/** Display text never carries a comment delimiter, so it cannot imitate or break a marker. */
+const display = (text: string): string =>
+  text.replaceAll("<!--", "&lt;!--").replaceAll("-->", "--&gt;");
 
 /** One trusted request after folding. */
 export interface FoldedRequest {
@@ -142,11 +157,12 @@ export interface RefinementFold {
   rejected: string[];
 }
 
+/**
+ * Every comment goes to marker classification: one whose order cannot be established is reported
+ * as unordered (unknown evidence), never silently dropped.
+ */
 const ordered = (comments: readonly Comment[]): ActivityComment[] =>
-  comments.filter(
-    (c): c is ActivityComment =>
-      typeof c.databaseId === "number" && typeof c.createdAt === "string",
-  );
+  comments as unknown as ActivityComment[];
 
 /**
  * Fold one issue's refinement records against its question resolutions. A request counts only
@@ -291,11 +307,78 @@ const ticketFacts = (
   labels: item.labels.nodes.map((l) => l.name),
 });
 
+type Ticket = Awaited<ReturnType<typeof readTicket>>;
+type Item = Extract<NonNullable<Ticket["item"]>, { __typename: "Issue" }>;
+
+/** Read the ticket and its complete comment history, or the refusal that applies. */
+async function readComplete(
+  repository: string,
+  number: number,
+  agent: string,
+  query: GraphQuery | TicketReads,
+  designer = "",
+): Promise<
+  | { ok: true; item: Item; repoLabels: Set<string>; facts: ClaimFacts; comments: Comment[] }
+  | ClaimRefusal
+> {
+  const triage = `pdb --repo ${repository}`;
+  const { item, repoLabels } = await readTicket(
+    repository,
+    number,
+    agent,
+    query,
+    designer,
+    refinementLabel,
+  );
+  if (!item)
+    return refuse("TICKET_NOT_FOUND", { number }, `#${number} must exist.`, [`${triage} --json`]);
+  if (item.__typename !== "Issue")
+    return refuse("NOT_AN_ISSUE", { number, url: item.url }, "Refinement is recorded on issues.", [
+      `gh pr view ${number} --repo ${repository}`,
+    ]);
+  const facts = ticketFacts(number, item);
+  if (item.labels.pageInfo?.hasNextPage)
+    return refuse(
+      "EVIDENCE_INCOMPLETE",
+      facts,
+      "More than 100 labels; the index label cannot be verified, so nothing is changed.",
+      [`${triage} --issue ${number}`],
+    );
+  // Every request and resolve must be seen: an unseen one could make a write stale or duplicate.
+  const history = await commentHistory(repository, number, item, () => false, query);
+  if (!history.complete)
+    return refuse(
+      "EVIDENCE_INCOMPLETE",
+      facts,
+      "The comment history is longer than the bounded read, so a request or resolve may be unseen; nothing is changed.",
+      [`${triage} --issue ${number}`],
+    );
+  return { ok: true, item, repoLabels, facts, comments: history.comments };
+}
+const isRefusal = (r: { ok: boolean }): r is ClaimRefusal => r.ok === false;
+
+async function trustedViewer(
+  repository: string,
+  number: number,
+  query: GraphQuery | TicketReads,
+  permission: PermissionLookup,
+): Promise<ClaimPlan | null> {
+  const { viewer, authority } = await viewerAuthority(query, permission);
+  return authority.status === "trusted"
+    ? null
+    : refuse(
+        "MARKER_UNVERIFIED",
+        { number },
+        `The authenticated account ${viewer?.login ?? "(unknown)"} must have write permission on ${repository} for refinement records to be trusted (${authority.why}); nothing is changed.`,
+        ["gh auth status"],
+      );
+}
+
 /**
- * Plan a refinement request (#1094): one comment holding the needs-human v2 question and the
- * refinement v1 marker, then the index label. Preserves assignment, claims, estimates, native
- * edges and every other label. A retry with the same intent finds its trusted comment and only
- * repairs a missing label.
+ * Plan a refinement request's record (#1094): one comment holding the needs-human v2 question and
+ * the refinement v1 marker. A retry finds its trusted comment and plans nothing; a matching
+ * comment whose authority cannot be established refuses rather than posting a duplicate.
+ * The index label is reconciled afterwards (`planRefinementLabel`).
  */
 export async function planRefinementRequest(
   repository: string,
@@ -326,40 +409,15 @@ export async function planRefinementRequest(
       `Suggested dependencies must be owner/name#N references: ${bad.join(", ")}.`,
       [`${triage} --issue ${number}`],
     );
-  const { viewer, authority } = await viewerAuthority(query, permission);
-  if (authority.status !== "trusted")
-    return refuse(
-      "MARKER_UNVERIFIED",
-      { number },
-      `The authenticated account ${viewer?.login ?? "(unknown)"} must have write permission on ${repository} for the request to be trusted (${authority.why}); nothing is posted.`,
-      ["gh auth status"],
-    );
-  const { item, repoLabels } = await readTicket(
-    repository,
-    number,
-    agent,
-    query,
-    designer,
-    refinementLabel,
-  );
-  if (!item)
-    return refuse("TICKET_NOT_FOUND", { number }, `#${number} must exist.`, [`${triage} --json`]);
-  if (item.__typename !== "Issue")
-    return refuse("NOT_AN_ISSUE", { number, url: item.url }, "Refinement is recorded on issues.", [
-      `gh pr view ${number} --repo ${repository}`,
-    ]);
-  const facts = ticketFacts(number, item);
+  const viewerRefusal = await trustedViewer(repository, number, query, permission);
+  if (viewerRefusal) return viewerRefusal;
+  const read = await readComplete(repository, number, agent, query, designer);
+  if (isRefusal(read)) return read;
+  const { item, facts, comments } = read;
   if (item.state !== "OPEN")
     return refuse("TICKET_CLOSED", facts, "Refinement is requested on open tickets.", [
       `${triage} --issue ${number}`,
     ]);
-  if (item.labels.pageInfo?.hasNextPage)
-    return refuse(
-      "EVIDENCE_INCOMPLETE",
-      facts,
-      "More than 100 labels; the index label cannot be verified, so nothing is posted.",
-      [`${triage} --issue ${number}`],
-    );
   const opId = opIdOf([
     "refinement-request",
     repository.toLowerCase(),
@@ -370,38 +428,6 @@ export async function planRefinementRequest(
     questions,
     dependencies,
   ]);
-  const mineIn = async (comments: Comment[]) => {
-    for (const c of comments) {
-      const parsed = parseRefinementComment(c.body ?? "");
-      if (parsed.kind !== "record" || parsed.record.opId !== opId) continue;
-      if ((await commentAuthority(c, permission)).status === "trusted") return true;
-    }
-    return false;
-  };
-  const history = await commentHistory(repository, number, item, mineIn, query);
-  if (!history.complete)
-    return refuse(
-      "EVIDENCE_INCOMPLETE",
-      facts,
-      "The comment history is longer than the bounded read, so whether this request was already posted is unknown; nothing is posted.",
-      [`${triage} --issue ${number}`],
-    );
-  const already = await mineIn(history.comments);
-  const hasLabel = item.labels.nodes.some((l) => l.name === refinementLabel);
-  // A replay of a recorded request repairs the label only while some request is outstanding:
-  // after a resolve, the cleared state (no label) is correct and must not be undone.
-  let outstanding = true;
-  if (already) {
-    const fold = await foldRefinement(repository, number, history.comments, permission);
-    if (fold.unknown.length)
-      return refuse(
-        "EVIDENCE_INCOMPLETE",
-        facts,
-        `Refinement or question records could not be verified (${fold.unknown.join("; ")}); nothing is changed.`,
-        [`${triage} --issue ${number}`],
-      );
-    outstanding = fold.requests.some((q) => !q.resolved);
-  }
   const record: RefinementRequestRecord = {
     v: 1,
     op: "request",
@@ -418,57 +444,51 @@ export async function planRefinementRequest(
     return refuse("INVALID_RECORD", facts, `The request record would be invalid: ${problem}.`, [
       `${triage} --issue ${number}`,
     ]);
-  const changes: PlanStep[] = [];
-  if (!already) {
-    changes.push(
-      writeStep("comment", {
-        kind: "comment",
-        repository,
-        number,
-        body: [
-          questionRecordBody(
-            { designer, agent, why, questions },
-            questionMarker(opId, repository, number),
-          ),
-          dependencies.length
-            ? `\nSuggested dependencies (not applied): ${dependencies.join(", ")}`
-            : "",
-          "",
-          refinementMarker(record),
-        ].join("\n"),
-      }),
-    );
+  let trusted = false;
+  const unverified: string[] = [];
+  for (const c of comments) {
+    const parsed = parseRefinementComment(c.body ?? "");
+    if (parsed.kind !== "record" || parsed.record.opId !== opId) continue;
+    const authority = await commentAuthority(c, permission);
+    if (authority.status === "trusted") trusted = true;
+    else if (authority.status === "unknown")
+      unverified.push(`comment ${c.databaseId} (${authority.why})`);
   }
-  if (!hasLabel && outstanding) {
-    if (!repoLabels.has(refinementLabel))
-      changes.push(
-        writeStep("create-label", {
-          kind: "label-create",
-          repository,
-          name: refinementLabel,
-          color: "d4c5f9",
-        }),
-      );
-    changes.push(
-      writeStep("labels", {
-        kind: "labels-edit",
-        repository,
-        number,
-        add: [refinementLabel],
-        remove: [],
-      }),
+  if (!trusted && unverified.length)
+    return refuse(
+      "EVIDENCE_INCOMPLETE",
+      facts,
+      `A matching request may already be recorded, but its author could not be verified (${unverified.join("; ")}); nothing is posted.`,
+      [`${triage} --issue ${number}`],
     );
-  }
+  if (trusted)
+    return {
+      ok: true,
+      noop: true,
+      facts,
+      reason: `Request ${opId} is already recorded.`,
+      changes: [],
+      questionOpId: opId,
+    };
+  const body = [
+    questionRecordBody(
+      {
+        designer: display(designer),
+        agent,
+        why: display(why),
+        questions: questions.map(display),
+      },
+      questionMarker(opId, repository, number),
+    ),
+    dependencies.length ? `\nSuggested dependencies (not applied): ${dependencies.join(", ")}` : "",
+    "",
+    refinementMarker(record),
+  ].join("\n");
   return {
     ok: true,
-    noop: !changes.length,
+    noop: false,
     facts,
-    changes,
-    notes: !already
-      ? []
-      : outstanding
-        ? [`Request ${opId} is already recorded; only the index label is repaired.`]
-        : [`Request ${opId} is already recorded and resolved; nothing is changed.`],
+    changes: [writeStep("comment", { kind: "comment", repository, number, body })],
     questionOpId: opId,
   };
 }
@@ -482,11 +502,11 @@ export interface RefinementResolveInput {
 }
 
 /**
- * Plan clearing one refinement request (#1094). Refuses unless the evidence was read completely,
- * the request is trusted and its question is settled by a trusted resolve or withdraw, and no
- * newer trusted request is unsettled. Removes the index label only when no other request stays
- * outstanding. Never adds readiness, closes the ticket, or touches assignment, claims, estimates,
- * native edges or other labels: the item returns for estimation.
+ * Plan one request's resolve record (#1094). Refuses unless the evidence was read completely, the
+ * request is trusted and its question settled by a trusted resolve or withdraw, and no request
+ * after it (in comment order) is unsettled. A retry whose resolve is recorded plans nothing.
+ * Never adds readiness, closes the ticket, or touches assignment, claims, estimates, native
+ * edges or other labels: the item returns for estimation. The label is reconciled afterwards.
  */
 export async function planRefinementResolve(
   repository: string,
@@ -504,39 +524,12 @@ export async function planRefinementResolve(
     return refuse("REASON_REQUIRED", { number }, "Say why the refinement is resolved.", [
       `${triage} --issue ${number}`,
     ]);
-  const { viewer, authority } = await viewerAuthority(query, permission);
-  if (authority.status !== "trusted")
-    return refuse(
-      "MARKER_UNVERIFIED",
-      { number },
-      `The authenticated account ${viewer?.login ?? "(unknown)"} must have write permission on ${repository} for the resolve to be trusted (${authority.why}); nothing is posted.`,
-      ["gh auth status"],
-    );
-  const { item } = await readTicket(repository, number, agent, query, "", refinementLabel);
-  if (!item)
-    return refuse("TICKET_NOT_FOUND", { number }, `#${number} must exist.`, [`${triage} --json`]);
-  if (item.__typename !== "Issue")
-    return refuse("NOT_AN_ISSUE", { number, url: item.url }, "Refinement is recorded on issues.", [
-      `gh pr view ${number} --repo ${repository}`,
-    ]);
-  const facts = ticketFacts(number, item);
-  if (item.labels.pageInfo?.hasNextPage)
-    return refuse(
-      "EVIDENCE_INCOMPLETE",
-      facts,
-      "More than 100 labels; the index label cannot be verified, so nothing is posted.",
-      [`${triage} --issue ${number}`],
-    );
-  // Every request and resolution must be seen: an unseen newer request would make clearing stale.
-  const history = await commentHistory(repository, number, item, () => false, query);
-  if (!history.complete)
-    return refuse(
-      "EVIDENCE_INCOMPLETE",
-      facts,
-      "The comment history is longer than the bounded read, so a newer request or an earlier resolve may be unseen; nothing is posted.",
-      [`${triage} --issue ${number}`],
-    );
-  const fold = await foldRefinement(repository, number, history.comments, permission);
+  const viewerRefusal = await trustedViewer(repository, number, query, permission);
+  if (viewerRefusal) return viewerRefusal;
+  const read = await readComplete(repository, number, agent, query);
+  if (isRefusal(read)) return read;
+  const { facts, comments } = read;
+  const fold = await foldRefinement(repository, number, comments, permission);
   if (fold.unknown.length)
     return refuse(
       "EVIDENCE_INCOMPLETE",
@@ -544,7 +537,8 @@ export async function planRefinementResolve(
       `Refinement or question records could not be verified (${fold.unknown.join("; ")}); nothing is posted.`,
       [`${triage} --issue ${number}`],
     );
-  const target = fold.requests.find((q) => q.opId === request);
+  const at = fold.requests.findIndex((q) => q.opId === request);
+  const target = fold.requests[at];
   if (!target)
     return refuse(
       "REQUEST_NOT_FOUND",
@@ -553,38 +547,17 @@ export async function planRefinementResolve(
       [`${triage} --issue ${number}`],
     );
   const opId = opIdOf(["refinement-resolve", repository.toLowerCase(), number, request]);
-  const hasLabel = item.labels.nodes.some((l) => l.name === refinementLabel);
-  const othersOutstanding = fold.requests.some((q) => q !== target && !q.resolved);
-  // Removed only when nothing stays outstanding: the label always means "some request is open".
-  const removeLabel = (): PlanStep[] =>
-    hasLabel && !othersOutstanding
-      ? [
-          writeStep("labels", {
-            kind: "labels-edit",
-            repository,
-            number,
-            add: [],
-            remove: [refinementLabel],
-          }),
-        ]
-      : [];
   if (target.resolved) {
-    const mine = history.comments.find((c) => String(c.databaseId) === target.resolved!.comment);
+    const mine = comments.find((c) => String(c.databaseId) === target.resolved!.comment);
     const parsed = mine ? parseRefinementComment(mine.body ?? "") : null;
-    if (parsed?.kind === "record" && parsed.record.opId === opId) {
-      // A retry after a partial write: the resolve is recorded, so only the label is repaired.
-      const repair = removeLabel();
+    if (parsed?.kind === "record" && parsed.record.opId === opId)
       return {
         ok: true,
-        noop: !repair.length,
+        noop: true,
         facts,
         reason: `Already resolved: request ${request} (comment ${target.resolved.comment}).`,
-        changes: repair,
-        ...(repair.length
-          ? { notes: [`The resolve is already recorded; only ${refinementLabel} is removed.`] }
-          : {}),
+        changes: [],
       };
-    }
     return refuse(
       "REQUEST_ALREADY_RESOLVED",
       facts,
@@ -601,9 +574,8 @@ export async function planRefinementResolve(
         `pdb question resolve ${number} --question https://github.com/${repository}/issues/${number}#issuecomment-${target.comment} --why TEXT --repo ${repository}`,
       ],
     );
-  const newerOpen = fold.requests.filter(
-    (q) => q !== target && !q.resolved && q.createdAt > target.createdAt,
-  );
+  // Comment order (creation time, then id), as the fold sorted them: ties are not missed.
+  const newerOpen = fold.requests.slice(at + 1).filter((q) => !q.resolved);
   if (newerOpen.length)
     return refuse(
       "NEWER_REQUEST_OPEN",
@@ -627,30 +599,150 @@ export async function planRefinementResolve(
     return refuse("INVALID_RECORD", facts, `The resolve record would be invalid: ${problem}.`, [
       `${triage} --issue ${number}`,
     ]);
-  const changes: PlanStep[] = [
-    writeStep("comment", {
-      kind: "comment",
-      repository,
-      number,
-      body: [
-        `**Refinement resolved** by \`${agent}\`: request \`${request}\`.`,
-        "",
-        `**Why:** ${why}`,
-        "",
-        "The ticket returns for estimation; this does not make it ready.",
-        "",
-        refinementMarker(record),
-      ].join("\n"),
-    }),
-    ...removeLabel(),
-  ];
+  const body = [
+    `**Refinement resolved** by \`${agent}\`: request \`${request}\`.`,
+    "",
+    `**Why:** ${display(why)}`,
+    "",
+    "The ticket returns for estimation; this does not make it ready.",
+    "",
+    refinementMarker(record),
+  ].join("\n");
   return {
     ok: true,
     noop: false,
     facts,
-    changes,
-    notes: othersOutstanding
-      ? [`${refinementLabel} is kept: another refinement request is still outstanding.`]
-      : [],
+    changes: [writeStep("comment", { kind: "comment", repository, number, body })],
   };
+}
+
+/**
+ * Plan the index label from a fresh, complete fold: `refinement:needed` is present exactly while
+ * some trusted request is outstanding. Refuses on incomplete or unverifiable evidence rather than
+ * guessing, so a label is never set or cleared on partial knowledge.
+ */
+export async function planRefinementLabel(
+  repository: string,
+  number: number,
+  agent: string,
+  query: GraphQuery | TicketReads,
+  permission: PermissionLookup,
+): Promise<ClaimPlan> {
+  const triage = `pdb --repo ${repository}`;
+  const read = await readComplete(repository, number, agent, query);
+  if (isRefusal(read)) return read;
+  const { item, repoLabels, facts, comments } = read;
+  const fold = await foldRefinement(repository, number, comments, permission);
+  if (fold.unknown.length)
+    return refuse(
+      "EVIDENCE_INCOMPLETE",
+      facts,
+      `Refinement or question records could not be verified (${fold.unknown.join("; ")}); ${refinementLabel} is left as it is.`,
+      [`${triage} --issue ${number}`],
+    );
+  const outstanding = fold.requests.some((q) => !q.resolved);
+  const present = item.labels.nodes.some((l) => l.name === refinementLabel);
+  const changes: PlanStep[] = [];
+  if (outstanding && !present) {
+    if (!repoLabels.has(refinementLabel))
+      changes.push(
+        writeStep("create-label", {
+          kind: "label-create",
+          repository,
+          name: refinementLabel,
+          color: "d4c5f9",
+        }),
+      );
+    changes.push(
+      writeStep("labels", {
+        kind: "labels-edit",
+        repository,
+        number,
+        add: [refinementLabel],
+        remove: [],
+      }),
+    );
+  } else if (!outstanding && present)
+    changes.push(
+      writeStep("labels", {
+        kind: "labels-edit",
+        repository,
+        number,
+        add: [],
+        remove: [refinementLabel],
+      }),
+    );
+  return {
+    ok: true,
+    noop: !changes.length,
+    facts,
+    changes,
+  };
+}
+
+export interface RefinementWrites {
+  run?: GhRun;
+  query: GraphQuery | TicketReads;
+  permission: PermissionLookup;
+}
+
+/**
+ * Apply a planned record, then reconcile the index label from a fresh read. The receipt lists
+ * every step in order; a failed or unreconcilable label after a written record is a partial
+ * outcome (exit 2), and the record stays authoritative.
+ */
+async function writeThenIndex(
+  repository: string,
+  plan: ClaimPlan,
+  number: number,
+  agent: string,
+  { run, query, permission }: RefinementWrites,
+): Promise<ClaimResult> {
+  if (!plan.ok) return { ...plan, exitCode: 1 };
+  const steps: PlanStep[] = [];
+  if (!plan.noop) {
+    const written = await applyPlan(repository, plan, { ...(run ? { run } : {}), query });
+    if (written.exitCode !== 0) return written;
+    steps.push(...(written.steps ?? []));
+  }
+  const label = await planRefinementLabel(repository, number, agent, query, permission);
+  let exitCode = 0;
+  let unverified: string | null = null;
+  if (!label.ok) {
+    unverified = `${refinementLabel} could not be reconciled: ${label.prerequisite}`;
+    exitCode = steps.length ? 2 : 1;
+  } else if (!label.noop) {
+    const indexed = await applyPlan(repository, label, { ...(run ? { run } : {}), query });
+    steps.push(...(indexed.steps ?? []));
+    if (indexed.exitCode !== 0) exitCode = steps.some((s) => s.status === "done") ? 2 : 1;
+  }
+  return {
+    ...plan,
+    noop: !steps.length && !unverified,
+    changes: [...plan.changes, ...(label.ok ? label.changes : [])],
+    steps,
+    conflict: null,
+    unverified,
+    exitCode,
+  };
+}
+
+/** Request refinement: write the record (if not already recorded), then reconcile the label. */
+export async function requestRefinement(
+  repository: string,
+  input: RefinementRequestInput,
+  writes: RefinementWrites,
+): Promise<ClaimResult> {
+  const plan = await planRefinementRequest(repository, input, writes.query, writes.permission);
+  return writeThenIndex(repository, plan, input.number, input.agent, writes);
+}
+
+/** Resolve one request: write the resolve (if not already recorded), then reconcile the label. */
+export async function resolveRefinement(
+  repository: string,
+  input: RefinementResolveInput,
+  writes: RefinementWrites,
+): Promise<ClaimResult> {
+  const plan = await planRefinementResolve(repository, input, writes.query, writes.permission);
+  return writeThenIndex(repository, plan, input.number, input.agent, writes);
 }
