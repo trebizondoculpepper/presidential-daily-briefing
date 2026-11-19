@@ -114,6 +114,11 @@
 [(follow-up ?t) (clean-pr ?t)]
 [(follow-up ?t) (integrate-pr ?t)]
 [(own-follow-up ?t) (mine-linked ?t) (follow-up ?t)]
+;; #651: an owned PR only waiting on its checks: visible as an owned wait, never a repair action.
+[(own-pr-waiting ?t) (pr ?t) (open ?t) (mine-linked ?t) [?t "pr-complete" true] [?t "required-evidence-complete" true] (pr-pending ?t) (not (follow-up ?t))]
+;; Incomplete PR evidence is never clean: an owned PR without an observed follow-up is inspected.
+[(own-pr-incomplete ?t) (pr ?t) (open ?t) (mine-linked ?t) [?t "pr-complete" false] (not (follow-up ?t))]
+[(own-pr-incomplete ?t) (pr ?t) (open ?t) (mine-linked ?t) [?t "required-evidence-complete" false] (not (follow-up ?t))]
 [(pr-action ?t) (pr ?t) [1 "role" ?viewer] [(not= ?viewer "human")]]
 [(question-labelled ?t) [?t "label" ?l] [1 "question-label" ?l]]
 [(trusted-record ?t ?r) [?t "question-record" ?r] [?r "record-trust" "trusted"]]
