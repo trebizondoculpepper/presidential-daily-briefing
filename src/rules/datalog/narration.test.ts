@@ -5,7 +5,12 @@ import { buildPolicy, policyDir, readSources } from "./build.js";
 import { narrationHashOf, rulesHashOf } from "./hash.js";
 import { compileEnglish } from "./english.js";
 import { purposeLimit, purposeText } from "./narration.js";
-import { rulesDocument, rulesText, validateRulesArtifact } from "./rules-command.js";
+import {
+  rulesDocument,
+  rulesFormalText,
+  rulesText,
+  validateRulesArtifact,
+} from "./rules-command.js";
 import { declaredRulesContext } from "../declared-context.js";
 import { compileProjectPolicy } from "./project/compile.js";
 
@@ -28,7 +33,7 @@ describe("rule-attached literal purposes (#578)", () => {
     expect(doc.decisions.some((d) => d.id === "D-HUMAN-ASK-YOU")).toBe(true);
   });
 
-  it("keeps formal CLI conditions and shape versions unchanged when documentation is removed", () => {
+  it("shows purposes in Markdown while preserving the formal listing and schema", () => {
     const bundle = buildPolicy();
     const annotated = compileEnglish(bundle);
     const { denialPurposes: _, ...plain } = bundle;
@@ -66,6 +71,11 @@ describe("rule-attached literal purposes (#578)", () => {
     expect(before.narration).toMatchObject({ total: 69, supplied: 0 });
     expect(before.narration.missing).toHaveLength(69);
     expect(rulesText(after)).not.toContain(bundle.definitions[0].purpose);
+    // #1121: the formal Markdown listing carries the authored purpose when one is supplied, and
+    // says so plainly when it is not.
+    expect(rulesFormalText(before)).toBe(rulesFormalText(after));
+    expect(rulesFormalText(before)).toContain("no purpose was supplied");
+    expect(rulesFormalText(after)).toContain(`In plain English: ${bundle.definitions[0].purpose}`);
   });
 
   it.each([
