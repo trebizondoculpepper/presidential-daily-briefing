@@ -60,9 +60,9 @@
 ;; #1092 (doc/design/estimation-refinement-loop.md): needs refinement denies pickup whatever the
 ;; estimate or readiness label says; an unknown refinement state or incomplete refinement
 ;; evidence fails closed. Resolving it returns the item for estimation, never to readiness.
-[(implementation-deny ?t ?r) (issue ?t) (needs-refinement ?t) [(str "D-DENY-REFINEMENT") ?r]]
-[(implementation-deny ?t ?r) (issue ?t) (awaiting-reestimate ?t) [(str "D-DENY-REESTIMATE") ?r]]
-[(implementation-deny ?t ?r) (issue ?t) [?t "refinement-complete" false] [(str "D-DENY-REFINEMENT-UNKNOWN") ?r]]
+[(implementation-deny ?t ?r) (needs-refinement ?t) (issue ?t) [(str "D-DENY-REFINEMENT") ?r]]
+[(implementation-deny ?t ?r) (awaiting-reestimate ?t) (issue ?t) [(str "D-DENY-REESTIMATE") ?r]]
+[(implementation-deny ?t ?r) [?t "refinement-complete" false] (issue ?t) [(str "D-DENY-REFINEMENT-UNKNOWN") ?r]]
 [(implementation-denied ?t) (implementation-deny ?t ?r)]
 [(eligible ?t) (implementation-permit ?t) (not (implementation-denied ?t))]
 [(design-eligible ?t) (issue ?t) (open ?t) [?t "label" "status:needs-design"] [?t "labels-complete" true] (platform-ok ?t) (closing-complete ?t) (not (claimed ?t)) (not (has-closing ?t)) (not [?t "label" "design:decision-needed"])]
@@ -258,7 +258,7 @@
 [(refinement-empty ?t) (refinement-open ?t ?q) (not (refinement-asks ?q))]
 ;; Resolved without a recorded later estimate (false or absent): back to estimation, never implementable.
 [(awaiting-reestimate ?t) [?t "refinement" ?q] [?q "refinement-state" "resolved"] (not [?q "refinement-estimated" true]) (not (needs-refinement ?t))]
-[(refinement-work ?t) (issue ?t) (open ?t) (needs-refinement ?t) [?t "labels-complete" true] (platform-ok ?t) (not (claimed ?t))]
+[(refinement-work ?t) (needs-refinement ?t) (issue ?t) (open ?t) [?t "labels-complete" true] (platform-ok ?t) (not (claimed ?t))]
 ;; #1092: needs refinement, awaiting re-estimate or unknown refinement holds an owned claim too;
 ;; the claim is kept, never continued as implementation.
 [(own-held-back ?t) (own-active ?t) (refinement-hold ?t)]

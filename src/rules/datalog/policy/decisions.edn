@@ -291,7 +291,7 @@
    :preference 0
    :affinity "implementer"
    :owned false
-   :when [[1 "role" ?role] [(not= ?role "human")] (issue ?t) (open ?t) (awaiting-reestimate ?t) (not (claimed ?t))]
+   :when [[1 "role" ?role] [(not= ?role "human")] (awaiting-reestimate ?t) (issue ?t) (open ?t) (not (claimed ?t))]
    :why "Refinement was resolved; re-estimate assuming its dependencies are complete. Estimation does not make the item ready."
    :codes ["ordinary"]}
 

@@ -1,8 +1,8 @@
 {
   "modelVersion": 2,
   "policyVersion": 1,
-  "rulesHash": "fcb1600822f2e890cbb31878b9fc76b782431d33654404b6f019e5b0eb862c1d",
-  "narrationHash": "282f738b1f866445aa7ef27c12aad850d8a3a22a47376aaf1ffa43eddc9c4d5c",
+  "rulesHash": "9f07f1e7205f1a8ca4c94f225bdd3d9833010d2e71d7940804ed457817d08de8",
+  "narrationHash": "8d23b95b3779602cafbf5978784575f34fece5d83f9ca5414aa7578b1a5fcbc6",
   "sources": [
     "policy/schema.edn",
     "policy/rules.edn",
@@ -2543,6 +2543,15 @@
         },
         {
           "type": "call",
+          "predicate": "awaiting-reestimate",
+          "args": [
+            {
+              "var": "?t"
+            }
+          ]
+        },
+        {
+          "type": "call",
           "predicate": "issue",
           "args": [
             {
@@ -2553,15 +2562,6 @@
         {
           "type": "call",
           "predicate": "open",
-          "args": [
-            {
-              "var": "?t"
-            }
-          ]
-        },
-        {
-          "type": "call",
-          "predicate": "awaiting-reestimate",
           "args": [
             {
               "var": "?t"
@@ -2585,7 +2585,7 @@
         }
       ],
       "templateClauses": 1,
-      "calls": ["foreground", "issue", "open", "awaiting-reestimate", "claimed"],
+      "calls": ["foreground", "awaiting-reestimate", "issue", "open", "claimed"],
       "evidence": [],
       "source": {
         "file": "policy/decisions.edn",
@@ -7618,7 +7618,7 @@
           "clauses": [
             {
               "type": "call",
-              "predicate": "issue",
+              "predicate": "needs-refinement",
               "args": [
                 {
                   "var": "?t"
@@ -7627,7 +7627,7 @@
             },
             {
               "type": "call",
-              "predicate": "needs-refinement",
+              "predicate": "issue",
               "args": [
                 {
                   "var": "?t"
@@ -7655,7 +7655,7 @@
           "clauses": [
             {
               "type": "call",
-              "predicate": "issue",
+              "predicate": "awaiting-reestimate",
               "args": [
                 {
                   "var": "?t"
@@ -7664,7 +7664,7 @@
             },
             {
               "type": "call",
-              "predicate": "awaiting-reestimate",
+              "predicate": "issue",
               "args": [
                 {
                   "var": "?t"
@@ -7691,15 +7691,6 @@
           "params": ["?t", "?r"],
           "clauses": [
             {
-              "type": "call",
-              "predicate": "issue",
-              "args": [
-                {
-                  "var": "?t"
-                }
-              ]
-            },
-            {
               "type": "fact",
               "scope": "entity",
               "entity": {
@@ -7711,6 +7702,15 @@
               },
               "phrase": "refinement evidence completeness",
               "many": false
+            },
+            {
+              "type": "call",
+              "predicate": "issue",
+              "args": [
+                {
+                  "var": "?t"
+                }
+              ]
             },
             {
               "type": "bind",
@@ -16761,6 +16761,15 @@
           "clauses": [
             {
               "type": "call",
+              "predicate": "needs-refinement",
+              "args": [
+                {
+                  "var": "?t"
+                }
+              ]
+            },
+            {
+              "type": "call",
               "predicate": "issue",
               "args": [
                 {
@@ -16771,15 +16780,6 @@
             {
               "type": "call",
               "predicate": "open",
-              "args": [
-                {
-                  "var": "?t"
-                }
-              ]
-            },
-            {
-              "type": "call",
-              "predicate": "needs-refinement",
               "args": [
                 {
                   "var": "?t"
@@ -16830,7 +16830,7 @@
           }
         }
       ],
-      "calls": ["issue", "open", "needs-refinement", "platform-ok", "claimed"],
+      "calls": ["needs-refinement", "issue", "open", "platform-ok", "claimed"],
       "set": "rules"
     },
     {
@@ -19974,7 +19974,7 @@
       "clauses": [
         {
           "type": "call",
-          "predicate": "issue",
+          "predicate": "needs-refinement",
           "args": [
             {
               "var": "?t"
@@ -19983,7 +19983,7 @@
         },
         {
           "type": "call",
-          "predicate": "needs-refinement",
+          "predicate": "issue",
           "args": [
             {
               "var": "?t"
@@ -19991,7 +19991,7 @@
           ]
         }
       ],
-      "calls": ["issue", "needs-refinement"]
+      "calls": ["needs-refinement", "issue"]
     },
     {
       "id": "D-DENY-REESTIMATE",
@@ -20000,7 +20000,7 @@
       "clauses": [
         {
           "type": "call",
-          "predicate": "issue",
+          "predicate": "awaiting-reestimate",
           "args": [
             {
               "var": "?t"
@@ -20009,7 +20009,7 @@
         },
         {
           "type": "call",
-          "predicate": "awaiting-reestimate",
+          "predicate": "issue",
           "args": [
             {
               "var": "?t"
@@ -20017,22 +20017,13 @@
           ]
         }
       ],
-      "calls": ["issue", "awaiting-reestimate"]
+      "calls": ["awaiting-reestimate", "issue"]
     },
     {
       "id": "D-DENY-REFINEMENT-UNKNOWN",
       "purpose": "Fail closed when refinement evidence could not be read completely.",
       "predicate": "implementation-deny",
       "clauses": [
-        {
-          "type": "call",
-          "predicate": "issue",
-          "args": [
-            {
-              "var": "?t"
-            }
-          ]
-        },
         {
           "type": "fact",
           "scope": "entity",
@@ -20045,6 +20036,15 @@
           },
           "phrase": "refinement evidence completeness",
           "many": false
+        },
+        {
+          "type": "call",
+          "predicate": "issue",
+          "args": [
+            {
+              "var": "?t"
+            }
+          ]
         }
       ],
       "calls": ["issue"]
