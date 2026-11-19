@@ -614,3 +614,73 @@ async function until(predicate: () => boolean, timeoutMs = 10_000): Promise<void
     await new Promise((done) => setTimeout(done, 5));
   }
 }
+
+describe("pdb serve discussion view through the shared cache (#1118 review)", () => {
+  it("reads once and serves a repeated identical request from the cache", async () => {
+    const clock = new ManualClock();
+    let discussionQueries = 0;
+    const discussionQuery: Query = async (source) => {
+      if (source.includes("comments{totalCount}")) discussionQueries++;
+      return {
+        repository: {
+          issues: {
+            nodes: [
+              {
+                number: 1,
+                title: "Ticket 1",
+                url: "https://github.com/example/one/issues/1",
+                state: "OPEN",
+                comments: { totalCount: 4 },
+              },
+            ],
+            pageInfo: { hasNextPage: false, endCursor: null },
+          },
+        },
+      } as never;
+    };
+    const serve: ServeRuntime = {
+      currentRepository: async () => "example/one",
+      authContext: async () => ({ host: "github.com", login: "octo" }),
+      clock,
+      stdout: () => undefined,
+      stderr: () => undefined,
+      signals: new EventEmitter(),
+      exit: () => undefined,
+      version: async () => "9.9.9",
+      platform: "linux",
+    };
+    const read: ServeReadRuntime = {
+      collect: async () => {
+        throw new Error("the discussion view must not collect a snapshot");
+      },
+      dependencyReport: async () => {
+        throw new Error("not used");
+      },
+      queryWith: () => discussionQuery,
+      now: () => clock.now(),
+      env: {},
+    };
+    const options = serveArguments(["--port", "0", "--repo", "example/one"]);
+    const running = await startServe(options, serve, readServices(options, serve, read));
+    const client = await connect(new URL(`${running.facts.url}mcp`));
+    try {
+      const call = async () =>
+        boundedEnvelope.parse(
+          (
+            await client.callTool({
+              name: "triage_discussion",
+              arguments: { repo: "example/one" },
+            })
+          ).structuredContent,
+        );
+      const first = await call();
+      expect(first).toMatchObject({ view: "discussion", status: "complete" });
+      expect(discussionQueries).toBe(1);
+      await call();
+      expect(discussionQueries).toBe(1);
+    } finally {
+      await client.close();
+      await running.close();
+    }
+  });
+});

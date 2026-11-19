@@ -1,4 +1,5 @@
 import { readDiscussion } from "../briefing/discussion.js";
+import type { DiscussionView } from "../briefing/discussion.js";
 import { discussionPage } from "../github/service/snapshot.js";
 import {
   startLocalIdentity,
@@ -110,6 +111,15 @@ export interface McpOptions {
 
 /** Injected boundaries; tests replace every GitHub-facing one. */
 export interface McpRuntime extends ReadRuntime {
+  /**
+   * #1118 review: a host-provided discussion read (pdb serve routes it through its shared cache,
+   * coalescing, concurrency limit and rate-limit cooldown). Absent, the tool reads directly.
+   */
+  readDiscussion?: (
+    repository: string,
+    scope: "open" | "closed" | "all",
+    signal: AbortSignal,
+  ) => Promise<DiscussionView>;
   /** Prepared by the local entry point only; never by a tool request. */
   identitySession?: LocalIdentitySession;
   /** HTTP cache's latest actual human observation, without another authentication request. */
@@ -1018,13 +1028,15 @@ export function createServer(
         ctx.mcpReq.signal,
         10000,
         async (selection, rt) => {
-          const view = await readDiscussion({
-            repository: selection.repository,
-            scope: args.state,
-            gh: discussionGhOf(rt),
-            signal: ctx.mcpReq.signal,
-            ...(rt.now ? { now: rt.now } : {}),
-          });
+          const view = runtime.readDiscussion
+            ? await runtime.readDiscussion(selection.repository, args.state, ctx.mcpReq.signal)
+            : await readDiscussion({
+                repository: selection.repository,
+                scope: args.state,
+                gh: discussionGhOf(rt),
+                signal: ctx.mcpReq.signal,
+                ...(rt.now ? { now: rt.now } : {}),
+              });
           return {
             status: view.coverage.complete ? "complete" : "incomplete",
             build: (base, redact) =>

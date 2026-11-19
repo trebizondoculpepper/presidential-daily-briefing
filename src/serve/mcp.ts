@@ -8,6 +8,10 @@
  * cache. `node:http` messages are converted to web `Request`/`Response` directly; no framework
  * or Node adapter package is added. The stdio `pdb-mcp` is untouched.
  */
+import type { Query } from "../github/github.js";
+import { readDiscussion } from "../briefing/discussion.js";
+import type { DiscussionView } from "../briefing/discussion.js";
+import { discussionPage } from "../github/service/snapshot.js";
 import { randomUUID } from "node:crypto";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { Readable } from "node:stream";
@@ -98,6 +102,42 @@ export function cachedMcpRuntime(
         throw error;
       }
     },
+    // #1118 review: the discussion view goes through the shared cache, keyed by repository and
+    // state scope, like every other served collection; only a complete view is stored.
+    ...(guardedQueryWith
+      ? {
+          readDiscussion: (
+            repository: string,
+            scope: "open" | "closed" | "all",
+            signal: AbortSignal,
+          ) =>
+            cache.read<DiscussionView>(
+              { repository, collector: "discussion", coverage: { scope } },
+              (inner) =>
+                readDiscussion({
+                  repository,
+                  scope,
+                  gh: {
+                    snapshot: {
+                      discussionPage: (repo, state, size, cursor, pageSignal) =>
+                        discussionPage(
+                          guardedQueryWith(pageSignal ?? inner) as Query,
+                          repo,
+                          state,
+                          size,
+                          cursor,
+                          pageSignal ?? inner,
+                        ),
+                    },
+                  },
+                  signal: inner,
+                  ...(read.now ? { now: read.now } : {}),
+                }),
+              signal,
+              (view) => view.coverage.complete,
+            ),
+        }
+      : {}),
     track: async (work) => {
       const { value, freshness } = await cache.track(false, work);
       // The stale record wins: a call that used any stale fact is reported stale.
