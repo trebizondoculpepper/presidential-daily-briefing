@@ -30,6 +30,8 @@ export const commandKinds: Record<string, string> = {
   document: "detail",
   "continue-implementation": "detail",
   design: "detail",
+  // #1092: refinement is read on the ticket until the refinement commands land (#1095, #1096).
+  refine: "detail",
   inspect: "detail",
   "inspect-assessment": "detail",
   "answer-questions": "detail",

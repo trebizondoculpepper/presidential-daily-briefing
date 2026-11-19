@@ -35,7 +35,7 @@ describe("rules build (#348)", () => {
     const artifact = buildPolicy();
     expect(JSON.parse(readFileSync(artifactPath, "utf8"))).toEqual(JSON.parse(serialize(artifact)));
     // 30 agent decisions (seven for retained claims/inventory, #413) plus eight human decisions (#457, #414).
-    expect(artifact.definitions).toHaveLength(50);
+    expect(artifact.definitions).toHaveLength(55);
   });
 
   it("rejects a second top-level form that DataScript would silently ignore", () => {

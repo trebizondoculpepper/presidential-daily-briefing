@@ -29,7 +29,7 @@
 ;; outstanding question or design need) is managed, never continued as implementation.
 [(own-held-back ?t) (own-active ?t) (blocked ?t)]
 [(own-held-back ?t) (own-active ?t) (prerequisite ?t)]
-[(own-continuable ?t) (own-active ?t) (not (blocked ?t)) (not (prerequisite ?t))]
+[(own-continuable ?t) (own-active ?t) (not (blocked ?t)) (not (prerequisite ?t)) (not (refinement-hold ?t))]
 ;; A closed source stays in the human view while a trusted question on it is unsettled (#414).
 [(foreground ?t) [1 "role" "human"] (orphan-source ?t)]
 [(platform-ok ?t) [?t "labels-complete" true] (not [?t "platform" _])]
@@ -42,7 +42,7 @@
 [(has-closing ?t) [?p "closes" ?t] (open ?p)]
 [(closing-complete ?t) [?t "reverse-complete" true]]
 [(closing-complete ?t) [?t "kind" _] [1 "forward-complete" true]]
-[(otherwise ?t) (issue ?t) (open ?t) (available ?t) [?t "labels-complete" true] (platform-ok ?t) (closing-complete ?t) (not (claimed ?t)) (not (has-closing ?t)) (not (prerequisite ?t))]
+[(otherwise ?t) (issue ?t) (open ?t) (available ?t) [?t "labels-complete" true] (platform-ok ?t) (closing-complete ?t) (not (claimed ?t)) (not (has-closing ?t)) (not (prerequisite ?t)) (not (refinement-hold ?t))]
 [(blocked ?t) [?t "open-blockers" ?n] [(> ?n 0)]]
 [(blocked ?t) [?t "blocker" ?i] [?i "state" "OPEN"]]
 [(implementation-permit ?t) (issue ?t) (open ?t) (available ?t)]
@@ -57,6 +57,12 @@
 ;; #413: an incomplete inventory cannot rule out omitted active claims, even if every
 ;; observed claim is waiting; new pickup is denied rather than inviting a claim that the guard may refuse.
 [(implementation-deny ?t ?r) (issue ?t) (open ?t) (available ?t) (not (claimed ?t)) [1 "owned-claims-complete" false] [(str "D-DENY-INVENTORY-UNKNOWN") ?r]]
+;; #1092 (doc/design/estimation-refinement-loop.md): needs refinement denies pickup whatever the
+;; estimate or readiness label says; an unknown refinement state or incomplete refinement
+;; evidence fails closed. Resolving it returns the item for estimation, never to readiness.
+[(implementation-deny ?t ?r) (needs-refinement ?t) (issue ?t) [(str "D-DENY-REFINEMENT") ?r]]
+[(implementation-deny ?t ?r) (awaiting-reestimate ?t) (issue ?t) [(str "D-DENY-REESTIMATE") ?r]]
+[(implementation-deny ?t ?r) [?t "refinement-complete" false] (issue ?t) [(str "D-DENY-REFINEMENT-UNKNOWN") ?r]]
 [(implementation-denied ?t) (implementation-deny ?t ?r)]
 [(eligible ?t) (implementation-permit ?t) (not (implementation-denied ?t))]
 [(design-eligible ?t) (issue ?t) (open ?t) [?t "label" "status:needs-design"] [?t "labels-complete" true] (platform-ok ?t) (closing-complete ?t) (not (claimed ?t)) (not (has-closing ?t)) (not [?t "label" "design:decision-needed"])]
@@ -70,7 +76,8 @@
 [(small-complexity ?t) [?t "complexity-state" "current"] [?t "complexity-size" ?s] [1 "small" ?s]]
 [(easy ?t) (large-impact ?t) (small-complexity ?t)]
 [(unfavorable ?t) [?t "impact-state" "current"] [?t "impact-size" ?i] [1 "small" ?i] [?t "complexity-state" "current"] [?t "complexity-size" ?c] [1 "large" ?c]]
-[(needs-complexity ?t) [?t "complexity-state" ?s] [1 "needs-assessment" ?s]]
+;; #1092: an open refinement is answered first; resolution then returns it for estimation.
+[(needs-complexity ?t) [?t "complexity-state" ?s] [1 "needs-assessment" ?s] (not (needs-refinement ?t))]
 [(needs-impact ?t) [?t "impact-state" ?s] [1 "needs-assessment" ?s]]
 [(bad-complexity ?t) [?t "complexity-state" ?s] [1 "bad-assessment" ?s]]
 [(bad-impact ?t) [?t "impact-state" ?s] [1 "bad-assessment" ?s]]
@@ -220,4 +227,39 @@
 [(discussion-ranked ?t ?key ?number ?why) (discussion-in-scope ?t) [?t "comment-count-known" true] [?t "comment-count" ?n] [(> ?n 0)] [(- 0 ?n) ?key] [?t "number" ?number] [(str ?n " comments: ranked by discussion volume, a rough proxy that does not imply disagreement.") ?why]]
 ;; An unread count is unknown, never zero, and is listed separately rather than ranked.
 [(discussion-unknown ?t ?number) (discussion-in-scope ?t) [?t "comment-count-known" false] [?t "number" ?number]]
+;; #1092 refinement (doc/design/estimation-refinement-loop.md). A request is a record on the
+;; ticket: open, resolved or unknown, with its blocking questions as question records (the #414
+;; vocabulary: an explicit resolve or withdraw settles each). Any open request means refinement;
+;; a newer open request after an earlier resolution reopens it.
+[(refinement-open ?t ?q) [?t "refinement" ?q] [?q "refinement-state" "open"]]
+[(needs-refinement ?t) (refinement-open ?t ?q)]
+[(needs-refinement ?t) (refinement-unknown ?t)]
+;; Incomplete refinement evidence (with or without observed records) cannot rule out an unread
+;; open request: it holds estimation and pickup until inspected.
+[(needs-refinement ?t) [?t "refinement-complete" false]]
+[(refinement-pending ?q) [?q "refinement-question" ?r] (not (record-settled ?r))]
+;; Only a trusted record settles a blocking question; an unverified or unknown author leaves it pending.
+[(refinement-pending ?q) [?q "refinement-question" ?r] (not [?r "record-trust" "trusted"])]
+[(refinement-asks ?q) [?q "refinement-question" _]]
+;; Pending questions await answers; all settled is ready to resolve; none recorded is malformed
+;; (the boundary refuses it) and is inspected.
+[(refinement-unanswered ?t) (refinement-open ?t ?q) (refinement-pending ?q)]
+;; Answered only on complete evidence: an unread request or question is never treated as settled.
+[(refinement-answered ?t) (refinement-open ?t ?q) (refinement-asks ?q) (not (refinement-pending ?q)) (not [?t "refinement-complete" false]) (not (refinement-unknown ?t))]
+[(refinement-incomplete ?t) (needs-refinement ?t) [?t "refinement-complete" false]]
+;; Only an explicit open or resolved state is known; unknown, missing or unrecognised fails closed.
+[(refinement-known ?q) [?q "refinement-state" "open"]]
+[(refinement-known ?q) [?q "refinement-state" "resolved"]]
+[(refinement-unknown ?t) [?t "refinement" ?q] (not (refinement-known ?q))]
+[(refinement-incomplete ?t) (refinement-unknown ?t)]
+[(refinement-hold ?t) (needs-refinement ?t)]
+[(refinement-hold ?t) (awaiting-reestimate ?t)]
+[(refinement-hold ?t) [?t "refinement-complete" false]]
+[(refinement-empty ?t) (refinement-open ?t ?q) (not (refinement-asks ?q))]
+;; Resolved without a recorded later estimate (false or absent): back to estimation, never implementable.
+[(awaiting-reestimate ?t) [?t "refinement" ?q] [?q "refinement-state" "resolved"] (not [?q "refinement-estimated" true]) (not (needs-refinement ?t))]
+[(refinement-work ?t) (needs-refinement ?t) (issue ?t) (open ?t) [?t "labels-complete" true] (platform-ok ?t) (not (claimed ?t))]
+;; #1092: needs refinement, awaiting re-estimate or unknown refinement holds an owned claim too;
+;; the claim is kept, never continued as implementation.
+[(own-held-back ?t) (own-active ?t) (refinement-hold ?t)]
 ]

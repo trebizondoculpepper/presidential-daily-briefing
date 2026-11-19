@@ -158,7 +158,10 @@ describe("workflow guide in help and briefings (#71, doc/design/workflow-guide.m
       }
     }
     // #1050: every budget now runs the native engine (~0.5s each), so the sweep needs headroom.
-  }, 90_000);
+    // #1123: the engine runs one query per decision and denial, so its cost grows with the policy
+    // (about 15% from the refinement rules, measured over the parity cases); the Windows runner
+    // reached 91s at 90s, so the sweep gets 180s rather than fewer budgets.
+  }, 180_000);
 
   it("serves help and the full guide locally, without GitHub or configuration", async () => {
     let helpText = "";
