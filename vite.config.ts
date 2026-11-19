@@ -1,6 +1,9 @@
+import { svelte } from "@sveltejs/vite-plugin-svelte";
 import { defineConfig } from "vite-plus";
 
 export default defineConfig({
+  // #853: tests server-render Svelte components (src/web); the asset build is vite.web.config.ts.
+  plugins: [svelte()],
   fmt: {},
   staged: { "*.{ts,js,json,md,yml}": "vp check --fix" },
   lint: {

@@ -44,6 +44,9 @@ const expected = [
   "dist/cli.mjs.map",
   "dist/mcp.mjs",
   "dist/mcp.mjs.map",
+  // #853: the built Rules page assets (vite.web.config.ts), served by pdb serve.
+  "dist/web/rules.css",
+  "dist/web/rules.js",
   "package.json",
   "third-party/README.md",
   "third-party/datascript-LICENSE",
@@ -274,20 +277,46 @@ async function serveSmoke(bin: string, env: NodeJS.ProcessEnv, cwd: string): Pro
       if (["cache", "inflight", "errors"].includes(view) && diag.data?.total !== 0)
         throw new Error(`Installed diagnostics ${view} is not empty before any read.`);
     }
-    // The project rules page (#392) from the packaged artifact, with no source tree: the same
-    // compiled policy as pdb rules, settings unknown for a --repo-only project, only shared navigation script.
+    // The project rules page (#392, #853) from the packaged artifact, with no source tree: a
+    // static bootstrap, the same compiled policy as pdb rules through /api/v1/rules, and the
+    // built Svelte assets served from the installed package (never src/, never compiled here).
     const rulesPage = await fetch(`${url}rules?repo=example%2Fparity`);
     const rulesHtml = await rulesPage.text();
     if (
       rulesPage.status !== 200 ||
       !rulesHtml.includes("<h1>Project rules</h1>") ||
-      !/Coverage of the full policy: \d+ decision rules/.test(rulesHtml) ||
-      !rulesHtml.includes("effective settings: unknown") ||
-      rulesHtml
-        .replace('<script src="/project-selection.js" defer></script>', "")
-        .includes("<script")
+      !rulesHtml.includes('<div id="rules-app" data-api="/api/v1/rules">') ||
+      !rulesHtml.includes('<script src="/web/rules.js" defer></script>') ||
+      rulesHtml.includes("Decision rules")
     )
       throw new Error(`Installed pdb serve /rules is wrong: ${rulesHtml.slice(0, 400)}`);
+    const rulesApi = await fetch(`${url}api/v1/rules?repo=example%2Fparity`);
+    const rulesData = (await rulesApi.json()) as {
+      kind?: string;
+      view?: { sections?: { title: string }[]; effectiveSettings?: { status?: string } };
+    };
+    if (
+      rulesApi.status !== 200 ||
+      rulesData.kind !== "rules" ||
+      !rulesData.view?.sections?.some((x) => x.title.startsWith("Decision rules (")) ||
+      rulesData.view.effectiveSettings?.status !== "unknown"
+    )
+      throw new Error(
+        `Installed pdb serve /api/v1/rules is wrong: ${JSON.stringify(rulesData).slice(0, 400)}`,
+      );
+    for (const [path, type, marker] of [
+      ["web/rules.js", "text/javascript", "rules-app"],
+      ["web/rules.css", "text/css", "rule-formal"],
+    ] as const) {
+      const asset = await fetch(`${url}${path}`);
+      const text = await asset.text();
+      if (
+        asset.status !== 200 ||
+        !asset.headers.get("content-type")?.startsWith(type) ||
+        !text.includes(marker)
+      )
+        throw new Error(`Installed pdb serve /${path} is unavailable or wrong (${asset.status}).`);
+    }
     const navigationScript = await fetch(`${url}project-selection.js`);
     if (
       navigationScript.status !== 200 ||
@@ -738,9 +767,18 @@ async function projectRulesParity(
       ).json()) as { result?: { decisionEngine?: { rulesHash?: string } } };
       if (served.result?.decisionEngine?.rulesHash !== hash)
         throw new Error("Installed pdb serve briefing names a different effective revision.");
-      const page = await (await fetch(`${url}rules?repo=example%2Fparity`)).text();
-      if (!page.includes(hash) || !page.includes("Project preferences"))
-        throw new Error("Installed /rules page does not show the effective project policy.");
+      // #853: the rules page's data comes from /api/v1/rules.
+      const rules = (await (await fetch(`${url}api/v1/rules?repo=example%2Fparity`)).json()) as {
+        view?: {
+          effectivePolicy?: { effectiveRulesHash?: string };
+          sections?: { title: string }[];
+        };
+      };
+      if (
+        rules.view?.effectivePolicy?.effectiveRulesHash !== hash ||
+        !rules.view.sections?.some((x) => x.title.startsWith("Project preferences"))
+      )
+        throw new Error("Installed /api/v1/rules does not show the effective project policy.");
     } finally {
       child.kill("SIGTERM");
     }

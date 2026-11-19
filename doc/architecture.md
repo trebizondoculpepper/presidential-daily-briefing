@@ -157,6 +157,12 @@ maintained executable research examples use strict TypeScript; installed consume
 run built JavaScript bundles. Use tsx for source execution and Vite+ for checks,
 tests and builds. Follow the [current-LTS runtime policy](design/runtime.md).
 
+Browser pages may use Svelte components (`.svelte`, with `<script lang="ts">`) for
+markup and presentation only (#853, [API-first contract](design/serve-api-first-frontend.md)).
+They are compiled at build time into served assets; API parsing, loading and any other logic
+stay in plain TypeScript modules that `tsc` checks, and `npm run check` compiles every
+component with warnings treated as errors.
+
 Scripts may use the documented ancillary-language exceptions, with purpose,
 runtime/platform support and validation recorded in `LANGUAGE_EXCEPTIONS`.
 Application/scripts code does not import those non-TypeScript files; selected

@@ -18,7 +18,7 @@ import { rulesDocument, rulesText } from "./datalog/rules-command.js";
 import type { ProjectRulesView } from "./datalog/rules-command.js";
 import { declaredRulesContext } from "./declared-context.js";
 import { projectRulesContext } from "./project-context.js";
-import { rulesPage } from "../serve/rules-page.js";
+import { readRules } from "../serve/rules-page.js";
 import { selectRepository } from "../serve/api.js";
 
 const repository = "example/project";
@@ -164,16 +164,19 @@ describe("pdb rules init and surface parity (#516)", () => {
         state: "active",
         effectiveRulesHash: starter.effectiveRulesHash,
       });
-      const page = await rulesPage(
+      // #853: the rules API's shared read carries the same effective policy as the CLI.
+      const page = await readRules(
         new URLSearchParams({ repo: repository }),
-        "http://127.0.0.1:4372",
         [{ repository, project: dir }],
         { git: gitAt(dir), fs: configFs(true) },
         selectRepository,
       );
-      expect(page.status).toBe(200);
-      expect(page.html).toContain(starter.effectiveRulesHash);
-      expect(page.html).toContain("Project preferences (1)");
+      if (!page.ok) throw new Error(page.message);
+      expect(page.view.effectivePolicy).toMatchObject({
+        state: "active",
+        effectiveRulesHash: starter.effectiveRulesHash,
+      });
+      expect(page.view.sections.map((x) => x.title)).toContain("Project preferences (1)");
       const briefing = await effectivePolicy(
         { enabled: true, source: "config", root: dir },
         [],
@@ -197,14 +200,14 @@ describe("pdb rules init and surface parity (#516)", () => {
       });
 
       // A repo-only served project is unknown, never shown as default-only effective policy.
-      const remote = await rulesPage(
+      const remote = await readRules(
         new URLSearchParams({ repo: repository }),
-        "http://127.0.0.1:4372",
         [{ repository }],
         { git: gitAt(dir), fs: configFs(true) },
         selectRepository,
       );
-      expect(remote.html).toContain("Effective policy</dt><dd>unknown");
+      if (!remote.ok) throw new Error(remote.message);
+      expect(remote.view.effectivePolicy.state).toBe("unknown");
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

@@ -7,9 +7,12 @@ import { pageById, shellContext, shellStart } from "./shell.js";
  * appear before native details controls; the shared formal formatter supplies conditions,
  * ordering and evidence. Missing metadata remains a visible gap. No rule matching occurs here.
  *
- * Loading the page reads at most the selected served project's local settings file through the
- * verified checkout resolver. It makes no GitHub request, starts no background work and writes
- * nothing. The response is static HTML with no script, under the dashboard's strict CSP.
+ * API-first (#853, doc/design/serve-api-first-frontend.md): `readRules` is the shared read the
+ * versioned `/api/v1/rules` route returns as data; `/rules` is a static bootstrap whose Svelte
+ * component (src/web/rules) fetches that route. The server generates no rules HTML.
+ *
+ * A read loads at most the selected served project's local settings file through the verified
+ * checkout resolver. It makes no GitHub request, starts no background work and writes nothing.
  */
 import {
   ConfigError,
@@ -28,6 +31,7 @@ import type { EffectiveSettings, RulesDocument } from "../rules/datalog/rules-co
 import { declaredRulesContext } from "../rules/declared-context.js";
 import { projectRulesContext } from "../rules/project-context.js";
 import { HttpFailure } from "./http.js";
+import type { ServeErrorCode } from "./http.js";
 
 /** Local, read-only boundaries for effective settings; tests inject fakes. */
 export interface RulesPageRuntime {
@@ -113,148 +117,132 @@ export async function effectiveSettings(
   }
 }
 
-interface PageContext {
-  origin: string;
-  served: readonly { repository: string; project?: string }[];
-  /** The selected repository, or null when the selection is missing and ambiguous. */
-  selected: string | null;
-  filters: { role?: string; rule?: string };
+/** One rule as the page lists it: its ID, authored purpose (null when not supplied) and formal lines. */
+export interface RulesRuleView {
+  id: string;
+  purpose: string | null;
+  /** The generated formal conditions, or null when the rule has none of its own. */
+  formal: string[] | null;
+}
+/** A formal block shown behind a disclosure control. */
+export interface RulesFormalView {
+  label: string;
+  lines: string[];
+}
+/**
+ * One section of the rules listing, arranged from the shared text and document by the existing
+ * display helpers. It decides no policy and invents no English: every string is supplied content.
+ */
+export type RulesSectionView =
+  | { kind: "text"; title: string; lines: string[] }
+  | { kind: "formal"; title: string; formal: RulesFormalView }
+  | {
+      kind: "decisions";
+      title: string;
+      introduction: string;
+      bands: { band: number; rules: RulesRuleView[] }[];
+    }
+  | {
+      kind: "rules";
+      title: string;
+      /** A formal block shown before the rules (the denial query), when any. */
+      before: RulesFormalView | null;
+      rules: RulesRuleView[];
+      /** A formal block shown after the rules, when any. */
+      after: RulesFormalView | null;
+    };
+
+/** The rules page's data: the document's own typed metadata plus its arranged sections. */
+export interface RulesView {
+  policy: RulesDocument["policy"];
+  effectivePolicy: RulesDocument["effectivePolicy"];
+  scope: RulesDocument["scope"];
+  narration: RulesDocument["narration"];
+  effectiveSettings: RulesDocument["defaults"]["effective"];
+  sections: RulesSectionView[];
 }
 
-const navigation = (page: PageContext, title = "Project rules") =>
-  shellStart(
-    shellContext(
-      "rules",
-      page.served,
-      new URLSearchParams(page.selected ? { repo: page.selected } : {}),
-    ),
-    title,
-  );
-
-/** The full page for one compiled document. */
-export function rulesPageHtml(doc: RulesDocument, text: string, page: PageContext): string {
-  const sections = rulesSections(text);
-  const effective = doc.defaults.effective;
-  const filters = Object.entries(page.filters).filter(([, v]) => v !== undefined);
-  const notices: string[] = [];
-  if (page.selected === null)
-    notices.push(
-      '<p class="warn" role="status">No project selected; choose one above to see its effective settings. The policy below is the same for every project.</p>',
-    );
-  if (doc.effectivePolicy.state === "error")
-    notices.push(
-      `<p class="error" role="alert">Project policy error: ${escapeHtml(doc.effectivePolicy.reason)}. ${doc.effectivePolicy.next.map(escapeHtml).join(" ")}</p>`,
-    );
-  if (!doc.scope.complete)
-    notices.push(
-      `<p class="warn" role="status">Filtered subset (${filters
-        .map(([k, v]) => `${escapeHtml(k)} ${escapeHtml(v)}`)
-        .join(", ")}): not the complete rules. <a href="${escapeHtml(
-        pageUrl(page.origin, "/rules", page.selected ? { repo: page.selected } : {}),
-      )}">Show every rule</a>.</p>`,
-    );
-  const identity = `<dl class="identity rules-identity">
-<dt>Policy version</dt><dd><code>${escapeHtml(doc.policy.policyVersion)}</code></dd>
-<dt>Default rulesHash</dt><dd><code>${escapeHtml(doc.policy.rulesHash)}</code></dd>
-<dt>Bundled purpose revision</dt><dd><code>${escapeHtml(doc.policy.narrationHash ?? "none: purposes not supplied")}</code></dd>
-<dt>Effective policy</dt><dd>${
-    doc.effectivePolicy.state === "active"
-      ? `default plus project preferences, <code>${escapeHtml(doc.effectivePolicy.effectiveRulesHash)}</code>`
-      : doc.effectivePolicy.state === "disabled"
-        ? "the shipped default only (project preferences disabled)"
-        : doc.effectivePolicy.state === "error"
-          ? '<span class="error">error: project preferences are enabled but not in force</span>'
-          : "unknown"
-  }</dd>
-${doc.effectivePolicy.state === "active" ? `<dt>Project source format</dt><dd>${escapeHtml(doc.effectivePolicy.formatVersion)} (projection ${escapeHtml(doc.effectivePolicy.projectionVersion)})</dd><dt>Project source revision</dt><dd><code>${escapeHtml(doc.effectivePolicy.projectRulesHash)}</code></dd>` : ""}
-<dt>Sources</dt><dd>${doc.policy.sources.map((s) => `<code>${escapeHtml(s)}</code>`).join(", ")}</dd>
-<dt>English model</dt><dd><code>${escapeHtml(doc.policy.englishModelVersion)}</code></dd>
-<dt>Scope</dt><dd>${doc.scope.complete ? "complete" : "filtered subset"}</dd>
-<dt>Effective settings</dt><dd>${effective.status === "known" ? `known for ${escapeHtml(effective.repository)}` : "unknown"}</dd>
-</dl>
-`;
-  const toc = sections
-    .map((s, i) => `<li><a href="#section-${i}">${escapeHtml(s.title)}</a></li>`)
-    .join("");
-  const formal = (lines: string[], label: string) =>
-    `<details class="rule-formal"><summary>${escapeHtml(label)}</summary><pre class="rules">${escapeHtml(lines.join("\n"))}</pre></details>`;
-  const card = (
-    rule: { id: string; purpose?: string },
-    lines?: string[],
-    level: 3 | 4 = 3,
-  ) => `<article class="rule-purpose" data-rule-id="${escapeHtml(rule.id)}"><h${level}><code>${escapeHtml(rule.id)}</code></h${level}>
-<p${rule.purpose === undefined ? ' class="warn"' : ""}>${escapeHtml(rule.purpose ?? "Purpose not supplied. Read the generated formal conditions below.")}</p>
-${lines ? formal(lines, `Formal conditions for ${rule.id}`) : ""}</article>`;
-  const body = sections
-    .map((s, i) => {
-      let content: string;
-      if (s.title.startsWith("Decision rules (")) {
-        content =
-          `<p class="formal-introduction">${escapeHtml(s.lines[0] ?? "")}</p>` +
-          decisionGroups(doc.decisions)
-            .map(
-              ({ band, decisions }) =>
-                `<h3 class="rule-band">Band ${band}</h3>` +
-                decisions.map((d) => card(d, decisionFormalLines(d), 4)).join("\n"),
-            )
-            .join("\n");
-      } else if (s.title.startsWith("Eligibility and denials (")) {
-        content =
-          (doc.eligibility.denialQuery
-            ? formal(denialQueryLines(doc.eligibility.denialQuery), "Formal denial query")
-            : "") + doc.eligibility.denials.map((d) => card(d, denialFormalLines(d))).join("\n");
-      } else if (s.title.startsWith("Procedural obligations (")) {
-        content =
-          doc.obligations.map((o) => card(o)).join("\n") +
-          formal(s.lines, "Structured obligation definitions");
-      } else if (s.title.startsWith("Project preferences (") && doc.project) {
-        content =
-          doc.project.preferences.map((p) => card(p)).join("\n") +
-          formal(s.lines, "Formal conditions for project preferences and helpers");
-      } else {
-        content = ["Policy", "Defaults", "Not formalized here"].includes(s.title)
-          ? `<pre class="rules">${escapeHtml(s.lines.join("\n"))}</pre>`
-          : formal(s.lines, `Formal ${s.title.toLowerCase()}`);
-      }
-      return `<section id="section-${i}"><h2>${escapeHtml(s.title)}</h2>\n${content}</section>`;
-    })
-    .join("\n");
-  const narration = `<aside aria-label="Purpose coverage"><p>Authored purposes: ${doc.narration.supplied} of ${doc.narration.total} rules in this view. ${escapeHtml(doc.narration.scope)}</p>
-<p>${escapeHtml(doc.narration.note)}</p>${doc.narration.missing.length ? `<p class="warn">Purpose not supplied for: ${doc.narration.missing.map(escapeHtml).join(", ")}. Every generated rule remains available.</p>` : ""}
-<p>The rulesHash preserves policy compatibility. The bundled purpose revision tracks authored narration separately. Project source hashes also include project purposes.</p></aside>`;
-  return `${navigation(page)}<main id="content" tabindex="-1"><h1>Project rules</h1>
-${notices.join("\n")}
-${identity}${narration}<nav aria-label="Sections"><ol class="toc">${toc}</ol></nav>
-${body}
-</main>
-<footer>Read-only. Compiled from the packaged policy artifact and, when enabled, the project's <code>pdb.rules.edn</code>; the same document as <code>pdb rules${filters.map(([k, v]) => ` --${escapeHtml(k)} ${escapeHtml(v)}`).join("")}</code>. Loading this page makes no GitHub requests.</footer>
-</body>
-</html>
-`;
+/** Arrange one compiled document and its formal text for display, without changing either. */
+export function rulesView(doc: RulesDocument, text: string): RulesView {
+  const formal = (lines: string[], label: string): RulesFormalView => ({ label, lines });
+  const rule = (r: { id: string; purpose?: string }, lines?: string[]): RulesRuleView => ({
+    id: r.id,
+    purpose: r.purpose ?? null,
+    formal: lines ?? null,
+  });
+  const sections: RulesSectionView[] = rulesSections(text).map((s) => {
+    if (s.title.startsWith("Decision rules ("))
+      return {
+        kind: "decisions",
+        title: s.title,
+        introduction: s.lines[0] ?? "",
+        bands: decisionGroups(doc.decisions).map(({ band, decisions }) => ({
+          band,
+          rules: decisions.map((d) => rule(d, decisionFormalLines(d))),
+        })),
+      };
+    if (s.title.startsWith("Eligibility and denials ("))
+      return {
+        kind: "rules",
+        title: s.title,
+        before: doc.eligibility.denialQuery
+          ? formal(denialQueryLines(doc.eligibility.denialQuery), "Formal denial query")
+          : null,
+        rules: doc.eligibility.denials.map((d) => rule(d, denialFormalLines(d))),
+        after: null,
+      };
+    if (s.title.startsWith("Procedural obligations ("))
+      return {
+        kind: "rules",
+        title: s.title,
+        before: null,
+        rules: doc.obligations.map((o) => rule(o)),
+        after: formal(s.lines, "Structured obligation definitions"),
+      };
+    if (s.title.startsWith("Project preferences (") && doc.project)
+      return {
+        kind: "rules",
+        title: s.title,
+        before: null,
+        rules: doc.project.preferences.map((p) => rule(p)),
+        after: formal(s.lines, "Formal conditions for project preferences and helpers"),
+      };
+    if (["Policy", "Defaults", "Not formalized here"].includes(s.title))
+      return { kind: "text", title: s.title, lines: s.lines };
+    return {
+      kind: "formal",
+      title: s.title,
+      formal: formal(s.lines, `Formal ${s.title.toLowerCase()}`),
+    };
+  });
+  return {
+    policy: doc.policy,
+    effectivePolicy: doc.effectivePolicy,
+    scope: doc.scope,
+    narration: doc.narration,
+    effectiveSettings: doc.defaults.effective,
+    sections,
+  };
 }
 
-/** An error page: the reason and the served projects, never an older document. */
-export function rulesErrorHtml(message: string, page: PageContext): string {
-  return `${navigation({ ...page, selected: null }, "Project rules: error")}<main id="content" tabindex="-1"><h1>Project rules</h1>
-<p class="error" role="alert">${escapeHtml(message)}</p>
-</main>
-</body>
-</html>
-`;
-}
-
-export interface RulesPageResult {
-  status: number;
-  html: string;
-}
+/** The shared rules read for one request's query: the view, or a coded refusal. */
+export type RulesRead =
+  | {
+      ok: true;
+      /** The selected repository, or null when the selection is missing and ambiguous. */
+      selected: string | null;
+      filters: { role?: string; rule?: string };
+      view: RulesView;
+    }
+  | { ok: false; status: number; code: ServeErrorCode; message: string };
 
 /**
- * Build the page for one request's query. Unserved or malformed selections fail with the
- * served-project list; an artifact that does not match the engine fails without a document.
+ * Read the rules for one query (#853): the same document as `pdb rules`, with the selected served
+ * project's effective settings and project preferences. Unserved or malformed selections and
+ * unknown parameters are refused; a policy that does not match the engine fails without a view.
  */
-export async function rulesPage(
+export async function readRules(
   query: URLSearchParams,
-  origin: string,
   served: readonly { repository: string; project?: string }[],
   runtime: RulesPageRuntime,
   /** The served-project resolver the read API uses (`selectRepository`). */
@@ -262,44 +250,43 @@ export async function rulesPage(
     served: readonly { repository: string; project?: string }[],
     repo: string | undefined,
   ) => { repository: string; project?: string },
-): Promise<RulesPageResult> {
-  const page: PageContext = { origin, served, selected: null, filters: {} };
+): Promise<RulesRead> {
+  const refuse = (status: number, code: ServeErrorCode, message: string): RulesRead => ({
+    ok: false,
+    status,
+    code,
+    message,
+  });
   for (const key of query.keys())
     if (!(rulesPageParameters as readonly string[]).includes(key))
-      return {
-        status: 400,
-        html: rulesErrorHtml(
-          `Unknown parameter. The rules page accepts ${rulesPageParameters.join(", ")}.`,
-          page,
-        ),
-      };
+      return refuse(
+        400,
+        "INVALID_ARGUMENT",
+        `Unknown parameter. The rules page accepts ${rulesPageParameters.join(", ")}.`,
+      );
   for (const key of new Set(query.keys()))
     if (query.getAll(key).length > 1)
-      return { status: 400, html: rulesErrorHtml("Give each parameter at most once.", page) };
+      return refuse(400, "INVALID_ARGUMENT", "Give each parameter at most once.");
   const repo = query.get("repo") ?? undefined;
   let selected: { repository: string; project?: string } | null = null;
   try {
     selected = repo === undefined ? null : select(served, repo);
   } catch (error) {
     if (!(error instanceof HttpFailure)) throw error;
-    // Missing selection with several projects: show the selector and the shared policy.
+    // Missing selection with several projects: the shared policy, with no project's settings.
     if (error.code !== "REPOSITORY_UNRESOLVED")
-      return {
-        status: error.status,
-        html: rulesErrorHtml(
-          error.code === "REPOSITORY_NOT_SERVED"
-            ? "That repository is not served by this server. Choose a served project above."
-            : "repo must be owner/name. Choose a served project above.",
-          page,
-        ),
-      };
+      return refuse(
+        error.status,
+        error.code,
+        error.code === "REPOSITORY_NOT_SERVED"
+          ? "That repository is not served by this server. Choose a served project."
+          : "repo must be owner/name. Choose a served project.",
+      );
   }
-  page.selected = selected?.repository ?? null;
   const filters = {
     ...(query.has("role") ? { role: query.get("role")! } : {}),
     ...(query.has("rule") ? { rule: query.get("rule")! } : {}),
   };
-  page.filters = filters;
   const rules = await import("../rules/datalog/datalog.js");
   const effective = selected
     ? await effectiveSettings(selected, runtime)
@@ -330,18 +317,46 @@ export async function rulesPage(
       undefined,
       limits,
     );
-    return { status: 200, html: rulesPageHtml(doc, rules.rulesFormalText(doc), page) };
+    return {
+      ok: true,
+      selected: selected?.repository ?? null,
+      filters,
+      view: rulesView(doc, rules.rulesFormalText(doc)),
+    };
   } catch (error) {
     if (error instanceof rules.RulesArgumentError)
-      return { status: 400, html: rulesErrorHtml(error.message, page) };
+      return refuse(400, "INVALID_ARGUMENT", error.message);
     if (error instanceof rules.RulesArtifactError)
-      return {
-        status: 500,
-        html: rulesErrorHtml(
-          `The packaged policy could not be compiled to a current document: ${error.message}`,
-          page,
-        ),
-      };
+      return refuse(
+        500,
+        "INTERNAL",
+        `The packaged policy could not be compiled to a current document: ${error.message}`,
+      );
     throw error;
   }
+}
+
+/** Built frontend assets the rules page loads from this server's origin (#853). */
+export const rulesAssets = { script: "/web/rules.js", stylesheet: "/web/rules.css" } as const;
+
+/**
+ * The static `/rules` bootstrap: the shared shell, a mount point and the built assets. It carries
+ * no rules content; the component reads `/api/v1/rules` with the page's own query.
+ */
+export function rulesBootstrapHtml(
+  served: readonly { repository: string; project?: string }[],
+  query: URLSearchParams,
+): string {
+  return `${shellStart(
+    shellContext("rules", served, query),
+    "Project rules",
+    rulesAssets.script,
+    rulesAssets.stylesheet,
+  )}<main id="content" tabindex="-1"><h1>Project rules</h1>
+<div id="rules-app" data-api="/api/v1/rules"><p role="status">Loading the rules…</p></div>
+<noscript><p class="warn">This page needs JavaScript to load the rules. The same document is available from <code>pdb rules</code>.</p></noscript>
+</main>
+</body>
+</html>
+`;
 }

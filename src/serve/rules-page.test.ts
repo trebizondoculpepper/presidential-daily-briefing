@@ -1,6 +1,7 @@
 /**
- * The project rules page (#392): the same compiled document as `pdb rules`, rendered from one
- * model; escaping; Host/Origin; unknown projects; effective settings known versus unknown; and
+ * The project rules page (#392, #853): the same compiled document as `pdb rules`, read through
+ * the versioned `/api/v1/rules` route and presented by the Svelte component (server-rendered
+ * here); escaping; Host/Origin; unknown projects; effective settings known versus unknown; and
  * no GitHub request while loading it.
  */
 import { EventEmitter } from "node:events";
@@ -21,7 +22,10 @@ import type { ServeRuntime } from "../serve.js";
 import { serveArguments } from "./options.js";
 import type { ServeReadRuntime } from "./api.js";
 import { readServices } from "./services.js";
-import { rulesPageHtml, rulesSections, escapeHtml } from "./rules-page.js";
+import { render } from "svelte/server";
+import { rulesSections, escapeHtml, rulesView } from "./rules-page.js";
+import type { RulesDocument } from "../rules/datalog/rules-command.js";
+import RulesPage from "../web/rules/RulesPage.svelte";
 import { compileProjectPolicy } from "../rules/datalog/project/compile.js";
 
 const checkout = resolve("/work/checkout");
@@ -37,18 +41,18 @@ const unescape = (html: string) =>
 
 /** The sections as the page shows them: each heading and its preformatted text, unescaped. */
 function pageSections(html: string): { title: string; lines: string[] }[] {
-  return [
-    ...html.matchAll(/<section id="section-\d+"><h2>(.*?)<\/h2>\n([\s\S]*?)<\/section>/g),
-  ].map((m) => ({
-    title: unescape(m[1]!),
-    lines: [
-      ...m[2]!.matchAll(
-        /<pre class="rules">([\s\S]*?)<\/pre>|<p class="formal-introduction">([\s\S]*?)<\/p>|<h3 class="rule-band">([\s\S]*?)<\/h3>/g,
-      ),
-    ]
-      .flatMap((part) => unescape(part[1] ?? part[2] ?? part[3] ?? "").split("\n"))
-      .filter((line) => line !== ""),
-  }));
+  return [...html.matchAll(/<section id="section-\d+"><h2>(.*?)<\/h2>([\s\S]*?)<\/section>/g)].map(
+    (m) => ({
+      title: unescape(m[1]!),
+      lines: [
+        ...m[2]!.matchAll(
+          /<pre class="rules">([\s\S]*?)<\/pre>|<p class="formal-introduction">([\s\S]*?)<\/p>|<h3 class="rule-band">([\s\S]*?)<\/h3>/g,
+        ),
+      ]
+        .flatMap((part) => unescape(part[1] ?? part[2] ?? part[3] ?? "").split("\n"))
+        .filter((line) => line !== ""),
+    }),
+  );
 }
 const formalSections = (text: string) =>
   rulesSections(text).map((s) => ({
@@ -56,7 +60,38 @@ const formalSections = (text: string) =>
     lines: s.lines.filter((line) => line !== ""),
   }));
 
-const page = { origin: "http://127.0.0.1:4372/", served: [], selected: null, filters: {} };
+/** Whitespace between tags collapsed, as `rulesPageHtml` does outside <pre>. */
+const collapse = (text: string) =>
+  text.replace(/\s+/g, " ").replace(/> /g, ">").replace(/ </g, "<");
+/**
+ * Server-render the Svelte Rules page for one document (#853), as the browser shows it once
+ * `/api/v1/rules` answers. Hydration comments are dropped and whitespace between tags is
+ * collapsed outside <pre>, so assertions read the markup rather than formatting.
+ */
+function rulesPageHtml(
+  doc: RulesDocument,
+  text: string,
+  page: { selected: string | null; filters: { role?: string; rule?: string } } = {
+    selected: null,
+    filters: {},
+  },
+): string {
+  const response = {
+    schemaVersion: 1 as const,
+    kind: "rules" as const,
+    selected: page.selected,
+    filters: page.filters,
+    view: rulesView(doc, text),
+  };
+  const body = render(RulesPage, { props: { response } }).body.replace(/<!--[\s\S]*?-->/g, "");
+  return body
+    .split(/(<pre[^>]*>[\s\S]*?<\/pre>)/)
+    .map((part) => (part.startsWith("<pre") ? part : collapse(part)))
+    .join("");
+}
+const page = { selected: null, filters: {} };
+/** Svelte's text escaping: `&` and `<` (no tag can open without `<`). */
+const textEscape = (text: string) => text.replace(/&/g, "&amp;").replace(/</g, "&lt;");
 
 const source = (file: string) => readFileSync(join(policyDir, file), "utf8");
 const editedModel = (file: string, edit: (text: string) => string) =>
@@ -99,10 +134,8 @@ describe("rules page rendering (#392)", () => {
     );
     const doc = rulesDocument({ ...declaredRulesContext(), effective: unknown }, {}, model);
     const html = rulesPageHtml(doc, rulesFormalText(doc), page);
-    expect(html).toContain("&lt;img src=x onerror=alert(1)&gt;");
-    expect(html.replace('<script src="/project-selection.js" defer></script>', "")).not.toMatch(
-      /<img|<script/i,
-    );
+    expect(html).toContain(textEscape("<img src=x onerror=alert(1)>"));
+    expect(html).not.toMatch(/<img|<script/i);
   });
 
   it("shows read settings as effective, and otherwise says unknown rather than the defaults", () => {
@@ -177,6 +210,11 @@ async function server(args: string[], files: Record<string, string> = {}) {
     version: async () => "9.9.9",
     platform: "linux",
     rulesPage: { git, fs },
+    webAssets: async () =>
+      new Map([
+        ["/web/rules.js", { type: "text/javascript; charset=utf-8", body: "/* rules.js */" }],
+        ["/web/rules.css", { type: "text/css; charset=utf-8", body: "/* rules.css */" }],
+      ]),
   };
   const read: ServeReadRuntime = {
     collect: record("collect"),
@@ -192,42 +230,44 @@ async function server(args: string[], files: Record<string, string> = {}) {
   return { running, github, port: running.port };
 }
 
-describe("GET /rules (#392)", () => {
-  it("renders the selected project's policy and effective settings with no GitHub request", async () => {
+describe("GET /api/v1/rules and /rules (#392, #853)", () => {
+  const json = (reply: Reply) => JSON.parse(reply.body);
+  it("returns the selected project's rules and effective settings as data, with no GitHub request", async () => {
     const { running, github, port } = await server(
       ["--project", checkout, "--repo", "other/repo"],
       { ".github/triage.toml": "schemaVersion = 1\nprocessGuide = true\n" },
     );
     try {
-      const reply = await call(port, "/rules?repo=example%2Fproject");
+      const reply = await call(port, "/api/v1/rules?repo=example%2Fproject");
       expect(reply.status).toBe(200);
-      expect(reply.headers["content-type"]).toBe("text/html; charset=utf-8");
-      expect(reply.headers["content-security-policy"]).toContain("default-src 'none'");
-      expect(
-        reply.body.replace('<script src="/project-selection.js" defer></script>', ""),
-      ).not.toMatch(/<script|\sstyle=|https?:\/\/(?!127\.0\.0\.1)/);
-      const text = unescape(reply.body);
-      expect(text).toContain("processGuide = true  (stored in the settings file)");
-      // #1050: the retired engine selector is not a setting any more.
-      expect(text).not.toContain("briefing.engine");
-      // Links use the real server origin and encoded selection.
-      expect(reply.body).toContain(`href="/rules?repo=other%2Frepo"`);
-      expect(reply.body).toContain(`href="/?repo=example%2Fproject"`);
+      expect(reply.headers["content-type"]).toMatch(/^application\/json/);
+      const body = json(reply);
+      expect(body).toMatchObject({ schemaVersion: 1, kind: "rules", selected: "example/project" });
+      // Data, not page HTML: no markup anywhere in the response.
+      expect(reply.body).not.toMatch(/<(section|article|details|pre|p|h\d)\b/);
+      const lines = (body.view.sections as { kind: string; lines?: string[] }[])
+        .flatMap((x) => x.lines ?? [])
+        .join("\n");
+      expect(lines).toContain("processGuide = true  (stored in the settings file)");
+      expect(lines).not.toContain("briefing.engine");
+      expect(body.view.effectiveSettings).toMatchObject({
+        status: "known",
+        repository: "example/project",
+      });
 
       // A repository served without a project: settings unknown, never the defaults.
-      const remote = unescape((await call(port, "/rules?repo=other/repo")).body);
-      expect(remote).toContain("This repository's effective settings: unknown.");
-      expect(remote).not.toContain("Effective settings of");
+      const remote = json(await call(port, "/api/v1/rules?repo=other/repo"));
+      expect(remote.view.effectiveSettings.status).toBe("unknown");
 
-      // Several projects and none selected: the selector and the shared policy, settings unknown.
-      const none = await call(port, "/rules");
+      // Several projects and none selected: the shared policy, settings unknown.
+      const none = await call(port, "/api/v1/rules");
       expect(none.status).toBe(200);
-      expect(none.body).toContain("No project selected");
-      expect(unescape(none.body)).toContain("effective settings: unknown");
+      expect(json(none).selected).toBeNull();
 
       // A filter is labelled a subset.
-      const filtered = await call(port, "/rules?repo=example%2Fproject&role=designer");
-      expect(filtered.body).toContain("Filtered subset");
+      const filtered = json(await call(port, "/api/v1/rules?repo=example%2Fproject&role=designer"));
+      expect(filtered.view.scope.complete).toBe(false);
+      expect(filtered.filters).toEqual({ role: "designer" });
       expect(github).toEqual([]);
     } finally {
       await running.close();
@@ -249,32 +289,65 @@ describe("GET /rules (#392)", () => {
         }),
       ).toBe(0);
       const cli = JSON.parse(stdout) as ReturnType<typeof rulesDocument>;
-      const html = (await call(port, "/rules")).body;
-      expect(html).toContain(`<code>${cli.policy.rulesHash}</code>`);
-      const decisions = pageSections(html).find((s) => s.title.startsWith("Decision rules"));
-      expect(decisions?.title).toBe(`Decision rules (${cli.decisions.length})`);
+      const view = JSON.parse((await call(port, "/api/v1/rules")).body).view;
+      expect(view.policy.rulesHash).toBe(cli.policy.rulesHash);
+      const decisions = view.sections.find((x: { title: string }) =>
+        x.title.startsWith("Decision rules"),
+      );
+      expect(decisions.title).toBe(`Decision rules (${cli.decisions.length})`);
+      const ids = decisions.bands.flatMap((b: { rules: { id: string }[] }) =>
+        b.rules.map((r) => r.id),
+      );
+      expect(ids.sort()).toEqual(cli.decisions.map((d) => d.id).sort());
       for (const d of cli.decisions)
-        expect(decisions?.lines.join("\n")).toContain(`${d.id}: action ${d.kind}`);
+        expect(
+          decisions.bands
+            .flatMap((b: { rules: { id: string; formal: string[] }[] }) => b.rules)
+            .find((r: { id: string }) => r.id === d.id)
+            .formal.join("\n"),
+        ).toContain(`${d.id}: action ${d.kind}`);
     } finally {
       await running.close();
     }
   });
 
-  it("refuses unserved, malformed and unknown inputs helpfully, escaping them", async () => {
+  it("refuses unserved, malformed and unknown inputs in the versioned error envelope", async () => {
     const { running, github, port } = await server(["--repo", "example/project"]);
     try {
-      const unserved = await call(port, "/rules?repo=evil/repo");
+      const unserved = await call(port, "/api/v1/rules?repo=evil/repo");
       expect(unserved.status).toBe(403);
-      expect(unserved.body).toContain("not served by this server");
-      expect(unserved.body).toContain("example/project");
+      expect(json(unserved).error).toMatchObject({ code: "REPOSITORY_NOT_SERVED" });
       expect(unserved.body).not.toContain("Decision rules");
-      expect((await call(port, "/rules?repo=%3Cscript%3E")).status).toBe(400);
-      expect((await call(port, "/rules?other=1")).status).toBe(400);
-      const rule = await call(port, "/rules?rule=%3Cscript%3Ealert(1)%3C%2Fscript%3E");
+      expect((await call(port, "/api/v1/rules?repo=%3Cscript%3E")).status).toBe(400);
+      expect((await call(port, "/api/v1/rules?other=1")).status).toBe(400);
+      const rule = await call(port, "/api/v1/rules?rule=%3Cscript%3Ealert(1)%3C%2Fscript%3E");
       expect(rule.status).toBe(400);
-      expect(rule.body).toContain("&lt;script&gt;alert(1)&lt;/script&gt;");
-      expect(rule.body).not.toContain("<script>");
+      expect(json(rule).error.code).toBe("INVALID_ARGUMENT");
       expect(github).toEqual([]);
+    } finally {
+      await running.close();
+    }
+  });
+
+  it("serves /rules as a static bootstrap with the built assets and no rules content", async () => {
+    const { running, port } = await server(["--repo", "example/project"]);
+    try {
+      const reply = await call(port, "/rules?repo=example%2Fproject");
+      expect(reply.status).toBe(200);
+      expect(reply.headers["content-type"]).toBe("text/html; charset=utf-8");
+      expect(reply.headers["content-security-policy"]).toContain("script-src 'self'");
+      expect(reply.body).toContain('<div id="rules-app" data-api="/api/v1/rules">');
+      expect(reply.body).toContain('<script src="/web/rules.js" defer></script>');
+      expect(reply.body).toContain('<link rel="stylesheet" href="/web/rules.css">');
+      expect(reply.body).not.toContain("Decision rules");
+      expect(reply.body).not.toMatch(/\sstyle=|<script>|https?:\/\/(?!127\.0\.0\.1)/);
+      // The injected built assets are served same-origin with their types.
+      const script = await call(port, "/web/rules.js");
+      expect(script.status).toBe(200);
+      expect(script.headers["content-type"]).toBe("text/javascript; charset=utf-8");
+      expect(script.body).toBe("/* rules.js */");
+      const css = await call(port, "/web/rules.css");
+      expect(css.headers["content-type"]).toBe("text/css; charset=utf-8");
     } finally {
       await running.close();
     }
@@ -283,9 +356,11 @@ describe("GET /rules (#392)", () => {
   it("applies the Host and Origin guards", async () => {
     const { running, port } = await server(["--repo", "example/project"]);
     try {
-      expect((await call(port, "/rules", { host: "evil.example" })).status).toBe(421);
-      expect((await call(port, "/rules", { origin: "http://evil.example" })).status).toBe(403);
-      expect((await call(port, "/rules", { origin: `http://127.0.0.1:${port}` })).status).toBe(200);
+      for (const path of ["/rules", "/api/v1/rules"]) {
+        expect((await call(port, path, { host: "evil.example" })).status).toBe(421);
+        expect((await call(port, path, { origin: "http://evil.example" })).status).toBe(403);
+        expect((await call(port, path, { origin: `http://127.0.0.1:${port}` })).status).toBe(200);
+      }
     } finally {
       await running.close();
     }
@@ -355,10 +430,8 @@ describe("purpose-first rule presentation (#578)", () => {
     expect(revised.narrationHash).not.toBe(shippedModel().narrationHash);
     expect(html).toContain(`<code>${revised.rulesHash}</code>`);
     expect(html).toContain(`<code>${revised.narrationHash}</code>`);
-    expect(html).toContain(escapeHtml(literal));
-    expect(html.replace('<script src="/project-selection.js" defer></script>', "")).not.toMatch(
-      /<img|<script/i,
-    );
+    expect(html).toContain(collapse(textEscape(literal)));
+    expect(html).not.toMatch(/<img|<script/i);
     expect(html).not.toContain('href="https://example.test/');
     expect(html).not.toContain(escapeHtml(shippedModel().decisions[0].purpose!));
     expect(html).toContain("{head} ${secret}");

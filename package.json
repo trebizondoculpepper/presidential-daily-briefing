@@ -29,7 +29,9 @@
     "dist/requiredchecks-*.mjs",
     "dist/requiredchecks-*.mjs.map",
     "dist/english-render-*.mjs",
-    "dist/english-render-*.mjs.map"
+    "dist/english-render-*.mjs.map",
+    "dist/web/rules.js",
+    "dist/web/rules.css"
   ],
   "type": "module",
   "publishConfig": {
@@ -37,8 +39,9 @@
   },
   "scripts": {
     "triage": "tsx src/cli.ts",
-    "build": "vp pack src/cli.ts --format esm --out-dir dist --sourcemap && vp pack src/mcp.ts --format esm --out-dir dist --no-clean --sourcemap && tsx scripts/sourcemaps.ts dist",
-    "check": "vp check && tsc -p doc/reports/examples && tsx src/rules/datalog/build.ts --check",
+    "build": "vp pack src/cli.ts --format esm --out-dir dist --sourcemap && vp pack src/mcp.ts --format esm --out-dir dist --no-clean --sourcemap && tsx scripts/sourcemaps.ts dist && npm run build:web",
+    "build:web": "vp build --config vite.web.config.ts --logLevel warn",
+    "check": "vp check && tsc -p doc/reports/examples && tsx src/rules/datalog/build.ts --check && tsx scripts/check-svelte.ts",
     "lint": "vp lint",
     "fmt": "vp fmt",
     "test": "vp test run",
@@ -68,7 +71,9 @@
   },
   "devDependencies": {
     "@modelcontextprotocol/client": "2.4.0",
+    "@sveltejs/vite-plugin-svelte": "7.3.1",
     "@types/node": "^26.6.6",
+    "svelte": "5.58.0",
     "tsx": "^4.23.15",
     "typescript": "~7.0.2",
     "vite": "npm:@voidzero-dev/vite-plus-core@1.5.0",

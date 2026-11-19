@@ -250,8 +250,13 @@ export function renderToolbar(context: ShellContext): string {
   )}</summary><ul>${projects || "<li>No projects are served. Start pdb serve with --repo or --project.</li>"}</ul></details>`;
   return `<header class="shell-toolbar"><a class="skip-link" href="#content">Skip to content</a><div class="shell-context"><a class="product" href="${htmlEscape(pageHref(pageById("work"), selection, page))}"${carryAttribute(pageById("work"))}>Presidential Daily Briefing</a>${projectMenu}${indicator ? `<span>${htmlEscape(indicator)}</span>` : ""}<p class="working-for" data-working-for role="status" aria-live="polite">Working for: loading…</p></div><div class="shell-menus"><nav class="wide-pages" aria-label="Pages">${links}</nav><details class="narrow-pages"><summary>Pages: ${htmlEscape(pageById(active).label)}</summary><nav aria-label="Pages">${links}</nav></details></div></header>`;
 }
-export function shellStart(context: ShellContext, title: string, script?: string): string {
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${htmlEscape(title)}</title><link rel="stylesheet" href="/dashboard.css"><script src="/project-selection.js" defer></script>${script ? `<script src="${htmlEscape(script)}" defer></script>` : ""}</head><body>${renderToolbar(context)}`;
+export function shellStart(
+  context: ShellContext,
+  title: string,
+  script?: string,
+  stylesheet?: string,
+): string {
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${htmlEscape(title)}</title><link rel="stylesheet" href="/dashboard.css">${stylesheet ? `<link rel="stylesheet" href="${htmlEscape(stylesheet)}">` : ""}<script src="/project-selection.js" defer></script>${script ? `<script src="${htmlEscape(script)}" defer></script>` : ""}</head><body>${renderToolbar(context)}`;
 }
 export function shellPage(
   context: ShellContext,

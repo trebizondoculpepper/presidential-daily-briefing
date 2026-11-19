@@ -1,0 +1,23 @@
+/* Rules page (#853): narrow layouts and keyboard focus; the shared shell styles everything else. */
+.rules-identity {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.25rem 1rem;
+}
+@media (max-width: 40rem) {
+  .rules-identity {
+    grid-template-columns: 1fr;
+  }
+}
+pre.rules {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+details.rule-formal > summary {
+  cursor: pointer;
+}
+details.rule-formal > summary:focus-visible,
+.toc a:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
