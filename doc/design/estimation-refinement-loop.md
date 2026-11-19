@@ -18,6 +18,23 @@ An outline or an exhaustive dependency audit is not required. Propose a missing 
 - Resolving refinement **returns the item for estimation**. It never makes the item ready automatically.
 - Refinement preserves human assignment, existing agent claims and existing admission. Requesting or resolving it authorizes no takeover and creates no claim.
 
+### Native facts and decisions (#1092)
+
+The native policy (`rules.edn`, `decisions.edn`, scenarios in `scenarios/refinement.edn`) reads these facts. The records service (#1094) supplies them; it adds no parallel question store.
+
+- `[?t "refinement" ?q]`: a refinement request on ticket `?t`, with `"refinement-state"` `open`, `resolved` or `unknown`. Any open or unknown request means **needs refinement**, so a newer open request after an earlier resolution reopens it.
+- `[?q "refinement-question" ?r]`: a blocking question, a question record in the existing #414 vocabulary. Only an explicit `record-outcome` `resolved` or `withdrawn` settles it. A request with no question is rejected at the boundary; if one is observed anyway, it is inspected (`D-REFINE-EMPTY`).
+- `[?q "refinement-estimated" false]` on a resolved request: no estimate recorded since the resolution.
+- `[?t "refinement-complete" false]`: refinement evidence could not be read completely.
+
+Decisions:
+
+- **Pickup denials:** `D-DENY-REFINEMENT` (needs refinement), `D-DENY-REESTIMATE` (resolved, not yet re-estimated) and `D-DENY-REFINEMENT-UNKNOWN` deny pickup whatever the estimate or `status:ready` label says.
+- **Complexity estimates:** not offered while refinement is open.
+- **Designer:** `D-REFINE` (questions pending) and `D-REFINE-RESOLVE` (all settled: resolve and return for estimation) are offered.
+- **Re-estimation:** `D-REESTIMATE` offers a complexity estimate after resolution. It never grants readiness.
+- **Unchanged:** claims, human assignment and native blockers. A blocked item can still be refined.
+
 ## Designer priority
 
 In the designer's queue, refinement work comes **after** direct human requests and the designer's own PR follow-up, and **before** ordinary new design work. Within the refinement bucket, items that unlock the most downstream work come first, using existing native dependency evidence, with deterministic ties.

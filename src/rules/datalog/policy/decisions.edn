@@ -240,6 +240,50 @@
    :why "Continue your active claim; impact {impact}, complexity {complexity}."
    :codes ["ordinary" "own-claim"]}
 
+  {:id "D-REFINE"
+   :purpose "Offer open refinement requests to the designer after human direction and own PR follow-up, ahead of new design, most downstream unlocks first."
+   :kind "refine"
+   :band 4
+   :preference 1
+   :affinity "designer"
+   :owned false
+   :when [[1 "role" ?role] [(not= ?role "human")] (refinement-work ?t) (refinement-unanswered ?t)]
+   :why "Needs refinement: answer its blocking questions from existing designs and decisions, and escalate only what needs a human decision through needs-human."
+   :codes ["designer-duty"]}
+
+  {:id "D-REFINE-RESOLVE"
+   :purpose "Offer refinement requests whose questions are all settled for resolution, returning them to estimation."
+   :kind "refine"
+   :band 4
+   :preference 1
+   :affinity "designer"
+   :owned false
+   :when [[1 "role" ?role] [(not= ?role "human")] (refinement-work ?t) (refinement-answered ?t) (not (refinement-unanswered ?t))]
+   :why "Every blocking question is settled: resolve the refinement so the item returns for estimation. Resolving does not make it ready."
+   :codes ["designer-duty"]}
+
+  {:id "D-REFINE-EMPTY"
+   :purpose "Inspect an open refinement request that records no blocking question; the boundary should have refused it."
+   :kind "inspect"
+   :band 4
+   :preference 1
+   :affinity "designer"
+   :owned false
+   :when [[1 "role" ?role] [(not= ?role "human")] (refinement-work ?t) (refinement-empty ?t) (not (refinement-unanswered ?t)) (not (refinement-answered ?t))]
+   :why "A refinement request records no blocking question; inspect it and record the concrete question or withdraw the request."
+   :codes ["designer-duty"]}
+
+  {:id "D-REESTIMATE"
+   :purpose "Return resolved refinement to estimation: an earlier estimate does not stand once refinement has been resolved."
+   :kind "estimate-complexity"
+   :band 5
+   :preference 0
+   :affinity "implementer"
+   :owned false
+   :when [[1 "role" ?role] [(not= ?role "human")] (issue ?t) (open ?t) (awaiting-reestimate ?t) (not (claimed ?t))]
+   :why "Refinement was resolved; re-estimate assuming its dependencies are complete. Estimation does not make the item ready."
+   :codes ["ordinary"]}
+
   {:id "D-DESIGN"
    :purpose "Offer design work when a required design contract is missing."
    :kind "design"
@@ -607,6 +651,9 @@
   "D-DENY-NATIVE-UNKNOWN" "Native dependency evidence is incomplete."
   "D-DENY-CLOSING-UNKNOWN" "Closing pull request evidence is incomplete."
   "D-DENY-PLATFORM" "The ticket names a platform the viewer is not known to run on."
+  "D-DENY-REFINEMENT" "The ticket needs refinement: blocking questions must be answered and it must be re-estimated."
+  "D-DENY-REESTIMATE" "Refinement was resolved; the ticket returns to estimation before implementation."
+  "D-DENY-REFINEMENT-UNKNOWN" "Refinement evidence is incomplete."
   "D-DENY-INVENTORY-UNKNOWN" "The viewer's claim inventory is incomplete: unseen active claims cannot be ruled out."}
  :denial-purposes
  {"D-DENY-CLAIM" "Keep already claimed tickets out of new implementation pickup."
@@ -617,4 +664,7 @@
   "D-DENY-NATIVE-UNKNOWN" "Withhold implementation pickup when native dependency evidence is incomplete."
   "D-DENY-CLOSING-UNKNOWN" "Withhold implementation pickup when existing closing PRs cannot be ruled out."
   "D-DENY-PLATFORM" "Keep platform-restricted work out of pickup without a matching viewer platform."
+  "D-DENY-REFINEMENT" "Keep work that needs refinement out of pickup, whatever its estimate or readiness label says."
+  "D-DENY-REESTIMATE" "Return resolved refinement to estimation instead of admitting it straight to implementation."
+  "D-DENY-REFINEMENT-UNKNOWN" "Fail closed when refinement evidence could not be read completely."
   "D-DENY-INVENTORY-UNKNOWN" "Withhold new implementation pickup while the viewer's claim inventory is incomplete."}}

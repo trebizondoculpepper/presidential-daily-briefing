@@ -1,0 +1,96 @@
+;; Estimation review and refinement policy (#1092, doc/design/estimation-refinement-loop.md).
+;; A refinement request is entity 200+ linked by "refinement"; its blocking questions are question
+;; records (300+) settled only by an explicit resolve or withdraw ("record-outcome").
+{:suite "refinement"
+ :scenarios
+ [{:id "r1-open-refinement-denies-ready-estimated-pickup"
+  :doc "Needs refinement denies pickup even with status:ready and a current estimate; the designer is offered it"
+  :viewer {:role "implementer"}
+  :facts [{:e 1 "forward-complete" true}
+          {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "S" "head" "not-a-pr" "label" "status:ready" "refinement" 200}
+          {:e 200 "refinement-state" "open" "refinement-question" 300}
+          {:e 300 "record-trust" "trusted" "record-version" 2 "record-outcome" "none"}]
+  :expect {:actions [{:subject 100 :rule "D-REFINE" :kind "refine" :band 4 :why "Needs refinement: answer its blocking questions from existing designs and decisions, and escalate only what needs a human decision through needs-human."}]
+           :denials #{[100 "D-DENY-REFINEMENT"]}}}
+
+ {:id "r2-designer-unanswered-ahead-of-design"
+  :doc "Designer: an unanswered refinement precedes ordinary design work, even when blocked"
+  :viewer {:role "designer"}
+  :facts [{:e 1 "forward-complete" true}
+          {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 1 "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "unassessed" "complexity-size" "unknown" "head" "not-a-pr" "refinement" 200}
+          {:e 200 "refinement-state" "open" "refinement-question" 300 "refinement-question" 301}
+          {:e 300 "record-trust" "trusted" "record-version" 2 "record-outcome" "resolved"}
+          {:e 301 "record-trust" "trusted" "record-version" 2 "record-outcome" "none"}
+          {:e 101 "kind" "issue" "state" "OPEN" "number" 2 "target" "https://github.com/o/r/issues/2" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "status:needs-design"}]
+  :expect {:actions [{:subject 100 :rule "D-REFINE" :kind "refine" :band 4 :why "Needs refinement: answer its blocking questions from existing designs and decisions, and escalate only what needs a human decision through needs-human."}
+            {:subject 101 :rule "D-DESIGN" :kind "design" :band 6}]
+           :denials #{}}}
+
+ {:id "r3-answered-resolve-and-empty-inspect"
+  :doc "Designer: all questions settled offers resolution; a request with no question is inspected"
+  :viewer {:role "designer"}
+  :facts [{:e 1 "forward-complete" true}
+          {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "current" "complexity-size" "S" "head" "not-a-pr" "refinement" 200}
+          {:e 200 "refinement-state" "open" "refinement-question" 300 "refinement-question" 301}
+          {:e 300 "record-trust" "trusted" "record-version" 2 "record-outcome" "resolved"}
+          {:e 301 "record-trust" "trusted" "record-version" 2 "record-outcome" "withdrawn"}
+          {:e 101 "kind" "issue" "state" "OPEN" "number" 2 "target" "https://github.com/o/r/issues/2" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "current" "complexity-size" "S" "head" "not-a-pr" "refinement" 201}
+          {:e 201 "refinement-state" "open"}]
+  :expect {:actions [{:subject 100 :rule "D-REFINE-RESOLVE" :kind "refine" :band 4 :why "Every blocking question is settled: resolve the refinement so the item returns for estimation. Resolving does not make it ready."}
+            {:subject 101 :rule "D-REFINE-EMPTY" :kind "inspect" :band 4 :why "A refinement request records no blocking question; inspect it and record the concrete question or withdraw the request."}]
+           :denials #{}}}
+
+ {:id "r4-resolved-returns-to-estimation-not-ready"
+  :doc "Resolved without a later estimate: re-estimate offered, old estimate and status:ready do not admit pickup"
+  :viewer {:role "implementer"}
+  :facts [{:e 1 "forward-complete" true}
+          {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "S" "head" "not-a-pr" "label" "status:ready" "refinement" 200}
+          {:e 200 "refinement-state" "resolved" "refinement-estimated" false "refinement-question" 300}
+          {:e 300 "record-trust" "trusted" "record-version" 2 "record-outcome" "resolved"}]
+  :expect {:actions [{:subject 100 :rule "D-REESTIMATE" :kind "estimate-complexity" :band 5 :why "Refinement was resolved; re-estimate assuming its dependencies are complete. Estimation does not make the item ready."}]
+           :denials #{[100 "D-DENY-REESTIMATE"]}}}
+
+ {:id "r5-reestimated-is-implementable-and-stale-resolution-reopens"
+  :doc "Re-estimated after resolution admits pickup; a newer open request on another item denies it again"
+  :viewer {:role "implementer"}
+  :facts [{:e 1 "forward-complete" true}
+          {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "status:ready" "refinement" 200}
+          {:e 200 "refinement-state" "resolved" "refinement-estimated" true "refinement-question" 300}
+          {:e 300 "record-trust" "trusted" "record-version" 2 "record-outcome" "resolved"}
+          {:e 101 "kind" "issue" "state" "OPEN" "number" 2 "target" "https://github.com/o/r/issues/2" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "status:ready" "refinement" 201 "refinement" 202}
+          {:e 201 "refinement-state" "resolved" "refinement-estimated" true "refinement-question" 301}
+          {:e 301 "record-trust" "trusted" "record-version" 2 "record-outcome" "resolved"}
+          {:e 202 "refinement-state" "open" "refinement-question" 302}
+          {:e 302 "record-trust" "trusted" "record-version" 2 "record-outcome" "none"}]
+  :expect {:actions [{:subject 100 :rule "D-ORDINARY" :kind "implement" :band 6}
+            {:subject 101 :rule "D-REFINE" :kind "refine" :band 4}]
+           :denials #{[101 "D-DENY-REFINEMENT"]}}}
+
+ {:id "r6-unknown-and-incomplete-fail-closed-claimed-preserved"
+  :doc "Unknown refinement state and incomplete refinement evidence deny pickup; another agent's claim is not offered to the designer"
+  :viewer {:role "designer"}
+  :facts [{:e 1 "forward-complete" true}
+          {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "status:ready" "refinement" 200}
+          {:e 200 "refinement-state" "unknown"}
+          {:e 101 "kind" "issue" "state" "OPEN" "number" 2 "target" "https://github.com/o/r/issues/2" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "status:ready" "refinement-complete" false}]
+  :expect {:actions []
+           :denials #{[100 "D-DENY-REFINEMENT"] [101 "D-DENY-REFINEMENT-UNKNOWN"]}}}
+
+ {:id "r7-designer-orders-refinement-by-downstream-unlocks"
+  :doc "Within the refinement bucket, more downstream unlocks first; ties to the older, then lower number"
+  :viewer {:role "designer"}
+  :facts [{:e 1 "forward-complete" true}
+          {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "not-a-pr" "refinement" 200}
+          {:e 200 "refinement-state" "open" "refinement-question" 300}
+          {:e 300 "record-trust" "trusted" "record-version" 2 "record-outcome" "none"}
+          {:e 101 "kind" "issue" "state" "OPEN" "number" 2 "target" "https://github.com/o/r/issues/2" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "not-a-pr" "refinement" 201 "dependent" 103}
+          {:e 201 "refinement-state" "open" "refinement-question" 301}
+          {:e 301 "record-trust" "trusted" "record-version" 2 "record-outcome" "none"}
+          {:e 103 "kind" "issue" "state" "OPEN" "number" 4 "target" "https://github.com/o/r/issues/4" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 1 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "not-a-pr" "label" "status:ready" "blocker" 101}
+          {:e 102 "kind" "issue" "state" "OPEN" "number" 3 "target" "https://github.com/o/r/issues/3" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "unknown" "complexity-size" "unknown" "head" "not-a-pr" "refinement" 202}
+          {:e 202 "refinement-state" "open" "refinement-question" 302}
+          {:e 302 "record-trust" "trusted" "record-version" 2 "record-outcome" "none"}]
+  :expect {:actions [{:subject 101 :rule "D-REFINE" :kind "refine" :band 4 :unlocks 1}
+            {:subject 100 :rule "D-REFINE" :kind "refine" :band 4 :unlocks 0}
+            {:subject 102 :rule "D-REFINE" :kind "refine" :band 4 :unlocks 0}]
+           :denials #{[103 "D-DENY-BLOCKER"]}}}]}

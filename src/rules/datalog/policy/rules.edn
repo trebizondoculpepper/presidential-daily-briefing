@@ -57,6 +57,12 @@
 ;; #413: an incomplete inventory cannot rule out omitted active claims, even if every
 ;; observed claim is waiting; new pickup is denied rather than inviting a claim that the guard may refuse.
 [(implementation-deny ?t ?r) (issue ?t) (open ?t) (available ?t) (not (claimed ?t)) [1 "owned-claims-complete" false] [(str "D-DENY-INVENTORY-UNKNOWN") ?r]]
+;; #1092 (doc/design/estimation-refinement-loop.md): needs refinement denies pickup whatever the
+;; estimate or readiness label says; an unknown refinement state or incomplete refinement
+;; evidence fails closed. Resolving it returns the item for estimation, never to readiness.
+[(implementation-deny ?t ?r) (issue ?t) (needs-refinement ?t) [(str "D-DENY-REFINEMENT") ?r]]
+[(implementation-deny ?t ?r) (issue ?t) (awaiting-reestimate ?t) [(str "D-DENY-REESTIMATE") ?r]]
+[(implementation-deny ?t ?r) (issue ?t) [?t "refinement-complete" false] [(str "D-DENY-REFINEMENT-UNKNOWN") ?r]]
 [(implementation-denied ?t) (implementation-deny ?t ?r)]
 [(eligible ?t) (implementation-permit ?t) (not (implementation-denied ?t))]
 [(design-eligible ?t) (issue ?t) (open ?t) [?t "label" "status:needs-design"] [?t "labels-complete" true] (platform-ok ?t) (closing-complete ?t) (not (claimed ?t)) (not (has-closing ?t)) (not [?t "label" "design:decision-needed"])]
@@ -70,7 +76,8 @@
 [(small-complexity ?t) [?t "complexity-state" "current"] [?t "complexity-size" ?s] [1 "small" ?s]]
 [(easy ?t) (large-impact ?t) (small-complexity ?t)]
 [(unfavorable ?t) [?t "impact-state" "current"] [?t "impact-size" ?i] [1 "small" ?i] [?t "complexity-state" "current"] [?t "complexity-size" ?c] [1 "large" ?c]]
-[(needs-complexity ?t) [?t "complexity-state" ?s] [1 "needs-assessment" ?s]]
+;; #1092: an open refinement is answered first; resolution then returns it for estimation.
+[(needs-complexity ?t) [?t "complexity-state" ?s] [1 "needs-assessment" ?s] (not (needs-refinement ?t))]
 [(needs-impact ?t) [?t "impact-state" ?s] [1 "needs-assessment" ?s]]
 [(bad-complexity ?t) [?t "complexity-state" ?s] [1 "bad-assessment" ?s]]
 [(bad-impact ?t) [?t "impact-state" ?s] [1 "bad-assessment" ?s]]
@@ -220,4 +227,21 @@
 [(discussion-ranked ?t ?key ?number ?why) (discussion-in-scope ?t) [?t "comment-count-known" true] [?t "comment-count" ?n] [(> ?n 0)] [(- 0 ?n) ?key] [?t "number" ?number] [(str ?n " comments: ranked by discussion volume, a rough proxy that does not imply disagreement.") ?why]]
 ;; An unread count is unknown, never zero, and is listed separately rather than ranked.
 [(discussion-unknown ?t ?number) (discussion-in-scope ?t) [?t "comment-count-known" false] [?t "number" ?number]]
+;; #1092 refinement (doc/design/estimation-refinement-loop.md). A request is a record on the
+;; ticket: open, resolved or unknown, with its blocking questions as question records (the #414
+;; vocabulary: an explicit resolve or withdraw settles each). Any open request means refinement;
+;; a newer open request after an earlier resolution reopens it.
+[(refinement-open ?t ?q) [?t "refinement" ?q] [?q "refinement-state" "open"]]
+[(needs-refinement ?t) (refinement-open ?t ?q)]
+[(needs-refinement ?t) [?t "refinement" ?q] [?q "refinement-state" "unknown"]]
+[(refinement-pending ?q) [?q "refinement-question" ?r] (not (record-settled ?r))]
+[(refinement-asks ?q) [?q "refinement-question" _]]
+;; Pending questions await answers; all settled is ready to resolve; none recorded is malformed
+;; (the boundary refuses it) and is inspected.
+[(refinement-unanswered ?t) (refinement-open ?t ?q) (refinement-pending ?q)]
+[(refinement-answered ?t) (refinement-open ?t ?q) (refinement-asks ?q) (not (refinement-pending ?q))]
+[(refinement-empty ?t) (refinement-open ?t ?q) (not (refinement-asks ?q))]
+;; Resolved without a later estimate: back to estimation, still not implementable.
+[(awaiting-reestimate ?t) [?t "refinement" ?q] [?q "refinement-state" "resolved"] [?q "refinement-estimated" false] (not (needs-refinement ?t))]
+[(refinement-work ?t) (issue ?t) (open ?t) (needs-refinement ?t) [?t "labels-complete" true] (platform-ok ?t) (not (claimed ?t))]
 ]
