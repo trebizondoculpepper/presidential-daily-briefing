@@ -434,14 +434,19 @@ normal stop. Native timeout must exceed the package deadline. Exact hook definit
 requires normal native trust. See doc/rebrief.md for setup/removal and trial limits.
 `;
 
-const claudeHelp = `Usage: pdb rebrief claude-stop --state-dir PATH --repo owner/name
+const claudeHelp = `Usage: pdb rebrief claude-stop [--installed | --state-dir PATH --repo owner/name]
        --role implementer|designer [--agent NAME] [--project PATH]
-       [--entry KEY | --harness NAME] --natural-stop-confirmed
+       [--entry KEY | --harness NAME] [--natural-stop-confirmed]
        [--deadline-ms 1..10000] [--cap N] [--transport service|http-mcp]
 Native Claude Code Stop adapter (#771): one JSON Stop event on stdin, one native JSON
 response on stdout. Claude Code fires Stop only when the main agent finishes a turn
 on its own (never on a user interrupt; API errors fire StopFailure), so the hook may
-pass --natural-stop-confirmed. The event is the payload's prompt_id within its
+pass --natural-stop-confirmed. Installed mode (pdb install claude) omits
+--state-dir/--repo: the repository is resolved from the event cwd's verified Git
+root and remote, the identity through resolveReadIdentity, and the private state
+directory is derived (owner-only, under the OS temporary directory) keyed by
+repository and session, initializing once on the first eligible Stop. The event is
+the payload's prompt_id within its
 session_id; a Stop already continued by a hook (stop_hook_active true), one with
 pending background_tasks or session_crons (paused, not finished), a missing
 prompt_id, missing/mismatched state, invalid input, cancellation or failure gives {}
@@ -540,7 +545,8 @@ async function runNativeStop(
     const installed = values.installed === true;
     // Installed-mode binding (#770) is Codex-specific; Claude installed registration is a
     // separate slice and must not silently reuse the Codex cwd-derived binding.
-    if (installed && profile.platform !== "codex") throw new Error("unsupported installed mode");
+    if (installed && !["codex", "claude-code"].includes(profile.platform))
+      throw new Error("unsupported installed mode");
     const deadline = Number(
       values["deadline-ms"] ?? (installed ? codexInstalledDeadlineMs : defaults.deadlineMs),
     );
