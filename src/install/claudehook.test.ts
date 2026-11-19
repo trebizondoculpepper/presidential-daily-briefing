@@ -40,10 +40,12 @@ const settingsFile = (dir: string) => join(dir, ".claude", "settings.local.json"
 
 describe("claude Stop hook entry shape (#771)", () => {
   it("renders the owned command invoking the resolved packaged pdb, no session paths", () => {
-    expect(claudeStopCommand({ pdbPath: PDB })).toBe(
+    expect(claudeStopCommand({ pdbPath: PDB, platform: "linux" })).toBe(
       `'${PDB}' rebrief claude-stop --installed --deadline-ms 4000`,
     );
-    expect(claudeStopCommand({ pdbPath: PDB, role: "implementer", entry: "claude" })).toBe(
+    expect(
+      claudeStopCommand({ pdbPath: PDB, role: "implementer", entry: "claude", platform: "linux" }),
+    ).toBe(
       `'${PDB}' rebrief claude-stop --installed --deadline-ms 4000 --role implementer --entry claude`,
     );
     // Windows routes through Node and quotes both the Node executable and the packaged script so
