@@ -159,6 +159,60 @@ describe("approved continuation v2 (#657)", () => {
   });
 });
 
+describe("v2 review regressions (#1074)", () => {
+  it("keeps a request's finite cap durably: a later uncapped request cannot continue", async () => {
+    const store = memoryStore(initializeV2(input));
+    const session = new ContinuationSession(store);
+    const runtime = changing();
+    const r = await session.evaluate({ ...event(0), cap: 1 }, runtime);
+    expect(r.decision).toBe("continue");
+    expect((await store.meta())!.budget).toBe(1);
+    await session.acknowledge(input, event(0).eventId, r.fingerprint!);
+    expect((await session.evaluate(event(1), runtime)).reason).toBe("continuation-cap");
+    expect((await session.evaluate({ ...event(2), cap: 5 }, runtime)).reason).toBe(
+      "continuation-cap",
+    );
+    expect((await store.meta())!.budget).toBe(1);
+  });
+
+  it("serializes concurrent callbacks before any store read (slow store)", async () => {
+    const base = memoryStore(initializeV2(input));
+    const slow: SessionStore = {
+      ...base,
+      meta: async () => {
+        await new Promise((r) => setTimeout(r, 5));
+        return base.meta();
+      },
+    };
+    const session = new ContinuationSession(slow);
+    const runtime = changing();
+    const [a, b] = await Promise.all([
+      session.evaluate(event(0), runtime),
+      session.evaluate(event(1), runtime),
+    ]);
+    expect([a.decision, b.reason]).toEqual(["continue", "reentry"]);
+    expect((await base.meta())!.offers).toBe(1);
+  });
+
+  it("an interruption during the state writes suppresses the offer and leaves it uncertain", async () => {
+    const base = memoryStore(initializeV2(input));
+    const controller = new AbortController();
+    const interrupting: SessionStore = {
+      ...base,
+      saveEvent: async (key, record) => {
+        if (record.delivery === "offered") controller.abort();
+        return base.saveEvent(key, record);
+      },
+    };
+    const session = new ContinuationSession(interrupting);
+    expect((await session.evaluate(event(0), changing(), controller.signal)).reason).toBe(
+      "cancelled",
+    );
+    expect((await base.meta())!.pending).not.toBeNull();
+    expect((await session.evaluate(event(1), changing())).reason).toBe("delivery-unacknowledged");
+  });
+});
+
 describe("v2 private file store (#657)", () => {
   const dir = () => mkdtemp(join(tmpdir(), "pdb-continuation-"));
 
@@ -210,6 +264,15 @@ describe("v2 private file store (#657)", () => {
         await expect(create(initializeV2(input))).rejects.toBeInstanceOf(StateUnavailable);
       });
       expect(await readFile(join(d, "state.json"), "utf8")).toBe(v1);
+      // Lost metadata with leftover records is never re-initialized.
+      await rm(join(d, "state.json"));
+      await writeFile(join(d, `e-${hash("x")}.json`), '{"fingerprint":null,"delivery":"none"}', {
+        mode: 0o600,
+      });
+      await withSessionStore(d, async (stored, create) => {
+        expect(stored.version).toBe("none");
+        await expect(create(initializeV2(input))).rejects.toBeInstanceOf(StateUnavailable);
+      });
       for (const text of [
         '{"schemaVersion":3}',
         "{not json",

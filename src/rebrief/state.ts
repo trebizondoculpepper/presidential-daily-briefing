@@ -1,5 +1,5 @@
 /** Private process-per-hook state. Never stores briefing data, raw session/event IDs or credentials. */
-import { lstat, open, readFile, realpath, rename, unlink } from "node:fs/promises";
+import { lstat, open, readdir, readFile, realpath, rename, unlink } from "node:fs/promises";
 import { isAbsolute, join, relative, dirname, sep } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
@@ -137,7 +137,13 @@ export async function withSessionStore<T>(
     const raw = await readPrivate(path, 65536);
     const store = fileStore(dir, path);
     const create = async (meta: SessionMeta) => {
-      if ((await readPrivate(path, 65536)) !== null) throw new StateUnavailable();
+      // Only an empty session directory may be initialized: leftover records mean lost metadata
+      // (possibly with a pending offer), which stays unavailable rather than being reset.
+      if (
+        (await readPrivate(path, 65536)) !== null ||
+        (await readdir(dir)).some((name) => /^[ef]-[a-f0-9]{64}\.json$/.test(name))
+      )
+        throw new StateUnavailable();
       await store.saveMeta(meta);
       return store;
     };

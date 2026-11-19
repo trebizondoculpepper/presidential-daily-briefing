@@ -526,11 +526,12 @@ export function memoryStore(initial: SessionMeta | null = null): SessionStore {
  * suppress a new offer.
  */
 export class ContinuationSession {
-  private busy = false;
+  /** The event being evaluated; set synchronously so concurrent callbacks never interleave. */
+  private inflight: string | null = null;
   constructor(private readonly store: SessionStore) {}
   /** Record exact receipt; idempotently completes an interrupted acknowledgement. */
   async acknowledge(context: Context, eventId: string, fingerprint: string): Promise<boolean> {
-    if (this.busy) return false;
+    if (this.inflight) return false;
     const meta = await this.store.meta();
     const event = hash(eventId);
     if (
@@ -557,20 +558,32 @@ export class ContinuationSession {
     if (!input.agent || !input.repository || !input.platform || !input.session || !input.eventId)
       return stop("missing-context");
     if (input.canDeliver === false) return stop("delivery-unsupported", "defer");
+    const event = hash(input.eventId);
+    // Claim the session synchronously, before any await, so a concurrent callback never acts on
+    // metadata read before another evaluation's writes (the file store adds the process lock).
+    if (this.inflight) return stop(this.inflight === event ? "duplicate-event" : "reentry");
+    this.inflight = event;
+    try {
+      return await this.evaluateClaimed(input, runtime, event, stop, signal);
+    } finally {
+      this.inflight = null;
+    }
+  }
+  private async evaluateClaimed(
+    input: Input,
+    runtime: Runtime,
+    event: string,
+    stop: (reason: string, decision?: Result["decision"]) => Result,
+    signal?: AbortSignal,
+  ): Promise<Result> {
     let meta: SessionMeta | null;
     try {
       meta = await this.store.meta();
-    } catch {
-      return stop("state-unavailable");
-    }
-    if (!meta || meta.context !== contextKey(input)) return stop("state-lost");
-    const event = hash(input.eventId);
-    try {
+      if (!meta || meta.context !== contextKey(input)) return stop("state-lost");
       if (await this.store.event(event)) return stop("duplicate-event");
     } catch {
       return stop("state-unavailable");
     }
-    if (this.busy) return stop("reentry");
     if (meta.pending) return stop("delivery-unacknowledged");
     const deadline = input.deadlineMs ?? defaults.deadlineMs;
     const requested = input.cap;
@@ -582,12 +595,24 @@ export class ContinuationSession {
       deadline > defaults.deadlineMs
     )
       return stop("invalid-budget");
-    // A known user-selected budget is never silently widened by a request.
-    const budgets = [meta.budget, requested].filter((b): b is number => typeof b === "number");
-    if (budgets.length && meta.offers >= Math.min(...budgets)) return stop("continuation-cap");
+    // A request's finite cap is an explicit user selection: it is kept durably and may only
+    // tighten a known budget, never widen or remove it. A cap at or below the offers already made
+    // records the budget as exhausted.
+    const budget =
+      requested === undefined
+        ? meta.budget
+        : Math.max(meta.offers, Math.min(requested, meta.budget ?? maxUserBudget), 1);
+    if (budget !== meta.budget) {
+      meta = { ...meta, budget };
+      try {
+        await this.store.saveMeta(meta);
+      } catch {
+        return stop("state-unavailable");
+      }
+    }
+    if (budget !== null && meta.offers >= budget) return stop("continuation-cap");
     if (!runtime.transport.freshRead) return stop("fresh-read-unsupported");
-    this.busy = true;
-    try {
+    {
       // Reserve the event durably before any I/O, so a concurrent or replayed callback is a
       // duplicate; the counter is diagnostic.
       try {
@@ -614,9 +639,11 @@ export class ContinuationSession {
       } catch {
         return stop("state-unavailable");
       }
+      // An interruption during the state writes suppresses the late result. The committed
+      // pending offer stays uncertain (never cleared to make progress), so no later callback
+      // receives a fresh offer in its place.
+      if (signal?.aborted) return stop("cancelled");
       return offer(input, candidate);
-    } finally {
-      this.busy = false;
     }
   }
 }
