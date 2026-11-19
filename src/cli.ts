@@ -2091,8 +2091,11 @@ async function run(
       agent: await commandActor({ ...parsed, ...identitySelection(parsed) }, identity, refineUsage),
     };
     const repository = values.repo ?? (await runtime.currentRepository());
-    const query = executorsOf(runtime).query;
-    const permission = ghOf(runtime).repos.permissionOf(repository);
+    // One composed GH facade (#1136 review): the permission check, ticket reads and writes all use
+    // the same typed boundary, so no global executor is reached.
+    const gh = ghOf(runtime);
+    const query = gh.tickets;
+    const permission = gh.repos.permissionOf(repository);
     const input = {
       number: values.number,
       agent: values.agent,
@@ -2108,7 +2111,7 @@ async function run(
           return { ...plan, exitCode: plan.ok ? 0 : 1 };
         })()
       : await requestRefinement(repository, input, {
-          run: executorsOf(runtime).run,
+          run: gh.run,
           query,
           permission,
         });

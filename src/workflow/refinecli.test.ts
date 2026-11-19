@@ -4,6 +4,7 @@
  */
 import { describe, expect, it } from "vite-plus/test";
 import { main } from "../cli.js";
+import { createAppServices } from "../composition.js";
 import { decisionGuidance, denialText } from "../rules/datalog/engine.js";
 import { refineArgumentsFor, refineUsage } from "./refinecli.js";
 import { refinementLabel } from "./refinement.js";
@@ -127,5 +128,28 @@ describe("refine request: service wiring (#1095)", () => {
     expect(await main(["refine", "--help"], async (t) => void (help = t))).toBe(0);
     expect(help).toContain("--question TEXT");
     expect(help).toContain("never added as a native dependency");
+  });
+
+  it("reads, checks permission and writes through the injected composed GH service only (#1136 review)", async () => {
+    const w = world();
+    w.add(1);
+    const services = createAppServices({
+      gh: { query: w.query as unknown as Query, run: w.run, rest: w.rest },
+    });
+    let text = "";
+    const code = await main(
+      ["refine", ...base, "--question", "Which engine?", "--repo", repo],
+      async (t) => void (text = t),
+      {
+        collect: async () => {
+          throw new Error("no briefing");
+        },
+        currentRepository: async () => repo,
+        services,
+      },
+    );
+    expect(code, text).toBe(0);
+    expect(w.issues.get(1)!.comments).toHaveLength(1);
+    expect(w.issues.get(1)!.labels).toContain(refinementLabel);
   });
 });
