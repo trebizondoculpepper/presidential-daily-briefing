@@ -137,7 +137,7 @@
    :preference 0
    :affinity "implementer"
    :owned true
-   :when [[1 "role" ?role] [(not= ?role "human")] (own-active ?t) (easy ?t)]
+   :when [[1 "role" ?role] [(not= ?role "human")] (own-continuable ?t) (easy ?t)]
    :why "Continue your known easy win: impact {impact}, complexity {complexity}."
    :codes ["easy-win" "own-claim"]}
 
@@ -236,7 +236,7 @@
    :preference 0
    :affinity "implementer"
    :owned true
-   :when [[1 "role" ?role] [(not= ?role "human")] (own-active ?t)]
+   :when [[1 "role" ?role] [(not= ?role "human")] (own-continuable ?t)]
    :why "Continue your active claim; impact {impact}, complexity {complexity}."
    :codes ["ordinary" "own-claim"]}
 
@@ -270,7 +270,7 @@
    :preference 0
    :affinity "implementer"
    :owned true
-   :when [[1 "role" ?role] [(not= ?role "human")] (own-active ?t) (unfavorable ?t)]
+   :when [[1 "role" ?role] [(not= ?role "human")] (own-continuable ?t) (unfavorable ?t)]
    :why "Your active work has impact {impact} and complexity {complexity}; reconsider or split before continuing."
    :codes ["unfavorable" "own-claim"]}
 
@@ -334,6 +334,18 @@
    :when [[1 "role" ?role] [(not= ?role "human")] [1 "owned-review-subject" ?t] (own-issue ?t) [1 "owned-claims" 1] [1 "owned-claims-complete" false]]
    :why "Your claim inventory is incomplete and only this claim was observed; inspect your ownership before claiming more work."
    :codes ["own-claim" "inspection"]}
+
+  {:id "D-OWN-HELD-BACK"
+   :purpose "Manage an owned claim that a native blocker or an outstanding prerequisite holds back (#651)."
+   :kind "inspect"
+   :band 3
+   :preference 2
+   :affinity "shared"
+   :owned true
+   :when [[1 "role" ?role] [(not= ?role "human")] (own-held-back ?t)]
+   :why "Your claim is held back by {heldBack}; inspect it, then advance the blocker or question, hand over, or release the claim. It is not ready to continue."
+   :codes ["owned-blocked" "own-claim"]
+   :witnesses {"heldBack" [(or-join [?t ?value] (and [?t "label" ?value] [1 "prerequisite" ?value]) (and [?t "open-blockers" ?n] [(> ?n 0)] [(str ?n " open native blocker(s)") ?value]) (and [?t "blocker" ?i] [?i "state" "OPEN"] [?i "number" ?b] [(str "open blocker #" ?b) ?value]))]}}
 
   {:id "D-OWN-UNKNOWN"
    :purpose "Surface a retained claim whose activity or wait evidence cannot be established."

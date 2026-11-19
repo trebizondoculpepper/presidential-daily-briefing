@@ -93,6 +93,7 @@ const audience: Record<
   "D-OWN-RESUME": { role: "agents", kind: "issue" },
   "D-REVIEW-OWNED": { role: "agents", kind: "issue" },
   "D-REVIEW-OWNED-PARTIAL": { role: "agents", kind: "issue" },
+  "D-OWN-HELD-BACK": { role: "agents", kind: "issue" },
   "D-OWN-UNKNOWN": { role: "agents", kind: "issue" },
   // Repository context has no GitHub issue/PR kind.
   "D-INVENTORY-UNKNOWN": { role: "agents", kind: "any" },
