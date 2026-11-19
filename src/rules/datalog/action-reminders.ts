@@ -238,7 +238,7 @@ function refusalErrorToRuleId(
       return "D-DENY-CLAIM";
     case "OTHER_ACTIVE_CLAIM":
       if ((facts.otherClaimCount ?? 0) > 1) {
-        return facts.inventoryComplete === false ? "D-REVIEW-OWNED-PARTIAL" : "D-REVIEW-OWNED";
+        return facts.inventoryComplete === true ? "D-REVIEW-OWNED" : "D-REVIEW-OWNED-PARTIAL";
       }
       return null;
     case "EVIDENCE_INCOMPLETE":
@@ -334,8 +334,14 @@ export function selectClaimRuleReminders(input: SelectClaimRemindersInput): Acti
   const facts = input.facts ?? {};
   const contextResolved = input.contextResolved ?? true;
   const normalizedRole = normalizeRole(input.role);
-  const maxItems = Math.max(1, input.maxItems ?? RULE_REMINDERS_MAX_ITEMS);
-  const maxCodePoints = Math.max(1, input.maxCodePoints ?? RULE_REMINDERS_MAX_CODE_POINTS);
+  const maxItems = Math.min(
+    RULE_REMINDERS_MAX_ITEMS,
+    Math.max(1, input.maxItems ?? RULE_REMINDERS_MAX_ITEMS),
+  );
+  const maxCodePoints = Math.min(
+    RULE_REMINDERS_MAX_CODE_POINTS,
+    Math.max(1, input.maxCodePoints ?? RULE_REMINDERS_MAX_CODE_POINTS),
+  );
 
   const modelRulesHash = model.rulesHash ?? rulesHash;
   const modelNarrationHash = model.narrationHash ?? null;
@@ -387,7 +393,12 @@ export function selectClaimRuleReminders(input: SelectClaimRemindersInput): Acti
     } else if (input.outcome === "partial") {
       for (const id of facts.denialIds ?? []) addPolicyItem(id, "admission");
       if (facts.inventoryComplete === false) {
-        if (facts.claimObserved === true || facts.hasOtherClaims === true) {
+        const observedCount =
+          (facts.claimObserved === true ? 1 : 0) +
+          (facts.otherClaimCount ?? (facts.hasOtherClaims === true ? 1 : 0));
+        if (observedCount > 1) {
+          addPolicyItem("D-REVIEW-OWNED-PARTIAL", "admission");
+        } else if (facts.claimObserved === true || facts.hasOtherClaims === true) {
           addPolicyItem("D-OWNED-INCOMPLETE", "admission");
         } else if (facts.claimObserved === false && facts.hasOtherClaims === false) {
           addPolicyItem("D-INVENTORY-UNKNOWN", "admission");
@@ -424,7 +435,7 @@ export function selectClaimRuleReminders(input: SelectClaimRemindersInput): Acti
       }
       if (facts.hasOtherClaims) {
         addPolicyItem(
-          facts.inventoryComplete === false ? "D-REVIEW-OWNED-PARTIAL" : "D-REVIEW-OWNED",
+          facts.inventoryComplete === true ? "D-REVIEW-OWNED" : "D-REVIEW-OWNED-PARTIAL",
           "admission",
         );
       } else if (facts.inventoryComplete === false) {

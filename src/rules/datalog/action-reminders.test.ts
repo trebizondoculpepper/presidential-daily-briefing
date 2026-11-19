@@ -183,6 +183,15 @@ describe("native claim-time obligations and action-reminder selection (#1029)", 
       "D-OWNED-INCOMPLETE",
     ]);
 
+    const multiObservedPartial = selectClaimRuleReminders({
+      role: "implementer",
+      outcome: "partial",
+      facts: { inventoryComplete: false, claimObserved: true, hasOtherClaims: true },
+    });
+    expect(multiObservedPartial.admissionRationale.map((i) => i.id)).toEqual([
+      "D-REVIEW-OWNED-PARTIAL",
+    ]);
+
     const unknownPartial = selectClaimRuleReminders({
       role: "implementer",
       outcome: "partial",
@@ -332,7 +341,7 @@ describe("native claim-time obligations and action-reminder selection (#1029)", 
       selectClaimRuleReminders({
         role: "implementer",
         outcome: "denied",
-        facts: { error: "OTHER_ACTIVE_CLAIM", otherClaimCount: 2 },
+        facts: { error: "OTHER_ACTIVE_CLAIM", otherClaimCount: 2, inventoryComplete: true },
       }).admissionRationale.map((i) => i.id),
     ).toEqual(["D-REVIEW-OWNED"]);
 
