@@ -143,6 +143,13 @@ export function claudeHookAdapter(command: string): JsonEntryAdapter {
       if (!("hooks" in doc)) return null;
       if (typeof doc.hooks !== "object" || doc.hooks === null || Array.isArray(doc.hooks))
         return "hooks must be a JSON object.";
+      // A Stop value that exists but is not an array is an unsupported native shape: refuse it
+      // rather than replacing its contents (mirrors the Codex Stop hook review, #770/#1124).
+      if (
+        claudeStopHookEvent in (doc.hooks as Record<string, unknown>) &&
+        !Array.isArray((doc.hooks as Record<string, unknown>)[claudeStopHookEvent])
+      )
+        return `${claudeStopHookEvent} must be a JSON array of command hooks.`;
       return null;
     },
     apply: (doc) => {
