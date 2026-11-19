@@ -192,4 +192,29 @@ describe("refine request: service wiring (#1095)", () => {
     );
     expect(json.guidance).toMatchObject({ rule: null, nextActor: null });
   });
+
+  it("gives no designer guidance when the comment write failed (#1136 review)", async () => {
+    const w = world();
+    w.add(1);
+    w.failing.add("comment");
+    const { code, text } = await run(w, [...base, "--question", "Which engine?", "--json"]);
+    expect(code).toBe(1);
+    const receipt = JSON.parse(text);
+    expect(receipt.guidance).toMatchObject({ rule: null, nextActor: null, pickup: null });
+    expect(w.issues.get(1)!.comments).toHaveLength(0);
+  });
+
+  it("previews that the label cannot be reconciled when an older record is unverifiable (#1136 review)", async () => {
+    const w = world();
+    w.add(1);
+    await run(w, [...base, "--question", "Older question?"]);
+    // The older request's author becomes unverifiable.
+    w.issues.get(1)!.comments[0]!.author = { __typename: "User", login: "ghost" };
+    w.issues.get(1)!.labels = w.issues.get(1)!.labels.filter((l) => l !== refinementLabel);
+    const dry = JSON.parse(
+      (await run(w, [...base, "--question", "New question?", "--dry-run", "--json"])).text,
+    );
+    expect(dry.changes.map((c: { step: string }) => c.step)).toEqual(["comment"]);
+    expect(dry.notes.join(" ")).toMatch(/would not be reconciled/);
+  });
 });

@@ -774,6 +774,23 @@ export async function previewRefinementRequest(
           }),
     };
   }
+  // The label is reconciled from the records after the write; if current evidence would refuse
+  // that (e.g. an unverifiable older record), the preview says so instead of promising a label.
+  const current = await planRefinementLabel(
+    repository,
+    input.number,
+    input.agent,
+    query,
+    permission,
+  );
+  if (!current.ok)
+    return {
+      ...plan,
+      notes: [
+        ...(plan.notes ?? []),
+        `${refinementLabel} would not be reconciled after the record is written: ${current.prerequisite}`,
+      ],
+    };
   const present = (plan.facts.labels ?? []).includes(refinementLabel);
   if (present) return plan;
   const { repoLabels } = await readTicket(

@@ -108,7 +108,20 @@ export function refineArgumentsFor(
 export function refineGuidance(result: ClaimPlan | ClaimResult) {
   if (!result.ok) return null;
   const request = result.questionOpId ?? null;
-  const recordedNow = result.changes.some((c) => c.step === "comment");
+  // An executed result counts only a comment step that completed; a plan (dry run) counts the
+  // planned step. A failed or skipped write never yields guidance for a request that may not exist.
+  const executed = "steps" in result && Array.isArray(result.steps);
+  const recordedNow = executed
+    ? result.steps!.some((s) => s.step === "comment" && s.status === "done")
+    : result.changes.some((c) => c.step === "comment");
+  if (executed && !recordedNow && result.changes.some((c) => c.step === "comment"))
+    return {
+      request,
+      nextActor: null,
+      rule: null,
+      next: "The request was not confirmed as recorded; see the step statuses and retry.",
+      pickup: null,
+    };
   if (!recordedNow)
     return {
       request,
