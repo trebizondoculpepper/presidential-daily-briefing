@@ -1,8 +1,8 @@
 {
   "modelVersion": 2,
   "policyVersion": 1,
-  "rulesHash": "d4cdba3726319a4735591fe3d475aa979f11387069deafe128f9646ada0e86b2",
-  "narrationHash": "70b53488c7f367a99ebd2f9e13754ff25e30477246e8a942016939590b5f40a7",
+  "rulesHash": "722abebb7a270af64d8b69e109236ed07e4cd6102ca8c8224acf6821c308a07c",
+  "narrationHash": "dc0b68ad36522c9c35045181672990d4f2735184d86e13daa7a3460b9f4a7a35",
   "sources": [
     "policy/schema.edn",
     "policy/rules.edn",
@@ -18,6 +18,14 @@
       "owned-claims": "number of implementation claims you retain",
       "owned-claims-complete": "completeness of your claim inventory",
       "owned-review-subject": "the claim the owned-work review is attached to",
+      "unassign-subject": "human unassign evaluation subject",
+      "unassign-agent": "agent claim targeted by human unassign",
+      "claim-present": "whether the target agent claim label is currently present",
+      "claim-start": "recorded timestamp when the target agent claim began",
+      "claim-history-complete": "completeness of claim label and timeline history",
+      "trusted-human-context": "verified same-origin explicit human-mode request",
+      "permission": "verified repository write permission for the serving user",
+      "override-unknown-history": "explicit human override when claim history is incomplete",
       "active-count": "number of active dependents",
       "active-dependent": "active dependent",
       "assessment-kind": "assessment action kind",
@@ -4279,6 +4287,998 @@
       "source": {
         "file": "policy/decisions.edn",
         "index": 41
+      }
+    },
+    {
+      "id": "D-UNASSIGN-REFUSE-CONTEXT",
+      "purpose": "Refuse Human-view Unassign without a verified explicit human-mode request.",
+      "kind": "unassign-refuse-context",
+      "band": 1,
+      "preference": 1,
+      "codes": ["unassign", "refuse"],
+      "roles": ["human"],
+      "clauses": [
+        {
+          "type": "call",
+          "predicate": "foreground",
+          "args": [
+            {
+              "var": "?t"
+            }
+          ]
+        },
+        {
+          "type": "fact",
+          "scope": "viewer",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "role",
+          "value": {
+            "lit": "human"
+          },
+          "phrase": "role",
+          "many": false
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?t"
+          },
+          "attribute": "unassign-subject",
+          "value": {
+            "lit": true
+          },
+          "phrase": "human unassign evaluation subject",
+          "many": false
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "trusted-human-context",
+          "value": {
+            "lit": false
+          },
+          "phrase": "verified same-origin explicit human-mode request",
+          "many": false
+        }
+      ],
+      "templateClauses": 1,
+      "calls": ["foreground"],
+      "evidence": [
+        {
+          "name": "agent",
+          "scope": "rule",
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "unassign-agent",
+              "value": {
+                "var": "?value"
+              },
+              "phrase": "agent claim targeted by human unassign",
+              "many": false
+            }
+          ]
+        }
+      ],
+      "source": {
+        "file": "policy/decisions.edn",
+        "index": 42
+      }
+    },
+    {
+      "id": "D-UNASSIGN-REFUSE-PERMISSION-DENIED",
+      "purpose": "Refuse Human-view Unassign when the serving GitHub account lacks write, maintain or admin permission.",
+      "kind": "unassign-refuse-permission-denied",
+      "band": 1,
+      "preference": 1,
+      "codes": ["unassign", "refuse"],
+      "roles": ["human"],
+      "clauses": [
+        {
+          "type": "call",
+          "predicate": "foreground",
+          "args": [
+            {
+              "var": "?t"
+            }
+          ]
+        },
+        {
+          "type": "fact",
+          "scope": "viewer",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "role",
+          "value": {
+            "lit": "human"
+          },
+          "phrase": "role",
+          "many": false
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?t"
+          },
+          "attribute": "unassign-subject",
+          "value": {
+            "lit": true
+          },
+          "phrase": "human unassign evaluation subject",
+          "many": false
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "trusted-human-context",
+          "value": {
+            "lit": true
+          },
+          "phrase": "verified same-origin explicit human-mode request",
+          "many": false
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "permission",
+          "value": {
+            "lit": "deny"
+          },
+          "phrase": "verified repository write permission for the serving user",
+          "many": false
+        }
+      ],
+      "templateClauses": 1,
+      "calls": ["foreground"],
+      "evidence": [
+        {
+          "name": "agent",
+          "scope": "rule",
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "unassign-agent",
+              "value": {
+                "var": "?value"
+              },
+              "phrase": "agent claim targeted by human unassign",
+              "many": false
+            }
+          ]
+        }
+      ],
+      "source": {
+        "file": "policy/decisions.edn",
+        "index": 43
+      }
+    },
+    {
+      "id": "D-UNASSIGN-REFUSE-PERMISSION-UNKNOWN",
+      "purpose": "Refuse Human-view Unassign when repository write permission for the serving GitHub account cannot be verified.",
+      "kind": "unassign-refuse-permission-unknown",
+      "band": 1,
+      "preference": 1,
+      "codes": ["unassign", "refuse"],
+      "roles": ["human"],
+      "clauses": [
+        {
+          "type": "call",
+          "predicate": "foreground",
+          "args": [
+            {
+              "var": "?t"
+            }
+          ]
+        },
+        {
+          "type": "fact",
+          "scope": "viewer",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "role",
+          "value": {
+            "lit": "human"
+          },
+          "phrase": "role",
+          "many": false
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?t"
+          },
+          "attribute": "unassign-subject",
+          "value": {
+            "lit": true
+          },
+          "phrase": "human unassign evaluation subject",
+          "many": false
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "trusted-human-context",
+          "value": {
+            "lit": true
+          },
+          "phrase": "verified same-origin explicit human-mode request",
+          "many": false
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "permission",
+          "value": {
+            "lit": "unknown"
+          },
+          "phrase": "verified repository write permission for the serving user",
+          "many": false
+        }
+      ],
+      "templateClauses": 1,
+      "calls": ["foreground"],
+      "evidence": [
+        {
+          "name": "agent",
+          "scope": "rule",
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "unassign-agent",
+              "value": {
+                "var": "?value"
+              },
+              "phrase": "agent claim targeted by human unassign",
+              "many": false
+            }
+          ]
+        }
+      ],
+      "source": {
+        "file": "policy/decisions.edn",
+        "index": 44
+      }
+    },
+    {
+      "id": "D-UNASSIGN-NOOP",
+      "purpose": "Report an idempotent no-op when the selected agent claim is already absent and history is complete.",
+      "kind": "unassign-noop",
+      "band": 1,
+      "preference": 1,
+      "codes": ["unassign", "noop"],
+      "roles": ["human"],
+      "clauses": [
+        {
+          "type": "call",
+          "predicate": "foreground",
+          "args": [
+            {
+              "var": "?t"
+            }
+          ]
+        },
+        {
+          "type": "fact",
+          "scope": "viewer",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "role",
+          "value": {
+            "lit": "human"
+          },
+          "phrase": "role",
+          "many": false
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?t"
+          },
+          "attribute": "unassign-subject",
+          "value": {
+            "lit": true
+          },
+          "phrase": "human unassign evaluation subject",
+          "many": false
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "trusted-human-context",
+          "value": {
+            "lit": true
+          },
+          "phrase": "verified same-origin explicit human-mode request",
+          "many": false
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "permission",
+          "value": {
+            "lit": "allow"
+          },
+          "phrase": "verified repository write permission for the serving user",
+          "many": false
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?t"
+          },
+          "attribute": "claim-present",
+          "value": {
+            "lit": false
+          },
+          "phrase": "whether the target agent claim label is currently present",
+          "many": false
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?t"
+          },
+          "attribute": "claim-history-complete",
+          "value": {
+            "lit": true
+          },
+          "phrase": "completeness of claim label and timeline history",
+          "many": false
+        }
+      ],
+      "templateClauses": 1,
+      "calls": ["foreground"],
+      "evidence": [
+        {
+          "name": "agent",
+          "scope": "rule",
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "unassign-agent",
+              "value": {
+                "var": "?value"
+              },
+              "phrase": "agent claim targeted by human unassign",
+              "many": false
+            }
+          ]
+        }
+      ],
+      "source": {
+        "file": "policy/decisions.edn",
+        "index": 45
+      }
+    },
+    {
+      "id": "D-UNASSIGN-REFUSE-EVIDENCE-INCOMPLETE",
+      "purpose": "Refuse Human-view Unassign when claim history is incomplete and no explicit human override was given.",
+      "kind": "unassign-refuse-evidence",
+      "band": 1,
+      "preference": 1,
+      "codes": ["unassign", "refuse"],
+      "roles": ["human"],
+      "clauses": [
+        {
+          "type": "call",
+          "predicate": "foreground",
+          "args": [
+            {
+              "var": "?t"
+            }
+          ]
+        },
+        {
+          "type": "fact",
+          "scope": "viewer",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "role",
+          "value": {
+            "lit": "human"
+          },
+          "phrase": "role",
+          "many": false
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?t"
+          },
+          "attribute": "unassign-subject",
+          "value": {
+            "lit": true
+          },
+          "phrase": "human unassign evaluation subject",
+          "many": false
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "trusted-human-context",
+          "value": {
+            "lit": true
+          },
+          "phrase": "verified same-origin explicit human-mode request",
+          "many": false
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "permission",
+          "value": {
+            "lit": "allow"
+          },
+          "phrase": "verified repository write permission for the serving user",
+          "many": false
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "override-unknown-history",
+          "value": {
+            "lit": false
+          },
+          "phrase": "explicit human override when claim history is incomplete",
+          "many": false
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?t"
+          },
+          "attribute": "claim-history-complete",
+          "value": {
+            "lit": false
+          },
+          "phrase": "completeness of claim label and timeline history",
+          "many": false
+        }
+      ],
+      "templateClauses": 1,
+      "calls": ["foreground"],
+      "evidence": [
+        {
+          "name": "agent",
+          "scope": "rule",
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "unassign-agent",
+              "value": {
+                "var": "?value"
+              },
+              "phrase": "agent claim targeted by human unassign",
+              "many": false
+            }
+          ]
+        }
+      ],
+      "source": {
+        "file": "policy/decisions.edn",
+        "index": 46
+      }
+    },
+    {
+      "id": "D-UNASSIGN-REFUSE-CLAIM-START-MISSING",
+      "purpose": "Refuse Human-view Unassign when claim start timestamp is unknown and no explicit human override was given.",
+      "kind": "unassign-refuse-evidence",
+      "band": 1,
+      "preference": 1,
+      "codes": ["unassign", "refuse"],
+      "roles": ["human"],
+      "clauses": [
+        {
+          "type": "call",
+          "predicate": "foreground",
+          "args": [
+            {
+              "var": "?t"
+            }
+          ]
+        },
+        {
+          "type": "fact",
+          "scope": "viewer",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "role",
+          "value": {
+            "lit": "human"
+          },
+          "phrase": "role",
+          "many": false
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?t"
+          },
+          "attribute": "unassign-subject",
+          "value": {
+            "lit": true
+          },
+          "phrase": "human unassign evaluation subject",
+          "many": false
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "trusted-human-context",
+          "value": {
+            "lit": true
+          },
+          "phrase": "verified same-origin explicit human-mode request",
+          "many": false
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "permission",
+          "value": {
+            "lit": "allow"
+          },
+          "phrase": "verified repository write permission for the serving user",
+          "many": false
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "override-unknown-history",
+          "value": {
+            "lit": false
+          },
+          "phrase": "explicit human override when claim history is incomplete",
+          "many": false
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?t"
+          },
+          "attribute": "claim-present",
+          "value": {
+            "lit": true
+          },
+          "phrase": "whether the target agent claim label is currently present",
+          "many": false
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?t"
+          },
+          "attribute": "claim-history-complete",
+          "value": {
+            "lit": true
+          },
+          "phrase": "completeness of claim label and timeline history",
+          "many": false
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?t"
+          },
+          "attribute": "claim-start",
+          "value": {
+            "lit": ""
+          },
+          "phrase": "recorded timestamp when the target agent claim began",
+          "many": false
+        }
+      ],
+      "templateClauses": 1,
+      "calls": ["foreground"],
+      "evidence": [
+        {
+          "name": "agent",
+          "scope": "rule",
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "unassign-agent",
+              "value": {
+                "var": "?value"
+              },
+              "phrase": "agent claim targeted by human unassign",
+              "many": false
+            }
+          ]
+        }
+      ],
+      "source": {
+        "file": "policy/decisions.edn",
+        "index": 47
+      }
+    },
+    {
+      "id": "D-UNASSIGN-ALLOW",
+      "purpose": "Allow Human-view Unassign of the verified claim while preserving human assignees, blockers, questions and ticket state.",
+      "kind": "unassign-allow",
+      "band": 1,
+      "preference": 1,
+      "codes": ["unassign", "allow"],
+      "roles": ["human"],
+      "clauses": [
+        {
+          "type": "call",
+          "predicate": "foreground",
+          "args": [
+            {
+              "var": "?t"
+            }
+          ]
+        },
+        {
+          "type": "fact",
+          "scope": "viewer",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "role",
+          "value": {
+            "lit": "human"
+          },
+          "phrase": "role",
+          "many": false
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?t"
+          },
+          "attribute": "unassign-subject",
+          "value": {
+            "lit": true
+          },
+          "phrase": "human unassign evaluation subject",
+          "many": false
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "trusted-human-context",
+          "value": {
+            "lit": true
+          },
+          "phrase": "verified same-origin explicit human-mode request",
+          "many": false
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "permission",
+          "value": {
+            "lit": "allow"
+          },
+          "phrase": "verified repository write permission for the serving user",
+          "many": false
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "override-unknown-history",
+          "value": {
+            "lit": false
+          },
+          "phrase": "explicit human override when claim history is incomplete",
+          "many": false
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?t"
+          },
+          "attribute": "claim-present",
+          "value": {
+            "lit": true
+          },
+          "phrase": "whether the target agent claim label is currently present",
+          "many": false
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?t"
+          },
+          "attribute": "claim-history-complete",
+          "value": {
+            "lit": true
+          },
+          "phrase": "completeness of claim label and timeline history",
+          "many": false
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?t"
+          },
+          "attribute": "claim-start",
+          "value": {
+            "var": "?cs"
+          },
+          "phrase": "recorded timestamp when the target agent claim began",
+          "many": false
+        },
+        {
+          "type": "compare",
+          "op": "not=",
+          "args": [
+            {
+              "var": "?cs"
+            },
+            {
+              "lit": ""
+            }
+          ]
+        }
+      ],
+      "templateClauses": 1,
+      "calls": ["foreground"],
+      "evidence": [
+        {
+          "name": "agent",
+          "scope": "rule",
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "unassign-agent",
+              "value": {
+                "var": "?value"
+              },
+              "phrase": "agent claim targeted by human unassign",
+              "many": false
+            }
+          ]
+        },
+        {
+          "name": "claimStart",
+          "scope": "rule",
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "claim-start",
+              "value": {
+                "var": "?value"
+              },
+              "phrase": "recorded timestamp when the target agent claim began",
+              "many": false
+            }
+          ]
+        }
+      ],
+      "source": {
+        "file": "policy/decisions.edn",
+        "index": 48
+      }
+    },
+    {
+      "id": "D-UNASSIGN-ALLOW-OVERRIDE",
+      "purpose": "Allow Human-view Unassign with explicit human override when claim history is incomplete or start is unknown.",
+      "kind": "unassign-allow",
+      "band": 1,
+      "preference": 1,
+      "codes": ["unassign", "allow", "override"],
+      "roles": ["human"],
+      "clauses": [
+        {
+          "type": "call",
+          "predicate": "foreground",
+          "args": [
+            {
+              "var": "?t"
+            }
+          ]
+        },
+        {
+          "type": "fact",
+          "scope": "viewer",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "role",
+          "value": {
+            "lit": "human"
+          },
+          "phrase": "role",
+          "many": false
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?t"
+          },
+          "attribute": "unassign-subject",
+          "value": {
+            "lit": true
+          },
+          "phrase": "human unassign evaluation subject",
+          "many": false
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "trusted-human-context",
+          "value": {
+            "lit": true
+          },
+          "phrase": "verified same-origin explicit human-mode request",
+          "many": false
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "permission",
+          "value": {
+            "lit": "allow"
+          },
+          "phrase": "verified repository write permission for the serving user",
+          "many": false
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "override-unknown-history",
+          "value": {
+            "lit": true
+          },
+          "phrase": "explicit human override when claim history is incomplete",
+          "many": false
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?t"
+          },
+          "attribute": "claim-present",
+          "value": {
+            "lit": true
+          },
+          "phrase": "whether the target agent claim label is currently present",
+          "many": false
+        }
+      ],
+      "templateClauses": 1,
+      "calls": ["foreground"],
+      "evidence": [
+        {
+          "name": "agent",
+          "scope": "rule",
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "unassign-agent",
+              "value": {
+                "var": "?value"
+              },
+              "phrase": "agent claim targeted by human unassign",
+              "many": false
+            }
+          ]
+        }
+      ],
+      "source": {
+        "file": "policy/decisions.edn",
+        "index": 49
       }
     }
   ],
@@ -16884,16 +17884,16 @@
     }
   ],
   "coverage": {
-    "decisions": 42,
+    "decisions": 50,
     "predicates": 91,
     "alternatives": 189,
     "denials": 9,
     "queries": 19,
     "keyQueries": 4,
-    "evidence": 40,
+    "evidence": 49,
     "overrides": 4,
     "constants": 14,
-    "attributes": 96,
-    "clauses": 1031
+    "attributes": 104,
+    "clauses": 1085
   }
 }

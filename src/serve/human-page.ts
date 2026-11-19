@@ -56,6 +56,7 @@ export function humanPage(
   query: URLSearchParams,
   served: readonly Served[],
   select: (served: readonly Served[], repo: string | undefined) => Served,
+  allowEdits = false,
 ): HumanPageResult {
   const error = (status: number, message: string): HumanPageResult => ({
     status,
@@ -99,13 +100,17 @@ ${footer}`,
   }
   return {
     status: 200,
-    html: `${navigation(served, selected.repository)}<main id="content" tabindex="-1" data-repo="${escapeHtml(selected.repository)}">
+    html: `${navigation(served, selected.repository)}<main id="content" tabindex="-1" data-repo="${escapeHtml(selected.repository)}" data-allow-edits="${allowEdits ? "true" : "false"}">
 <h1>Human attention</h1><p><a href="${escapeHtml(pageLink("/", { repo: selected.repository, role: "implementer" }))}">Implementer</a> · <a href="${escapeHtml(pageLink("/", { repo: selected.repository, role: "designer" }))}">Designer</a></p><p>Project: <strong>${escapeHtml(selected.repository)}</strong></p>
 <form id="selection">
 <label>Human name <input id="agent" type="text" value="${escapeHtml(agent ?? "")}" placeholder="optional, as in attention:NAME" autocomplete="off" spellcheck="false"></label>
 <button id="show" type="submit">Show</button>
 <button id="refresh" type="button">Refresh</button>
-</form>
+</form>${
+      allowEdits
+        ? `\n<section id="unassign-status" aria-live="polite"></section>\n<dialog id="unassign-dialog" aria-labelledby="unassign-title">\n<form id="unassign-form" method="dialog">\n<h2 id="unassign-title">Confirm Unassign</h2>\n<div id="unassign-preview"></div>\n<label>Your actor name <input id="unassign-actor" type="text" required autocomplete="off" spellcheck="false"></label>\n<label id="unassign-override-row" hidden><input id="unassign-override" type="checkbox"> Override unknown claim history</label>\n<p class="dialog-actions"><button id="unassign-confirm" type="submit">Confirm Unassign</button> <button id="unassign-cancel" type="button">Cancel</button></p>\n</form>\n</dialog>`
+        : ""
+    }
 <section id="state" aria-live="polite"></section>
 <section id="notices"></section>
 <section id="actionable" aria-labelledby="actionable-heading"></section>
@@ -121,7 +126,11 @@ export interface HumanRenderers {
   /** Whether the envelope belongs to the page's project (a late or foreign answer is dropped). */
   matches(envelope: unknown, repo: string): boolean;
   renderNotices(envelope: unknown): string;
-  renderSections(envelope: unknown, limit: number): { actionable: string; waiting: string };
+  renderSections(
+    envelope: unknown,
+    limit: number,
+    allowEdits?: boolean,
+  ): { actionable: string; waiting: string };
   renderCoverage(envelope: unknown): string;
 }
 
@@ -171,7 +180,7 @@ export function humanRenderers(base: DashboardRenderers): HumanRenderers {
     "orphaned-question": "Question on a closed ticket",
   };
 
-  const renderItem = (raw: unknown, repository: string): string => {
+  const renderItem = (raw: unknown, repository: string, allowEdits = false): string => {
     const item = record(raw);
     const target = item.target;
     const number = numberOf(target);
@@ -208,8 +217,20 @@ export function humanRenderers(base: DashboardRenderers): HumanRenderers {
       issue && issue[1]!.toLowerCase() === repository.toLowerCase()
         ? ` <a class="detail" href="${escapeHtml(`/ticket?${new URLSearchParams({ repo: repository, n: issue[2]! }).toString()}`)}">details</a>`
         : "";
+    const claimAgents = list(item.claims).filter(
+      (v): v is string => typeof v === "string" && v.trim().length > 0,
+    );
+    const unassignControl =
+      allowEdits && issue && issue[1]!.toLowerCase() === repository.toLowerCase()
+        ? claimAgents
+            .map(
+              (claimAgent) =>
+                ` <button type="button" class="unassign-btn" data-issue="${escapeHtml(issue[2]!)}" data-agent="${escapeHtml(claimAgent)}">Unassign ${escapeHtml(claimAgent)}</button>`,
+            )
+            .join("")
+        : "";
     const warnings = list(item.warnings);
-    return `<li>${link(target, `#${number} ${str(item.title)}`)}${detail}
+    return `<li>${link(target, `#${number} ${str(item.title)}`)}${detail}${unassignControl}
 <p>${badges}</p>
 <p class="why">${escapeHtml(item.reason)}</p>${
       requested.length
@@ -224,7 +245,7 @@ export function humanRenderers(base: DashboardRenderers): HumanRenderers {
     }</li>`;
   };
 
-  const renderSections = (envelope: unknown, limit: number) => {
+  const renderSections = (envelope: unknown, limit: number, allowEdits = false) => {
     const e = record(envelope);
     const view = human(envelope);
     if (e.status === "error" || !Object.keys(view).length)
@@ -255,7 +276,9 @@ export function humanRenderers(base: DashboardRenderers): HumanRenderers {
         : "";
     const section = (id: string, title: string, intro: string, rows: unknown[]) =>
       `<h2 id="${id}-heading">${title} (${rows.length})</h2>${intro}${
-        rows.length ? `<ol>${rows.map((r) => renderItem(r, repository)).join("")}</ol>` : empty
+        rows.length
+          ? `<ol>${rows.map((r) => renderItem(r, repository, allowEdits)).join("")}</ol>`
+          : empty
       }`;
     return {
       actionable:
@@ -307,6 +330,7 @@ export function humanClient(base: DashboardRenderers, view: HumanRenderers): voi
   const repo = main?.dataset.repo ?? "";
   // No validated project: the server already rendered the no-selection or error state.
   if (!main || !repo) return;
+  const allowEdits = main.dataset.allowEdits === "true";
   const agent = byId("agent") as HTMLInputElement;
   const state = byId("state")!;
   const notices = byId("notices")!;
@@ -316,11 +340,21 @@ export function humanClient(base: DashboardRenderers, view: HumanRenderers): voi
   let limit = 50;
   let generation = 0;
   let controller: AbortController | null = null;
+  let csrfToken: string | null = null;
+  let lastUncertainOp: { key: string; operationId: string } | null = null;
+  let pendingPreview: {
+    issue: string;
+    agent: string;
+    claimStart: string | null;
+    revision: string;
+    requiresOverride: boolean;
+    operationId: string;
+  } | null = null;
 
   const render = (envelope: unknown) => {
     state.innerHTML = base.renderState(envelope, false);
     notices.innerHTML = view.renderNotices(envelope);
-    const sections = view.renderSections(envelope, limit);
+    const sections = view.renderSections(envelope, limit, allowEdits);
     actionable.innerHTML = sections.actionable;
     waiting.innerHTML = sections.waiting;
     coverage.innerHTML = view.renderCoverage(envelope);
@@ -386,6 +420,204 @@ export function humanClient(base: DashboardRenderers, view: HumanRenderers): voi
       void show(false, false);
     }
   });
+  if (allowEdits) {
+    const statusBox = byId("unassign-status");
+    const dialog = byId("unassign-dialog") as HTMLDialogElement | null;
+    const form = byId("unassign-form") as HTMLFormElement | null;
+    const previewBox = byId("unassign-preview");
+    const actorInput = byId("unassign-actor") as HTMLInputElement | null;
+    const overrideRow = byId("unassign-override-row");
+    const overrideBox = byId("unassign-override") as HTMLInputElement | null;
+    const confirmBtn = byId("unassign-confirm") as HTMLButtonElement | null;
+    const cancelBtn = byId("unassign-cancel") as HTMLButtonElement | null;
+
+    const ensureCsrf = async (): Promise<string> => {
+      if (csrfToken) return csrfToken;
+      const res = await fetch("/api/v1/session", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+      });
+      const json = (await res.json()) as { csrfToken?: string; error?: { message?: string } };
+      if (!res.ok || !json.csrfToken) {
+        throw new Error(json.error?.message ?? "Could not start write session.");
+      }
+      csrfToken = json.csrfToken;
+      return csrfToken;
+    };
+
+    const postWithCsrf = async (
+      url: string,
+      payload: unknown,
+    ): Promise<{ res: Response; data: unknown }> => {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const token = await ensureCsrf();
+        const res = await fetch(url, {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-pdb-csrf": token },
+          body: JSON.stringify(payload),
+        });
+        const data = (await res.json()) as { error?: { code?: string } | string | null };
+        const errCode = data.error && typeof data.error === "object" ? data.error.code : undefined;
+        if (res.status === 403 && errCode === "CSRF_REQUIRED" && attempt === 0) {
+          csrfToken = null;
+          continue;
+        }
+        return { res, data };
+      }
+      throw new Error("Could not renew write session.");
+    };
+
+    const setStatus = (cls: string, msg: string) => {
+      if (!statusBox) return;
+      statusBox.innerHTML = `<p class="${base.escapeHtml(cls)}">${base.escapeHtml(msg)}</p>`;
+    };
+
+    main.addEventListener("click", (event) => {
+      const btn = (event.target as HTMLElement).closest(".unassign-btn") as HTMLElement | null;
+      if (!btn) return;
+      const issue = btn.dataset.issue ?? "";
+      const claimAgent = btn.dataset.agent ?? "";
+      if (!issue || !claimAgent) return;
+      void (async () => {
+        try {
+          const { res, data: rawData } = await postWithCsrf(
+            `/api/v1/tickets/${encodeURIComponent(issue)}/unassign/preview?repo=${encodeURIComponent(repo)}`,
+            { agent: claimAgent },
+          );
+          const data = rawData as {
+            preview?: {
+              number: number;
+              title: string;
+              agent: string;
+              claimStart: string | null;
+              claimHistoryComplete: boolean;
+              revision: string;
+              confirmationNote: string;
+              preserved: { humanAssignees: string[]; state: string };
+              decision: { verdict: string; code: string; reason: string };
+            };
+            error?: { message?: string };
+          };
+          if (!res.ok || !data.preview) {
+            setStatus("error", data.error?.message ?? "Unassign preview failed.");
+            return;
+          }
+          const p = data.preview;
+          const requiresOverride =
+            p.decision.verdict === "refuse" && p.decision.code === "EVIDENCE_INCOMPLETE";
+          const opKey = JSON.stringify([issue, p.agent, p.claimStart, p.revision]);
+          const operationId =
+            lastUncertainOp?.key === opKey
+              ? lastUncertainOp.operationId
+              : typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+                ? crypto.randomUUID()
+                : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+          pendingPreview = {
+            issue,
+            agent: p.agent,
+            claimStart: p.claimStart,
+            revision: p.revision,
+            requiresOverride,
+            operationId,
+          };
+          if (previewBox) {
+            const owners = p.preserved.humanAssignees.length
+              ? p.preserved.humanAssignees.join(", ")
+              : "none";
+            previewBox.innerHTML = `<p>Ticket <strong>#${base.escapeHtml(p.number)}</strong>: ${base.escapeHtml(p.title)}</p><p>Release agent claim: <code>${base.escapeHtml(p.agent)}</code> (started: ${base.escapeHtml(p.claimStart ?? "unknown")})</p><p>Preserved human assignees: ${base.escapeHtml(owners)} · State: ${base.escapeHtml(p.preserved.state)}</p><p>${base.escapeHtml(p.confirmationNote)}</p>`;
+          }
+          if (overrideRow && overrideBox) {
+            overrideRow.hidden = !requiresOverride;
+            overrideBox.checked = false;
+          }
+          if (actorInput && !actorInput.value.trim()) {
+            actorInput.value = agent.value.trim();
+          }
+          if (confirmBtn) {
+            confirmBtn.disabled = p.decision.verdict === "refuse" && !requiresOverride;
+          }
+          dialog?.showModal?.();
+        } catch (error) {
+          setStatus("error", error instanceof Error ? error.message : String(error));
+        }
+      })();
+    });
+
+    cancelBtn?.addEventListener("click", () => {
+      pendingPreview = null;
+      dialog?.close?.();
+    });
+
+    form?.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const current = pendingPreview;
+      if (!current) return;
+      const actor = actorInput?.value.trim() ?? "";
+      if (!actor) return;
+      if (confirmBtn) confirmBtn.disabled = true;
+      const opKey = JSON.stringify([
+        current.issue,
+        current.agent,
+        current.claimStart,
+        current.revision,
+      ]);
+      const operationId = current.operationId;
+      void (async () => {
+        try {
+          const { data: rawBody } = await postWithCsrf(
+            `/api/v1/tickets/${encodeURIComponent(current.issue)}/unassign?repo=${encodeURIComponent(repo)}`,
+            {
+              operationId,
+              actor,
+              agent: current.agent,
+              expectedClaimStart: current.claimStart,
+              expectedRevision: current.revision,
+              overrideUnknownHistory: Boolean(overrideBox?.checked),
+            },
+          );
+          const body = rawBody as {
+            status?: string;
+            recordOutcome?: string;
+            message?: string;
+            error?: string | { message?: string } | null;
+            next?: string[];
+          };
+          dialog?.close?.();
+          pendingPreview = null;
+          if (body.status === "applied" || body.status === "noop") {
+            lastUncertainOp = null;
+            setStatus("ok", body.message ?? "Unassigned.");
+            void show(true, false);
+          } else if (body.status === "partial" || body.status === "unknown") {
+            lastUncertainOp = { key: opKey, operationId };
+            const detail = typeof body.error === "string" ? ` (${body.error})` : "";
+            const next = body.next?.length ? ` Next: ${body.next.join(" ")}` : "";
+            setStatus("warn", `${body.message ?? "Unassign outcome incomplete."}${detail}${next}`);
+            void show(true, false);
+          } else {
+            lastUncertainOp = null;
+            const errMsg =
+              typeof body.error === "object" && body.error !== null
+                ? body.error.message
+                : body.message;
+            setStatus("error", errMsg ?? "Unassign refused.");
+            if (body.recordOutcome === "applied") {
+              void show(true, false);
+            }
+          }
+        } catch (error) {
+          lastUncertainOp = { key: opKey, operationId };
+          setStatus(
+            "warn",
+            `Unassign response was lost or unreachable (${error instanceof Error ? error.message : String(error)}); refresh and inspect the issue before retrying.`,
+          );
+        } finally {
+          if (confirmBtn) confirmBtn.disabled = false;
+        }
+      })();
+    });
+  }
   // Only this view is read: one project, on load or on request.
   void show(false, false);
 }

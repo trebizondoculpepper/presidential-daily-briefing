@@ -57,3 +57,10 @@ export {
   type RuleReminderItem,
   type ActionRuleReminders,
 } from "./action-reminders.js";
+export {
+  evaluateUnassignDecision,
+  type UnassignDecision,
+  type UnassignDecisionCode,
+  type UnassignPermission,
+  type UnassignRuleFacts,
+} from "./unassign.js";

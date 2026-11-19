@@ -32,7 +32,10 @@ export type ServeErrorCode =
   | "DIAGNOSTIC_CURSOR_EXPIRED"
   | "RUNS_BUSY"
   | "RUN_TIMEOUT"
-  | "PROJECT_REQUIRED";
+  | "PROJECT_REQUIRED"
+  | "EDITS_DISABLED"
+  | "CSRF_REQUIRED"
+  | "CONFLICT";
 
 export interface ServeError {
   code: ServeErrorCode;

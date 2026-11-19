@@ -606,7 +606,12 @@ export async function startServe(
           throw new HttpFailure(405, "METHOD_NOT_ALLOWED", "Use GET.", [], {
             allow: "GET, HEAD",
           });
-        const page = humanPage(context.url.searchParams, served, selectRepository);
+        const page = humanPage(
+          context.url.searchParams,
+          served,
+          selectRepository,
+          Boolean(options.allowEdits),
+        );
         response.writeHead(page.status, {
           "content-type": "text/html; charset=utf-8",
           "cache-control": "no-store",

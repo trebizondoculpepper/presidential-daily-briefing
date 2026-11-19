@@ -501,7 +501,103 @@
    :owned false
    :when [[1 "role" "human"] (open ?t) (accepted-pr ?t) (clean-pr ?t)]
    :why "Accepted at head {head}: required checks satisfied, head reviewed, no findings. Inferred: merge sign-off candidate; nobody asked explicitly."
-   :codes ["inferred"]}]
+   :codes ["inferred"]}
+
+  {:id "D-UNASSIGN-REFUSE-CONTEXT"
+   :purpose "Refuse Human-view Unassign without a verified explicit human-mode request."
+   :kind "unassign-refuse-context"
+   :band 1
+   :preference 1
+   :affinity "human"
+   :owned false
+   :when [[1 "role" "human"] [?t "unassign-subject" true] [1 "trusted-human-context" false]]
+   :why "Unassign requires a trusted explicit human-mode request for {agent}; a role selector or agent name is never authorization."
+   :codes ["unassign" "refuse"]
+   :witnesses {"agent" [[?t "unassign-agent" ?value]]}}
+
+  {:id "D-UNASSIGN-REFUSE-PERMISSION-DENIED"
+   :purpose "Refuse Human-view Unassign when the serving GitHub account lacks write, maintain or admin permission."
+   :kind "unassign-refuse-permission-denied"
+   :band 1
+   :preference 1
+   :affinity "human"
+   :owned false
+   :when [[1 "role" "human"] [?t "unassign-subject" true] [1 "trusted-human-context" true] [1 "permission" "deny"]]
+   :why "The serving GitHub account does not have write, maintain or admin permission to release {agent}."
+   :codes ["unassign" "refuse"]
+   :witnesses {"agent" [[?t "unassign-agent" ?value]]}}
+
+  {:id "D-UNASSIGN-REFUSE-PERMISSION-UNKNOWN"
+   :purpose "Refuse Human-view Unassign when repository write permission for the serving GitHub account cannot be verified."
+   :kind "unassign-refuse-permission-unknown"
+   :band 1
+   :preference 1
+   :affinity "human"
+   :owned false
+   :when [[1 "role" "human"] [?t "unassign-subject" true] [1 "trusted-human-context" true] [1 "permission" "unknown"]]
+   :why "Repository write permission for the serving GitHub account could not be verified; refusing to release {agent}."
+   :codes ["unassign" "refuse"]
+   :witnesses {"agent" [[?t "unassign-agent" ?value]]}}
+
+  {:id "D-UNASSIGN-NOOP"
+   :purpose "Report an idempotent no-op when the selected agent claim is already absent and history is complete."
+   :kind "unassign-noop"
+   :band 1
+   :preference 1
+   :affinity "human"
+   :owned false
+   :when [[1 "role" "human"] [?t "unassign-subject" true] [1 "trusted-human-context" true] [1 "permission" "allow"] [?t "claim-present" false] [?t "claim-history-complete" true]]
+   :why "Agent {agent} no longer holds an active claim; human owners and ticket state are preserved."
+   :codes ["unassign" "noop"]
+   :witnesses {"agent" [[?t "unassign-agent" ?value]]}}
+
+  {:id "D-UNASSIGN-REFUSE-EVIDENCE-INCOMPLETE"
+   :purpose "Refuse Human-view Unassign when claim history is incomplete and no explicit human override was given."
+   :kind "unassign-refuse-evidence"
+   :band 1
+   :preference 1
+   :affinity "human"
+   :owned false
+   :when [[1 "role" "human"] [?t "unassign-subject" true] [1 "trusted-human-context" true] [1 "permission" "allow"] [1 "override-unknown-history" false] [?t "claim-history-complete" false]]
+   :why "Claim history for {agent} is incomplete; inspect the ticket or confirm with an explicit human override."
+   :codes ["unassign" "refuse"]
+   :witnesses {"agent" [[?t "unassign-agent" ?value]]}}
+
+  {:id "D-UNASSIGN-REFUSE-CLAIM-START-MISSING"
+   :purpose "Refuse Human-view Unassign when claim start timestamp is unknown and no explicit human override was given."
+   :kind "unassign-refuse-evidence"
+   :band 1
+   :preference 1
+   :affinity "human"
+   :owned false
+   :when [[1 "role" "human"] [?t "unassign-subject" true] [1 "trusted-human-context" true] [1 "permission" "allow"] [1 "override-unknown-history" false] [?t "claim-present" true] [?t "claim-history-complete" true] [?t "claim-start" ""]]
+   :why "Claim start timestamp for {agent} is unknown; inspect the ticket or confirm with an explicit human override."
+   :codes ["unassign" "refuse"]
+   :witnesses {"agent" [[?t "unassign-agent" ?value]]}}
+
+  {:id "D-UNASSIGN-ALLOW"
+   :purpose "Allow Human-view Unassign of the verified claim while preserving human assignees, blockers, questions and ticket state."
+   :kind "unassign-allow"
+   :band 1
+   :preference 1
+   :affinity "human"
+   :owned false
+   :when [[1 "role" "human"] [?t "unassign-subject" true] [1 "trusted-human-context" true] [1 "permission" "allow"] [1 "override-unknown-history" false] [?t "claim-present" true] [?t "claim-history-complete" true] [?t "claim-start" ?cs] [(not= ?cs "")]]
+   :why "Release only agent:{agent} (started {claimStart}); preserve all human assignees, readiness labels, blockers, questions and other agents' claims."
+   :codes ["unassign" "allow"]
+   :witnesses {"agent" [[?t "unassign-agent" ?value]] "claimStart" [[?t "claim-start" ?value]]}}
+
+  {:id "D-UNASSIGN-ALLOW-OVERRIDE"
+   :purpose "Allow Human-view Unassign with explicit human override when claim history is incomplete or start is unknown."
+   :kind "unassign-allow"
+   :band 1
+   :preference 1
+   :affinity "human"
+   :owned false
+   :when [[1 "role" "human"] [?t "unassign-subject" true] [1 "trusted-human-context" true] [1 "permission" "allow"] [1 "override-unknown-history" true] [?t "claim-present" true]]
+   :why "Release only agent:{agent} under explicit human override; preserve all human assignees, readiness labels, blockers, questions and other agents' claims."
+   :codes ["unassign" "allow" "override"]
+   :witnesses {"agent" [[?t "unassign-agent" ?value]]}}]
  :denials
  {"D-DENY-CLAIM" "Someone already claims the ticket."
   "D-DENY-PREREQUISITE" "A prerequisite label (design, question, blocked or parked) is present."

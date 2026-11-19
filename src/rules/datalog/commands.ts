@@ -35,4 +35,10 @@ export const commandKinds: Record<string, string> = {
   "inspect-ownership": "team",
   // A wait is followed with a focused read, never a claim, merge or resubmit (#413).
   "wait-claim": "detail",
+  "unassign-allow": "detail",
+  "unassign-noop": "detail",
+  "unassign-refuse-context": "detail",
+  "unassign-refuse-permission-denied": "detail",
+  "unassign-refuse-permission-unknown": "detail",
+  "unassign-refuse-evidence": "detail",
 };
