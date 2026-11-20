@@ -5,6 +5,8 @@
 import { describe, expect, it } from "vite-plus/test";
 import {
   detailLoader,
+  expansionController,
+  type ExpansionState,
   focusAfter,
   parseTicketDetail,
   parseWorkQueue,
@@ -239,5 +241,138 @@ describe("work preview: loading states, late responses and contexts (#753)", () 
     await d.load(ctx(), 1);
     expect(requests).toBe(2);
     expect(d.current(ctx(), d.generation())).toBe(true);
+  });
+});
+
+describe("work preview: expansion controller (#1164 review)", () => {
+  const rowsOf = (...ns: number[]) => parseWorkQueue(envelope(ns.map((n) => action(n))))!.rows;
+  const ticket = (n: number) =>
+    new Response(
+      JSON.stringify({
+        status: "complete",
+        result: { kind: "ticket-status", title: `T${n}`, state: "OPEN", url: url(n) },
+      }),
+      { status: 200 },
+    );
+
+  it("opens rows at once, keeps several open while details are pending, and loads each", async () => {
+    const t = deferredFetch();
+    const states: ExpansionState[] = [];
+    const c = expansionController(
+      detailLoader("/api/v1/tickets", t.fetcher),
+      (s) => void states.push(s),
+    );
+    c.setContext(ctx());
+    const [a, b] = rowsOf(1, 2);
+    const pa = c.toggle(a!);
+    const pb = c.toggle(b!);
+    // Both open immediately, both loading, neither overwrote the other.
+    expect([...states.at(-1)!.open].sort()).toEqual([a!.key, b!.key].sort());
+    expect(states.at(-1)!.details[a!.key]).toEqual({ status: "loading" });
+    t.pending[1]!.resolve({
+      status: "complete",
+      result: { kind: "ticket-status", title: "T2", state: "OPEN", url: url(2) },
+    });
+    t.pending[0]!.resolve({
+      status: "complete",
+      result: { kind: "ticket-status", title: "T1", state: "OPEN", url: url(1) },
+    });
+    await Promise.all([pa, pb]);
+    const last = states.at(-1)!;
+    expect(last.open.size).toBe(2);
+    expect(last.details[a!.key]).toMatchObject({ status: "ready", detail: { title: "T1" } });
+    expect(last.details[b!.key]).toMatchObject({ status: "ready", detail: { title: "T2" } });
+  });
+
+  it("ignores a detail that arrives after its row was collapsed", async () => {
+    const t = deferredFetch();
+    const states: ExpansionState[] = [];
+    const c = expansionController(
+      detailLoader("/api/v1/tickets", t.fetcher),
+      (s) => void states.push(s),
+    );
+    c.setContext(ctx());
+    const [a] = rowsOf(1);
+    const pending = c.toggle(a!);
+    await c.toggle(a!);
+    t.pending[0]!.resolve({
+      status: "complete",
+      result: { kind: "ticket-status", title: "T1", state: "OPEN", url: url(1) },
+    });
+    await pending;
+    expect(states.at(-1)!.open.size).toBe(0);
+    expect(states.at(-1)!.details[a!.key]).not.toMatchObject({ status: "ready" });
+  });
+
+  it("never reads a ticket detail for a pull-request row", async () => {
+    let requests = 0;
+    const fetcher = (async () => (requests++, ticket(1))) as typeof fetch;
+    const c = expansionController(detailLoader("/api/v1/tickets", fetcher), () => {});
+    c.setContext(ctx());
+    const prRow = {
+      ...rowsOf(1)[0]!,
+      target: `https://github.com/${repo}/pull/7`,
+      number: 7,
+      subjectKind: "pr" as const,
+    };
+    await c.toggle(prRow);
+    expect(requests).toBe(0);
+  });
+
+  it("keeps surviving open rows across a refresh and re-reads their details; a context change closes all", async () => {
+    let requests = 0;
+    const fetcher = (async (u: RequestInfo | URL) => {
+      requests++;
+      return ticket(Number(/\/(\d+)\?/.exec(String(u))![1]));
+    }) as typeof fetch;
+    const states: ExpansionState[] = [];
+    const c = expansionController(
+      detailLoader("/api/v1/tickets", fetcher),
+      (s) => void states.push(s),
+    );
+    c.setContext(ctx());
+    const [a, b] = rowsOf(1, 2);
+    await c.toggle(a!);
+    await c.toggle(b!);
+    expect(requests).toBe(2);
+    await c.refreshed(rowsOf(2, 3));
+    expect([...states.at(-1)!.open]).toEqual([b!.key]);
+    expect(requests).toBe(3);
+    expect(states.at(-1)!.details[b!.key]).toMatchObject({ status: "ready" });
+    c.setContext(ctx({ agent: "dario" }));
+    expect(states.at(-1)!.open.size).toBe(0);
+  });
+});
+
+describe("work preview: coverage and staleness (#1164 review)", () => {
+  it("shows the report's own coverage warnings with the envelope's", () => {
+    const body = envelope([action(1)], { warnings: ["envelope"] }) as Record<string, unknown>;
+    (body.result as Record<string, unknown>).completeness = {
+      complete: false,
+      warnings: ["report"],
+    };
+    expect(parseWorkQueue(body)!.warnings).toEqual(["report", "envelope"]);
+  });
+
+  it("marks a retained, stale or incomplete detail envelope as such", () => {
+    const detail = parseTicketDetail({
+      status: "incomplete",
+      freshness: { stale: true },
+      result: {
+        kind: "ticket-status",
+        title: "T",
+        state: "OPEN",
+        url: url(1),
+        completeness: { complete: true, warnings: [] },
+      },
+    })!;
+    expect(detail).toMatchObject({ complete: false, stale: true });
+  });
+
+  it("classifies the row's subject from its target", () => {
+    const row = parseWorkQueue(
+      envelope([{ ...action(1), target: `https://github.com/${repo}/pull/7` }]),
+    )!.rows[0]!;
+    expect(row.subjectKind).toBe("pr");
   });
 });

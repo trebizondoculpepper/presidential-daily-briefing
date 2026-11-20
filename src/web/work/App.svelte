@@ -2,9 +2,9 @@
   import { onMount, tick } from "svelte";
   import {
     detailLoader,
+    expansionController,
     focusAfter,
     queueLoader,
-    reconcileOpen,
     selectedContext,
   } from "./client.js";
   import type { DetailState, QueueState, WorkContext, WorkRow } from "./client.js";
@@ -12,10 +12,11 @@
   let { api, ticketApi }: { api: string; ticketApi: string } = $props();
   let state: QueueState = $state({ status: "loading" });
   let context: WorkContext | null = $state(null);
-  let open: Set<string> = $state(new Set());
-  let details: Record<string, DetailState> = $state({});
+  let open: ReadonlySet<string> = $state(new Set());
+  let details: Readonly<Record<string, DetailState>> = $state({});
   let announcement = $state("");
   let refresh = $state(() => {});
+  let toggle = $state((_row: WorkRow) => {});
   let list: HTMLElement | undefined = $state();
   let refreshButton: HTMLButtonElement | undefined = $state();
 
@@ -30,63 +31,34 @@
   const panelId = (row: WorkRow) => `detail-${encodeURIComponent(row.key).replace(/%/g, "_")}`;
   const domId = (row: WorkRow) => `row-${encodeURIComponent(row.key).replace(/%/g, "_")}`;
 
-  let details$: ReturnType<typeof detailLoader> | null = null;
-
-  /** Read one open row's detail; a result from an older context or refresh is discarded. */
-  async function loadDetail(row: WorkRow) {
-    if (!context || row.number === null || !details$) return;
-    const c = context;
-    const generation = details$.generation();
-    details = { ...details, [row.key]: { status: "loading" } };
-    const result = await details$.load(c, row.number);
-    if (details$.current(c, generation) && open.has(row.key))
-      details = { ...details, [row.key]: result };
-  }
-
-  function toggle(row: WorkRow) {
-    // The expansion is committed first, so the panel and its loading status show at once and
-    // several rows can be opened while their details are pending.
-    const next = new Set(open);
-    if (next.has(row.key)) {
-      next.delete(row.key);
-      open = next;
-      return;
-    }
-    next.add(row.key);
-    open = next;
-    const d = details[row.key];
-    if (!d || d.status === "error") void loadDetail(row);
-  }
-
   onMount(() => {
     const fetcher = (input: RequestInfo | URL, init?: RequestInit) => fetch(input, init);
-    details$ = detailLoader(ticketApi, fetcher);
+    // Expansion and detail state live in the checked client module; this component presents it.
+    const expansion = expansionController(detailLoader(ticketApi, fetcher), (next) => {
+      open = next.open;
+      details = next.details;
+    });
+    toggle = (row) => void expansion.toggle(row);
     let before: WorkRow[] = [];
     const loader = queueLoader(api, fetcher, async (next, nextContext) => {
-      const focusedKey = document.activeElement?.closest<HTMLElement>("[data-row-key]")?.dataset.rowKey ?? null;
-      const contextChanged = JSON.stringify(nextContext) !== JSON.stringify(context);
+      const active = document.activeElement as HTMLElement | null;
+      const focusedKey = active?.closest<HTMLElement>("[data-row-key]")?.dataset.rowKey ?? null;
       context = nextContext;
-      if (contextChanged) {
-        open = new Set();
-        details = {};
-        details$?.reset(nextContext);
-      }
+      expansion.setContext(nextContext);
       state = next;
       if (next.status === "ready" && !next.updating) {
         const after = next.queue.rows;
-        open = reconcileOpen(open, after);
-        // Details from before this refresh are older evidence than the new list: re-read the
-        // open rows that survived, and drop everything else.
-        details$?.invalidate();
-        details = {};
-        for (const row of after) if (open.has(row.key)) void loadDetail(row);
-        if (focusedKey) {
+        void expansion.refreshed(after);
+        announcement = `Work list updated: ${after.length} shown${next.queue.total !== null ? ` of ${next.queue.total}` : ""}.`;
+        await tick();
+        // Focus stays where it is when that element survived (a detail link, say); only a
+        // focused row that disappeared moves focus to its nearest survivor or to Refresh.
+        if (focusedKey && !(active && active.isConnected)) {
           const target = focusAfter(focusedKey, before, after);
-          await tick();
           const el = target
             ? list?.querySelector<HTMLElement>(`[data-row-key="${CSS.escape(target)}"] button`)
             : refreshButton;
-          el?.focus({ preventScroll: target === focusedKey });
+          el?.focus({ preventScroll: true });
         }
         before = after;
       } else if (next.status === "error") announcement = `Update failed: ${next.message}`;
@@ -162,7 +134,9 @@
             {@const d = details[row.key]}
             {#if row.nextCommand}<p>Next: <code>{row.nextCommand}</code></p>{/if}
             {#if row.labels.length}<p class="labels">Labels: {row.labels.join(", ")}</p>{/if}
-            {#if row.number === null}
+            {#if row.subjectKind === "pr"}
+              <p><a href={row.target}>Open pull request #{row.number}</a> (pull-request detail is not read here; the ticket view covers issues only).</p>
+            {:else if row.subjectKind !== "issue" || row.number === null}
               <p>No ticket detail for this action.</p>
             {:else if !d || d.status === "loading"}
               <p role="status">Loading details…</p>
@@ -176,6 +150,7 @@
               {#if d.detail.nextSteps.length}
                 <ul>{#each d.detail.nextSteps as step}<li>{step.why}{#if step.command}{" "}<code>{step.command}</code>{/if}</li>{/each}</ul>
               {/if}
+              {#if d.detail.stale}<p class="warn">Stale detail: retained from an earlier read.</p>{/if}
               {#if !d.detail.complete}<p class="warn">Partial detail: {d.detail.warnings.join(" ")}</p>{/if}
               <p><a href={d.detail.url}>Open on GitHub</a> · <a href={`/ticket?repo=${encodeURIComponent(context?.repository ?? "")}&n=${row.number}`}>Full ticket view</a></p>
             {/if}

@@ -31,6 +31,8 @@ export interface WorkRow {
   kind: string;
   target: string;
   number: number | null;
+  /** Issue rows load the ticket detail; pull-request rows link to the PR (no ticket read). */
+  subjectKind: "issue" | "pr" | "other";
   title: string;
   /** Badges as supplied: the decision rules and the reason codes. */
   ruleIds: string[];
@@ -80,6 +82,11 @@ function parseRow(
     kind,
     target,
     number: issueNumber(target),
+    subjectKind: /\/issues\/\d+$/.test(target)
+      ? "issue"
+      : /\/pull\/\d+$/.test(target)
+        ? "pr"
+        : "other",
     title: str(subject.title) ?? target,
     ruleIds: isStrings(a.ruleIds) ? a.ruleIds : [],
     reasonCodes: isStrings(a.reasonCodes) ? a.reasonCodes : [],
@@ -126,7 +133,13 @@ export function parseWorkQueue(body: unknown): WorkQueue | null {
         ? body.status
         : "error",
     repository,
-    warnings: isStrings(body.warnings) ? body.warnings : [],
+    // The report's own coverage warnings, which the envelope does not copy (#1164 review).
+    warnings: [
+      ...(isObject(result.completeness) && isStrings(result.completeness.warnings)
+        ? result.completeness.warnings
+        : []),
+      ...(isStrings(body.warnings) ? body.warnings : []),
+    ],
     freshness,
     rows,
     shown: rows.length,
@@ -272,7 +285,10 @@ export interface TicketDetail {
   delivery: string | null;
   pullRequests: { number: number; url: string }[];
   nextSteps: { kind: string; why: string; command: string | null }[];
+  /** Complete only when both the document and its envelope say so. */
   complete: boolean;
+  /** The envelope's freshness says the detail is a retained, stale read. */
+  stale: boolean;
   warnings: string[];
 }
 
@@ -307,7 +323,8 @@ export function parseTicketDetail(body: unknown): TicketDetail | null {
     delivery: isObject(r.delivery) ? str(r.delivery.verdict) : null,
     pullRequests,
     nextSteps,
-    complete: completeness.complete === true,
+    complete: completeness.complete === true && body.status === "complete",
+    stale: isObject(body.freshness) && body.freshness.stale === true,
     warnings: [
       ...(isStrings(completeness.warnings) ? completeness.warnings : []),
       ...(isStrings(body.warnings) ? body.warnings : []),
@@ -380,6 +397,69 @@ export function detailLoader(api: string, fetcher: typeof fetch) {
     },
     /** Whether a result loaded in generation `loaded` is still current for this context. */
     current: (c: WorkContext, loaded: number) => contextKey(c) === scope && loaded === generation,
+  };
+}
+
+/** The expansion view state: which rows are open and each open row's detail. */
+export interface ExpansionState {
+  open: ReadonlySet<string>;
+  details: Readonly<Record<string, DetailState>>;
+}
+
+/**
+ * Which rows are open and their details (contract "Rows and expansion"), as plain TypeScript the
+ * component only presents. Opening commits at once, so several rows can open while their details
+ * are pending; a detail result is accepted only while its row is open and it belongs to the
+ * current context and refresh. A context change closes everything; a completed refresh keeps the
+ * surviving open rows and re-reads their details. Only issue rows read a ticket detail.
+ */
+export function expansionController(
+  details: ReturnType<typeof detailLoader>,
+  report: (state: ExpansionState) => void,
+) {
+  let context: WorkContext | null = null;
+  let open = new Set<string>();
+  let loaded: Record<string, DetailState> = {};
+  const emit = () => report({ open: new Set(open), details: { ...loaded } });
+  const load = async (row: WorkRow) => {
+    if (!context || row.subjectKind !== "issue" || row.number === null) return;
+    const c = context;
+    const generation = details.generation();
+    loaded = { ...loaded, [row.key]: { status: "loading" } };
+    emit();
+    const result = await details.load(c, row.number);
+    if (!details.current(c, generation) || !open.has(row.key)) return;
+    loaded = { ...loaded, [row.key]: result };
+    emit();
+  };
+  return {
+    setContext(next: WorkContext | null) {
+      if (next && context && contextKey(next) === contextKey(context)) return;
+      context = next;
+      details.reset(next);
+      open = new Set();
+      loaded = {};
+      emit();
+    },
+    toggle(row: WorkRow): Promise<void> {
+      if (open.has(row.key)) {
+        open.delete(row.key);
+        emit();
+        return Promise.resolve();
+      }
+      open.add(row.key);
+      emit();
+      const d = loaded[row.key];
+      return !d || d.status === "error" ? load(row) : Promise.resolve();
+    },
+    /** A completed read of the current context: keep surviving open rows, re-read details. */
+    refreshed(rows: readonly WorkRow[]): Promise<void> {
+      open = reconcileOpen(open, rows);
+      details.invalidate();
+      loaded = {};
+      emit();
+      return Promise.all(rows.filter((r) => open.has(r.key)).map(load)).then(() => {});
+    },
   };
 }
 
