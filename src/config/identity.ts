@@ -1452,6 +1452,19 @@ export async function migrateSessionIdentity(
           "Legacy entries could not be checked before creating the default identity.",
           "Repair the legacy identity file or set the default entry explicitly.",
         );
+      // A legacy default for this harness is the established identity: migration may only
+      // confirm it, never shadow it with a different name or role (#1189 review).
+      const legacyDefault = recordFor(legacyNames.document, harness, LEGACY_IDENTITY_FILE);
+      if (
+        legacyDefault.entryExists &&
+        (legacyDefault.name?.toLowerCase() !== decision.name.toLowerCase() ||
+          (legacyDefault.triageRole ?? null) !== decision.role)
+      )
+        throw new ConfigError(
+          "identity-unresolved",
+          `${LEGACY_IDENTITY_FILE} already has a default [agents.${harness}] (${legacyDefault.name ?? "no name"}) that differs from the identity earlier sessions recorded (${decision.name}); the default was not created and nothing was renamed.`,
+          `Choose the default explicitly: pdb config set identity.name NAME --entry ${harness} and pdb config set identity.triage_role ROLE --entry ${harness}, then retry.`,
+        );
       for (const name of legacyOnlyNames(legacyNames.document, document, harness))
         takenElsewhere.add(name);
       if (takenElsewhere.has(decision.name.toLowerCase()))

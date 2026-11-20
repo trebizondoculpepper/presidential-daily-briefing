@@ -2,6 +2,7 @@
  * Recovering automatic session identities into the stable harness default (#1047,
  * doc/design/stable-harness-identity.md), with the real store and lock in a disposable checkout.
  */
+import { writeFileSync } from "node:fs";
 import { describe, expect, it } from "vite-plus/test";
 import {
   migrateSessionIdentity,
@@ -106,6 +107,19 @@ describe("session identity recovery (#1047)", () => {
       await f.fs.writeText(f.file, raw);
       await expect(migrate(f as never)).rejects.toMatchObject({ code: "conflict" });
       expect(await f.fs.readText(f.file)).toBe(raw);
+    }));
+
+  it("never shadows a differing legacy default in agent-inbox.toml (#1189 review)", async () =>
+    fixture(async (f) => {
+      const raw = `schemaVersion = 1\n${legacy("a", "session_agent")}[agentBindings]\n${binding("1", "a")}`;
+      await f.fs.writeText(f.file, raw);
+      const inbox = f.file.replace(/pdb\.toml$/, "agent-inbox.toml");
+      await f.fs.writeText(inbox, `[agents.codex]\nname = "legacy_agent"\n`);
+      await expect(migrate(f as never)).rejects.toMatchObject({ code: "identity-unresolved" });
+      expect(await f.fs.readText(f.file)).toBe(raw);
+      // A legacy default that agrees with the session records is confirmed, not refused.
+      writeFileSync(inbox, `[agents.codex]\nname = "session_agent"\ntriage_role = "designer"\n`);
+      await expect(migrate(f as never)).resolves.toMatchObject({ state: "migrated" });
     }));
 
   it("refuses a session binding whose entry is missing instead of allocating a default (#1189 review)", async () =>
