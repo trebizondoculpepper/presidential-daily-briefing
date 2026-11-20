@@ -71,6 +71,7 @@ import {
   inventoryView,
   newsView,
   timingView,
+  pickupDelayView,
   waitingImpactView,
 } from "../metrics/views.js";
 import { trailingWindow } from "../metrics/windows.js";
@@ -1095,12 +1096,13 @@ export function readApi(
               view !== "news" &&
               view !== "daily" &&
               view !== "timing" &&
+              view !== "pickup-delay" &&
               view !== "inventory" &&
               view !== "assessment-queue" &&
               view !== "waiting-impact"
             )
               throw invalid(
-                "view must be news, daily, timing, inventory, assessment-queue or waiting-impact.",
+                "view must be news, daily, timing, pickup-delay, inventory, assessment-queue or waiting-impact.",
               );
             const nowIso = runtime.now().toISOString();
             let from: string;
@@ -1110,13 +1112,17 @@ export function readApi(
               span = Number(values.get("hours") ?? 6);
               if (span !== 1 && span !== 6) throw invalid("hours must be 1 or 6.");
               if (values.has("days"))
-                throw invalid("days applies to daily, timing and assessment-queue views only.");
+                throw invalid(
+                  "days applies to daily, timing, pickup-delay and assessment-queue views only.",
+                );
               if (values.has("stalledHours"))
                 throw invalid("stalledHours applies to the inventory view only.");
               from = new Date(Date.parse(nowIso) - span * 3_600_000).toISOString();
             } else if (view === "inventory" || view === "waiting-impact") {
               if (values.has("days"))
-                throw invalid("days applies to daily, timing and assessment-queue views only.");
+                throw invalid(
+                  "days applies to daily, timing, pickup-delay and assessment-queue views only.",
+                );
               if (values.has("hours")) throw invalid("hours applies to the news view only.");
               if (view === "waiting-impact" && values.has("stalledHours"))
                 throw invalid("stalledHours applies to the inventory view only.");
@@ -1168,7 +1174,9 @@ export function readApi(
                       ? assessmentQueueView(nowIso, span, read.tickets, read.coverage, unread)
                       : view === "waiting-impact"
                         ? waitingImpactView(nowIso, read.tickets, read.coverage)
-                        : timingView(nowIso, span, read.tickets, read.coverage);
+                        : view === "pickup-delay"
+                          ? pickupDelayView(nowIso, span, read.tickets, read.coverage)
+                          : timingView(nowIso, span, read.tickets, read.coverage);
             const complete = metricsReadComplete(read, from);
             return {
               status: complete ? "complete" : "incomplete",

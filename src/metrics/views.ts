@@ -10,6 +10,7 @@
 
 import { inWindow } from "../github/changes.js";
 import {
+  createdToPickup,
   deliveryInstant,
   groupedDurations,
   pickupToDelivery,
@@ -364,6 +365,58 @@ export function timingView(
     coverage: { historyCompleteFrom: coverage.completeFrom, note: coverageNote(from, coverage) },
     cohort: `delivered-in(${from}, ${through}) + open now + closed-undelivered-in + unknown open or with event-in`,
     groupBasis: "latest-valid-complexity",
+    groups: Object.fromEntries(groupedDurations(samples)),
+  };
+}
+
+// ---------------------------------------------------------------------------------------------
+// Pickup delay: creation to first pickup, grouped by current valid impact (#821).
+
+export interface PickupDelayResult extends Envelope<"pickup-delay"> {
+  cohort: string;
+  /** Owner decision: grouped by the current valid impact, labelled as current, not at pickup. */
+  groupBasis: "current-valid-impact";
+  groups: Record<string, DurationStats>;
+}
+
+/**
+ * Population: tickets created within the window (the creation-date cohort). Each is a completed
+ * sample once picked up, an open lower bound while open and never picked up, closed without a
+ * pickup, or unknown when its creation or pickup history was not read. A ticket whose creation
+ * instant is unread cannot be placed in the cohort and is counted as unknown only when it has an
+ * event in the window, never dropped silently.
+ */
+export function pickupDelayView(
+  now: string,
+  days: number,
+  tickets: readonly MetricTicket[],
+  coverage: HistoryCoverage,
+): PickupDelayResult {
+  const days_ = trailingWindow(now, days);
+  const from = `${days_.days[0]}T00:00:00.000Z`;
+  const through = days_.partial.observedThrough;
+  const window = { from, through };
+  const samples: (DurationSample & { group: string })[] = [];
+  for (const t of tickets) {
+    const created = t.ledger.events.find((e) => e.kind === "created")?.at ?? null;
+    const inCohort =
+      created !== null
+        ? inWindow(created, window) === true
+        : t.ledger.events.some((e) => inWindow(e.at, window) === true);
+    if (!inCohort) continue;
+    samples.push({
+      ...createdToPickup(t.member, t.ledger, now),
+      group: t.assessment?.impact.group ?? "unknown",
+    });
+  }
+  return {
+    schemaVersion: METRICS_SCHEMA_VERSION,
+    kind: "pipeline-metrics",
+    view: "pickup-delay",
+    window,
+    coverage: { historyCompleteFrom: coverage.completeFrom, note: coverageNote(from, coverage) },
+    cohort: `created-in(${from}, ${through}); creation unread: any event in the window`,
+    groupBasis: "current-valid-impact",
     groups: Object.fromEntries(groupedDurations(samples)),
   };
 }

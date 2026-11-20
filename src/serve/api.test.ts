@@ -2103,6 +2103,14 @@ describe("pipeline metrics endpoint (#573 slice 5b)", () => {
       // The quiet open ticket from the open inventory is part of the read, not missing.
       expect(timing.json.result.historyNotRead).toMatchObject({ count: 0 });
       expect(counter.n).toBe(before);
+      // #821: the pickup-delay view reads the same cached ledger, grouped by current impact.
+      const delay = await call(s.running.port, "/api/v1/metrics?view=pickup-delay&days=7");
+      expect(delay.status).toBe(200);
+      expect(delay.json.result).toMatchObject({
+        view: "pickup-delay",
+        groupBasis: "current-valid-impact",
+      });
+      expect(counter.n).toBe(before);
       // The inventory view for the same 7-day cache entry reuses the cached read too.
       const inventory = await call(
         s.running.port,
