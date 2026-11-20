@@ -114,6 +114,56 @@ export function parseTimingResponse(body: unknown): TimingResponse | null {
   };
 }
 
+/** One assessment metric's first-assessment latency, from the assessment-queue view. */
+export interface LatencyResponse {
+  status: "complete" | "incomplete" | "error";
+  warnings: string[];
+  window: { from: string; through: string };
+  coverageNote: string | null;
+  /** This response's own freshness; null when the envelope supplied none (not "fresh"). */
+  freshness: { observedAt: string; stale: boolean } | null;
+  stats: DurationStats;
+}
+
+/**
+ * Parse `/api/v1/metrics?view=assessment-queue` for one metric's creation-to-first-trusted
+ * assessment latency (src/metrics/assessmentqueue.ts `firstAssessmentLatency`); null when the
+ * envelope is not that view or the metric's figures are malformed.
+ */
+export function parseLatencyResponse(
+  body: unknown,
+  metric: "impact" | "complexity",
+): LatencyResponse | null {
+  if (!isObject(body) || !isObject(body.result)) return null;
+  const r = body.result;
+  if (r.kind !== "pipeline-metrics" || r.view !== "assessment-queue") return null;
+  if (
+    !isObject(r.window) ||
+    typeof r.window.from !== "string" ||
+    typeof r.window.through !== "string"
+  )
+    return null;
+  const m = isObject(r.metrics) ? r.metrics[metric] : null;
+  if (!isObject(m) || !validStats(m.firstAssessmentLatency)) return null;
+  return {
+    status:
+      body.status === "complete" || body.status === "incomplete" || body.status === "error"
+        ? body.status
+        : "error",
+    warnings: isStrings(body.warnings) ? body.warnings : [],
+    window: { from: r.window.from, through: r.window.through },
+    coverageNote:
+      isObject(r.coverage) && typeof r.coverage.note === "string" ? r.coverage.note : null,
+    freshness:
+      isObject(body.freshness) &&
+      typeof body.freshness.observedAt === "string" &&
+      typeof body.freshness.stale === "boolean"
+        ? { observedAt: body.freshness.observedAt, stale: body.freshness.stale }
+        : null,
+    stats: m.firstAssessmentLatency,
+  };
+}
+
 /** A duration for people: minutes under two hours, hours under three days, else days. */
 export function formatDuration(ms: number | null): string {
   if (ms === null) return "—";
@@ -155,11 +205,13 @@ export function ticketLink(member: string, search: string): string | null {
   return `/ticket?${q}`;
 }
 
-export type TimingState =
+export type ViewState<R> =
   | { status: "no-project" }
   | { status: "loading" }
-  | { status: "ready"; response: TimingResponse }
+  | { status: "ready"; response: R }
   | { status: "error"; message: string; code: string | null };
+export type TimingState = ViewState<TimingResponse>;
+export type LatencyState = ViewState<LatencyResponse>;
 
 /** The page selection: repository and window, validated; days defaults to 7. */
 export function selection(search: string): { repository: string | null; days: TimingDays } {
@@ -172,16 +224,18 @@ export function selection(search: string): { repository: string | null; days: Ti
   };
 }
 
-/** Read the timing view once; never throws. */
-export async function fetchTiming(
+/** Read one metrics view once; never throws. */
+export async function fetchMetricsView<R>(
   api: string,
+  view: string,
   repository: string,
   days: TimingDays,
+  parse: (body: unknown) => R | null,
   fetcher: typeof fetch,
   signal?: AbortSignal,
   refresh = false,
-): Promise<TimingState> {
-  const q = new URLSearchParams({ view: "timing", repo: repository, days: String(days) });
+): Promise<ViewState<R>> {
+  const q = new URLSearchParams({ view, repo: repository, days: String(days) });
   if (refresh) q.set("refresh", "true");
   let response: Response;
   try {
@@ -192,7 +246,7 @@ export async function fetchTiming(
   } catch {
     return {
       status: "error",
-      message: "The timing figures could not be read from the server.",
+      message: "The figures could not be read from the server.",
       code: null,
     };
   }
@@ -209,29 +263,31 @@ export async function fetchTiming(
       message:
         error && typeof error.message === "string"
           ? error.message
-          : `The timing figures could not be read (HTTP ${response.status}).`,
+          : `The figures could not be read (HTTP ${response.status}).`,
       code: error && typeof error.code === "string" ? error.code : null,
     };
   }
-  const parsed = parseTimingResponse(body);
+  const parsed = parse(body);
   return parsed
     ? { status: "ready", response: parsed }
     : {
         status: "error",
-        message: "The server returned timing figures in a format this page does not read.",
+        message: "The server returned figures in a format this page does not read.",
         code: null,
       };
 }
 
 /**
- * One loader: each read aborts the previous one and only the newest result is reported, so a
- * project or window change never shows another selection's figures. `refresh` bypasses the
- * server's cache; `load` skips an unchanged selection.
+ * One loader per section: each read aborts the previous one and only the newest result is
+ * reported, so a project or window change never shows another selection's figures. `refresh`
+ * bypasses the server's cache; `load` skips an unchanged selection.
  */
-export function timingLoader(
+export function metricsLoader<R>(
   api: string,
+  view: string,
+  parse: (body: unknown) => R | null,
   fetcher: typeof fetch,
-  report: (state: TimingState) => void,
+  report: (state: ViewState<R>) => void,
 ) {
   let current: AbortController | null = null;
   let sequence = 0;
@@ -240,7 +296,7 @@ export function timingLoader(
   const read = async (
     sel: { repository: string | null; days: TimingDays },
     refresh: boolean,
-  ): Promise<TimingState | null> => {
+  ): Promise<ViewState<R> | null> => {
     last = sel;
     loaded = JSON.stringify(sel);
     current?.abort();
@@ -253,10 +309,12 @@ export function timingLoader(
     const controller = new AbortController();
     current = controller;
     report({ status: "loading" });
-    const state = await fetchTiming(
+    const state = await fetchMetricsView(
       api,
+      view,
       sel.repository,
       sel.days,
+      parse,
       fetcher,
       controller.signal,
       refresh,
@@ -269,5 +327,23 @@ export function timingLoader(
     load: (sel: { repository: string | null; days: TimingDays }) =>
       JSON.stringify(sel) === loaded ? Promise.resolve(null) : read(sel, false),
     refresh: () => read(last, true),
+    /** Re-read through the server cache (after another section refreshed it). */
+    reload: () => read(last, false),
   };
 }
+
+/** The pickup-to-delivery section's loader. */
+export const timingLoader = (
+  api: string,
+  fetcher: typeof fetch,
+  report: (state: TimingState) => void,
+) => metricsLoader(api, "timing", parseTimingResponse, fetcher, report);
+
+/** A first-assessment latency section's loader for one metric. */
+export const latencyLoader = (
+  api: string,
+  metric: "impact" | "complexity",
+  fetcher: typeof fetch,
+  report: (state: LatencyState) => void,
+) =>
+  metricsLoader(api, "assessment-queue", (b) => parseLatencyResponse(b, metric), fetcher, report);

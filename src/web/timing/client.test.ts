@@ -8,6 +8,8 @@ import {
   chartBars,
   formatDuration,
   groupOrder,
+  latencyLoader,
+  parseLatencyResponse,
   parseTimingResponse,
   selection,
   ticketLink,
@@ -150,5 +152,64 @@ describe("timing page: selection and loading (#820)", () => {
       days: 7,
     });
     expect(states.at(-1)).toEqual({ status: "error", message: "Slow down.", code: "RATE_LIMITED" });
+  });
+});
+
+describe("timing page: creation to first impact assessment (#822)", () => {
+  const queue = (impactStats: unknown, complexityStats: unknown = stats([])) => ({
+    status: "incomplete",
+    warnings: ["w"],
+    result: {
+      schemaVersion: 1,
+      kind: "pipeline-metrics",
+      view: "assessment-queue",
+      window: { from: "2026-11-14T00:00:00.000Z", through: "2026-11-20T10:00:00.000Z" },
+      coverage: { historyCompleteFrom: null, note: "partial history" },
+      days: 7,
+      metrics: {
+        impact: { firstAssessmentLatency: impactStats },
+        complexity: { firstAssessmentLatency: complexityStats },
+      },
+    },
+  });
+
+  it("reads only the impact metric's latency, with unknown kept apart from completed", () => {
+    const r = parseLatencyResponse(queue(stats([2, 6], 0, 1), stats([50])), "impact")!;
+    expect(r.stats).toMatchObject({ completed: 2, median: 4 * hour, unknown: 1 });
+    expect(r.stats.members.completed).toHaveLength(2);
+    expect(r.stats.members.unknown).toHaveLength(1);
+    expect(r).toMatchObject({
+      status: "incomplete",
+      coverageNote: "partial history",
+      warnings: ["w"],
+    });
+    // No freshness supplied stays null, never "fresh" (#1178 review).
+    expect(r.freshness).toBeNull();
+    const fresh = parseLatencyResponse(
+      { ...queue(stats([1])), freshness: { observedAt: "2026-11-20T10:00:00Z", stale: true } },
+      "impact",
+    )!;
+    expect(fresh.freshness).toEqual({ observedAt: "2026-11-20T10:00:00Z", stale: true });
+    // Open (not yet assessed) tickets are kept with their members for display (#1178 review).
+    const waiting = parseLatencyResponse(queue(stats([], 2)), "impact")!;
+    expect(waiting.stats.open.count).toBe(2);
+    expect(waiting.stats.members.open).toHaveLength(2);
+    expect(parseLatencyResponse(queue({ median: "x" }), "impact")).toBeNull();
+    expect(parseLatencyResponse(envelope({}), "impact")).toBeNull();
+  });
+
+  it("requests the assessment-queue view with the page's window", async () => {
+    const urls: string[] = [];
+    const fetcher = (async (u: RequestInfo | URL) => {
+      urls.push(String(u));
+      return new Response(JSON.stringify(queue(stats([1]))), { status: 200 });
+    }) as typeof fetch;
+    const states: unknown[] = [];
+    await latencyLoader("/api/v1/metrics", "impact", fetcher, (s) => void states.push(s)).load({
+      repository: repo,
+      days: 30,
+    });
+    expect(urls[0]).toBe("/api/v1/metrics?view=assessment-queue&repo=example%2Fproject&days=30");
+    expect(states.at(-1)).toMatchObject({ status: "ready", response: { stats: { completed: 1 } } });
   });
 });
