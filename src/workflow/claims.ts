@@ -17,6 +17,8 @@ import {
 import type { QuestionResolutionRecord } from "./claimactivity.js";
 import { evaluateClaimAdmission } from "../rules/datalog/engine.js";
 import type { ClaimAdmissionInput } from "../rules/datalog/engine.js";
+import type { HumanContext } from "../config/humancontext.js";
+import { claimHumanMarker, recordedHuman } from "./claimbinding.js";
 import { workflow } from "./definition.js";
 import { ghQuery, permissionLookup, writePermissions } from "../github/github.js";
 import type { PermissionLookup } from "../github/github.js";
@@ -205,6 +207,11 @@ export interface ClaimRequest {
    * `done` release. Never makes awaiting-review work generally pickable.
    */
   rework?: boolean;
+  /**
+   * The employing human as the shared #664 resolver reports it, recorded with the claim (#690,
+   * src/workflow/claimbinding.ts). Absent when human resolution is disabled: no binding is written.
+   */
+  employingHuman?: HumanContext;
 }
 /**
  * How `claim --rework` is authorised (doc/design/delivery-lifecycle.md "Rework authority"),
@@ -859,12 +866,23 @@ async function planClaimFor(
       ],
     );
   const op = marker("claim", [repository, number, agent]);
+  // #690: the employing human travels in the same comment as the claim marker, bound to it, so
+  // the claim marker (and retry matching) is unchanged.
+  const human = request.employingHuman ? recordedHuman(request.employingHuman) : null;
+  const binding = human
+    ? `\n${claimHumanMarker({ v: 1, repository, issue: number, agent, claim: markerId([repository, number, agent]), human })}`
+    : "";
+  const humanLine = !human
+    ? ""
+    : human.login
+      ? ` Employing human: \`${human.login}\` (${human.provenance}).`
+      : " Employing human: unresolved.";
   const claimComment = (): PlanStep =>
     writeStep("comment", {
       kind: "comment",
       repository,
       number,
-      body: `Claimed by \`${agent}\`${branch ? ` on branch \`${branch}\`` : ""} with \`pdb claim\`.\n\n${op}`,
+      body: `Claimed by \`${agent}\`${branch ? ` on branch \`${branch}\`` : ""} with \`pdb claim\`.${humanLine}\n\n${op}${binding}`,
     });
   if (label(item, mine)) {
     // Complete only when the explanatory comment exists too: a run whose comment failed is
@@ -1161,7 +1179,7 @@ async function planClaimFor(
       kind: "comment",
       repository,
       number,
-      body: `Claimed by \`${agent}\`${branch ? ` on branch \`${branch}\`` : ""} with \`pdb claim\`${rework ? " for review rework" : ""}. Removed: ${remove.map((l) => `\`${l}\``).join(", ")}.\n\n${op}`,
+      body: `Claimed by \`${agent}\`${branch ? ` on branch \`${branch}\`` : ""} with \`pdb claim\`${rework ? " for review rework" : ""}. Removed: ${remove.map((l) => `\`${l}\``).join(", ")}.${humanLine}\n\n${op}${binding}`,
     }),
   );
   return {

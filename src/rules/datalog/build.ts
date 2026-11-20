@@ -351,11 +351,14 @@ export function readSources(
         "policy/obligations.edn :obligations",
       ).map((form) => {
         const where = "policy/obligations.edn :obligations";
-        const m = keyed(form, where, ["id", "outcome", "role", "purpose"]);
+        const m = keyed(form, where, ["id", "outcome", "work", "role", "purpose"]);
         return {
           id: text(need(m, "id", `${where} :id`), `${where} :id`),
           outcome: vector(need(m, "outcome", `${where} :outcome`), `${where} :outcome`).map((x) =>
             text(x, `${where} :outcome`),
+          ),
+          work: vector(need(m, "work", `${where} :work`), `${where} :work`).map((x) =>
+            text(x, `${where} :work`),
           ),
           ...(m.has("role")
             ? {

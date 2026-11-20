@@ -1,8 +1,8 @@
 {
   "modelVersion": 3,
   "policyVersion": 1,
-  "rulesHash": "f23927161091802f6bfd7f75988d5ea4ff9cfa2beb852d421b317b34c9af8df3",
-  "narrationHash": "c468976c9e207ca1175f58446beaa12f350d8df572fcb6a644729f3c9ff8d69a",
+  "rulesHash": "be898939138017e1ccffa08057159521ea5beec0dee567ee0e46aade7334941c",
+  "narrationHash": "11f36e44d491c3af6b24ccb51689dce23e7a8f2aa641bf1aa8e991752ddaed55",
   "sources": [
     "policy/schema.edn",
     "policy/rules.edn",
@@ -85,8 +85,10 @@
       "obligation-role": "obligation role applicability",
       "obligation-outcome": "obligation action-outcome applicability",
       "obligation-order": "obligation source order",
+      "obligation-work": "obligation work-kind applicability",
       "claim-outcome": "claim action outcome",
       "claim-role": "resolved claim viewer role",
+      "claim-work": "claim work kind",
       "receipt": "review receipt",
       "receipt-commit": "reviewed commit",
       "receipt-findings": "findings flag",
@@ -17887,6 +17889,32 @@
               "many": true
             },
             {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?o"
+              },
+              "attribute": "obligation-work",
+              "value": {
+                "var": "?w"
+              },
+              "phrase": "obligation work-kind applicability",
+              "many": true
+            },
+            {
+              "type": "fact",
+              "scope": "context",
+              "entity": {
+                "lit": 1
+              },
+              "attribute": "claim-work",
+              "value": {
+                "var": "?w"
+              },
+              "phrase": "claim work kind",
+              "many": true
+            },
+            {
               "type": "not",
               "join": null,
               "body": [
@@ -17960,6 +17988,32 @@
                 "var": "?oc"
               },
               "phrase": "claim action outcome",
+              "many": true
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?o"
+              },
+              "attribute": "obligation-work",
+              "value": {
+                "var": "?w"
+              },
+              "phrase": "obligation work-kind applicability",
+              "many": true
+            },
+            {
+              "type": "fact",
+              "scope": "context",
+              "entity": {
+                "lit": 1
+              },
+              "attribute": "claim-work",
+              "value": {
+                "var": "?w"
+              },
+              "phrase": "claim work kind",
               "many": true
             },
             {
@@ -21398,10 +21452,11 @@
   ],
   "obligations": [
     {
-      "id": "O-CLAIM-ACCEPTANCE",
-      "purpose": "Follow the ticket acceptance criteria and applicable architecture contracts before considering the work complete.",
-      "outcomes": ["claimed", "noop"],
-      "roles": null,
+      "id": "O-CLAIM-PUBLISH-EARLY",
+      "purpose": "Minimize unpublished work: once a coherent change passes local checks, commit and push it promptly and open a draft PR as soon as there is useful work to inspect, keeping it updated. Do not wait for the whole ticket; the draft states what works, what remains and known failures, for recovery and review.",
+      "outcomes": ["claimed", "noop", "partial"],
+      "work": ["repository-changing"],
+      "roles": ["implementer", "designer"],
       "clauses": [
         {
           "type": "call",
@@ -21452,23 +21507,56 @@
           "many": true
         },
         {
-          "type": "not",
-          "join": null,
-          "body": [
-            {
-              "type": "fact",
-              "scope": "entity",
-              "entity": {
-                "var": "?o"
-              },
-              "attribute": "obligation-role",
-              "value": {
-                "wild": true
-              },
-              "phrase": "obligation role applicability",
-              "many": true
-            }
-          ]
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?o"
+          },
+          "attribute": "obligation-work",
+          "value": {
+            "var": "?w"
+          },
+          "phrase": "obligation work-kind applicability",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "claim-work",
+          "value": {
+            "var": "?w"
+          },
+          "phrase": "claim work kind",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?o"
+          },
+          "attribute": "obligation-role",
+          "value": {
+            "var": "?r"
+          },
+          "phrase": "obligation role applicability",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "claim-role",
+          "value": {
+            "var": "?r"
+          },
+          "phrase": "resolved claim viewer role",
+          "many": true
         }
       ],
       "calls": ["obligation-record"],
@@ -21478,9 +21566,10 @@
       }
     },
     {
-      "id": "O-CLAIM-OWNERSHIP",
-      "purpose": "Respect human ownership and other agents' active claims; never overwrite or displace another owner's work.",
-      "outcomes": ["claimed", "noop", "denied", "partial"],
+      "id": "O-CLAIM-ACCEPTANCE",
+      "purpose": "Follow the ticket acceptance criteria and applicable architecture contracts before considering the work complete.",
+      "outcomes": ["claimed", "noop"],
+      "work": ["repository-changing", "observational"],
       "roles": null,
       "clauses": [
         {
@@ -21529,6 +21618,32 @@
             "var": "?oc"
           },
           "phrase": "claim action outcome",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?o"
+          },
+          "attribute": "obligation-work",
+          "value": {
+            "var": "?w"
+          },
+          "phrase": "obligation work-kind applicability",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "claim-work",
+          "value": {
+            "var": "?w"
+          },
+          "phrase": "claim work kind",
           "many": true
         },
         {
@@ -21558,9 +21673,10 @@
       }
     },
     {
-      "id": "O-CLAIM-BLOCKERS",
-      "purpose": "Surface blockers, missing design decisions, or unresolved questions explicitly instead of guessing.",
-      "outcomes": ["claimed", "noop"],
+      "id": "O-CLAIM-OWNERSHIP",
+      "purpose": "Respect human ownership and other agents' active claims; never overwrite or displace another owner's work.",
+      "outcomes": ["claimed", "noop", "denied", "partial"],
+      "work": ["repository-changing", "observational"],
       "roles": null,
       "clauses": [
         {
@@ -21609,6 +21725,32 @@
             "var": "?oc"
           },
           "phrase": "claim action outcome",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?o"
+          },
+          "attribute": "obligation-work",
+          "value": {
+            "var": "?w"
+          },
+          "phrase": "obligation work-kind applicability",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "claim-work",
+          "value": {
+            "var": "?w"
+          },
+          "phrase": "claim work kind",
           "many": true
         },
         {
@@ -21638,9 +21780,10 @@
       }
     },
     {
-      "id": "O-CLAIM-REMOVAL",
-      "purpose": "Preserve useful unfinished work and share a truthful handoff if your claim is released or removed.",
-      "outcomes": ["claimed", "noop", "partial"],
+      "id": "O-CLAIM-BLOCKERS",
+      "purpose": "Surface blockers, missing design decisions, or unresolved questions explicitly instead of guessing.",
+      "outcomes": ["claimed", "noop"],
+      "work": ["repository-changing", "observational"],
       "roles": null,
       "clauses": [
         {
@@ -21692,6 +21835,32 @@
           "many": true
         },
         {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?o"
+          },
+          "attribute": "obligation-work",
+          "value": {
+            "var": "?w"
+          },
+          "phrase": "obligation work-kind applicability",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "claim-work",
+          "value": {
+            "var": "?w"
+          },
+          "phrase": "claim work kind",
+          "many": true
+        },
+        {
           "type": "not",
           "join": null,
           "body": [
@@ -21718,9 +21887,117 @@
       }
     },
     {
+      "id": "O-CLAIM-REMOVAL",
+      "purpose": "Preserve useful unfinished work and share a truthful handoff if your claim is released or removed.",
+      "outcomes": ["claimed", "noop", "partial"],
+      "work": ["repository-changing", "observational"],
+      "roles": null,
+      "clauses": [
+        {
+          "type": "call",
+          "predicate": "obligation-record",
+          "args": [
+            {
+              "var": "?o"
+            }
+          ]
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?o"
+          },
+          "attribute": "obligation",
+          "value": {
+            "var": "?id"
+          },
+          "phrase": "applicable action obligation",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?o"
+          },
+          "attribute": "obligation-outcome",
+          "value": {
+            "var": "?oc"
+          },
+          "phrase": "obligation action-outcome applicability",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "claim-outcome",
+          "value": {
+            "var": "?oc"
+          },
+          "phrase": "claim action outcome",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?o"
+          },
+          "attribute": "obligation-work",
+          "value": {
+            "var": "?w"
+          },
+          "phrase": "obligation work-kind applicability",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "claim-work",
+          "value": {
+            "var": "?w"
+          },
+          "phrase": "claim work kind",
+          "many": true
+        },
+        {
+          "type": "not",
+          "join": null,
+          "body": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?o"
+              },
+              "attribute": "obligation-role",
+              "value": {
+                "wild": true
+              },
+              "phrase": "obligation role applicability",
+              "many": true
+            }
+          ]
+        }
+      ],
+      "calls": ["obligation-record"],
+      "source": {
+        "file": "policy/obligations.edn",
+        "index": 4
+      }
+    },
+    {
       "id": "O-CLAIM-DELIVERABLE",
       "purpose": "For an implementation deliverable, retain responsibility through review, CI checks, fixes, and merging.",
       "outcomes": ["claimed", "noop"],
+      "work": ["repository-changing", "observational"],
       "roles": ["implementer"],
       "clauses": [
         {
@@ -21777,6 +22054,32 @@
           "entity": {
             "var": "?o"
           },
+          "attribute": "obligation-work",
+          "value": {
+            "var": "?w"
+          },
+          "phrase": "obligation work-kind applicability",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "claim-work",
+          "value": {
+            "var": "?w"
+          },
+          "phrase": "claim work kind",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?o"
+          },
           "attribute": "obligation-role",
           "value": {
             "var": "?r"
@@ -21801,13 +22104,14 @@
       "calls": ["obligation-record"],
       "source": {
         "file": "policy/obligations.edn",
-        "index": 4
+        "index": 5
       }
     },
     {
       "id": "O-CLAIM-NOOP-CONTINUE",
       "purpose": "This ticket is already claimed by you (no-op); continue from the existing work rather than re-claiming.",
       "outcomes": ["noop"],
+      "work": ["repository-changing", "observational"],
       "roles": null,
       "clauses": [
         {
@@ -21859,70 +22163,16 @@
           "many": true
         },
         {
-          "type": "not",
-          "join": null,
-          "body": [
-            {
-              "type": "fact",
-              "scope": "entity",
-              "entity": {
-                "var": "?o"
-              },
-              "attribute": "obligation-role",
-              "value": {
-                "wild": true
-              },
-              "phrase": "obligation role applicability",
-              "many": true
-            }
-          ]
-        }
-      ],
-      "calls": ["obligation-record"],
-      "source": {
-        "file": "policy/obligations.edn",
-        "index": 5
-      }
-    },
-    {
-      "id": "O-CLAIM-PARTIAL-RECOVERY",
-      "purpose": "Claim writes were partial or unverified; inspect the live ticket state and retry only the missing steps.",
-      "outcomes": ["partial"],
-      "roles": null,
-      "clauses": [
-        {
-          "type": "call",
-          "predicate": "obligation-record",
-          "args": [
-            {
-              "var": "?o"
-            }
-          ]
-        },
-        {
           "type": "fact",
           "scope": "entity",
           "entity": {
             "var": "?o"
           },
-          "attribute": "obligation",
+          "attribute": "obligation-work",
           "value": {
-            "var": "?id"
+            "var": "?w"
           },
-          "phrase": "applicable action obligation",
-          "many": true
-        },
-        {
-          "type": "fact",
-          "scope": "entity",
-          "entity": {
-            "var": "?o"
-          },
-          "attribute": "obligation-outcome",
-          "value": {
-            "var": "?oc"
-          },
-          "phrase": "obligation action-outcome applicability",
+          "phrase": "obligation work-kind applicability",
           "many": true
         },
         {
@@ -21931,11 +22181,11 @@
           "entity": {
             "lit": 1
           },
-          "attribute": "claim-outcome",
+          "attribute": "claim-work",
           "value": {
-            "var": "?oc"
+            "var": "?w"
           },
-          "phrase": "claim action outcome",
+          "phrase": "claim work kind",
           "many": true
         },
         {
@@ -21965,9 +22215,10 @@
       }
     },
     {
-      "id": "O-CLAIM-DENIED-RECOVERY",
-      "purpose": "Claim was refused; do not start work until the reported prerequisite or ownership conflict is resolved.",
-      "outcomes": ["denied"],
+      "id": "O-CLAIM-PARTIAL-RECOVERY",
+      "purpose": "Claim writes were partial or unverified; inspect the live ticket state and retry only the missing steps.",
+      "outcomes": ["partial"],
+      "work": ["repository-changing", "observational"],
       "roles": null,
       "clauses": [
         {
@@ -22019,6 +22270,32 @@
           "many": true
         },
         {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?o"
+          },
+          "attribute": "obligation-work",
+          "value": {
+            "var": "?w"
+          },
+          "phrase": "obligation work-kind applicability",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "claim-work",
+          "value": {
+            "var": "?w"
+          },
+          "phrase": "claim work kind",
+          "many": true
+        },
+        {
           "type": "not",
           "join": null,
           "body": [
@@ -22042,6 +22319,113 @@
       "source": {
         "file": "policy/obligations.edn",
         "index": 7
+      }
+    },
+    {
+      "id": "O-CLAIM-DENIED-RECOVERY",
+      "purpose": "Claim was refused; do not start work until the reported prerequisite or ownership conflict is resolved.",
+      "outcomes": ["denied"],
+      "work": ["repository-changing", "observational"],
+      "roles": null,
+      "clauses": [
+        {
+          "type": "call",
+          "predicate": "obligation-record",
+          "args": [
+            {
+              "var": "?o"
+            }
+          ]
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?o"
+          },
+          "attribute": "obligation",
+          "value": {
+            "var": "?id"
+          },
+          "phrase": "applicable action obligation",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?o"
+          },
+          "attribute": "obligation-outcome",
+          "value": {
+            "var": "?oc"
+          },
+          "phrase": "obligation action-outcome applicability",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "claim-outcome",
+          "value": {
+            "var": "?oc"
+          },
+          "phrase": "claim action outcome",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?o"
+          },
+          "attribute": "obligation-work",
+          "value": {
+            "var": "?w"
+          },
+          "phrase": "obligation work-kind applicability",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "claim-work",
+          "value": {
+            "var": "?w"
+          },
+          "phrase": "claim work kind",
+          "many": true
+        },
+        {
+          "type": "not",
+          "join": null,
+          "body": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?o"
+              },
+              "attribute": "obligation-role",
+              "value": {
+                "wild": true
+              },
+              "phrase": "obligation role applicability",
+              "many": true
+            }
+          ]
+        }
+      ],
+      "calls": ["obligation-record"],
+      "source": {
+        "file": "policy/obligations.edn",
+        "index": 8
       }
     }
   ],
@@ -23939,13 +24323,13 @@
     "predicates": 118,
     "alternatives": 254,
     "denials": 12,
-    "obligations": 8,
+    "obligations": 9,
     "queries": 26,
     "keyQueries": 4,
     "evidence": 51,
     "overrides": 5,
     "constants": 14,
-    "attributes": 131,
-    "clauses": 1450
+    "attributes": 133,
+    "clauses": 1454
   }
 }

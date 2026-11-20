@@ -297,14 +297,17 @@
 [(own-held-back ?t) (own-active ?t) (refinement-hold ?t)]
 
 ;; #1113 Native action obligations (doc/design/native-action-obligations.md).
-;; The host asserts one claim-outcome fact ([1 "claim-outcome" <outcome>]) plus obligation records
-;; (entity ?o with "obligation" <id>, optional "obligation-role" <role> and "obligation-outcome"
-;; <outcome>) as the typed facts; the rules decide which obligations apply to the viewer's role and
-;; the action outcome, so a policy edit changes selection without touching command text.
+;; The host asserts one claim-outcome fact ([1 "claim-outcome" <outcome>]), one claim-work fact
+;; ([1 "claim-work" <kind>]) and obligation records (entity ?o with "obligation" <id>,
+;; "obligation-outcome" <outcome>, "obligation-work" <work-kind> and optional "obligation-role"
+;; <role>) as typed facts; the rules decide which obligations apply to the viewer's role, the
+;; action outcome and the work kind, so a policy edit changes selection without touching command
+;; text. Every record states :work explicitly so the work check is a plain join.
 [(obligation-record ?o) [?o "obligation" _]]
 [(obligation-applies ?o)
  (obligation-record ?o) [?o "obligation" ?id]
  [?o "obligation-outcome" ?oc] [1 "claim-outcome" ?oc]
+ [?o "obligation-work" ?w] [1 "claim-work" ?w]
  (not [?o "obligation-role" _])]
 ;; Role-restricted obligations require a caller-supplied claim-role fact: the engine always asserts
 ;; [1 "role"] from the viewer, but an unresolved caller role must not be fabricated as
@@ -312,6 +315,7 @@
 [(obligation-applies ?o)
  (obligation-record ?o) [?o "obligation" ?id]
  [?o "obligation-outcome" ?oc] [1 "claim-outcome" ?oc]
+ [?o "obligation-work" ?w] [1 "claim-work" ?w]
  [?o "obligation-role" ?r] [1 "claim-role" ?r]]
 [(claim-obligation ?id) (obligation-applies ?o) [?o "obligation" ?id]]
 ]
