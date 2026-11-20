@@ -9,7 +9,8 @@
  * rather than writing a command that cannot run. Project arguments are emitted for project
  * scope only, and Windows launches the packaged script through Node.
  */
-import { readFile } from "node:fs/promises";
+import { readFile, mkdir } from "node:fs/promises";
+import { dirname } from "node:path";
 import { installedVersion } from "../updates/updates.js";
 import {
   editTomlTable,
@@ -17,11 +18,13 @@ import {
   removeTomlTable,
   writeInstallManifestRecord,
   type InstallEditErrorCode,
+  type InstallEditOutcome,
   type InstallScope,
   type ManifestRuntime,
 } from "./manifest.js";
 import type { InstallEditResult } from "./manifest.js";
-import { acquireFileLock, type LockTiming } from "../config/filelock.js";
+import { acquireFileLock, releaseProblem, type LockTiming } from "../config/filelock.js";
+import { nodeSafeFs } from "../config/safejson.js";
 
 /** The TOML table that holds the PDB MCP server under Codex's `config.toml`. */
 export const codexMcpTablePath = ["mcp_servers", "pdb"] as const;
@@ -103,10 +106,11 @@ export interface InstallEditResultLike {
 export function refusal(
   code: InstallEditErrorCode | "UNSUPPORTED_SCOPE",
   message: string,
+  outcome: InstallEditOutcome = "refused",
 ): InstallEditResult {
   return {
     action: "kept",
-    outcome: "refused",
+    outcome,
     ownership: "absent",
     code: code as InstallEditErrorCode,
     message,
@@ -117,29 +121,43 @@ export function refusal(
 
 const LOCK_TIMING: LockTiming = { waitMs: 5_000, pollMs: 50 };
 
+/** Scope-lock result: the work value, or a refusal (held lock / lock release failure). */
+export type ScopedLock<T> =
+  | { status: "ok"; value: T }
+  | { status: "refused"; reason: InstallEditResult };
+
 /**
  * Serialize the full install/uninstall operation for one scope/client on the private manifest's
  * operation lock, so a concurrent uninstall cannot delete an ownership record an install just
  * saved (or vice versa). The lock file lives beside the private manifest, never on the native
- * config.
+ * config. The lock always runs on a filesystem: an injected runtime fs in tests, the real one
+ * otherwise. A dry-run/preview never takes the writer lock and never creates the manifest
+ * directory: planning writes nothing (attended-installer-delivery.md read-only preview boundary).
  */
 export async function withScopeLock<T>(
   manifestPath: string,
   runtime: ManifestRuntime | undefined,
   work: () => Promise<T>,
-): Promise<{ status: "ok"; value: T } | { status: "refused"; reason: InstallEditResult }> {
-  const fs = runtime?.fs;
-  if (!fs || typeof fs.readFile !== "function") {
-    return { status: "ok", value: await work() };
-  }
+  dryRun?: boolean,
+): Promise<ScopedLock<T>> {
+  if (dryRun) return { status: "ok", value: await work() };
+  const fs = runtime?.fs ?? nodeSafeFs;
   const now = runtime?.now ?? (() => new Date());
+  // The lock file lives beside the private manifest; ensure its directory exists (the ownership
+  // writer creates it later, but the lock must be acquired first).
+  try {
+    await mkdir(dirname(manifestPath), { recursive: true });
+  } catch {
+    // A pre-existing directory is fine; refuse only on a real write failure below.
+  }
+  const lock = `${manifestPath}.op.lock`;
   const held = await acquireFileLock(
     {
       readFile: (p) => fs.readFile(p),
       writeFile: (p, data) => fs.createSynced(p, data),
       unlink: (p) => fs.unlink(p),
     },
-    `${manifestPath}.op.lock`,
+    lock,
     LOCK_TIMING,
     () => now().getTime(),
     (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
@@ -147,13 +165,27 @@ export async function withScopeLock<T>(
   if (held === null)
     return {
       status: "refused",
-      reason: refusal("CONFLICT", "Another Codex installer operation holds the scope lock; retry."),
+      reason: refusal(
+        "CONFLICT",
+        "Another installer operation holds the scope lock; wait for it to finish or verify no writer is active before removing the lock.",
+      ),
     };
+  let value: T;
   try {
-    return { status: "ok", value: await work() };
+    value = await work();
   } finally {
-    await held();
+    // A failed release leaves a lock that blocks later commands; surface it as an explicit partial
+    // outcome instead of discarding it (shared-write contract).
+    const cleanup = await held();
+    const problem = releaseProblem(lock, cleanup);
+    if (problem) {
+      return {
+        status: "refused",
+        reason: refusal("WRITE_FAILED", problem, "committed-with-error"),
+      };
+    }
   }
+  return { status: "ok", value };
 }
 
 /** Propagate an ownership-manifest persistence failure as an explicit partial outcome (#770 reusable). */
@@ -257,60 +289,65 @@ export async function installCodexMcp(params: {
   });
   // The read/edit/persist are one operation under the scope lock so a concurrent uninstall can't
   // delete an ownership record this install just saved (or vice versa).
-  const guarded = await withScopeLock(manifestPath, runtime, async () => {
-    if (!dryRun && expectedSnapshot) {
-      const currentSnapshot = await readCodexInstallSnapshot(scope, manifestPath, runtime?.fs);
-      if (codexInstallSnapshotChanged(expectedSnapshot, currentSnapshot)) {
+  const guarded = await withScopeLock(
+    manifestPath,
+    runtime,
+    async () => {
+      if (!dryRun && expectedSnapshot) {
+        const currentSnapshot = await readCodexInstallSnapshot(scope, manifestPath, runtime?.fs);
+        if (codexInstallSnapshotChanged(expectedSnapshot, currentSnapshot)) {
+          return {
+            mcp: refusal(
+              "CONFLICT",
+              "Codex configuration or ownership manifest changed since the preview; re-run to inspect the updated plan.",
+            ),
+          };
+        }
+      }
+      const read = await readInstallManifest(manifestPath, runtime?.fs);
+      if (read.status === "error")
         return {
           mcp: refusal(
-            "CONFLICT",
-            "Codex configuration or ownership manifest changed since the preview; re-run to inspect the updated plan.",
+            "MALFORMED_MANIFEST",
+            "The private install manifest could not be read; refusing to edit without a trusted ownership record.",
           ),
         };
-      }
-    }
-    const read = await readInstallManifest(manifestPath, runtime?.fs);
-    if (read.status === "error")
-      return {
-        mcp: refusal(
-          "MALFORMED_MANIFEST",
-          "The private install manifest could not be read; refusing to edit without a trusted ownership record.",
-        ),
-      };
-    const manifestRecord = read.status === "ok" ? read.manifest.records[file] : undefined;
-    const mcp = await editTomlTable({
-      file,
-      allowedRoot,
-      tablePath: [...codexMcpTablePath],
-      desiredBlock,
-      kind: "mcp",
-      manifestRecord,
-      pdbVersion,
-      dryRun,
-      adopt,
-      runtime,
-    });
-    // Persist the ownership record so a later uninstall/rerun recognizes this entry as owned; a
-    // persistence failure is an explicit partial outcome, never unconditional success. Adopted
-    // foreign tables carry an ownership record to save too.
-    if (
-      !dryRun &&
-      (mcp.outcome === "applied" ||
-        mcp.outcome === "adopted" ||
-        mcp.outcome === "committed-with-error") &&
-      mcp.manifestRecord
-    ) {
-      const wrote = await writeInstallManifestRecord(
-        manifestPath,
-        "codex",
+      const manifestRecord = read.status === "ok" ? read.manifest.records[file] : undefined;
+      const mcp = await editTomlTable({
         file,
-        mcp.manifestRecord,
+        allowedRoot,
+        tablePath: [...codexMcpTablePath],
+        desiredBlock,
+        kind: "mcp",
+        manifestRecord,
+        pdbVersion,
+        dryRun,
+        adopt,
         runtime,
-      );
-      return { mcp: withManifestWrite(wrote, mcp, "The Codex MCP configuration") };
-    }
-    return { mcp };
-  });
+      });
+      // Persist the ownership record so a later uninstall/rerun recognizes this entry as owned; a
+      // persistence failure is an explicit partial outcome, never unconditional success. Adopted
+      // foreign tables carry an ownership record to save too.
+      if (
+        !dryRun &&
+        (mcp.outcome === "applied" ||
+          mcp.outcome === "adopted" ||
+          mcp.outcome === "committed-with-error") &&
+        mcp.manifestRecord
+      ) {
+        const wrote = await writeInstallManifestRecord(
+          manifestPath,
+          "codex",
+          file,
+          mcp.manifestRecord,
+          runtime,
+        );
+        return { mcp: withManifestWrite(wrote, mcp, "The Codex MCP configuration") };
+      }
+      return { mcp };
+    },
+    dryRun,
+  );
   if (guarded.status === "refused") return { mcp: guarded.reason };
   return guarded.value;
 }
@@ -327,44 +364,49 @@ export async function uninstallCodexMcp(params: {
   const file = codexConfigPath(scope);
   const allowedRoot = codexConfigRoot(scope);
   // Read/edit/persist are one operation under the scope lock (see installCodexMcp).
-  const guarded = await withScopeLock(manifestPath, runtime, async () => {
-    if (!dryRun && expectedSnapshot) {
-      const currentSnapshot = await readCodexInstallSnapshot(scope, manifestPath, runtime?.fs);
-      if (codexInstallSnapshotChanged(expectedSnapshot, currentSnapshot)) {
+  const guarded = await withScopeLock(
+    manifestPath,
+    runtime,
+    async () => {
+      if (!dryRun && expectedSnapshot) {
+        const currentSnapshot = await readCodexInstallSnapshot(scope, manifestPath, runtime?.fs);
+        if (codexInstallSnapshotChanged(expectedSnapshot, currentSnapshot)) {
+          return {
+            mcp: refusal(
+              "CONFLICT",
+              "Codex configuration or ownership manifest changed since the preview; re-run to inspect the updated plan.",
+            ),
+          };
+        }
+      }
+      const read = await readInstallManifest(manifestPath, runtime?.fs);
+      if (read.status === "error")
         return {
           mcp: refusal(
-            "CONFLICT",
-            "Codex configuration or ownership manifest changed since the preview; re-run to inspect the updated plan.",
+            "MALFORMED_MANIFEST",
+            "The private install manifest could not be read; refusing to edit without a trusted ownership record.",
           ),
         };
+      const manifestRecord = read.status === "ok" ? read.manifest.records[file] : undefined;
+      const mcp = await removeTomlTable({
+        file,
+        allowedRoot,
+        tablePath: [...codexMcpTablePath],
+        kind: "mcp",
+        manifestRecord,
+        dryRun,
+        runtime,
+      });
+      // A successful removal deletes the ownership record, so a repeated uninstall is `absent`; a
+      // persistence failure is an explicit partial outcome.
+      if (!dryRun && (mcp.outcome === "applied" || mcp.outcome === "committed-with-error")) {
+        const wrote = await writeInstallManifestRecord(manifestPath, "codex", file, null, runtime);
+        return { mcp: withManifestWrite(wrote, mcp, "The Codex MCP configuration") };
       }
-    }
-    const read = await readInstallManifest(manifestPath, runtime?.fs);
-    if (read.status === "error")
-      return {
-        mcp: refusal(
-          "MALFORMED_MANIFEST",
-          "The private install manifest could not be read; refusing to edit without a trusted ownership record.",
-        ),
-      };
-    const manifestRecord = read.status === "ok" ? read.manifest.records[file] : undefined;
-    const mcp = await removeTomlTable({
-      file,
-      allowedRoot,
-      tablePath: [...codexMcpTablePath],
-      kind: "mcp",
-      manifestRecord,
-      dryRun,
-      runtime,
-    });
-    // A successful removal deletes the ownership record, so a repeated uninstall is `absent`; a
-    // persistence failure is an explicit partial outcome.
-    if (!dryRun && (mcp.outcome === "applied" || mcp.outcome === "committed-with-error")) {
-      const wrote = await writeInstallManifestRecord(manifestPath, "codex", file, null, runtime);
-      return { mcp: withManifestWrite(wrote, mcp, "The Codex MCP configuration") };
-    }
-    return { mcp };
-  });
+      return { mcp };
+    },
+    dryRun,
+  );
   if (guarded.status === "refused") return { mcp: guarded.reason };
   return guarded.value;
 }

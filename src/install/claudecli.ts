@@ -167,10 +167,12 @@ export const claudeInstallHelp = (operation: "install" | "uninstall"): string =>
   operation === "install"
     ? `Usage: pdb install claude [--global] [--transport stdio|http] [--url URL] [--role implementer|designer]
                        [--entry KEY | --harness NAME] [--repo owner/name] [--dry-run] [--json] [--yes]
-Configure the PDB MCP connection for Claude Code. Default scope is the current repository
-(project .mcp.json); --global targets the user-wide Claude config. STDIO is the default;
---transport http with --url is explicit. --dry-run previews exact changes and writes nothing.
-A Claude Stop hook is not installed (hook adapter is a separate slice).`
+Configure the PDB MCP connection and Stop hook for Claude Code. Default scope is the current
+repository (project .mcp.json and .claude/settings.local.json); --global targets the user-wide
+Claude config. STDIO is the default; --transport http with --url is explicit. --dry-run previews
+exact changes and writes nothing. The install also registers the owned Stop hook so a finished
+Claude turn runs pdb's continuation check; Claude asks you to approve the Stop hook command once
+during setup.`
     : `Usage: pdb uninstall claude [--global] [--dry-run] [--json] [--yes]
 Remove only PDB-managed Claude entries in the selected scope; identity, project settings and
 unrelated entries survive. Already absent is a no-op. --global is required to touch user-wide

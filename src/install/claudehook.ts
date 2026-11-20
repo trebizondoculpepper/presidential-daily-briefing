@@ -29,10 +29,8 @@ import {
   type ManifestRuntime,
 } from "./manifest.js";
 import { resolveInstalledPdb } from "./claudemcp.js";
+import { withScopeLock } from "./codexmcp.js";
 import { nodeSafeFs } from "../config/safejson.js";
-import { mkdir } from "node:fs/promises";
-import { dirname } from "node:path";
-import { acquireFileLock, releaseProblem, type LockTiming } from "../config/filelock.js";
 
 /** Refuse an edit when the ownership manifest itself cannot be trusted (#970 pattern). */
 function manifestReadRefusal(
@@ -87,84 +85,6 @@ async function readOptionalText(path: string, fs?: InstallFs): Promise<string | 
 
 /** The hook event PDB registers for: the synchronous Claude Code Stop event. */
 export const claudeStopHookEvent = "Stop";
-
-const LOCK_TIMING: LockTiming = { waitMs: 5_000, pollMs: 50 };
-
-/** Scope-lock result: the work value, or a refusal (held lock / lock release failure). */
-type Scoped<T> = { status: "ok"; value: T } | { status: "refused"; reason: InstallEditResult };
-
-/** Serialize read/edit/persist on the private manifest's operation lock so concurrent install and
- * uninstall cannot delete an ownership record the other just saved (reviewed #1126 finding). The
- * lock always runs on a filesystem: an injected runtime fs in tests, the real one otherwise.
- * A dry-run/preview never takes the writer lock and never creates the manifest directory: planning
- * writes nothing (attended-installer-delivery.md read-only preview boundary). */
-async function withScopeLock<T>(
-  manifestPath: string,
-  dryRun: boolean | undefined,
-  runtime: ManifestRuntime | undefined,
-  work: () => Promise<T>,
-): Promise<Scoped<T>> {
-  if (dryRun) return { status: "ok", value: await work() };
-  const fs = runtime?.fs ?? nodeSafeFs;
-  const now = runtime?.now ?? (() => new Date());
-  // The lock file lives beside the private manifest; ensure its directory exists (the ownership
-  // writer creates it later, but the lock must be acquired first).
-  try {
-    await mkdir(dirname(manifestPath), { recursive: true });
-  } catch {
-    // A pre-existing directory is fine; refuse only on a real write failure below.
-  }
-  const lock = `${manifestPath}.op.lock`;
-  const held = await acquireFileLock(
-    {
-      readFile: (p) => fs.readFile(p),
-      writeFile: (p, data) => fs.createSynced(p, data),
-      unlink: (p) => fs.unlink(p),
-    },
-    lock,
-    LOCK_TIMING,
-    () => now().getTime(),
-    (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
-  );
-  if (held === null)
-    return {
-      status: "refused",
-      reason: {
-        action: "kept",
-        outcome: "refused",
-        ownership: "absent",
-        code: "CONFLICT",
-        message:
-          "Another Claude installer operation holds the scope lock; wait for it to finish or verify no writer is active before removing the lock.",
-        diff: null,
-        manifestRecord: null,
-      },
-    };
-  let value: T;
-  try {
-    value = await work();
-  } finally {
-    // A failed release leaves a lock that blocks later commands; surface it as an explicit partial
-    // outcome instead of discarding it (shared-write contract, reviewed #1126 finding).
-    const cleanup = await held();
-    const problem = releaseProblem(lock, cleanup);
-    if (problem) {
-      return {
-        status: "refused",
-        reason: {
-          action: "kept",
-          outcome: "committed-with-error",
-          ownership: "absent",
-          code: "WRITE_FAILED",
-          message: problem,
-          diff: null,
-          manifestRecord: null,
-        },
-      };
-    }
-  }
-  return { status: "ok", value };
-}
 
 /** Native hook timeout in seconds (native default 600; an explicit short bound per the shared core). */
 export const claudeHookNativeTimeout = 10;
@@ -397,62 +317,67 @@ export async function installClaudeStopHook(params: {
       },
     };
   const command = claudeStopCommand({ ...options, pdbPath: installedPdb ?? "" });
-  const guarded = await withScopeLock(manifestPath, dryRun, runtime, async () => {
-    // Under the operation lock, re-verify the hook settings against what the preview approved:
-    // another installer may have changed the hook or its ownership record while the MCP phase ran
-    // or while this command waited for the lock, and that new state must be refused, not adopted
-    // as the baseline (reviewed #1126 finding).
-    if (!dryRun && params.expectedHooksRaw !== undefined) {
-      const current = await readOptionalText(file, runtime?.fs);
-      if (current !== params.expectedHooksRaw) {
-        return {
-          hook: {
-            action: "kept" as const,
-            outcome: "refused" as const,
-            ownership: "absent" as const,
-            code: "CONFLICT" as const,
-            message:
-              "The Claude settings changed since the preview; re-run to inspect the updated plan.",
-            diff: null,
-            manifestRecord: null,
-          },
-        };
+  const guarded = await withScopeLock(
+    manifestPath,
+    runtime,
+    async () => {
+      // Under the operation lock, re-verify the hook settings against what the preview approved:
+      // another installer may have changed the hook or its ownership record while the MCP phase ran
+      // or while this command waited for the lock, and that new state must be refused, not adopted
+      // as the baseline (reviewed #1126 finding).
+      if (!dryRun && params.expectedHooksRaw !== undefined) {
+        const current = await readOptionalText(file, runtime?.fs);
+        if (current !== params.expectedHooksRaw) {
+          return {
+            hook: {
+              action: "kept" as const,
+              outcome: "refused" as const,
+              ownership: "absent" as const,
+              code: "CONFLICT" as const,
+              message:
+                "The Claude settings changed since the preview; re-run to inspect the updated plan.",
+              diff: null,
+              manifestRecord: null,
+            },
+          };
+        }
       }
-    }
-    const read = await readInstallManifest(manifestPath, runtime?.fs);
-    const manifestBlocked = manifestReadRefusal(read, file);
-    if (manifestBlocked) return { hook: manifestBlocked };
-    const manifestRecord = read.status === "ok" ? read.manifest.records[file] : undefined;
-    const hook = await editJsonEntry({
-      file,
-      allowedRoot,
-      adapter: claudeHookAdapter(command),
-      manifestRecord,
-      pdbVersion,
-      dryRun,
-      adopt,
-      runtime,
-    });
-    // Persist the ownership record so a later uninstall/rerun recognizes this entry as owned; a
-    // persistence failure is an explicit partial outcome, never unconditional success.
-    if (
-      !dryRun &&
-      (hook.outcome === "applied" ||
-        hook.outcome === "adopted" ||
-        hook.outcome === "committed-with-error") &&
-      hook.manifestRecord
-    ) {
-      const wrote = await writeInstallManifestRecord(
-        manifestPath,
-        "claude",
+      const read = await readInstallManifest(manifestPath, runtime?.fs);
+      const manifestBlocked = manifestReadRefusal(read, file);
+      if (manifestBlocked) return { hook: manifestBlocked };
+      const manifestRecord = read.status === "ok" ? read.manifest.records[file] : undefined;
+      const hook = await editJsonEntry({
         file,
-        hook.manifestRecord,
+        allowedRoot,
+        adapter: claudeHookAdapter(command),
+        manifestRecord,
+        pdbVersion,
+        dryRun,
+        adopt,
         runtime,
-      );
-      return { hook: manifestWriteRefusal(wrote, "The Claude Stop hook", hook) };
-    }
-    return { hook };
-  });
+      });
+      // Persist the ownership record so a later uninstall/rerun recognizes this entry as owned; a
+      // persistence failure is an explicit partial outcome, never unconditional success.
+      if (
+        !dryRun &&
+        (hook.outcome === "applied" ||
+          hook.outcome === "adopted" ||
+          hook.outcome === "committed-with-error") &&
+        hook.manifestRecord
+      ) {
+        const wrote = await writeInstallManifestRecord(
+          manifestPath,
+          "claude",
+          file,
+          hook.manifestRecord,
+          runtime,
+        );
+        return { hook: manifestWriteRefusal(wrote, "The Claude Stop hook", hook) };
+      }
+      return { hook };
+    },
+    dryRun,
+  );
   if (guarded.status === "refused") return { hook: guarded.reason };
   return guarded.value;
 }
@@ -474,45 +399,50 @@ export async function uninstallClaudeStopHook(params: {
   // Classification matches the claude-stop entry by command substring, so removal works regardless
   // of the package path; no resolution is needed to delete an owned (possibly broken) hook.
   const command = claudeStopCommand({ pdbPath: "" });
-  const guarded = await withScopeLock(manifestPath, dryRun, runtime, async () => {
-    // Re-verify the hook settings against the approved preview under the lock, exactly as install
-    // does: a concurrent hook/ownership edit after the preview must be refused, not removed over.
-    if (!dryRun && params.expectedHooksRaw !== undefined) {
-      const current = await readOptionalText(file, runtime?.fs);
-      if (current !== params.expectedHooksRaw) {
-        return {
-          hook: {
-            action: "kept" as const,
-            outcome: "refused" as const,
-            ownership: "absent" as const,
-            code: "CONFLICT" as const,
-            message:
-              "The Claude settings changed since the preview; re-run to inspect the updated plan.",
-            diff: null,
-            manifestRecord: null,
-          },
-        };
+  const guarded = await withScopeLock(
+    manifestPath,
+    runtime,
+    async () => {
+      // Re-verify the hook settings against the approved preview under the lock, exactly as install
+      // does: a concurrent hook/ownership edit after the preview must be refused, not removed over.
+      if (!dryRun && params.expectedHooksRaw !== undefined) {
+        const current = await readOptionalText(file, runtime?.fs);
+        if (current !== params.expectedHooksRaw) {
+          return {
+            hook: {
+              action: "kept" as const,
+              outcome: "refused" as const,
+              ownership: "absent" as const,
+              code: "CONFLICT" as const,
+              message:
+                "The Claude settings changed since the preview; re-run to inspect the updated plan.",
+              diff: null,
+              manifestRecord: null,
+            },
+          };
+        }
       }
-    }
-    const read = await readInstallManifest(manifestPath, runtime?.fs);
-    const manifestBlocked = manifestReadRefusal(read, file);
-    if (manifestBlocked) return { hook: manifestBlocked };
-    const manifestRecord = read.status === "ok" ? read.manifest.records[file] : undefined;
-    const hook = await removeJsonEntry({
-      file,
-      allowedRoot,
-      adapter: claudeHookAdapter(command),
-      manifestRecord,
-      dryRun,
-      runtime,
-    });
-    // A successful removal deletes the ownership record; a persistence failure is explicit.
-    if (!dryRun && (hook.outcome === "applied" || hook.outcome === "committed-with-error")) {
-      const wrote = await writeInstallManifestRecord(manifestPath, "claude", file, null, runtime);
-      return { hook: manifestWriteRefusal(wrote, "The Claude Stop hook", hook) };
-    }
-    return { hook };
-  });
+      const read = await readInstallManifest(manifestPath, runtime?.fs);
+      const manifestBlocked = manifestReadRefusal(read, file);
+      if (manifestBlocked) return { hook: manifestBlocked };
+      const manifestRecord = read.status === "ok" ? read.manifest.records[file] : undefined;
+      const hook = await removeJsonEntry({
+        file,
+        allowedRoot,
+        adapter: claudeHookAdapter(command),
+        manifestRecord,
+        dryRun,
+        runtime,
+      });
+      // A successful removal deletes the ownership record; a persistence failure is explicit.
+      if (!dryRun && (hook.outcome === "applied" || hook.outcome === "committed-with-error")) {
+        const wrote = await writeInstallManifestRecord(manifestPath, "claude", file, null, runtime);
+        return { hook: manifestWriteRefusal(wrote, "The Claude Stop hook", hook) };
+      }
+      return { hook };
+    },
+    dryRun,
+  );
   if (guarded.status === "refused") return { hook: guarded.reason };
   return guarded.value;
 }

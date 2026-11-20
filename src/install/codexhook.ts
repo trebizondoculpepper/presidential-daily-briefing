@@ -228,46 +228,51 @@ export async function installCodexStopHook(params: {
   const file = codexHooksPath(scope);
   const allowedRoot = codexHooksRoot(scope);
   const command = codexStopCommand(options);
-  const guarded = await withScopeLock(manifestPath, runtime, async () => {
-    const read = await readInstallManifest(manifestPath, runtime?.fs);
-    if (read.status === "error")
-      return {
-        hook: refusal(
-          "MALFORMED_MANIFEST",
-          "The private install manifest could not be read; refusing to edit without a trusted ownership record.",
-        ),
-      };
-    const manifestRecord = read.status === "ok" ? read.manifest.records[file] : undefined;
-    const hook = await editJsonEntry({
-      file,
-      allowedRoot,
-      adapter: codexHookAdapter(command),
-      manifestRecord,
-      pdbVersion,
-      dryRun,
-      adopt,
-      runtime,
-    });
-    // Persist the ownership record so a later uninstall/rerun recognizes this entry as owned; a
-    // persistence failure is an explicit partial outcome, never unconditional success.
-    if (
-      !dryRun &&
-      (hook.outcome === "applied" ||
-        hook.outcome === "adopted" ||
-        hook.outcome === "committed-with-error") &&
-      hook.manifestRecord
-    ) {
-      const wrote = await writeInstallManifestRecord(
-        manifestPath,
-        "codex",
+  const guarded = await withScopeLock(
+    manifestPath,
+    runtime,
+    async () => {
+      const read = await readInstallManifest(manifestPath, runtime?.fs);
+      if (read.status === "error")
+        return {
+          hook: refusal(
+            "MALFORMED_MANIFEST",
+            "The private install manifest could not be read; refusing to edit without a trusted ownership record.",
+          ),
+        };
+      const manifestRecord = read.status === "ok" ? read.manifest.records[file] : undefined;
+      const hook = await editJsonEntry({
         file,
-        hook.manifestRecord,
+        allowedRoot,
+        adapter: codexHookAdapter(command),
+        manifestRecord,
+        pdbVersion,
+        dryRun,
+        adopt,
         runtime,
-      );
-      return { hook: withManifestWrite(wrote, hook, "The Codex Stop hook") };
-    }
-    return { hook };
-  });
+      });
+      // Persist the ownership record so a later uninstall/rerun recognizes this entry as owned; a
+      // persistence failure is an explicit partial outcome, never unconditional success.
+      if (
+        !dryRun &&
+        (hook.outcome === "applied" ||
+          hook.outcome === "adopted" ||
+          hook.outcome === "committed-with-error") &&
+        hook.manifestRecord
+      ) {
+        const wrote = await writeInstallManifestRecord(
+          manifestPath,
+          "codex",
+          file,
+          hook.manifestRecord,
+          runtime,
+        );
+        return { hook: withManifestWrite(wrote, hook, "The Codex Stop hook") };
+      }
+      return { hook };
+    },
+    dryRun,
+  );
   if (guarded.status === "refused") return { hook: guarded.reason };
   return guarded.value;
 }
@@ -283,31 +288,36 @@ export async function uninstallCodexStopHook(params: {
   const file = codexHooksPath(scope);
   const allowedRoot = codexHooksRoot(scope);
   const command = codexStopCommand({});
-  const guarded = await withScopeLock(manifestPath, runtime, async () => {
-    const read = await readInstallManifest(manifestPath, runtime?.fs);
-    if (read.status === "error")
-      return {
-        hook: refusal(
-          "MALFORMED_MANIFEST",
-          "The private install manifest could not be read; refusing to remove without a trusted ownership record.",
-        ),
-      };
-    const manifestRecord = read.status === "ok" ? read.manifest.records[file] : undefined;
-    const hook = await removeJsonEntry({
-      file,
-      allowedRoot,
-      adapter: codexHookAdapter(command),
-      manifestRecord,
-      dryRun,
-      runtime,
-    });
-    // A successful removal deletes the ownership record; a persistence failure is explicit.
-    if (!dryRun && (hook.outcome === "applied" || hook.outcome === "committed-with-error")) {
-      const wrote = await writeInstallManifestRecord(manifestPath, "codex", file, null, runtime);
-      return { hook: withManifestWrite(wrote, hook, "The Codex Stop hook") };
-    }
-    return { hook };
-  });
+  const guarded = await withScopeLock(
+    manifestPath,
+    runtime,
+    async () => {
+      const read = await readInstallManifest(manifestPath, runtime?.fs);
+      if (read.status === "error")
+        return {
+          hook: refusal(
+            "MALFORMED_MANIFEST",
+            "The private install manifest could not be read; refusing to remove without a trusted ownership record.",
+          ),
+        };
+      const manifestRecord = read.status === "ok" ? read.manifest.records[file] : undefined;
+      const hook = await removeJsonEntry({
+        file,
+        allowedRoot,
+        adapter: codexHookAdapter(command),
+        manifestRecord,
+        dryRun,
+        runtime,
+      });
+      // A successful removal deletes the ownership record; a persistence failure is explicit.
+      if (!dryRun && (hook.outcome === "applied" || hook.outcome === "committed-with-error")) {
+        const wrote = await writeInstallManifestRecord(manifestPath, "codex", file, null, runtime);
+        return { hook: withManifestWrite(wrote, hook, "The Codex Stop hook") };
+      }
+      return { hook };
+    },
+    dryRun,
+  );
   if (guarded.status === "refused") return { hook: guarded.reason };
   return guarded.value;
 }
