@@ -1,0 +1,91 @@
+;; Native claim action obligations (#1113, doc/design/native-action-obligations.md).
+;; The native mechanism: policy/obligations.edn holds each obligation record (id, applicable
+;; outcome(s), optional role restriction and purpose); policy/rules.edn derives claim-obligation
+;; from the asserted claim-outcome fact on entity 1 and the viewer role; the :claim-obligations
+;; query selects the applicable IDs. These scenarios assert the same typed facts the adapter
+;; transacts, covering the outcome matrix and the implementer-only DELIVERABLE restriction.
+;; The viewer role is asserted by the engine ([1 "role" viewer]); an unresolved-role exclusion
+;; is an adapter-side filter (DataScript cannot `not` an entity-1 literal fact), so scenarios
+;; cover resolved roles deterministically.
+{:suite "obligations (#1113)"
+ :scenarios
+ [{:id "claimed-implementer-obligations"
+   :doc "A successful claim by an implementer confers the five owner duties, including the implementer-only DELIVERABLE."
+   :viewer {:role "implementer"}
+   :facts [{:e 1 "claim-outcome" "claimed"}
+           {:e 101 "obligation" "O-CLAIM-ACCEPTANCE" "obligation-outcome" ["claimed" "noop"]}
+           {:e 102 "obligation" "O-CLAIM-OWNERSHIP" "obligation-outcome" ["claimed" "noop" "denied" "partial"]}
+           {:e 103 "obligation" "O-CLAIM-BLOCKERS" "obligation-outcome" ["claimed" "noop"]}
+           {:e 104 "obligation" "O-CLAIM-REMOVAL" "obligation-outcome" ["claimed" "noop" "partial"]}
+           {:e 105 "obligation" "O-CLAIM-DELIVERABLE" "obligation-outcome" ["claimed" "noop"] "obligation-role" "implementer"}
+           {:e 106 "obligation" "O-CLAIM-NOOP-CONTINUE" "obligation-outcome" ["noop"]}
+           {:e 107 "obligation" "O-CLAIM-PARTIAL-RECOVERY" "obligation-outcome" ["partial"]}
+           {:e 108 "obligation" "O-CLAIM-DENIED-RECOVERY" "obligation-outcome" ["denied"]}]
+   :expect {:actions []
+            :denials #{}
+            :obligations ["O-CLAIM-ACCEPTANCE" "O-CLAIM-BLOCKERS" "O-CLAIM-DELIVERABLE" "O-CLAIM-OWNERSHIP" "O-CLAIM-REMOVAL"]}}
+
+  {:id "noop-implementer-obligations"
+   :doc "A no-op claim (already claimed by the viewer) adds the continuation obligation to the owner duties."
+   :viewer {:role "implementer"}
+   :facts [{:e 1 "claim-outcome" "noop"}
+           {:e 101 "obligation" "O-CLAIM-ACCEPTANCE" "obligation-outcome" ["claimed" "noop"]}
+           {:e 102 "obligation" "O-CLAIM-OWNERSHIP" "obligation-outcome" ["claimed" "noop" "denied" "partial"]}
+           {:e 103 "obligation" "O-CLAIM-BLOCKERS" "obligation-outcome" ["claimed" "noop"]}
+           {:e 104 "obligation" "O-CLAIM-REMOVAL" "obligation-outcome" ["claimed" "noop" "partial"]}
+           {:e 105 "obligation" "O-CLAIM-DELIVERABLE" "obligation-outcome" ["claimed" "noop"] "obligation-role" "implementer"}
+           {:e 106 "obligation" "O-CLAIM-NOOP-CONTINUE" "obligation-outcome" ["noop"]}
+           {:e 107 "obligation" "O-CLAIM-PARTIAL-RECOVERY" "obligation-outcome" ["partial"]}
+           {:e 108 "obligation" "O-CLAIM-DENIED-RECOVERY" "obligation-outcome" ["denied"]}]
+   :expect {:actions []
+            :denials #{}
+            :obligations ["O-CLAIM-ACCEPTANCE" "O-CLAIM-BLOCKERS" "O-CLAIM-DELIVERABLE" "O-CLAIM-NOOP-CONTINUE" "O-CLAIM-OWNERSHIP" "O-CLAIM-REMOVAL"]}}
+
+  {:id "denied-implementer-obligations"
+   :doc "A refused claim grants no owner duties; only ownership respect and denied-recovery guidance apply."
+   :viewer {:role "implementer"}
+   :facts [{:e 1 "claim-outcome" "denied"}
+           {:e 101 "obligation" "O-CLAIM-ACCEPTANCE" "obligation-outcome" ["claimed" "noop"]}
+           {:e 102 "obligation" "O-CLAIM-OWNERSHIP" "obligation-outcome" ["claimed" "noop" "denied" "partial"]}
+           {:e 103 "obligation" "O-CLAIM-BLOCKERS" "obligation-outcome" ["claimed" "noop"]}
+           {:e 104 "obligation" "O-CLAIM-REMOVAL" "obligation-outcome" ["claimed" "noop" "partial"]}
+           {:e 105 "obligation" "O-CLAIM-DELIVERABLE" "obligation-outcome" ["claimed" "noop"] "obligation-role" "implementer"}
+           {:e 106 "obligation" "O-CLAIM-NOOP-CONTINUE" "obligation-outcome" ["noop"]}
+           {:e 107 "obligation" "O-CLAIM-PARTIAL-RECOVERY" "obligation-outcome" ["partial"]}
+           {:e 108 "obligation" "O-CLAIM-DENIED-RECOVERY" "obligation-outcome" ["denied"]}]
+   :expect {:actions []
+            :denials #{}
+            :obligations ["O-CLAIM-DENIED-RECOVERY" "O-CLAIM-OWNERSHIP"]}}
+
+  {:id "partial-implementer-obligations"
+   :doc "A partial claim confers the general owner duties that remain meaningful plus the partial-recovery guidance."
+   :viewer {:role "implementer"}
+   :facts [{:e 1 "claim-outcome" "partial"}
+           {:e 101 "obligation" "O-CLAIM-ACCEPTANCE" "obligation-outcome" ["claimed" "noop"]}
+           {:e 102 "obligation" "O-CLAIM-OWNERSHIP" "obligation-outcome" ["claimed" "noop" "denied" "partial"]}
+           {:e 103 "obligation" "O-CLAIM-BLOCKERS" "obligation-outcome" ["claimed" "noop"]}
+           {:e 104 "obligation" "O-CLAIM-REMOVAL" "obligation-outcome" ["claimed" "noop" "partial"]}
+           {:e 105 "obligation" "O-CLAIM-DELIVERABLE" "obligation-outcome" ["claimed" "noop"] "obligation-role" "implementer"}
+           {:e 106 "obligation" "O-CLAIM-NOOP-CONTINUE" "obligation-outcome" ["noop"]}
+           {:e 107 "obligation" "O-CLAIM-PARTIAL-RECOVERY" "obligation-outcome" ["partial"]}
+           {:e 108 "obligation" "O-CLAIM-DENIED-RECOVERY" "obligation-outcome" ["denied"]}]
+   :expect {:actions []
+            :denials #{}
+            :obligations ["O-CLAIM-OWNERSHIP" "O-CLAIM-PARTIAL-RECOVERY" "O-CLAIM-REMOVAL"]}}
+
+  {:id "claimed-designer-excludes-implementer-deliverable"
+   :doc "A designer's successful claim does not apply the implementer-only DELIVERABLE obligation."
+   :viewer {:role "designer"}
+   :facts [{:e 1 "claim-outcome" "claimed"}
+           {:e 101 "obligation" "O-CLAIM-ACCEPTANCE" "obligation-outcome" ["claimed" "noop"]}
+           {:e 102 "obligation" "O-CLAIM-OWNERSHIP" "obligation-outcome" ["claimed" "noop" "denied" "partial"]}
+           {:e 103 "obligation" "O-CLAIM-BLOCKERS" "obligation-outcome" ["claimed" "noop"]}
+           {:e 104 "obligation" "O-CLAIM-REMOVAL" "obligation-outcome" ["claimed" "noop" "partial"]}
+           {:e 105 "obligation" "O-CLAIM-DELIVERABLE" "obligation-outcome" ["claimed" "noop"] "obligation-role" "implementer"}
+           {:e 106 "obligation" "O-CLAIM-NOOP-CONTINUE" "obligation-outcome" ["noop"]}
+           {:e 107 "obligation" "O-CLAIM-PARTIAL-RECOVERY" "obligation-outcome" ["partial"]}
+           {:e 108 "obligation" "O-CLAIM-DENIED-RECOVERY" "obligation-outcome" ["denied"]}]
+   :expect {:actions []
+            :denials #{}
+            :obligations ["O-CLAIM-ACCEPTANCE" "O-CLAIM-BLOCKERS" "O-CLAIM-OWNERSHIP" "O-CLAIM-REMOVAL"]}}
+ ]}

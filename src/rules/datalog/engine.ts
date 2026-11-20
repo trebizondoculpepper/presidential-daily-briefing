@@ -104,6 +104,8 @@ export interface PolicyResult {
   /** Already in policy order. */
   decisions: PolicyDecision[];
   denials: { subject: number; ruleId: string }[];
+  /** Applicable native action obligations by obligation ID (#1113). */
+  obligations: string[];
   datoms: number;
 }
 
@@ -430,11 +432,15 @@ export function evaluatePolicy(input: PolicyFacts, options: PolicyOptions = {}):
       };
     });
   options.signal?.throwIfAborted();
+  // #1113: applicable native action obligations, from the viewer role and the asserted
+  // claim-outcome fact; policy decides applicability, never a TypeScript catalog.
+  const obligations = query(db, queries["claim-obligations"]).flat().map(String);
   return {
     policyVersion: policy.policyVersion,
     rulesHash: options.policy ? rulesHashOf(policy) : rulesHash,
     decisions,
     denials,
+    obligations,
     datoms: facts.length,
   };
 }

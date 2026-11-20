@@ -295,4 +295,20 @@
 ;; #1092: needs refinement, awaiting re-estimate or unknown refinement holds an owned claim too;
 ;; the claim is kept, never continued as implementation.
 [(own-held-back ?t) (own-active ?t) (refinement-hold ?t)]
+
+;; #1113 Native action obligations (doc/design/native-action-obligations.md).
+;; The host asserts one claim-outcome fact ([1 "claim-outcome" <outcome>]) plus obligation records
+;; (entity ?o with "obligation" <id>, optional "obligation-role" <role> and "obligation-outcome"
+;; <outcome>) as the typed facts; the rules decide which obligations apply to the viewer's role and
+;; the action outcome, so a policy edit changes selection without touching command text.
+[(obligation-record ?o) [?o "obligation" _]]
+[(obligation-applies ?o)
+ (obligation-record ?o) [?o "obligation" ?id]
+ [?o "obligation-outcome" ?oc] [1 "claim-outcome" ?oc]
+ (not [?o "obligation-role" _])]
+[(obligation-applies ?o)
+ (obligation-record ?o) [?o "obligation" ?id]
+ [?o "obligation-outcome" ?oc] [1 "claim-outcome" ?oc]
+ [?o "obligation-role" ?r] [1 "role" ?r]]
+[(claim-obligation ?id) (obligation-applies ?o) [?o "obligation" ?id]]
 ]
