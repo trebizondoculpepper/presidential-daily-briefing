@@ -124,11 +124,13 @@ describe("runOriInstall (#772)", () => {
       const mcpFile = join(dir, ".ori", "mcp.json");
       const written = JSON.parse(await readFile(mcpFile, "utf8"));
       const realRoot = await realpath(dir);
-      expect(written.mcpServers.pdb).toEqual({
-        type: "stdio",
-        command: PDBMCP,
-        args: ["--project", realRoot, "--repo", "example/project", "--entry", "ori"],
-      });
+      // On Windows the packaged .mjs launches through Node; elsewhere it is the command itself.
+      const stdioArgs = ["--project", realRoot, "--repo", "example/project", "--entry", "ori"];
+      expect(written.mcpServers.pdb).toEqual(
+        process.platform === "win32"
+          ? { type: "stdio", command: process.execPath, args: [PDBMCP, ...stdioArgs] }
+          : { type: "stdio", command: PDBMCP, args: stdioArgs },
+      );
 
       const out2: string[] = [];
       const code2 = await runOriInstall(
