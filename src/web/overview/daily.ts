@@ -130,8 +130,12 @@ export function parseDailyResponse(body: unknown): DailyResponse | null {
   };
 }
 
-/** A day cell: a known count (zero included), or a dash for an unknown day, never 0. */
-export const cell = (d: Day): string => (d.status === "known" ? String(d.count) : "unknown");
+/**
+ * A day cell: a known count (zero included), "unknown" for an unread day (never 0), and "at least
+ * N" when the figure is a lower bound because some tickets' evidence is missing.
+ */
+export const cell = (d: Day, lowerBound = false): string =>
+  d.status === "unknown" ? "unknown" : lowerBound ? `at least ${d.count}` : String(d.count);
 
 /** The complete-day average text, with how many days are known. */
 export function averageText(s: Series): string {

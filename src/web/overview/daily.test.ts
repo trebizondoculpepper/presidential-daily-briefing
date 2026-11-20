@@ -67,7 +67,7 @@ const body = (
 describe("overview daily ticket progress (#826)", () => {
   it("shows a known zero as 0 and an unread day as unknown, never 0", () => {
     const r = parseDailyResponse(body())!;
-    expect(r.series.deliveries.days.map(cell)).toEqual(["unknown", "0", "1"]);
+    expect(r.series.deliveries.days.map((d) => cell(d))).toEqual(["unknown", "0", "1"]);
     expect(r.deliveredDateUnknown.count).toBe(1);
   });
 
@@ -109,5 +109,13 @@ describe("overview daily ticket progress (#826)", () => {
     expect(states.at(-1)).toMatchObject({ status: "ready" });
     expect(dailyWindow("?days=30d")).toBe(30);
     expect(dailyWindow("?days=9d")).toBe(7);
+  });
+});
+
+describe("overview daily: lower bounds (#1186 review)", () => {
+  it("shows a lower-bound count as 'at least N' and keeps unknown days unknown", () => {
+    expect(cell({ day: "d", status: "known", count: 0, members: [] }, true)).toBe("at least 0");
+    expect(cell({ day: "d", status: "known", count: 2, members: [] })).toBe("2");
+    expect(cell({ day: "d", status: "unknown", observed: 0, members: [] }, true)).toBe("unknown");
   });
 });

@@ -64,7 +64,7 @@
           <tr>
             <th scope="row">{dayName}</th>
             {#each ticketSeries as [name]}
-              <td>{cell(response.series[name].days[i]!)}</td>
+              <td>{cell(response.series[name].days[i]!, response.series[name].lowerBound)}</td>
             {/each}
           </tr>
         {/each}
@@ -93,11 +93,26 @@
           {#each groups as g (g)}
             <tr>
               <th scope="row">{g}</th>
-              {#each ticketSeries as [name]}<td>{response.series[name].byComplexity[g]?.count ?? 0}</td>{/each}
+{#each ticketSeries as [name]}<td>{response.series[name].byComplexity[g]?.count ?? 0}{response.series[name].lowerBound ? " (at least)" : ""}</td>{/each}
             </tr>
           {/each}
         </tbody>
       </table>
+    {/if}
+    {#if groups.length}
+      <details class="drill">
+        <summary>The tickets behind each complexity count</summary>
+        {#each groups as g (g)}
+          {#each ticketSeries as [name, label]}
+            {@const members = response.series[name].byComplexity[g]?.members ?? []}
+            {#if members.length}
+              <p>{g}, {label.toLowerCase()}:
+                {#each members as m, i}{i ? ", " : ""}{#if ticketHref(m)}<a href={ticketHref(m)}>{m}</a>{:else}{m}{/if}{/each}
+              </p>
+            {/if}
+          {/each}
+        {/each}
+      </details>
     {/if}
     {#each ticketSeries as [name, label]}
       {@const s = response.series[name]}
