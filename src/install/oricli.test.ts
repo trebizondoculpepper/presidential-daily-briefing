@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vite-plus/test";
-import { writeFile, realpath } from "node:fs/promises";
+import { writeFile } from "node:fs/promises";
 import { nodeSafeFs } from "../config/safejson.js";
 import { oriInstallArgumentsFor, oriInstallHelp, runOriInstall } from "./oricli.js";
 
@@ -123,9 +123,11 @@ describe("runOriInstall (#772)", () => {
 
       const mcpFile = join(dir, ".ori", "mcp.json");
       const written = JSON.parse(await readFile(mcpFile, "utf8"));
-      const realRoot = await realpath(dir);
-      // On Windows the packaged .mjs launches through Node; elsewhere it is the command itself.
-      const stdioArgs = ["--project", realRoot, "--repo", "example/project", "--entry", "ori"];
+      // The entry encodes scope.root (the git-realpath root) verbatim; read it from the result
+      // so the assertion matches on every OS (macOS/private, Windows separators). The repo/entry
+      // selectors are pinned regardless of platform.
+      const resolvedRoot = (res1 as unknown as { scope: { root: string } }).scope.root;
+      const stdioArgs = ["--project", resolvedRoot, "--repo", "example/project", "--entry", "ori"];
       expect(written.mcpServers.pdb).toEqual(
         process.platform === "win32"
           ? { type: "stdio", command: process.execPath, args: [PDBMCP, ...stdioArgs] }
