@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 import { createHash } from "node:crypto";
 import { main } from "../cli.js";
 import {
@@ -214,7 +214,7 @@ describe("claim and needs-human (doc/design/workflow.md)", () => {
         issue: 7,
         agent: "kavya",
         claim: /claim:([0-9a-f]{16})/.exec(claimMarkerFor(repo, 7, "kavya"))![1]!,
-        since: null,
+        since: "2026-11-20T10:00:00Z",
         complete: true,
       },
       async () => ({ status: "trusted" }),
@@ -532,6 +532,42 @@ describe("claim and needs-human (doc/design/workflow.md)", () => {
     expect(env.writes).toEqual([]);
     expect(text).toContain("DRY RUN");
     expect(text).toContain("--add-label agent:kavya");
+  });
+
+  it("writes the employing human only while human resolution is enabled (#1152 review)", async () => {
+    const human = {
+      state: "current" as const,
+      host: "github.com",
+      login: "sal",
+      source: "gh-login" as const,
+      observedAt: "2026-11-20T10:00:00.000Z",
+    };
+    const dryRun = async () => {
+      const env = fake({ labels: ["status:ready"] });
+      let text = "";
+      await main(
+        ["claim", "7", "--agent", "kavya", "--dry-run", "--json", "--repo", repo],
+        async (t) => void (text = t),
+        {
+          collect: async () => {
+            throw new Error("no briefing");
+          },
+          currentRepository: async () => repo,
+          query: env.query,
+          ghRun: env.run,
+          briefingHuman: async () => human,
+        },
+      );
+      return text;
+    };
+    // The test environment sets PDB_NO_HUMAN_CONTEXT: nothing is recorded.
+    expect(await dryRun()).not.toContain("claim-human");
+    vi.stubEnv("PDB_NO_HUMAN_CONTEXT", "");
+    try {
+      expect(await dryRun()).toContain("claim-human");
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });
 

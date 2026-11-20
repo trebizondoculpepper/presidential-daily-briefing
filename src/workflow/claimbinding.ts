@@ -146,7 +146,11 @@ export interface ClaimBindingQuery {
   agent: string;
   /** The claim marker id of this agent on this issue (`claimMarkerFor`'s id). */
   claim: string;
-  /** Claim start: the time the agent's label was last added; earlier comments are not read. */
+  /**
+   * Claim start: the time the agent's label was last added; earlier comments are not read. Null
+   * when the start could not be established: the claim marker id repeats across acquisitions, so
+   * no comment can then be tied to this claim and the binding is unknown.
+   */
   since: string | null;
   /** Whether `comments` hold the complete history since the claim start. */
   complete: boolean;
@@ -164,11 +168,15 @@ export async function readClaimBinding<C extends BindingComment>(
     why,
   });
   const claimMarker = `<!-- github-triage:claim:${q.claim} -->`;
-  const since = q.since ? Date.parse(q.since) : null;
+  const since = q.since ? Date.parse(q.since) : Number.NaN;
+  if (Number.isNaN(since))
+    return unknown(
+      "incomplete",
+      "The claim start could not be established, so no claim comment can be tied to this claim.",
+    );
   const current = comments.filter(
     (c) =>
-      c.body.includes(claimMarker) &&
-      (since === null || (c.createdAt !== undefined && Date.parse(c.createdAt) >= since)),
+      c.body.includes(claimMarker) && c.createdAt !== undefined && Date.parse(c.createdAt) >= since,
   );
   // The newest claim comment of this acquisition is the one a retry would have repaired.
   const latest = current.at(-1);

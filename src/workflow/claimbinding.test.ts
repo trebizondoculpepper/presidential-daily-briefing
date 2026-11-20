@@ -144,6 +144,11 @@ describe("claim employing-human binding (#690)", () => {
     expect(await read([malformed])).toMatchObject({ reason: "malformed" });
     expect(await read([])).toMatchObject({ reason: "no-claim-comment" });
     expect(await read([], "kavya", { complete: false })).toMatchObject({ reason: "incomplete" });
+    // An unknown claim start never widens to every historical acquisition (#1152 review).
+    expect(await read([claimComment("kavya")], "kavya", { since: null })).toMatchObject({
+      state: "unknown",
+      reason: "incomplete",
+    });
   });
 
   it("reads only the current acquisition: an older claim's binding never stands in", async () => {

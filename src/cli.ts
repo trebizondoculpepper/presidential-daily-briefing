@@ -2255,7 +2255,12 @@ async function run(
     };
     const repository = values.repo ?? (await runtime.currentRepository());
     // #690: a claim records its employing human from the shared resolver (never guessed).
-    if (args[0] === "claim" && !("questions" in values) && !("outcome" in values)) {
+    if (
+      args[0] === "claim" &&
+      !("questions" in values) &&
+      !("outcome" in values) &&
+      humanContextEnabled()
+    ) {
       const human = identity?.result
         ? identity.result.human
         : runtime.briefingHuman
