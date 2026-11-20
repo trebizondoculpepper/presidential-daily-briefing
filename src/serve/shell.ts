@@ -79,7 +79,7 @@ export const servedPages: readonly ServedPage[] = [
     path: "/overview",
     label: "Overview",
     scope: "project",
-    parameters: ["repo", "news"],
+    parameters: ["repo", "news", "days"],
     carries: [],
     shipped: true,
   },

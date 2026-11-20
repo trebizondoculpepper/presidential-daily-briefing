@@ -184,6 +184,12 @@ export interface DailyFigure {
    */
   incomplete: { count: number; members: string[] };
   lowerBound: boolean;
+  /**
+   * Ticket figures only (#826): the window's members by latest valid complexity group (sizes and
+   * the explicit unassessed, stale, conflict and unknown groups), built from exactly the members
+   * in the series, so a breakdown and its drill-down cannot disagree. Absent for PR merges.
+   */
+  byComplexity?: Record<string, { count: number; members: string[] }>;
 }
 
 export interface DailyResult extends Envelope<"daily"> {
@@ -257,14 +263,32 @@ export function dailyView(
     }
   }
 
-  const figure = (events: { at: string; key: string }[], gaps: Set<string>): DailyFigure => {
+  const complexityOf = new Map(tickets.map((t) => [t.member, t.complexity]));
+  const figure = (
+    events: { at: string; key: string }[],
+    gaps: Set<string>,
+    tickets_ = true,
+  ): DailyFigure => {
     const series = dailySeries(events, window, coverage);
-    return {
+    const result: DailyFigure = {
       series,
       average: dailyAverage(series),
       incomplete: { count: gaps.size, members: [...gaps] },
       lowerBound: gaps.size > 0,
     };
+    if (!tickets_) return result;
+    const byComplexity: Record<string, { count: number; members: string[] }> = {};
+    const inWindowMembers = new Set([
+      ...series.days.flatMap((d) => d.members),
+      ...series.partial.members,
+    ]);
+    for (const m of inWindowMembers) {
+      const g = complexityOf.get(m) ?? "unknown";
+      const entry = (byComplexity[g] ??= { count: 0, members: [] });
+      entry.count++;
+      entry.members.push(m);
+    }
+    return { ...result, byComplexity };
   };
   const from = `${window.days[0]}T00:00:00.000Z`;
   return {
@@ -282,6 +306,7 @@ export function dailyView(
       prMerges: figure(
         walkedMerges ? [...walkedMerges] : [...merges].map(([key, at]) => ({ at, key })),
         mergeGaps,
+        false,
       ),
     },
     deliveredDateUnknown: { count: undated.size, members: [...undated] },
