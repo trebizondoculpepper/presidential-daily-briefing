@@ -1849,3 +1849,96 @@ describe("a throttled reset record re-checks the reset prerequisites (#345)", ()
     expect(t.state.writes).toEqual([]);
   });
 });
+
+describe("deliverables unassign: human-directed responsibility release (#1019)", () => {
+  const both = () =>
+    post(rec("submit", { deliverables: [member(998), member(999)], membership: "complete" }));
+
+  it("parses --from, which only unassign takes and unassign needs", () => {
+    const ok = deliverablesArguments([
+      "42",
+      "unassign",
+      "--agent",
+      "maint",
+      "--from",
+      "alice",
+      "--reason",
+      "owner directed",
+    ]);
+    expect(ok.request).toMatchObject({
+      action: "unassign",
+      from: "alice",
+      reason: "owner directed",
+    });
+    expect(() =>
+      deliverablesArguments(["42", "unassign", "--agent", "maint", "--reason", "r"]),
+    ).toThrow(/--from/);
+    expect(() =>
+      deliverablesArguments(["42", "unassign", "--agent", "maint", "--from", "alice"]),
+    ).toThrow(/requires --reason/);
+    expect(() =>
+      deliverablesArguments([
+        "42",
+        "reassign",
+        "--agent",
+        "maint",
+        "--to",
+        "bob",
+        "--from",
+        "alice",
+        "--reason",
+        "r",
+      ]),
+    ).toThrow(/--from/);
+  });
+
+  it("records the release of ticket and member responsibility while open PRs stay (#891/#930 shape)", async () => {
+    const submit = both();
+    const { rt, state } = github({
+      comments: [submit],
+      prs: [fakePr(998), fakePr(999)],
+      labels: ["status:awaiting-review"],
+    });
+    const result = await applyDeliverables(
+      repo,
+      request("unassign", { agent: "maint", from: "alice" }),
+      rt,
+    );
+    expect(result.exitCode).toBe(0);
+    const rel = posted(state)[0]!;
+    expect(rel).toMatchObject({ op: "unassign", from: "alice", login: "writer" });
+    expect(rel.expected!.ticket).toBe(String(submit.databaseId));
+    expect(rel.expected!.members.map((m) => m.record)).toEqual([
+      String(submit.databaseId),
+      String(submit.databaseId),
+    ]);
+    // Labels untouched: awaiting-review stays, nothing closes or detaches a PR.
+    expect(state.labels).toEqual(["status:awaiting-review"]);
+    expect(state.writes.filter((w) => w[1] !== "comment")).toEqual([]);
+    // A retry posts nothing more, and the agent then holds nothing.
+    const again = await applyDeliverables(
+      repo,
+      request("unassign", { agent: "maint", from: "alice" }),
+      rt,
+    );
+    expect(again.exitCode).toBe(0);
+    expect(posted(state)).toHaveLength(1);
+  });
+
+  it("is a no-op for an agent that holds nothing, and never takes an active claim", async () => {
+    const plan = await planDeliverables(
+      repo,
+      request("unassign", { agent: "maint", from: "zoe" }),
+      github({ comments: [both()] }).rt,
+    );
+    expect(plan.ok && plan.noop).toBe(true);
+    refused(
+      await planDeliverables(
+        repo,
+        request("unassign", { agent: "maint", from: "alice" }),
+        github({ comments: [both()], labels: ["agent:alice"] }).rt,
+      ),
+      "CLAIM_HELD",
+    );
+  });
+});

@@ -1,6 +1,6 @@
 import { identitySelection, identitySelectionOptions } from "../config/commandidentity.js";
 /**
- * `deliverables N attach | detach | retarget | handoff | membership | attest | reassign | reset |
+ * `deliverables N attach | detach | retarget | handoff | membership | attest | reassign | reset | unassign |
  * void` (#189, doc/design/delivery-lifecycle.md "Transitions and commands", "Legacy attachment",
  * "Legacy attestation" and "Maintainer override").
  *
@@ -50,6 +50,7 @@ export const deliverablesActions = [
   "reassign",
   "reset",
   "void",
+  "unassign",
 ] as const;
 export type DeliverablesAction = (typeof deliverablesActions)[number];
 
@@ -73,6 +74,8 @@ export interface DeliverablesRequest {
   comment: string | null;
   /** `reset --as ready|incomplete`. */
   as: "ready" | "incomplete" | null;
+  /** `unassign --from AGENT` (#1019): the agent whose responsibility a human releases. */
+  from?: string | null;
   /** `membership open` written by `claim --rework` after the claim (doc "Rework authority"). */
   rework?: boolean;
 }
@@ -275,6 +278,7 @@ const reasonRequired = new Set<DeliverablesAction>([
   "reassign",
   "reset",
   "void",
+  "unassign",
 ]);
 
 /** The record op a request writes. */
@@ -295,6 +299,7 @@ export function deliverablesCommand(repository: string, r: DeliverablesRequest):
   if (r.action !== "membership" && r.membership) parts.push(`--membership ${r.membership}`);
   if (r.to) parts.push(`--to ${r.to}`);
   if (r.as) parts.push(`--as ${r.as}`);
+  if (r.from) parts.push(`--from ${r.from}`);
   if (r.comment) parts.push(`--comment ${r.comment}`);
   if (r.evidence) parts.push(`--evidence ${shellQuote(r.evidence)}`);
   if (r.reason) parts.push(`--reason ${shellQuote(r.reason)}`);
@@ -445,6 +450,7 @@ function intended(
     scope: op === "handoff" ? (deliverables.length ? "deliverable" : "ticket") : undefined,
     voids: r.comment ?? undefined,
     plan: op === "reset" ? resetPlan(r.as) : undefined,
+    from: op === "unassign" ? (r.from ?? undefined) : undefined,
   };
 }
 /** Ops that neither set nor end responsibility, so they leave a recorded reset's plan standing. */
@@ -1286,6 +1292,38 @@ export async function planDeliverables(
         { add, remove },
       );
     }
+    case "unassign": {
+      // #1019 (doc/design/human-responsibility-release.md): a maintainer clears one agent's
+      // continuing responsibility while its open PRs, members and membership stay. An active
+      // claim is released through the claim path first; this never takes a held claim.
+      const from = r.from!;
+      if (claims.includes(from))
+        return claimHeld(
+          [from],
+          "release that claim first; unassign clears only continuing delivery responsibility",
+        );
+      const ticketHeld = fold.ticketResponsible === from;
+      const held = fold.members.filter((m) => m.responsible === from);
+      if (!ticketHeld && !held.length)
+        return noop(`${from} holds no ticket or deliverable responsibility on #${number}.`);
+      return accepted(
+        draft({
+          from,
+          login,
+          expected: {
+            ticket: ticketHeld ? fold.ticketResponsibilityRecord : null,
+            members: held.map((m) => ({
+              deliverable: deliverableKey(m.deliverable),
+              record: m.responsibilityRecord,
+            })),
+          },
+        }),
+        `override by ${agent} (${login}): released ${from}'s responsibility (${[
+          ...(ticketHeld ? ["the ticket"] : []),
+          ...held.map((m) => deliverableLabel(m.deliverable)),
+        ].join(", ")}); open pull requests, members and membership are kept`,
+      );
+    }
     case "void": {
       const target = r.comment!;
       if (fold.voided.includes(target)) return noop(`Comment ${target} is already voided.`);
@@ -1637,6 +1675,7 @@ export const deliverablesUsage = `Usage: pdb deliverables N attach [--agent NAME
        pdb deliverables N attest [--legacy] --agent NAME --reason TEXT [--evidence URL]
        pdb deliverables N reassign [--agent NAME] --to NAME --reason TEXT
        pdb deliverables N reset [--agent NAME] --as ready|incomplete --reason TEXT
+       pdb deliverables N unassign [--agent NAME] --from AGENT --reason TEXT
        pdb deliverables N void [--agent NAME] --comment ID --reason TEXT
   Every form also takes [--dry-run] [--json] [--repo owner/name].`;
 
@@ -1661,6 +1700,8 @@ named pull requests, folds the trusted delivery records, then posts one record c
   attest      Non-code outcome; only when the set is empty and complete, or every member merged
               into its target (ATTEST_NOT_APPLICABLE otherwise)
   reassign    Maintainer override: make another agent responsible (no claim may be held)
+  unassign    Maintainer release (#1019): clear AGENT's continuing responsibility; open PRs,
+              members and membership stay, so another agent can adopt them
   reset       Maintainer override: end responsibility and return the ticket to ready or
               incomplete (removes status:awaiting-review and the other readiness label);
               refused RESET_HAS_OPEN_PR while an open PR links or closes the issue
@@ -1690,6 +1731,7 @@ export function deliverablesArguments(args: string[]) {
       target: { type: "string" },
       reason: { type: "string" },
       to: { type: "string" },
+      from: { type: "string" },
       membership: { type: "string" },
       legacy: { type: "boolean" },
       evidence: { type: "string" },
@@ -1740,6 +1782,9 @@ export function deliverablesArguments(args: string[]) {
     fail(`--pr does not apply to ${act}.`);
   if (act === "retarget" && !target) fail("retarget needs --target owner/name:branch.");
   if (target && act !== "attach" && act !== "retarget") fail(`--target does not apply to ${act}.`);
+  if ((act === "unassign") !== (values.from !== undefined))
+    fail("--from AGENT applies to unassign only, and unassign needs it.");
+  if (values.from !== undefined && !name.test(values.from)) fail("--from must be an agent name.");
   const needsTo = act === "handoff" || act === "reassign";
   if (needsTo && (!values.to || !name.test(values.to))) fail(`${act} needs --to NAME.`);
   if (!needsTo && values.to) fail(`--to does not apply to ${act}.`);
@@ -1781,6 +1826,7 @@ export function deliverablesArguments(args: string[]) {
     evidence,
     comment: values.comment ?? null,
     as: (values.as as "ready" | "incomplete" | undefined) ?? null,
+    from: values.from ?? null,
   };
   return {
     request,
