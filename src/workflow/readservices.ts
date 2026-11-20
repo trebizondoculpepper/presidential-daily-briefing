@@ -3,6 +3,7 @@
  * summary", #373). The CLI and `pdb serve` call these directly; neither runs the other or parses
  * terminal text, so both emit the same versioned JSON for the same facts.
  */
+import { readLiveClaimBinding } from "./claimbindingread.js";
 import { ticketDoctor, ticketDoctorText } from "./ticketdoctor.js";
 import type { DeclaredReviewPolicy } from "./reviewpolicy.js";
 import { collectIssueFocus, hydratePullRequests } from "../github/github.js";
@@ -165,6 +166,27 @@ export async function readWho(
           }),
         )
       : null;
+  // #690: the employing human bound to each recorded owner's current claim, live only (null:
+  // not read). An unknown binding is reported with its reason; it never removes a claim.
+  const claimHuman =
+    boundaries.live && !options.offline && ownership.recordedOwners
+      ? await Promise.all(
+          ownership.recordedOwners
+            // A label whose claim was observed released or closed binds nothing to read.
+            .filter((agent) => claimActivity?.find((a) => a.agent === agent)?.state !== "not-owned")
+            .map(async (agent) => ({
+              agent,
+              ...(await readLiveClaimBinding(snapshot.repository, number, agent, {
+                query: boundaries.live!.query as GraphQuery,
+                permission: permissionLookup(
+                  snapshot.repository,
+                  boundaries.live!.rest,
+                  boundaries.signal,
+                ),
+              })),
+            })),
+        )
+      : null;
   const unknownActivity = (claimActivity ?? []).filter((f) => f.state === "unknown");
   if (unknownActivity.length)
     ownership.completeness = {
@@ -179,13 +201,18 @@ export async function readWho(
     };
   const report = withDeliveryCompleteness(
     issue
-      ? { ...ownership, claimActivity, ...deliveryFields(issue, view) }
-      : { ...ownership, claimActivity },
+      ? { ...ownership, claimActivity, claimHuman, ...deliveryFields(issue, view) }
+      : { ...ownership, claimActivity, claimHuman },
     read,
   );
   const text = appendLines(ticketOwnershipText(ownership), [
     ...(claimActivity ?? []).map(
       (a) => `Claim activity: ${a.agent}: ${a.state}${a.reason ? ` (${a.reason})` : ""}`,
+    ),
+    ...(claimHuman ?? []).map((h) =>
+      h.state === "bound"
+        ? `Employing human: ${h.agent}: ${h.login} (${h.provenance}, ${h.host})`
+        : `Employing human: ${h.agent}: unknown (${h.reason}: ${h.why})`,
     ),
     ...deliveryLines(view),
     ...omissionLines(read),
