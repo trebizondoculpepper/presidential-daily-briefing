@@ -475,3 +475,8 @@ export function seriesMembers(figure: AssessmentQueueSeriesFigure): string[] {
     ...new Set([...figure.series.days.flatMap((d) => d.members), ...figure.series.partial.members]),
   ];
 }
+
+/** The tickets behind one day's figure (#1144 review): known or observed members for that day. */
+export function volumeDayMembers(figure: AssessmentQueueSeriesFigure, day: string): string[] {
+  return figure.series.days.find((x) => x.day === day)?.members ?? [];
+}

@@ -104,12 +104,15 @@ const html = (body: unknown) =>
     .body.replace(/<!--[\s\S]*?-->/g, "")
     .replace(/\s+/g, " ")
     .replace(/> </g, "><");
-const row = (out: string, day: string) =>
-  [
-    ...new RegExp(`<th scope="row"><time datetime="${day}">${day}</time></th>((?:<td>[^<]*</td>)+)`)
-      .exec(out)![1]!
-      .matchAll(/<td>([^<]*)<\/td>/g),
-  ].map((m) => m[1]);
+/** A day row's figures: each cell's text, or its disclosure summary when it lists tickets. */
+const row = (out: string, day: string) => {
+  const start = out.indexOf(`<th scope="row"><time datetime="${day}">`);
+  const tr = out.slice(start, out.indexOf("</tr>", start));
+  return [...tr.matchAll(/<td>(.*?)<\/td>/g)].map((m) => {
+    const summary = /<summary[^>]*>([^<]*)<\/summary>/.exec(m[1]!);
+    return summary ? summary[1]! : m[1]!;
+  });
+};
 
 describe("assessment pace (#687)", () => {
   const tickets = [
@@ -132,7 +135,7 @@ describe("assessment pace (#687)", () => {
     expect(row(out, "2026-11-19")).toEqual(["1", "1", "1"]);
     // Today's partial row states its UTC cutoff (#1144 review).
     expect(out).toMatch(
-      /2026-11-20<\/time> so far \(through <time datetime="2026-11-20T12:00:00\.000Z">2026-11-20T12:00:00\.000Z<\/time>\)<\/th><td>1<\/td><td>0<\/td><td>0<\/td>/,
+      /2026-11-20<\/time> so far \(through <time datetime="2026-11-20T12:00:00\.000Z">2026-11-20T12:00:00\.000Z<\/time>\)<\/th><td><details/,
     );
     // Reassessments are events, reported apart from the ticket columns.
     expect(out).toContain("Reassessments in this window");
@@ -190,5 +193,24 @@ describe("assessment pace (#687)", () => {
     );
     expect(out).toContain("<summary>New tickets: 1 undated ticket</summary>");
     expect(out).toContain('<a href="/ticket?repo=o%2Fr&amp;n=9">o/r#9</a>');
+  });
+
+  it("lets each daily figure open the tickets behind it (#1144 review)", () => {
+    const out = html(envelope(tickets, "2026-11-01T00:00:00.000Z"));
+    const start = out.indexOf('datetime="2026-11-19"');
+    const day = out.slice(start, out.indexOf("</tr>", start));
+    // The 19th's new tickets list #2; its first complexity assessments list #1.
+    expect(day).toMatch(
+      /<summary aria-label="New tickets, 2026-11-19: 1; show 1 ticket">1<\/summary><ul><li><a href="\/ticket\?repo=o%2Fr&amp;n=2">o\/r#2<\/a>/,
+    );
+    expect(day).toMatch(
+      /aria-label="First complexity assessments, 2026-11-19: 1; show 1 ticket">1<\/summary><ul><li><a href="\/ticket\?repo=o%2Fr&amp;n=1">/,
+    );
+    // Today's partial row opens its observed ticket.
+    expect(out).toContain('aria-label="New tickets, today so far: 1; show 1 ticket"');
+    // A zero figure is plain text, with nothing to open.
+    expect(row(out, "2026-11-18")).toEqual(["1", "0", "0"]);
+    const start18 = out.indexOf('datetime="2026-11-18"');
+    expect(out.slice(start18, out.indexOf("</tr>", start18))).toContain("<td>0</td>");
   });
 });

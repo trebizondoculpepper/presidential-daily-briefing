@@ -1,5 +1,12 @@
 <script lang="ts">
-  import { seriesMembers, ticketLink, volumeAverage, volumeCell } from "./client.js";
+  import {
+    seriesMembers,
+    ticketLink,
+    volumeAverage,
+    volumeCell,
+    volumeDayMembers,
+  } from "./client.js";
+  import VolumeCell from "./VolumeCell.svelte";
   import type { AssessmentResponse } from "./client.js";
 
   let { response }: { response: AssessmentResponse } = $props();
@@ -75,7 +82,13 @@
         {#each days as day (day)}
           <tr>
             <th scope="row"><time datetime={day}>{day}</time></th>
-            {#each columns as c (c.id)}<td>{volumeCell(c.figure, day)}</td>{/each}
+            {#each columns as c (c.id)}<td
+                ><VolumeCell
+                  text={volumeCell(c.figure, day)}
+                  members={volumeDayMembers(c.figure, day)}
+                  label={`${c.label}, ${day}`}
+                /></td
+              >{/each}
           </tr>
         {/each}
         <tr>
@@ -86,7 +99,13 @@
               >{incoming.series.partial.observedThrough}</time
             >)
           </th>
-          {#each columns as c (c.id)}<td>{c.figure.series.partial.observed}</td>{/each}
+          {#each columns as c (c.id)}<td
+              ><VolumeCell
+                text={String(c.figure.series.partial.observed)}
+                members={c.figure.series.partial.members}
+                label={`${c.label}, today so far`}
+              /></td
+            >{/each}
         </tr>
       </tbody>
       <tfoot>
