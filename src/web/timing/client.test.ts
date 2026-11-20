@@ -213,3 +213,29 @@ describe("timing page: creation to first impact assessment (#822)", () => {
     expect(states.at(-1)).toMatchObject({ status: "ready", response: { stats: { completed: 1 } } });
   });
 });
+
+describe("timing page: creation to first complexity assessment (#823)", () => {
+  it("reads only the complexity metric's latency from the same view", () => {
+    const body = {
+      status: "complete",
+      result: {
+        kind: "pipeline-metrics",
+        view: "assessment-queue",
+        window: { from: "2026-11-14T00:00:00.000Z", through: "2026-11-20T10:00:00.000Z" },
+        metrics: {
+          impact: { firstAssessmentLatency: stats([1]) },
+          complexity: { firstAssessmentLatency: stats([3, 5, 7], 1, 2) },
+        },
+      },
+    };
+    const r = parseLatencyResponse(body, "complexity")!;
+    expect(r.stats).toMatchObject({
+      completed: 3,
+      median: 5 * hour,
+      unknown: 2,
+      open: { count: 1 },
+    });
+    expect(r.stats.members.unknown).toHaveLength(2);
+    expect(parseLatencyResponse(body, "impact")!.stats.completed).toBe(1);
+  });
+});
