@@ -497,6 +497,61 @@ describe("claim and needs-human (doc/design/workflow.md)", () => {
     expect(text).toContain("DRY RUN");
     expect(text).toContain("--add-label agent:kavya");
   });
+
+  describe("claim: adopting preserved work after a human-directed release (#1019)", () => {
+    const pr = (n: number) => `https://github.com/${repo}/pull/${n}`;
+    const released = (extra = {}) => ({
+      release: { trust: "trusted", from: "alice", preservedPrUrls: [pr(12)], ...extra },
+    });
+    const adopt = (facts: unknown, labels = ["status:awaiting-review"]) => {
+      const env = fake({ labels, openPrs: [12] });
+      return planClaim(
+        repo,
+        { number: 7, agent: "kavya" },
+        env.query,
+        env.permission,
+        undefined,
+        undefined,
+        async () => facts as never,
+      );
+    };
+
+    it("admits the claim the briefing's D-ADOPT recommends, despite awaiting-review and the open PR", async () => {
+      const plan = accepted(await adopt(released()));
+      expect(plan.notes?.join(" ")).toMatch(/Adopting preserved work released from alice/);
+      expect(plan.notes?.join(" ")).toContain("pdb submit 7 --agent kavya");
+    });
+
+    it("lets the native rules refuse while the ticket is owned, the PR is owned or unknown, or the fold is unread", async () => {
+      for (const facts of [
+        { ...released(), ticketResponsible: true },
+        released({ ownedPrUrls: [pr(12)] }),
+        released({ unknownPrUrls: [pr(12)] }),
+        { responsibilityUnknown: true },
+        undefined,
+      ])
+        expect(["NOT_READY", "HAS_OPEN_PR"]).toContain(refused(await adopt(facts)).error);
+    });
+
+    it("refuses rather than guessing when the delivery records cannot be read", async () => {
+      const env = fake({ labels: ["status:awaiting-review"], openPrs: [12] });
+      const plan = refused(
+        await planClaim(
+          repo,
+          { number: 7, agent: "kavya" },
+          env.query,
+          env.permission,
+          undefined,
+          undefined,
+          async () => {
+            throw new Error("rate limited");
+          },
+        ),
+      );
+      expect(plan.error).toBe("EVIDENCE_INCOMPLETE");
+      expect(env.writes).toEqual([]);
+    });
+  });
 });
 
 describe("claim and needs-human review fixes", () => {

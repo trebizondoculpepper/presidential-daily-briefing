@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vite-plus/test";
 import { evaluateUnassignDecision } from "../rules/datalog/unassign.js";
+import { evaluateClaimAdmission } from "../rules/datalog/engine.js";
 import {
+  adoptionFacts,
   applyDeliverables,
   deliverablesArguments,
   deliverablesText,
@@ -1856,6 +1858,81 @@ describe("a throttled reset record re-checks the reset prerequisites (#345)", ()
 describe("deliverables unassign: human-directed responsibility release (#1019)", () => {
   const both = () =>
     post(rec("submit", { deliverables: [member(998), member(999)], membership: "complete" }));
+
+  describe("adoption facts for claim admission (#1149 review)", () => {
+    const admit = (facts: Awaited<ReturnType<typeof adoptionFacts>>) =>
+      evaluateClaimAdmission({
+        ...facts,
+        state: "OPEN",
+        labels: ["status:awaiting-review"],
+        labelsComplete: true,
+        nativeComplete: true,
+        openBlockers: 0,
+        openPrCount: 2,
+        platform: null,
+        platforms: [],
+        ownedClaimsComplete: true,
+        claimedByOther: false,
+      });
+    const release = async (submit: DeliveryComment, prs: FakePr[]) => {
+      const { rt } = github({ comments: [submit], prs, labels: ["status:awaiting-review"] });
+      const done = await applyDeliverables(
+        repo,
+        request("unassign", { agent: "maint", from: "alice" }),
+        rt,
+      );
+      expect(done.exitCode).toBe(0);
+      return adoptionFacts(repo, N, rt);
+    };
+
+    it("admits the replacement's claim once the released agent held everything (#891/#930 shape)", async () => {
+      const facts = await release(both(), [fakePr(998), fakePr(999)]);
+      expect(facts).toMatchObject({
+        release: { from: "alice", preservedPrUrls: [prLink(998), prLink(999)], unknownPrUrls: [] },
+        ticketResponsible: false,
+      });
+      expect([...admit(facts)]).toEqual([]);
+    });
+
+    it("keeps refusing while another agent still holds the ticket (split ownership)", async () => {
+      const split = post(
+        rec("submit", {
+          agent: "bob",
+          responsible: "alice",
+          deliverables: [member(998)],
+          membership: "complete",
+        }),
+      );
+      const facts = await release(split, [fakePr(998)]);
+      expect(facts?.ticketResponsible).toBe(true);
+      expect(admit(facts)).toContain("CLAIM-NOT-READY");
+    });
+
+    it("treats a preserved PR that also closes another issue as unknown ownership", async () => {
+      const shared = fakePr(998, {
+        closingIssuesReferences: {
+          nodes: [
+            { number: N, repository: { nameWithOwner: repo } },
+            { number: 77, repository: { nameWithOwner: repo } },
+          ],
+        },
+      });
+      const facts = await release(both(), [shared, fakePr(999)]);
+      expect(facts?.release?.unknownPrUrls).toEqual([prLink(998)]);
+      // PR 999 alone is still preserved unowned work, so the ticket stays adoptable.
+      expect([...admit(facts)]).toEqual([]);
+      const onlyShared = await release(
+        post(rec("submit", { deliverables: [member(998)], membership: "complete" })),
+        [shared],
+      );
+      expect(admit(onlyShared)).toContain("D-DENY-OPEN-PR");
+    });
+
+    it("reports nothing without an applied release, so ordinary admission is unchanged", async () => {
+      const { rt } = github({ comments: [both()], prs: [fakePr(998), fakePr(999)] });
+      expect(await adoptionFacts(repo, N, rt)).toBeUndefined();
+    });
+  });
 
   it("parses --from, which only unassign takes and unassign needs", () => {
     const ok = deliverablesArguments([

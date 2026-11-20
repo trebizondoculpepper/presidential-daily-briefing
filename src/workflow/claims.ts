@@ -16,6 +16,7 @@ import {
 } from "./claimactivity.js";
 import type { QuestionResolutionRecord } from "./claimactivity.js";
 import { evaluateClaimAdmission } from "../rules/datalog/engine.js";
+import type { ClaimAdmissionInput } from "../rules/datalog/engine.js";
 import { workflow } from "./definition.js";
 import { ghQuery, permissionLookup, writePermissions } from "../github/github.js";
 import type { PermissionLookup } from "../github/github.js";
@@ -215,6 +216,15 @@ export type ReworkAuthority =
   | { path: "legacy" }
   | { path: "delivery" }
   | { refusal: { error: string; prerequisite: string; recovery: string[] } };
+
+/**
+ * Adoption facts for a claim on released work (#1019): read by an injected host reader and
+ * passed unchanged to the native claim admission, which alone decides `adoptable`.
+ */
+export type ClaimAdoptionFacts = Pick<
+  ClaimAdmissionInput,
+  "release" | "ticketResponsible" | "responsibilityUnknown"
+>;
 
 /**
  * The retained-claim admission guard (#412, doc/design/blocked-retained-claims.md), injected so
@@ -688,6 +698,7 @@ export async function planClaim(
   permission: PermissionLookup = permissionLookup(repository),
   reworkAuthority?: () => Promise<ReworkAuthority>,
   admission?: Admission,
+  adoption?: () => Promise<ClaimAdoptionFacts | undefined>,
 ): Promise<ClaimPlan> {
   const exception: { waiting: number[]; notes: string[] } = { waiting: [], notes: [] };
   const plan = await planClaimFor(
@@ -698,6 +709,7 @@ export async function planClaim(
     reworkAuthority,
     admission,
     exception,
+    adoption,
   );
   if (!plan.ok || !exception.waiting.length) return plan;
   return {
@@ -715,6 +727,7 @@ async function planClaimFor(
   reworkAuthority: (() => Promise<ReworkAuthority>) | undefined,
   admission: Admission | undefined,
   exception: { waiting: number[]; notes: string[] },
+  adoption?: () => Promise<ClaimAdoptionFacts | undefined>,
 ): Promise<ClaimPlan> {
   const { number, agent, branch = null, platform = null, rework = false } = request;
   const { item, claims, claimsComplete, repoLabels } = await readTicket(
@@ -956,7 +969,24 @@ async function planClaimFor(
   const restrictions = facts.labels
     .filter((l) => l.startsWith(claimPolicy.platformPrefix))
     .map((l) => l.slice(claimPolicy.platformPrefix.length));
+  // #1019: released work with a preserved open PR is offered for adoption (D-ADOPT); its facts
+  // reach the native admission, which alone decides whether the open PR or a held status still
+  // refuses the claim. Read only when an open PR could otherwise refuse it.
+  let adopting: ClaimAdoptionFacts | undefined;
+  if (!rework && adoption && openPrs.length > 0) {
+    try {
+      adopting = await adoption();
+    } catch (error) {
+      return refuse(
+        "EVIDENCE_INCOMPLETE",
+        { ...facts, pullRequests: openPrs.map((p) => p.url) },
+        `The delivery records of #${number} could not be read (${error instanceof Error ? error.message : "unknown error"}), so whether its open pull request is preserved unowned work is unknown; nothing was written.`,
+        [command(`who ${number}`), `${triage} --issue ${number}`],
+      );
+    }
+  }
   const denials = evaluateClaimAdmission({
+    ...adopting,
     state: item.state,
     labels: facts.labels,
     labelsComplete: !item.labels.pageInfo?.hasNextPage,
@@ -1090,10 +1120,15 @@ async function planClaimFor(
     facts,
     changes,
     recheck: { agent },
-    ...(ignored.length || deliveryPath
+    ...(ignored.length || deliveryPath || adopting?.release
       ? {
           notes: [
             ...ignoredNote(ignored),
+            ...(adopting?.release
+              ? [
+                  `Adopting preserved work released from ${adopting.release.from}: continue ${adopting.release.preservedPrUrls.join(", ")} rather than opening a duplicate PR, then become responsible with pdb submit ${number} --agent ${agent} --repo ${repository}.`,
+                ]
+              : []),
             ...(deliveryPath
               ? [
                   `Rework by the ticket-responsible agent: after the claim, a delivery record reopens membership (membership open, reason "rework claim"); finish with pdb submit ${number} --agent ${agent} --repo ${repository}.`,

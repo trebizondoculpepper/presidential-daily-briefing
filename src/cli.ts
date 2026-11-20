@@ -175,6 +175,7 @@ import {
   submitArguments,
   submitHelp,
   reworkAuthority,
+  adoptionFacts,
   reworkMembershipRequest,
   planDeliverables,
 } from "./workflow/deliverables.js";
@@ -2281,6 +2282,7 @@ async function run(
                 ? () => reworkAuthority(repository, values.number, values.agent, rt)
                 : undefined,
               admissionFor(repository, values.agent, query, permission),
+              () => adoptionFacts(repository, values.number, rt),
             );
     const stillWaiting = stillWaitingFor(repository, values.agent, query, permission);
     // needs-human on a claim the caller keeps (#412): question first, then the wait bound to

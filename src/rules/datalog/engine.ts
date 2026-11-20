@@ -680,7 +680,15 @@ export interface ClaimAdmissionInput {
     from: string;
     /** Open preserved PRs continuing the unowned work (their state is asserted OPEN). */
     preservedPrUrls: readonly string[];
+    /** Preserved PRs another agent is responsible for, e.g. through another issue (#1019). */
+    ownedPrUrls?: readonly string[];
+    /** Preserved PRs whose ownership could not be read; unknown, never unowned (#1019). */
+    unknownPrUrls?: readonly string[];
   };
+  /** The ticket still has a responsible agent on its trusted delivery fold (#1019). */
+  ticketResponsible?: boolean;
+  /** The ticket's delivery records could not be folded, so its responsibility is unknown. */
+  responsibilityUnknown?: boolean;
 }
 
 /** Pure claim-admission seam (#1086); all pickup denial rules live in native EDN. */
@@ -719,8 +727,15 @@ export function evaluateClaimAdmission(input: ClaimAdmissionInput): Set<string> 
     input.release.preservedPrUrls.forEach((url, i) => {
       const pr = 400 + i;
       facts.push([releaseEntity, "release-pr", pr], [pr, "state", "OPEN"], [pr, "target", url]);
+      if (input.release!.ownedPrUrls?.includes(url)) facts.push([pr, "responsible", "other"]);
+      if (input.release!.unknownPrUrls?.includes(url))
+        facts.push([pr, "responsibility-unknown", true]);
     });
   }
+  // #1019: the native released-unowned rule withholds adoption from a ticket still owned, or
+  // whose ownership is unknown; the host only reports these facts.
+  if (input.ticketResponsible) facts.push([100, "responsible", "other"]);
+  if (input.responsibilityUnknown) facts.push([100, "responsibility-unknown", true]);
   const db = ds.init_db(facts, bundle.schema);
   const rows = ds.q(bundle.queries["claim-denials"], db, bundle.clauses) as [number, string][];
   return new Set(rows.filter(([id]) => id === 100).map(([, code]) => code));

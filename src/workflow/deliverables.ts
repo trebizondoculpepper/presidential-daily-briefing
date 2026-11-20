@@ -18,7 +18,14 @@ import { parseArgs } from "node:util";
 import { workflow } from "./definition.js";
 import { claimPolicy, failStep, retryLine, shellQuote, ticketGuard, writeStep } from "./claims.js";
 import type { Query } from "../github/github.js";
-import type { Comment, GhRun, GraphQuery, PlanStep, ReworkAuthority } from "./claims.js";
+import type {
+  ClaimAdoptionFacts,
+  Comment,
+  GhRun,
+  GraphQuery,
+  PlanStep,
+  ReworkAuthority,
+} from "./claims.js";
 import {
   attestApplicability,
   deliverableKey,
@@ -1451,6 +1458,72 @@ export async function planDeliverables(
       notes.push(`${agent} holds the claim; the ordinary command also applies: ${ordinary}`);
     return null;
   }
+}
+
+/**
+ * Adoption facts for `claim` (#1019, doc/design/human-responsibility-release.md): the trusted,
+ * applied human-directed releases on the ticket, its preserved open PR members, and whether the
+ * ticket or those PRs still have (or may have) an owner. Only facts: the native claim admission
+ * (`adoptable`) decides. Undefined when the ticket has no applied release, so ordinary admission
+ * is unchanged; an unreadable fold reports unknown responsibility, never "unowned".
+ */
+export async function adoptionFacts(
+  repository: string,
+  number: number,
+  rt: DeliverablesRuntime,
+): Promise<ClaimAdoptionFacts | undefined> {
+  const read = await readIssue(repository, number, rt.query);
+  const item = read.item;
+  if (!item || item.__typename !== "Issue") return undefined;
+  const history = await readDeliveryComments(repository, number, item.comments, rt.query);
+  const { records, fold } = await readDeliveryFold(
+    history.comments,
+    history.complete,
+    { repository, issue: number },
+    rt.trust,
+  );
+  if (fold.recordsUnknown) return { responsibilityUnknown: true };
+  const releases = fold.applied
+    .filter((a) => a.op === "unassign")
+    .flatMap((a) => {
+      const rec = records.find(
+        (r) => r.status === "trusted" && String(r.comment.databaseId) === a.comment,
+      );
+      return rec?.status === "trusted" && rec.record.from ? [rec.record.from] : [];
+    });
+  if (!releases.length) return undefined;
+  const preserved: string[] = [];
+  const unknown: string[] = [];
+  for (const m of fold.members) {
+    if (m.deliverable.kind !== "pr" || m.responsible !== null) continue;
+    const url = `https://github.com/${m.deliverable.repository}/pull/${m.deliverable.number}`;
+    const pr = await readPr(url, rt.query).catch(() => null);
+    if (!pr) {
+      unknown.push(url);
+      preserved.push(url);
+      continue;
+    }
+    if (pr.state !== "OPEN") continue;
+    preserved.push(pr.url);
+    // A PR that also closes another issue may be owned there; that issue's records are not read
+    // here, so its ownership is unknown, never unowned (fails closed, like #1149's briefing read).
+    const closes = pr.closingIssuesReferences?.nodes;
+    if (
+      !closes ||
+      closes.length >= 50 ||
+      closes.some((i) => !sameRepo(i.repository.nameWithOwner, repository) || i.number !== number)
+    )
+      unknown.push(pr.url);
+  }
+  return {
+    release: {
+      trust: "trusted",
+      from: releases[releases.length - 1]!,
+      preservedPrUrls: preserved,
+      unknownPrUrls: unknown,
+    },
+    ticketResponsible: fold.ticketResponsible !== null,
+  };
 }
 
 /**
