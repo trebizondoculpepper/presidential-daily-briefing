@@ -80,15 +80,15 @@ export async function readTeam(
   snapshot = withPolicy(snapshot, boundaries);
   // #413: each claim's activity on a live read, with the claim guard's own reader (bounded).
   const holders = teamView(snapshot, options).agents.map((a) => a.agent);
+  // One lookup per read, shared by every activity and binding read (it caches per login).
+  const permission = boundaries.live
+    ? permissionLookup(snapshot.repository, boundaries.live.rest, boundaries.signal)
+    : undefined;
   const activity =
     boundaries.live && !options.offline && holders.length
       ? await readTeamActivity(snapshot, holders, {
           query: boundaries.live.query as GraphQuery,
-          permission: permissionLookup(
-            snapshot.repository,
-            boundaries.live.rest,
-            boundaries.signal,
-          ),
+          permission: permission!,
         })
       : null;
   // #690: the employing human of each claim whose activity was read and is still held, read
@@ -103,11 +103,7 @@ export async function readTeam(
         if (fact.state === "not-owned") continue;
         const b = await readLiveClaimBinding(snapshot.repository, fact.number, agent, {
           query: boundaries.live.query as GraphQuery,
-          permission: permissionLookup(
-            snapshot.repository,
-            boundaries.live.rest,
-            boundaries.signal,
-          ),
+          permission: permission!,
         });
         const perAgent = humans.get(agent) ?? new Map();
         perAgent.set(
@@ -176,6 +172,10 @@ export async function readWho(
   const read = deliveryRead(scoped, diagnosis ?? (await diagnoseDelivery(scoped, boundaries)));
   const view = read.tickets.find((t) => t.number === number) ?? null;
   const issue = scoped.issues[0];
+  // One lookup per read, shared by the activity and binding reads (it caches per login).
+  const permission = boundaries.live
+    ? permissionLookup(snapshot.repository, boundaries.live.rest, boundaries.signal)
+    : undefined;
   // #413: each recorded owner's claim activity on this ticket, live only (null: not read).
   const claimActivity =
     boundaries.live && !options.offline && ownership.recordedOwners
@@ -183,11 +183,7 @@ export async function readWho(
           ownership.recordedOwners.map(async (agent) => {
             const fact = await readClaimActivity(snapshot.repository, number, agent, {
               query: boundaries.live!.query as GraphQuery,
-              permission: permissionLookup(
-                snapshot.repository,
-                boundaries.live!.rest,
-                boundaries.signal,
-              ),
+              permission: permission!,
             });
             return { agent, state: fact.state, reason: fact.reason };
           }),
@@ -205,11 +201,7 @@ export async function readWho(
               agent,
               ...(await readLiveClaimBinding(snapshot.repository, number, agent, {
                 query: boundaries.live!.query as GraphQuery,
-                permission: permissionLookup(
-                  snapshot.repository,
-                  boundaries.live!.rest,
-                  boundaries.signal,
-                ),
+                permission: permission!,
               })),
             })),
         )
