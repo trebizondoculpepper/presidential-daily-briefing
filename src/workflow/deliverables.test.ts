@@ -2022,6 +2022,45 @@ describe("deliverables unassign: human-directed responsibility release (#1019)",
       expect(posted(g.state).map((r) => r?.op)).toEqual(["unassign", "submit"]);
     });
 
+    it("runs the full suggested sequence: attach then submit leave every PR owned by the adopter", async () => {
+      const g = github({
+        comments: [
+          post(
+            rec("submit", {
+              deliverables: [member(997), member(998), member(999)],
+              membership: "open",
+            }),
+          ),
+        ],
+        prs: [fakePr(997), fakePr(998), fakePr(999)],
+        labels: ["status:awaiting-review"],
+      });
+      await applyDeliverables(repo, request("unassign", { agent: "maint", from: "alice" }), g.rt);
+      g.state.labels.push("agent:kavya");
+      for (const n of [997, 998]) {
+        const step = await applyDeliverables(
+          repo,
+          request("attach", {
+            agent: "kavya",
+            reason: "adopt preserved work",
+            prs: [prLink(n)],
+            membership: "open",
+          }),
+          g.rt,
+        );
+        expect(step.exitCode, JSON.stringify(step)).toBe(0);
+      }
+      const submit = await applyDeliverables(
+        repo,
+        request("submit", { agent: "kavya", reason: null, prs: [prLink(999)] }),
+        g.rt,
+      );
+      expect(submit.exitCode, JSON.stringify(submit)).toBe(0);
+      const facts = await adoptionFacts(repo, N, g.rt);
+      // No member is left unowned: nothing remains to adopt.
+      expect(facts?.release?.preservedPrUrls ?? []).toEqual([]);
+    });
+
     it("lets the adopter become responsible with the suggested submit command", async () => {
       const g = github({
         comments: [both()],

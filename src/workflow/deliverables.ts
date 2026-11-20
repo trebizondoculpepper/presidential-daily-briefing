@@ -1110,7 +1110,13 @@ export async function planDeliverables(
         );
       const fresh = deliverables.filter((d) => {
         const m = memberOf(d);
-        return !m || JSON.stringify(m.deliverable.target) !== JSON.stringify(d.target);
+        // An unowned member (after a human-directed release, #1019) is not "already required"
+        // for this purpose: attaching it is how an adopter becomes responsible for it.
+        return (
+          !m ||
+          m.responsible === null ||
+          JSON.stringify(m.deliverable.target) !== JSON.stringify(d.target)
+        );
       });
       if (!fresh.length && (!r.membership || r.membership === fold.membership))
         return noop("Every named deliverable is already required with that target.");
