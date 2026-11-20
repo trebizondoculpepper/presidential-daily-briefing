@@ -39,4 +39,11 @@ describe("readSnapshotRefinements (#1098)", () => {
     const facts = await readSnapshotRefinements(snapshot([i], []), unknown as never);
     expect(facts.get(i.url)?.complete).toBe(false);
   });
+
+  it("keeps a label seen on an incomplete label page as incomplete facts (#1194 review)", async () => {
+    const i = issue(6, ["status:ready", refinementLabel]);
+    i.labels.pageInfo.hasNextPage = true;
+    const facts = await readSnapshotRefinements(snapshot([i], []), trusted);
+    expect(facts.get(i.url)?.complete).toBe(false);
+  });
 });

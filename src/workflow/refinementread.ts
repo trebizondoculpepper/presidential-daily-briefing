@@ -32,9 +32,9 @@ export async function readSnapshotRefinements(
     if (issue.state !== "OPEN") continue;
     const comments = issue.comments.nodes as unknown as Comment[];
     const labelsComplete = !issue.labels.pageInfo.hasNextPage;
-    const labelPresent = labelsComplete
-      ? issue.labels.nodes.some((l) => l.name === refinementLabel)
-      : null;
+    // A label seen on a partial page is still present; only its absence is unknown then.
+    const seen = issue.labels.nodes.some((l) => l.name === refinementLabel);
+    const labelPresent = seen ? true : labelsComplete ? false : null;
     const hasRecord = comments.some((c) => parseRefinementComment(c.body ?? "").kind !== "none");
     if (labelPresent === false && !hasRecord) continue;
     if (labelPresent === null && !hasRecord) continue;
