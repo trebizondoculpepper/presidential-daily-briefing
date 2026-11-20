@@ -1318,7 +1318,20 @@ export async function planDeliverables(
       });
       if (decision.verdict === "noop") return noop(decision.reason);
       if (decision.verdict === "refuse")
-        return refuse(decision.code, facts, decision.reason, [cmd(`who ${number}`), retry]);
+        return refuse(
+          decision.code,
+          facts,
+          claimPresent
+            ? `${decision.reason} ${workflow.ownerPrefix}${from} still holds an active claim, which this command does not read or remove: release that claim through its own guarded path, then run unassign for the continuing responsibility.`
+            : decision.reason,
+          [
+            cmd(`who ${number}`),
+            ...(claimPresent
+              ? [cmd(`release ${number} --agent ${from} --as ready --note TEXT`)]
+              : []),
+            retry,
+          ],
+        );
       // The policy may admit a claim release, but this command writes only the responsibility
       // record; the claim's own guarded release path removes the label (mechanics, not policy).
       if (claimPresent)

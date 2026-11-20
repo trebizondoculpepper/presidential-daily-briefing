@@ -1943,5 +1943,15 @@ describe("deliverables unassign: human-directed responsibility release (#1019)",
       // Decided by the native Unassign policy: the claim's history is not read here.
       "EVIDENCE_INCOMPLETE",
     );
+    const claimed = await planDeliverables(
+      repo,
+      request("unassign", { agent: "maint", from: "alice" }),
+      github({ comments: [both()], labels: ["agent:alice"] }).rt,
+    );
+    // The recovery names the claim's own guarded release (#1147 review).
+    expect(!claimed.ok && claimed.recovery.join("\n")).toMatch(
+      /release 42 --agent alice --as ready/,
+    );
+    expect(!claimed.ok && claimed.prerequisite).toMatch(/agent:alice still holds an active claim/);
   });
 });
