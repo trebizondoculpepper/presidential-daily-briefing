@@ -602,30 +602,44 @@ async function runNativeStop(
       if (values.role !== undefined && !["implementer", "designer"].includes(values.role))
         throw new Error("invalid role");
       const requestedRole = values.role as "implementer" | "designer" | undefined;
-      const effectiveIdentity = runtime.prepareIdentity
-        ? await runtime.prepareIdentity({
-            project: target.root,
-            repository,
-            agent: values.agent,
-            entry: values.entry,
-            harness: values.harness,
-            role: requestedRole,
-            requireProject: true,
-            intent: "readonly",
-          })
-        : undefined;
-      const identity = effectiveIdentity
-        ? effectiveReadIdentity(effectiveIdentity, "tool")
-        : await resolveReadIdentity({
-            toolAgent: values.agent,
-            project: target.root,
-            repository,
-            entry: values.entry,
-            harness: values.harness,
-            env: runtime.env ?? process.env,
-            fs: runtime.fs,
-            git,
-          });
+      // Claude Code is a detected harness but has no active per-session binding provider (only
+      // codex does), so prepareEffectiveIdentity can never resolve an installed global Claude
+      // hook, making it return {} without checking for work. Resolve the local identity entry
+      // read-only first (its ambiguity checks cover detectClientEntry/resolveEntry and it never
+      // writes); fall back to the prepared identity when the host provides one (reviewed #1126).
+      const readOnly = async () =>
+        resolveReadIdentity({
+          toolAgent: values.agent,
+          project: target.root,
+          repository,
+          entry: values.entry,
+          harness: values.harness,
+          env: runtime.env ?? process.env,
+          fs: runtime.fs,
+          git,
+        });
+      const prepared = async () =>
+        runtime.prepareIdentity
+          ? effectiveReadIdentity(
+              await runtime.prepareIdentity({
+                project: target.root,
+                repository,
+                agent: values.agent,
+                entry: values.entry,
+                harness: values.harness,
+                role: requestedRole,
+                requireProject: true,
+                intent: "readonly",
+              }),
+              "tool",
+            )
+          : readOnly();
+      const identity =
+        profile.platform === "claude-code"
+          ? (await readOnly()).agent
+            ? await readOnly()
+            : await prepared()
+          : await prepared();
       if (!identity.agent) throw new Error("missing identity");
       // An explicit --role wins; otherwise the stored identity's triage role decides the view
       // rather than a hardcoded implementer default (reviewed #1124 finding).

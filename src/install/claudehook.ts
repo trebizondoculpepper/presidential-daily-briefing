@@ -23,6 +23,7 @@ import {
   writeInstallManifestRecord,
   type InstallEditResult,
   type InstallEditErrorCode,
+  type InstallFs,
   type InstallScope,
   type JsonEntryAdapter,
   type ManifestRuntime,
@@ -72,6 +73,16 @@ function manifestWriteRefusal(
     diff: hook.diff,
     manifestRecord: null,
   };
+}
+
+/** Read a file's raw text, or null when it is absent; other read failures propagate. */
+async function readOptionalText(path: string, fs?: InstallFs): Promise<string | null> {
+  try {
+    return await (fs ?? nodeSafeFs).readFile(path);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw error;
+  }
 }
 
 /** The hook event PDB registers for: the synchronous Claude Code Stop event. */
@@ -361,6 +372,8 @@ export async function installClaudeStopHook(params: {
   claudeConfigDir?: boolean;
   /** Injected installed pdb path for tests; resolves from the running package when omitted. */
   pdbPath?: string;
+  /** The approved preview's hook-settings raw text, when an interactive preview was shown. */
+  expectedHooksRaw?: string | null;
   runtime?: ManifestRuntime;
 }): Promise<ClaudeHookResult> {
   const { scope, options, manifestPath, pdbVersion, dryRun, adopt, claudeConfigDir, runtime } =
@@ -385,6 +398,27 @@ export async function installClaudeStopHook(params: {
     };
   const command = claudeStopCommand({ ...options, pdbPath: installedPdb ?? "" });
   const guarded = await withScopeLock(manifestPath, dryRun, runtime, async () => {
+    // Under the operation lock, re-verify the hook settings against what the preview approved:
+    // another installer may have changed the hook or its ownership record while the MCP phase ran
+    // or while this command waited for the lock, and that new state must be refused, not adopted
+    // as the baseline (reviewed #1126 finding).
+    if (!dryRun && params.expectedHooksRaw !== undefined) {
+      const current = await readOptionalText(file, runtime?.fs);
+      if (current !== params.expectedHooksRaw) {
+        return {
+          hook: {
+            action: "kept" as const,
+            outcome: "refused" as const,
+            ownership: "absent" as const,
+            code: "CONFLICT" as const,
+            message:
+              "The Claude settings changed since the preview; re-run to inspect the updated plan.",
+            diff: null,
+            manifestRecord: null,
+          },
+        };
+      }
+    }
     const read = await readInstallManifest(manifestPath, runtime?.fs);
     const manifestBlocked = manifestReadRefusal(read, file);
     if (manifestBlocked) return { hook: manifestBlocked };
@@ -430,6 +464,8 @@ export async function uninstallClaudeStopHook(params: {
   dryRun?: boolean;
   /** True when the global scope's homeDir is an explicit CLAUDE_CONFIG_DIR. */
   claudeConfigDir?: boolean;
+  /** The approved preview's hook-settings raw text, when an interactive preview was shown. */
+  expectedHooksRaw?: string | null;
   runtime?: ManifestRuntime;
 }): Promise<ClaudeHookResult> {
   const { scope, manifestPath, dryRun, claudeConfigDir, runtime } = params;
@@ -439,6 +475,25 @@ export async function uninstallClaudeStopHook(params: {
   // of the package path; no resolution is needed to delete an owned (possibly broken) hook.
   const command = claudeStopCommand({ pdbPath: "" });
   const guarded = await withScopeLock(manifestPath, dryRun, runtime, async () => {
+    // Re-verify the hook settings against the approved preview under the lock, exactly as install
+    // does: a concurrent hook/ownership edit after the preview must be refused, not removed over.
+    if (!dryRun && params.expectedHooksRaw !== undefined) {
+      const current = await readOptionalText(file, runtime?.fs);
+      if (current !== params.expectedHooksRaw) {
+        return {
+          hook: {
+            action: "kept" as const,
+            outcome: "refused" as const,
+            ownership: "absent" as const,
+            code: "CONFLICT" as const,
+            message:
+              "The Claude settings changed since the preview; re-run to inspect the updated plan.",
+            diff: null,
+            manifestRecord: null,
+          },
+        };
+      }
+    }
     const read = await readInstallManifest(manifestPath, runtime?.fs);
     const manifestBlocked = manifestReadRefusal(read, file);
     if (manifestBlocked) return { hook: manifestBlocked };

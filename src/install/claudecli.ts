@@ -579,6 +579,7 @@ async function evaluateClaudeInstallPlan(params: {
             manifestPath: manifestPathForScope,
             dryRun,
             claudeConfigDir: scope.kind === "global" ? scope.claudeConfigDir : undefined,
+            expectedHooksRaw: expectedSnapshot?.hooksRaw,
           })
         : await installClaudeStopHook({
             scope,
@@ -591,6 +592,7 @@ async function evaluateClaudeInstallPlan(params: {
             dryRun,
             claudeConfigDir: scope.kind === "global" ? scope.claudeConfigDir : undefined,
             pdbPath: installedPdbPath ?? undefined,
+            expectedHooksRaw: expectedSnapshot?.hooksRaw,
           });
   const mcpConfigured =
     args.operation === "install" &&

@@ -4,7 +4,7 @@
  * temp filesystem only; no real client configuration or trust is touched.
  */
 import { describe, expect, it } from "vite-plus/test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { nodeSafeFs } from "../config/safejson.js";
@@ -196,6 +196,45 @@ describe("installClaudeStopHook / uninstallClaudeStopHook (#771)", () => {
       await expect(nodeSafeFs.readFile(`${manifest}.op.lock`)).rejects.toMatchObject({
         code: "ENOENT",
       });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses when the hook settings changed since the approved preview (#1126)", async () => {
+    const { dir, scope } = await tmpProject();
+    try {
+      const file = settingsFile(dir);
+      const approved = JSON.stringify({ hooks: {} }, null, 2);
+      await nodeSafeFs.createSynced(file, approved);
+      const manifest = manifestPath(scope, "claude");
+      // The preview showed `approved`; a concurrent installer changes the settings before apply.
+      await writeFile(file, JSON.stringify({ hooks: { Other: [] } }, null, 2), { flag: "w" });
+      const installed = await installClaudeStopHook({
+        scope,
+        options: {},
+        manifestPath: manifest,
+        pdbVersion: "0.1.0",
+        pdbPath: PDB,
+        expectedHooksRaw: approved,
+        runtime: { now: fixedNow },
+      });
+      expect(installed.hook).toMatchObject({
+        outcome: "refused",
+        code: "CONFLICT",
+      });
+      // The concurrent change is preserved, not adopted as the new baseline or overwritten.
+      expect(await nodeSafeFs.readFile(file)).toBe(
+        JSON.stringify({ hooks: { Other: [] } }, null, 2),
+      );
+      // An uninstall under the same approved preview is refused too.
+      const removed = await uninstallClaudeStopHook({
+        scope,
+        manifestPath: manifest,
+        expectedHooksRaw: approved,
+        runtime: { now: fixedNow },
+      });
+      expect(removed.hook).toMatchObject({ outcome: "refused", code: "CONFLICT" });
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
