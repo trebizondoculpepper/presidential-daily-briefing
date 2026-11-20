@@ -6,7 +6,12 @@ import { promisify } from "node:util";
 import { describe, expect, it } from "vite-plus/test";
 import { writeFile } from "node:fs/promises";
 import { nodeSafeFs } from "../config/safejson.js";
-import { oriInstallArgumentsFor, oriInstallHelp, runOriInstall } from "./oricli.js";
+import {
+  identityRecoveryHint,
+  oriInstallArgumentsFor,
+  oriInstallHelp,
+  runOriInstall,
+} from "./oricli.js";
 
 const exec = promisify(execFile);
 
@@ -326,6 +331,45 @@ describe("runOriInstall (#772)", () => {
       await expect(readFile(join(dir, "pdb.toml"), "utf8")).rejects.toMatchObject({
         code: "ENOENT",
       });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("identity recovery hint (#1150 review)", () => {
+  it("preserves the requested role instead of assuming implementer", () => {
+    expect(identityRecoveryHint("ori", "designer")).toBe(
+      "pdb config set identity.triage_role designer --entry ori",
+    );
+    expect(identityRecoveryHint("opencode", null)).toBe(
+      "pdb config set identity.triage_role implementer --entry opencode",
+    );
+  });
+});
+
+describe("non-TTY preview exit code (#1150 review)", () => {
+  it("exits zero when the confirmation contract previews instead of writing", async () => {
+    const dir = await initTempRepo("pdb-oricli-preview-");
+    try {
+      const out: string[] = [];
+      // A fresh checkout: the identity would be created, so every item is only planned.
+      // No --yes and no TTY confirm: the contract previews, so nothing was refused or missed.
+      const code = await runOriInstall(
+        oriInstallArgumentsFor(
+          ["ori", "--repo", "example/project", "--entry", "ori", "--role", "implementer", "--json"],
+          "install",
+        ),
+        { cwd: dir, env: {}, pdbMcpPath: PDBMCP },
+        async (text) => void out.push(text),
+      );
+      const result = JSON.parse(out.join("")) as {
+        dryRun: boolean;
+        items: { kind: string; outcome: string }[];
+      };
+      expect(result.dryRun).toBe(true);
+      expect(result.items.find((i) => i.kind === "mcp")).toMatchObject({ outcome: "planned" });
+      expect(code, out.join("")).toBe(0);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

@@ -294,7 +294,7 @@ async function prepareIdentity(
           created: false,
           refused:
             prepared.setup.notices.join("; ") || "The identity was persisted but failed cleanup.",
-          retry: `pdb config set identity.triage_role implementer --entry ${targetEntry}`,
+          retry: identityRecoveryHint(targetEntry, args.role),
         };
       }
       const diagnostic = prepared.diagnostic;
@@ -335,7 +335,7 @@ async function prepareIdentity(
           : null,
       retry:
         prepared.setup.state === "persisted-with-error"
-          ? `pdb config set identity.triage_role implementer --entry ${targetEntry}`
+          ? identityRecoveryHint(targetEntry, args.role)
           : null,
     };
   }
@@ -427,6 +427,15 @@ export interface OriRunRuntime extends ConfigRuntime {
   stderr?: (text: string) => void | Promise<void>;
   /** Inject the installed pdb-mcp path for tests; resolves from the running package when omitted. */
   pdbMcpPath?: string;
+}
+
+/**
+ * The recovery hint for an entry whose identity was written but whose setup then failed. The
+ * requested role is preserved: telling a `--role designer` caller to record `implementer` would
+ * undo the role it asked for (#1150 review).
+ */
+export function identityRecoveryHint(entry: string, role: string | null): string {
+  return `pdb config set identity.triage_role ${role ?? "implementer"} --entry ${entry}`;
 }
 
 function formatOriInstallOutput(
@@ -658,7 +667,10 @@ async function evaluateOriInstallPlan(params: {
   const appliedOrCurrent = result.items.some(
     (i) => i.outcome === "applied" || i.outcome === "kept" || i.outcome === "adopted",
   );
-  const exitCode = refusedOrFailed ? 2 : !appliedOrCurrent && !args.dryRun ? 1 : 0;
+  // The effective dry run decides the exit code, not the requested flag: the confirmation
+  // contract previews a non-TTY invocation without --yes, and a complete preview is not a miss
+  // (#1150 review). A planned-only preview therefore exits 0.
+  const exitCode = refusedOrFailed ? 2 : !appliedOrCurrent && !dryRun ? 1 : 0;
   return { result, exitCode };
 }
 
