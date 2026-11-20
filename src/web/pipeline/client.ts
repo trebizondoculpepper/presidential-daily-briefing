@@ -228,14 +228,15 @@ export function viewLoader<R>(
   let current: AbortController | null = null;
   let sequence = 0;
   let loaded: string | null | undefined;
-  const read = async (repository: string | null, refresh = false): Promise<void> => {
+  /** Read and report; resolves to the state reported, or null when superseded or no project. */
+  const read = async (repository: string | null, refresh = false): Promise<ViewState<R> | null> => {
     loaded = repository;
     current?.abort();
     const mine = ++sequence;
     if (repository === null) {
       current = null;
       report({ status: "no-project" });
-      return;
+      return null;
     }
     const controller = new AbortController();
     current = controller;
@@ -249,11 +250,13 @@ export function viewLoader<R>(
       controller.signal,
       refresh,
     );
-    if (mine === sequence && !controller.signal.aborted) report(state);
+    if (mine !== sequence || controller.signal.aborted) return null;
+    report(state);
+    return state;
   };
   return {
     load: (repository: string | null) =>
-      repository === loaded ? Promise.resolve() : read(repository),
+      repository === loaded ? Promise.resolve(null) : read(repository),
     // Refresh asks the server for fresh facts, not its cached entry (#1141 review).
     refresh: () => read(loaded ?? null, true),
     /** Re-read the current project through the cache (after another section refreshed it). */
@@ -268,12 +271,18 @@ export function viewLoader<R>(
  * refreshing every section with `refresh=true` would collect the same facts once per section.
  */
 export async function refreshSections(
-  sections: readonly { refresh(): Promise<void>; reload(): Promise<void> }[],
+  sections: readonly {
+    refresh(): Promise<ViewState<{ status: string }> | null>;
+    reload(): Promise<unknown>;
+  }[],
 ): Promise<void> {
   const [first, ...rest] = sections;
   if (!first) return;
-  await first.refresh();
-  await Promise.all(rest.map((s) => s.reload()));
+  const fresh = await first.refresh();
+  // The server stores only complete reads (#1142 review): reuse the cache only when the first
+  // read was complete; after a failed or incomplete read, the others collect for themselves.
+  const stored = fresh?.status === "ready" && fresh.response.status === "complete";
+  await Promise.all(rest.map((s) => (stored ? s.reload() : s.refresh())));
 }
 
 /** The inventory section's fetch (#684). */

@@ -5,6 +5,7 @@
  */
 import { render } from "svelte/server";
 import { describe, expect, it } from "vite-plus/test";
+import { inventoryView } from "../../metrics/inventory.js";
 import { waitingImpactView } from "../../metrics/waitingimpact.js";
 import type { WaitingImpactTicket } from "../../metrics/waitingimpact.js";
 import { parseWaitingResponse, waitingGroupOrder, waitingLoader } from "./client.js";
@@ -60,6 +61,17 @@ const envelope = (tickets: WaitingImpactTicket[]) => ({
   error: null,
   result: waitingImpactView(now, tickets, { completeFrom: "2026-01-01T00:00:00Z" }),
 });
+/** A complete inventory envelope, for the inventory section's requests. */
+const inventoryEnvelope = () => ({
+  ...envelope([]),
+  result: inventoryView(now, [], { completeFrom: "2026-01-01T00:00:00Z" }),
+});
+/** Answers each section's request with its own view's envelope. */
+const respond = (input: RequestInfo | URL) =>
+  new Response(
+    JSON.stringify(String(input).includes("view=inventory") ? inventoryEnvelope() : envelope([])),
+    { status: 200 },
+  );
 const html = (state: State) =>
   render(WaitingState, { props: { state } })
     .body.replace(/<!--[\s\S]*?-->/g, "")
@@ -138,7 +150,7 @@ describe("waiting backlog by impact (#685)", () => {
     const calls: string[] = [];
     const fetcher = (async (input: RequestInfo | URL) => {
       calls.push(String(input));
-      return new Response(JSON.stringify(envelope([])), { status: 200 });
+      return respond(input);
     }) as typeof fetch;
     const { inventoryLoader, refreshSections } = await import("./client.js");
     const sections = [
@@ -172,5 +184,37 @@ describe("waiting backlog by impact (#685)", () => {
     expect(out).toContain('Facts collected at <time datetime="2026-11-20T11:40:00Z">');
     expect(out).toContain("(cached, 20m old, stale)");
     expect(out).toContain("figures computed at");
+  });
+
+  it("refreshes the other sections too when the first read was incomplete or failed (#1142 review)", async () => {
+    const { inventoryLoader, refreshSections } = await import("./client.js");
+    for (const first of [
+      () =>
+        new Response(JSON.stringify({ ...envelope([]), status: "incomplete" }), { status: 200 }),
+      () =>
+        new Response(JSON.stringify({ error: { code: "GITHUB_UNAVAILABLE", message: "down" } }), {
+          status: 503,
+        }),
+    ]) {
+      const calls: string[] = [];
+      const fetcher = (async (input: RequestInfo | URL) => {
+        calls.push(String(input));
+        return String(input).includes("view=inventory") && String(input).includes("refresh=true")
+          ? first()
+          : respond(input);
+      }) as typeof fetch;
+      const sections = [
+        inventoryLoader("/api/v1/metrics", fetcher, () => {}),
+        waitingLoader("/api/v1/metrics", fetcher, () => {}),
+      ];
+      for (const s of sections) await s.load("o/r");
+      calls.length = 0;
+      await refreshSections(sections);
+      // Nothing fresh was stored, so the backlog collects for itself rather than reading old facts.
+      expect(calls).toEqual([
+        "/api/v1/metrics?view=inventory&repo=o%2Fr&refresh=true",
+        "/api/v1/metrics?view=waiting-impact&repo=o%2Fr&refresh=true",
+      ]);
+    }
   });
 });
