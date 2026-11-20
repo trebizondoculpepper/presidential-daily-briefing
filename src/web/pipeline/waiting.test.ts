@@ -217,4 +217,36 @@ describe("waiting backlog by impact (#685)", () => {
       ]);
     }
   });
+
+  it("does nothing more when the Refresh was superseded by a project change (#1142 review)", async () => {
+    const { inventoryLoader, refreshSections } = await import("./client.js");
+    const pending: ((r: Response) => void)[] = [];
+    const calls: string[] = [];
+    let hold = false;
+    const fetcher = ((input: RequestInfo | URL) => {
+      calls.push(String(input));
+      if (hold) return new Promise<Response>((done) => pending.push(done));
+      return Promise.resolve(respond(input));
+    }) as typeof fetch;
+    const sections = [
+      inventoryLoader("/api/v1/metrics", fetcher, () => {}),
+      waitingLoader("/api/v1/metrics", fetcher, () => {}),
+    ];
+    for (const s of sections) await s.load("o/r");
+    hold = true;
+    calls.length = 0;
+    const refreshing = refreshSections(sections);
+    // The project changes while the inventory refresh is pending.
+    const loads = sections.map((s) => s.load("o/other"));
+    for (const done of pending.splice(0)) done(respond("view=inventory"));
+    hold = false;
+    await refreshing;
+    await Promise.all(loads);
+    // No forced backlog read for the new project: only the refresh and the new project's loads.
+    expect(calls).toEqual([
+      "/api/v1/metrics?view=inventory&repo=o%2Fr&refresh=true",
+      "/api/v1/metrics?view=inventory&repo=o%2Fother",
+      "/api/v1/metrics?view=waiting-impact&repo=o%2Fother",
+    ]);
+  });
 });

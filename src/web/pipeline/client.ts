@@ -279,6 +279,9 @@ export async function refreshSections(
   const [first, ...rest] = sections;
   if (!first) return;
   const fresh = await first.refresh();
+  // Superseded (e.g. the project changed meanwhile): the new project's own loads are in
+  // charge; starting more reads here would abort them (#1142 review).
+  if (fresh === null) return;
   // The server stores only complete reads (#1142 review): reuse the cache only when the first
   // read was complete; after a failed or incomplete read, the others collect for themselves.
   const stored = fresh?.status === "ready" && fresh.response.status === "complete";
