@@ -37,7 +37,9 @@
     "dist/web/work.js",
     "dist/web/work.css",
     "dist/web/timing.js",
-    "dist/web/timing.css"
+    "dist/web/timing.css",
+    "dist/web/overview.js",
+    "dist/web/overview.css"
   ],
   "type": "module",
   "publishConfig": {
