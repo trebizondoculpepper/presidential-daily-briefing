@@ -238,4 +238,59 @@ describe("inventoryView (#883)", () => {
     expect(view.stalled.unknownActivity).toEqual({ count: 2, members: ["o/r#14", "o/r#15"] });
     expect(view.stages.unassessed.members).toEqual(["o/r#16"]);
   });
+
+  it("records each stalled ticket's owner, agent, last activity and wait reason (#688)", () => {
+    const old = (n: number, at: string) =>
+      ({
+        events: [{ at, kind: "picked-up", agent: "a", source: "label", key: `k${n}` }],
+      }) as Partial<TicketLedger>;
+    const tickets: MetricTicket[] = [
+      ticket(
+        21,
+        "open",
+        {
+          stage: "claimed",
+          claimed: true,
+          waiting: true,
+          blocked: false,
+          agent: "kavya",
+          humanOwners: ["salim"],
+          waitReason: "Owner must choose (waiting on human question on o/r#21)",
+        },
+        old(21, "2026-11-10T08:00:00.000Z"),
+      ),
+      ticket(
+        22,
+        "open",
+        {
+          stage: "claimed",
+          claimed: true,
+          waiting: false,
+          blocked: false,
+          agent: "jonas",
+          humanOwners: null,
+        },
+        old(22, "2026-11-09T08:00:00.000Z"),
+      ),
+    ];
+    const view = inventoryView(now, tickets, coverage, { stalledHours: 24 });
+    expect(view.stalled.details["o/r#21"]).toEqual({
+      bucket: "knownWait",
+      agent: "kavya",
+      humanOwners: ["salim"],
+      lastActivityAt: "2026-11-10T08:00:00.000Z",
+      waitReason: "Owner must choose (waiting on human question on o/r#21)",
+    });
+    // Unread owners stay unknown (null), and a wait reason only accompanies a known wait.
+    expect(view.stalled.details["o/r#22"]).toEqual({
+      bucket: "noRecordedProgress",
+      agent: "jonas",
+      humanOwners: null,
+      lastActivityAt: "2026-11-09T08:00:00.000Z",
+      waitReason: null,
+    });
+    expect(Object.keys(view.stalled.details).sort()).toEqual(
+      [...view.stalled.total.members, ...view.stalled.unknownActivity.members].sort(),
+    );
+  });
 });

@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { InventoryState } from "./client.js";
   import Inventory from "./Inventory.svelte";
+  import Stalled from "./Stalled.svelte";
 
   let { state }: { state: InventoryState } = $props();
 </script>
@@ -13,4 +14,5 @@
   <p class="error" role="alert">{state.message}</p>
 {:else}
   <Inventory response={state.response} />
+  <Stalled response={state.response} />
 {/if}

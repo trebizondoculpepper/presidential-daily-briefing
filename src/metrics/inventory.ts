@@ -42,6 +42,12 @@ export interface InventoryFacts {
   claimed?: boolean;
   /** Whether the issue's label list was read completely (so absence of an `agent:` label proves unclaimed). */
   labelsComplete?: boolean;
+  /** The claiming agent from its claim label (#688); null when none or ambiguous. */
+  agent?: string | null;
+  /** Human owners (assignees) when read completely (#688); null is unknown, never "none". */
+  humanOwners?: string[] | null;
+  /** The recorded reason of a known wait (#688), from the claim's wait record; null otherwise. */
+  waitReason?: string | null;
 }
 
 export interface StageAgeStats {
@@ -63,9 +69,22 @@ export interface StalledBucket {
   members: string[];
 }
 
+/** One stalled ticket's evidence (#688): who holds it, the last recorded event and any wait. */
+export interface StalledDetail {
+  bucket: "knownWait" | "blocked" | "noRecordedProgress" | "unknownActivity";
+  agent: string | null;
+  /** Assignees; null when not read completely (unknown, not unowned). */
+  humanOwners: string[] | null;
+  /** The latest evidenced event of any kind, or null when none was recorded. */
+  lastActivityAt: string | null;
+  waitReason: string | null;
+}
+
 export interface StalledInventory {
   thresholdHours: number;
   cutoff: string;
+  /** Per stalled ticket, keyed by member (every member of the buckets below). */
+  details: Record<string, StalledDetail>;
   total: StalledBucket;
   knownWait: StalledBucket;
   blocked: StalledBucket;
@@ -201,6 +220,7 @@ export function inventoryView(
 
   const stateUnknownMembers: string[] = [];
   const stalledTotal: string[] = [];
+  const stalledDetails: Record<string, StalledDetail> = {};
   const knownWait: string[] = [];
   const blocked: string[] = [];
   const noRecordedProgress: string[] = [];
@@ -233,20 +253,33 @@ export function inventoryView(
         return ms !== null && ms >= cutoffMs && ms <= nowMs;
       });
       if (!hasRecentEvent) {
+        let bucket: StalledDetail["bucket"];
         if (!hasCompleteActivityEvidence(t)) {
+          bucket = "unknownActivity";
           unknownActivity.push(t.member);
         } else {
           stalledTotal.push(t.member);
           if (t.inventory?.waiting === true) {
+            bucket = "knownWait";
             knownWait.push(t.member);
           } else if (t.inventory?.blocked === true) {
+            bucket = "blocked";
             blocked.push(t.member);
           } else if (t.inventory?.waiting === null || t.inventory?.blocked === null) {
+            bucket = "unknownActivity";
             unknownActivity.push(t.member);
           } else {
+            bucket = "noRecordedProgress";
             noRecordedProgress.push(t.member);
           }
         }
+        stalledDetails[t.member] = {
+          bucket,
+          agent: t.inventory?.agent ?? null,
+          humanOwners: t.inventory?.humanOwners ?? null,
+          lastActivityAt: latestEventIsoOf(t),
+          waitReason: bucket === "knownWait" ? (t.inventory?.waitReason ?? null) : null,
+        };
       }
     }
   }
@@ -275,6 +308,7 @@ export function inventoryView(
     stalled: {
       thresholdHours,
       cutoff,
+      details: stalledDetails,
       total: { count: stalledTotal.length, members: stalledTotal },
       knownWait: { count: knownWait.length, members: knownWait },
       blocked: { count: blocked.length, members: blocked },
