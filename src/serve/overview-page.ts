@@ -27,7 +27,7 @@ export function overviewBootstrapHtml(
 </html>
 `;
   return `${shellStart(context, "Overview", overviewAssets.script, overviewAssets.stylesheet)}${heading}
-<div id="overview-app" data-api="/api/v1/metrics"><p role="status">Loading the overview…</p></div>
+<div id="overview-app" data-api="/api/v1/metrics" data-team-api="/api/v1/team"><p role="status">Loading the overview…</p></div>
 <noscript><p class="warn">This page needs JavaScript. The same data is available from <code>/api/v1/metrics?view=news</code>.</p></noscript>
 </main>
 </body>
