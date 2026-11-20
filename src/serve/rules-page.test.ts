@@ -665,7 +665,9 @@ describe("GET /overview (#824)", () => {
       expect(reply.status).toBe(200);
       expect(reply.headers["content-security-policy"]).toContain("script-src 'self'");
       expect(reply.body).toContain("<h1>Overview</h1>");
-      expect(reply.body).toContain('<div id="overview-app" data-api="/api/v1/metrics">');
+      expect(reply.body).toContain(
+        '<div id="overview-app" data-api="/api/v1/metrics" data-team-api="/api/v1/team">',
+      );
       expect(reply.body).toContain('<script src="/web/overview.js" defer></script>');
       expect(reply.body).not.toMatch(/\sstyle=|<script>/);
       expect(reply.body).toMatch(

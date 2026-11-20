@@ -10,6 +10,7 @@ import "./overview.css";
 const target = document.getElementById("overview-app");
 if (target) {
   const api = target.dataset.api ?? "/api/v1/metrics";
+  const teamApi = target.dataset.teamApi ?? "/api/v1/team";
   target.replaceChildren();
-  mount(App, { target, props: { api } });
+  mount(App, { target, props: { api, teamApi } });
 }

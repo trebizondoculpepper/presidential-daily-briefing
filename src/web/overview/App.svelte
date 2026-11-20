@@ -2,8 +2,22 @@
   import { onMount } from "svelte";
   import { itemLinks, kindLabel, newsHours, newsLoader, selection } from "./client.js";
   import type { NewsHours, NewsState } from "./client.js";
+  import CurrentWork from "./CurrentWork.svelte";
+  import { workLoader } from "./work.js";
+  import type { WorkState } from "./work.js";
 
-  let { api }: { api: string } = $props();
+  let { api, teamApi }: { api: string; teamApi: string } = $props();
+  let work: WorkState = $state({ status: "loading" });
+  let repository: string | null = $state(null);
+  const ticketHref = (n: number) => {
+    const q = new URLSearchParams({ repo: repository ?? "", n: String(n) });
+    const keep = new URLSearchParams(window.location.search);
+    for (const k of ["role", "agent"]) {
+      const v = keep.get(k);
+      if (v) q.set(k, v);
+    }
+    return `/ticket?${q}`;
+  };
   let state: NewsState = $state({ status: "loading" });
   let hours: NewsHours = $state(6);
   let refresh = $state(() => {});
@@ -15,11 +29,19 @@
     const loader = newsLoader(api, fetcher, (next) => {
       state = next;
     });
-    refresh = () => void loader.refresh();
+    const workRead = workLoader(teamApi, fetcher, (next) => {
+      work = next;
+    });
+    refresh = () => {
+      void loader.refresh();
+      void workRead.refresh();
+    };
     const load = () => {
       const sel = selection(window.location.search);
       hours = sel.hours;
+      repository = sel.repository;
       void loader.load(sel);
+      void workRead.load(sel.repository);
     };
     choose = (h) => {
       const url = new URL(window.location.href);
@@ -92,3 +114,5 @@
     {/if}
   {/if}
 </section>
+
+<CurrentWork state={work} {ticketHref} />
