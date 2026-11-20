@@ -142,8 +142,15 @@ export async function readSnapshotResponsibility(
   // unowned (#1149 review): it closes such an issue, or an admissible record there names it.
   // The native rules decide with that fact.
   const unknownPrs = new Set<string>(unreadMembers);
+  // Issues outside the collected inventory (closed ones, for instance) were never read, and
+  // closing an issue does not clear its responsibility records (#1149 review): unknown too.
+  const inventory = new Set(snapshot.issues.map((i) => i.url.toLowerCase()));
   for (const p of snapshot.pullRequests)
-    if (p.closingIssuesReferences.nodes.some((i) => unreadIssues.has(i.url.toLowerCase())))
+    if (
+      p.closingIssuesReferences.nodes.some(
+        (i) => unreadIssues.has(i.url.toLowerCase()) || !inventory.has(i.url.toLowerCase()),
+      )
+    )
       unknownPrs.add(p.url);
   facts.unknownPrs = [...unknownPrs];
   return facts;

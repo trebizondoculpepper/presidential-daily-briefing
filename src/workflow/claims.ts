@@ -257,7 +257,7 @@ function adoptionNote(
     groups.set(t, [...(groups.get(t) ?? []), u]);
   }
   const args = (t: string | null, prs: string[]) =>
-    `${prs.map((u) => ` --pr ${u}`).join("")}${t ? ` --target ${t}` : ""}`;
+    `${prs.map((u) => ` --pr ${u}`).join("")}${t ? ` --target ${shellQuote(t)}` : ""}`;
   const entries = [...groups.entries()];
   const last = entries.pop();
   const steps = [

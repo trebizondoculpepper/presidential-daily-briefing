@@ -584,7 +584,7 @@ describe("claim and needs-human (doc/design/workflow.md)", () => {
           async () =>
             ({
               release: { trust: "trusted", from: "alice", preservedPrUrls: [pr(12), pr(13)] },
-              targets: { [pr(12)]: null, [pr(13)]: "other/lib:release" },
+              targets: { [pr(12)]: null, [pr(13)]: "other/lib:release/(legacy)" },
             }) as never,
         ),
       );
@@ -593,7 +593,7 @@ describe("claim and needs-human (doc/design/workflow.md)", () => {
         `pdb deliverables 7 attach --agent kavya --pr ${pr(12)} --membership open`,
       );
       expect(note).toContain(
-        `pdb submit 7 --agent kavya --pr ${pr(13)} --target other/lib:release`,
+        `pdb submit 7 --agent kavya --pr ${pr(13)} --target 'other/lib:release/(legacy)'`,
       );
     });
 
