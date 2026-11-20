@@ -243,6 +243,8 @@ describe("effective identity preparation (#677)", () => {
       expect(normal.setup.notices.join(" ")).toMatch(
         /default codex identity from earlier sessions/,
       );
+      // The receipt distinguishes the migration from a no-op (#1189 review).
+      expect(normal.setup).toMatchObject({ state: "imported", changed: true, persisted: true });
       const doc = parseIdentityDocument((await f.fs.readText(f.file))!);
       expect(Object.keys(doc.agents as object).sort()).toEqual(["codex", sessionEntry].sort());
       expect((await readIdentityBindings(f.root, f.fs)).get(b.key)).toBe("codex");

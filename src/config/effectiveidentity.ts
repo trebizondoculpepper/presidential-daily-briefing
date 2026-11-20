@@ -173,6 +173,8 @@ export async function prepareEffectiveIdentity(
   let attempted = false;
   /** Setup notices gathered before the final result (migration, obsolete bindings). */
   const setupNotices: string[] = [];
+  /** #1047: the default was established from earlier session records in this run. */
+  let migrated = false;
   const fs = runtime.fs ?? nodeFileSystem;
   // One typed Git service for this preparation (#907): shared if injected, else built once.
   const git = gitServiceOf(runtime.git);
@@ -284,6 +286,7 @@ export async function prepareEffectiveIdentity(
             },
           },
         );
+        if (migration.state === "migrated") migrated = true;
         if (migration.state === "migrated")
           setupNotices.push(
             `PDB made ${migration.record.name} the default ${provider.harness} identity from earlier sessions' records and pointed ${migration.retargeted} session binding(s) at it; the old entries are kept.`,
@@ -381,7 +384,13 @@ export async function prepareEffectiveIdentity(
       };
     }
     if (!needsWrite)
-      return resolved(record, { state: "reused", changed: false, persisted: true, notices: [] });
+      return resolved(record, {
+        // A migration rewrote the store even when no further write was needed (#1189 review).
+        state: migrated ? "imported" : "reused",
+        changed: migrated,
+        persisted: true,
+        notices: [],
+      });
     if (!record.name && !role)
       throw selectionError("A new identity needs an explicit triage role; none was inferred.");
     attempted = true;
@@ -422,7 +431,7 @@ export async function prepareEffectiveIdentity(
       );
     const state = write.generatedName
       ? "created"
-      : write.importedFrom
+      : write.importedFrom || migrated
         ? "imported"
         : write.changed
           ? "bound"
@@ -432,7 +441,7 @@ export async function prepareEffectiveIdentity(
         ? [
             `While preparing your requested command, PDB created agent identity ${verified.record.name} and saved it for this session/entry; continuing as ${verified.record.name}.`,
           ]
-        : state === "imported"
+        : state === "imported" && write.importedFrom
           ? [
               `PDB imported the existing identity ${verified.record.name} once into ${IDENTITY_FILE}; continuing with that name.`,
             ]
@@ -442,7 +451,12 @@ export async function prepareEffectiveIdentity(
               ]
             : [];
     if (write.lockCleanup) notices.push(write.lockCleanup);
-    return resolved(verified.record, { state, changed: write.changed, persisted: true, notices });
+    return resolved(verified.record, {
+      state,
+      changed: write.changed || migrated,
+      persisted: true,
+      notices,
+    });
   } catch (error) {
     // A failed post-rename chmod/readback may leave a real persisted identity. Report it;
     // never retry initialization blindly or claim the original operation continued.

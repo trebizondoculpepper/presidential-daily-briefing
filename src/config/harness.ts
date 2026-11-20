@@ -254,7 +254,11 @@ export async function resolveEntry(options: {
       create: null,
     };
   }
-  if (candidates.some((key) => key !== detector.entryKey)) {
+  // #1047: with the default present, the harness's own preserved automatic session aliases
+  // (<entry>.session_<64 hex>) are the same logical agent, not competing entries.
+  const alias = new RegExp(`^${detector.entryKey.replace(/[-]/g, "\\-")}\\.session_[0-9a-f]{64}$`);
+  const hasDefault = candidates.includes(detector.entryKey);
+  if (candidates.some((key) => key !== detector.entryKey && !(hasDefault && alias.test(key)))) {
     return {
       status: "unresolved",
       reason: "several-entries",

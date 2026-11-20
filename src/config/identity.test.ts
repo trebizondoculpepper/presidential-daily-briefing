@@ -311,6 +311,18 @@ x = 1
       reason: "several-entries",
       candidates: ["codex", "codex.review"],
     });
+    // #1047: the default's own preserved session aliases are not competing entries.
+    files.set(
+      file,
+      `${sample}\n[agents."codex.session_${"a".repeat(64)}"]\nname = "${"same_one"}"\n`,
+    );
+    expect(await resolveEntry({ env: codexEnv, root, fs })).toMatchObject({
+      status: "resolved",
+      entry: "codex",
+    });
+    // Without the default, a session alias alone still needs explicit selection.
+    files.set(file, `[agents."codex.session_${"a".repeat(64)}"]\nname = "same_one"\n`);
+    expect(await resolveEntry({ env: codexEnv, root, fs })).toMatchObject({ status: "unresolved" });
     // Only an unrelated or differently keyed entry exists: still no borrowing.
     files.set(file, `[agents."codex.review"]\nname = "third_one"\n`);
     expect(await resolveEntry({ env: codexEnv, root, fs })).toMatchObject({
