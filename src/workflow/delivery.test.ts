@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 import {
   attestApplicability,
+  deliverableLabel,
   deliveryMarker,
   deliveryOpId,
   foldDelivery,
@@ -642,5 +643,128 @@ describe("delivery ordering evidence (PRRT_kwDOVsRJzc63TEp3)", () => {
       { ...post(record("attach", { deliverables: [pr(5)] }), "reader"), createdAt: "" },
     ]);
     expect(f.recordsUnknown).toBe(false);
+  });
+});
+
+describe("unassign: human-directed responsibility release (#1019)", () => {
+  /** Posts in a fixed order: ids 2000+ give strictly increasing times (t(id % 60)). */
+  let seq = 2000;
+  const at = (r: DeliveryRecord) => comment(deliveryMarker(r), "writer", seq++);
+  const submitBoth = () =>
+    at(
+      record("submit", {
+        agent: "alice",
+        deliverables: [pr(998), pr(999)],
+        membership: "complete",
+      }),
+    );
+  const release = (
+    submit: DeliveryComment,
+    over: Partial<DeliveryRecord> = {},
+    members = [pr(998), pr(999)],
+  ) =>
+    at(
+      record("unassign", {
+        agent: "maintainer-agent",
+        from: "alice",
+        expected: {
+          ticket: String(submit.databaseId),
+          members: members.map((d) => ({
+            deliverable: deliverableLabel(d),
+            record: String(submit.databaseId),
+          })),
+        },
+        ...over,
+      }),
+    );
+
+  it("clears the released agent's ticket and member responsibility, keeping members and membership", async () => {
+    const submit = submitBoth();
+    const unassign = release(submit);
+    const f = await fold([submit, unassign]);
+    expect(f.recordsUnknown).toBe(false);
+    expect(f.ticketResponsible).toBeNull();
+    expect(f.ticketResponsibilityRecord).toBe(String(unassign.databaseId));
+    expect(f.members.map((m) => [deliverableLabel(m.deliverable), m.responsible])).toEqual([
+      [deliverableLabel(pr(998)), null],
+      [deliverableLabel(pr(999)), null],
+    ]);
+    expect(f.membership).toBe("complete");
+    expect(f.applied.at(-1)).toMatchObject({ op: "unassign" });
+  });
+
+  it("leaves another owner's member untouched", async () => {
+    const submit = submitBoth();
+    const handoff = at(
+      record("handoff", {
+        agent: "alice",
+        to: "bob",
+        scope: "deliverable",
+        deliverables: [pr(999)],
+        expectedResponsibilityRecord: String(submit.databaseId),
+      }),
+    );
+    const f = await fold([submit, handoff, release(submit, {}, [pr(998)])]);
+    expect(f.members.map((m) => m.responsible)).toEqual([null, "bob"]);
+  });
+
+  it("rejects a stale release and a replacement owner, clearing nothing", async () => {
+    const submit = submitBoth();
+    // Planned against an older record.
+    const stale = await fold([submit, release(submit, { expected: { ticket: "1", members: [] } })]);
+    expect(stale.rejected[0]).toMatchObject({ error: "UNASSIGN_STALE" });
+    expect(stale.ticketResponsible).toBe("alice");
+    expect(stale.members.every((m) => m.responsible === "alice")).toBe(true);
+    // The ticket moved to a replacement owner before the release applied.
+    const reassign = at(record("reassign", { agent: "alice", to: "carol" }));
+    const moved = await fold([submit, reassign, release(submit)]);
+    expect(moved.rejected[0]).toMatchObject({ error: "UNASSIGN_STALE" });
+    expect(moved.rejected[0]!.why).toContain("moved to carol");
+    expect(moved.ticketResponsible).toBe("carol");
+  });
+
+  it("is a no-op when the agent holds nothing, and unverifiable after unknown history", async () => {
+    const submit = submitBoth();
+    const first = release(submit);
+    const again = await fold([
+      submit,
+      first,
+      at(
+        record("unassign", {
+          agent: "maintainer-agent",
+          from: "alice",
+          expected: { ticket: null, members: [] },
+        }),
+      ),
+    ]);
+    expect(again.rejected).toEqual([]);
+    expect(again.ticketResponsible).toBeNull();
+    const truncated = await fold([submit, release(submit)], false);
+    expect(truncated.recordsUnknown).toBe(true);
+    expect(truncated.ticketResponsible).toBe("alice");
+  });
+
+  it("validates the record, and older readers treat it as unknown, never skipped", () => {
+    expect(
+      parseDeliveryComment(deliveryMarker(record("unassign", { from: "alice" }))),
+    ).toMatchObject({
+      kind: "malformed",
+      why: "unassign has no expected responsibility records",
+    });
+    expect(
+      parseDeliveryComment(
+        deliveryMarker(record("unassign", { expected: { ticket: null, members: [] } })),
+      ),
+    ).toMatchObject({
+      kind: "malformed",
+      why: "unassign names no agent to release",
+    });
+    expect(
+      parseDeliveryComment(
+        deliveryMarker(
+          record("unassign", { from: "alice", expected: { ticket: null, members: [] } }),
+        ),
+      ),
+    ).toMatchObject({ kind: "record" });
   });
 });
