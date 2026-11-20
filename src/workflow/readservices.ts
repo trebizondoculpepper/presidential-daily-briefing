@@ -91,9 +91,36 @@ export async function readTeam(
           ),
         })
       : null;
+  // #690: the employing human of each claim whose activity was read and is still held, read
+  // with the same live boundaries (bounded by the activity cap above).
+  const humans = new Map<
+    string,
+    Map<string, { login: string | null; provenance: string | null; reason: string | null }>
+  >();
+  if (activity && boundaries.live)
+    for (const [agent, claims] of activity.activity)
+      for (const [url, fact] of claims) {
+        if (fact.state === "not-owned") continue;
+        const b = await readLiveClaimBinding(snapshot.repository, fact.number, agent, {
+          query: boundaries.live.query as GraphQuery,
+          permission: permissionLookup(
+            snapshot.repository,
+            boundaries.live.rest,
+            boundaries.signal,
+          ),
+        });
+        const perAgent = humans.get(agent) ?? new Map();
+        perAgent.set(
+          url,
+          b.state === "bound"
+            ? { login: b.login, provenance: b.provenance, reason: null }
+            : { login: null, provenance: null, reason: b.reason },
+        );
+        humans.set(agent, perAgent);
+      }
   const view = teamView(snapshot, {
     ...options,
-    ...(activity ? { activity: activity.activity } : {}),
+    ...(activity ? { activity: activity.activity, humans } : {}),
   });
   if (activity?.omitted.length)
     view.completeness = {

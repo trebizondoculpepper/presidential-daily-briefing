@@ -294,3 +294,25 @@ describe("team view (#41, doc/design/diagnostics.md)", () => {
     expect(contributionFinished(withUnansweredReviewRequest)).toBe(false);
   });
 });
+
+describe("team view: employing human per claim (#690)", () => {
+  it("shows each claim's bound human, or why it is unknown, only when read", () => {
+    const snap = snapshot([issue(1, ["agent:kavya"]), issue(2, ["agent:dario"])], []);
+    type Human = { login: string | null; provenance: string | null; reason: string | null };
+    const humans = new Map<string, Map<string, Human>>([
+      ["kavya", new Map([[issue(1).url, { login: "sal", provenance: "current", reason: null }]])],
+      ["dario", new Map([[issue(2).url, { login: null, provenance: null, reason: "legacy" }]])],
+    ]);
+    const view = teamView(snap, { humans });
+    const claim = (agent: string) => view.agents.find((a) => a.agent === agent)!.claims[0]!;
+    expect(claim("kavya").human).toEqual({ login: "sal", provenance: "current", reason: null });
+    expect(claim("dario").human).toMatchObject({ login: null, reason: "legacy" });
+    const text = teamText(view);
+    expect(text).toContain("employing human: sal (current)");
+    expect(text).toContain("employing human: unknown (legacy)");
+    // Not read: no field and no line.
+    const unread = teamView(snap);
+    expect(unread.agents[0]!.claims[0]!.human).toBeUndefined();
+    expect(teamText(unread)).not.toContain("employing human");
+  });
+});

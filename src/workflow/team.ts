@@ -39,6 +39,11 @@ export interface TeamClaim {
    * it; null when not read (offline or no live boundary).
    */
   activity: { state: string; reason: string } | null;
+  /**
+   * The employing human bound to this claim (#690), read live; absent when not read. A login
+   * when bound, otherwise null with the reason it is unknown.
+   */
+  human?: { login: string | null; provenance: string | null; reason: string | null };
 }
 export interface TeamWarning {
   kind: string;
@@ -82,6 +87,8 @@ export interface TeamOptions {
   offline?: boolean;
   /** #413: claim activity per agent, then per claim URL; absent means not read. */
   activity?: ReadonlyMap<string, ReadonlyMap<string, { state: string; reason: string }>>;
+  /** #690: the employing human per agent, then per claim URL; absent means not read. */
+  humans?: ReadonlyMap<string, ReadonlyMap<string, NonNullable<TeamClaim["human"]>>>;
 }
 
 export interface ActivityEvent {
@@ -128,6 +135,7 @@ export function teamView(
     staleHours = defaultStaleHours,
     offline = false,
     activity: claimActivity,
+    humans,
   }: TeamOptions = {},
 ): TeamView {
   const open = snapshot.issues.filter((i) => i.state === "OPEN");
@@ -184,7 +192,12 @@ export function teamView(
         agents.set(agent, entry);
       }
       const read = claimActivity?.get(agent)?.get(issue.url);
-      entry.claims.push(read ? { ...claim, activity: read } : claim);
+      const human = humans?.get(agent)?.get(issue.url);
+      entry.claims.push({
+        ...claim,
+        ...(read ? { activity: read } : {}),
+        ...(human ? { human } : {}),
+      });
     }
   }
   for (const entry of agents.values()) {
@@ -276,6 +289,10 @@ export function teamText(view: TeamView): string {
       if (c.activity)
         lines.push(
           `    activity: ${c.activity.state}${c.activity.reason ? ` (${c.activity.reason})` : ""}`,
+        );
+      if (c.human)
+        lines.push(
+          `    employing human: ${c.human.login ? `${c.human.login} (${c.human.provenance})` : `unknown (${c.human.reason})`}`,
         );
       lines.push(
         `    last activity: ${c.latestActivity ? `${c.latestActivity.at} (${c.latestActivity.source})` : "unknown"}`,
