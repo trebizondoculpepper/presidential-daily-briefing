@@ -69,7 +69,7 @@ function github(
     /** Other issues' comments, by number, for cross-issue ownership reads (#1019). */
     others?: Record<number, DeliveryComment[] | null>;
     /** Issues referencing each PR URL (closing or cross-reference); default: just N. */
-    refs?: Record<string, { issues: number[]; complete?: boolean }>;
+    refs?: Record<string, { issues: number[]; complete?: boolean; unreadable?: boolean }>;
   } = {},
 ) {
   const state = {
@@ -132,7 +132,10 @@ function github(
             pageInfo: { hasNextPage: false },
           },
           timelineItems: {
-            nodes: r.issues.map((n) => ({ source: { __typename: "Issue", ...node(n) } })),
+            nodes: [
+              ...r.issues.map((n) => ({ source: { __typename: "Issue", ...node(n) } })),
+              ...(r.unreadable ? [{ source: null }] : []),
+            ],
             pageInfo: { hasNextPage: r.complete === false },
           },
         },
@@ -2014,6 +2017,14 @@ describe("deliverables unassign: human-directed responsibility release (#1019)",
         prs: prs(),
         others: { 79: null },
         refs: { [prLink(998)]: { issues: [N, 79] } },
+      });
+      expect(facts?.release?.unknownPrUrls).toEqual([prLink(998)]);
+    });
+
+    it("treats a cross-reference with an unreadable source as unknown ownership (#1149 review)", async () => {
+      const facts = await released({
+        prs: prs(),
+        refs: { [prLink(998)]: { issues: [N], unreadable: true } },
       });
       expect(facts?.release?.unknownPrUrls).toEqual([prLink(998)]);
     });

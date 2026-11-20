@@ -377,14 +377,21 @@ export async function pullReferencingIssues(
       return true;
     };
     if (!closing.nodes.every(add)) return null;
+    // A reference whose source cannot be read (an inaccessible issue) may record an owner: the
+    // list is then incomplete, never complete (#1149 review; shortlist.ts treats it alike).
+    let unreadable = false;
     for (const t of timeline.nodes) {
       const source = isRecord(t) ? t.source : null;
+      if (!isRecord(source)) {
+        unreadable = true;
+        continue;
+      }
       // Pull requests that mention it hold no delivery records; only issues do.
-      if (isRecord(source) && source.__typename === "Issue" && !add(source)) return null;
+      if (source.__typename === "Issue" && !add(source)) return null;
     }
     const more = (c: Record<string, unknown>): boolean =>
       !isRecord(c.pageInfo) || c.pageInfo.hasNextPage !== false;
-    return { issues, complete: !more(closing) && !more(timeline) };
+    return { issues, complete: !unreadable && !more(closing) && !more(timeline) };
   } catch {
     return null;
   }
