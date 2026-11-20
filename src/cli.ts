@@ -490,7 +490,7 @@ ${crashDisclosure()}
                         connection (--dry-run previews without writing; install codex --help)
   uninstall codex [--global] [--yes] [--dry-run]  Remove PDB-managed Codex MCP entries in the
                         selected scope; preserves identity and settings (uninstall codex --help)
-  onboard [--repo owner/name] [--role implementer|designer] [--server URL] [--install] [--json]
+  onboard [--repo owner/name] [--role implementer|designer] [--server URL] [--install] [--dry-run] [--json]
                         New here? How an agent starts with pdb: rules, identity, commands and
                         a prompt to give it; --install adds the pdb section to AGENTS.md
   contributors [--repo owner/name] [--json]  Read-only: the verified checkout's CONTRIBUTORS.md

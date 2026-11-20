@@ -104,6 +104,7 @@ export function onboardingDocument(input: OnboardingInput): OnboardingDocument {
     `${repo ? `This project (${repo})` : "This project"} uses pdb for status, priorities, claims and handoffs.`,
     "",
     `- At the start of every session, read the current rules: ${rulesRef}.`,
+    "- A generated snapshot of those rules lives in `rules.md` in this project; `pdb onboard` refreshes it, and `pdb rules` is always current.",
     `- First use: \`${firstCommand("implementer|designer")}\`. PDB reuses or safely creates your identity, saves it and continues. If selection is ambiguous, select your logical entry with --entry KEY. A verified binding retains it; unsupported sessions must keep passing --entry KEY on every invocation. Never reuse another agent's name.`,
     `- See what to do next: \`pdb${repoFlag}\`. Help: \`pdb --help\`; onboarding: ${onboardingRef}.`,
     `- MCP clients: \`pdb-mcp${repoFlag}\`${server ? `; web: ${server}` : ""}.`,

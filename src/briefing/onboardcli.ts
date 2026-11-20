@@ -12,6 +12,8 @@ import { resolveRepositoryTarget } from "../config/config.js";
 import type { GitRunner } from "../config/config.js";
 import type { ConfigRuntime } from "../config/configcli.js";
 import { installCoordinationSection } from "../config/agentsguide.js";
+import { installRulesFile, RULES_FILE_NAME } from "../config/rulesfile.js";
+import { readFile } from "node:fs/promises";
 import { updateJsonFile, type SafeFs } from "../config/safejson.js";
 import { createGitService } from "../git/service.js";
 import type { GitService } from "../git/service.js";
@@ -29,7 +31,7 @@ const isRecord = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
 
 export const onboardUsage =
-  "Usage: pdb onboard [--repo owner/name] [--role implementer|designer] [--server URL] [--install] [--json]";
+  "Usage: pdb onboard [--repo owner/name] [--role implementer|designer] [--server URL] [--install] [--dry-run] [--json]";
 
 export async function runOnboard(
   args: string[],
@@ -42,6 +44,7 @@ export async function runOnboard(
     role?: string;
     server?: string;
     install?: boolean;
+    "dry-run"?: boolean;
     json?: boolean;
     help?: boolean;
   };
@@ -53,6 +56,7 @@ export async function runOnboard(
         role: { type: "string" },
         server: { type: "string" },
         install: { type: "boolean" },
+        "dry-run": { type: "boolean" },
         json: { type: "boolean" },
         help: { type: "boolean" },
       },
@@ -63,7 +67,7 @@ export async function runOnboard(
   }
   if (values.help) {
     await output(
-      `${onboardUsage}\n\nPrints how an agent gets started with pdb in this project: the rules, its own identity, the commands and a prompt to give it. --install adds or updates the pdb coordination section of this checkout's AGENTS.md (nothing else is changed).\n`,
+      `${onboardUsage}\n\nPrints how an agent gets started with pdb in this project: the rules, its own identity, the commands and a prompt to give it. In a verified checkout it also writes rules.md and updates only the pdb coordination section of AGENTS.md; --install is kept as an alias for those same writes and --dry-run previews them without touching any file. --help reads nothing and writes nothing.\n`,
     );
     return 0;
   }
@@ -96,22 +100,38 @@ export async function runOnboard(
     server,
   });
 
+  // #1027: a verified checkout now gets both files by default (rules.md plus the managed
+  // AGENTS.md section); --install remains an alias for the same writes, and --dry-run previews
+  // them without touching the tree. Outside a verified checkout nothing is written.
+  const dryRun = values["dry-run"] === true;
+  const files: FileReport[] = [];
   let install: Awaited<ReturnType<typeof installCoordinationSection>> | null = null;
-  if (values.install) {
-    if (!root || !repository)
-      return usage(
-        values.repo
-          ? `--install needs a local checkout of ${values.repo}; run it from that checkout.`
-          : "--install needs a local GitHub checkout; run it from the project, or pass --repo from its checkout.",
-      );
-    install = await installCoordinationSection(root, doc.persistentSection);
+  if (root && repository) {
+    const markdown = await generatedRulesMarkdown(repository, runtime);
+    if (dryRun) {
+      files.push(await previewRulesFile(root, markdown));
+      files.push(await previewCoordinationSection(root, doc.persistentSection));
+    } else {
+      const rules = await installRulesFile(root, markdown);
+      files.push(reportOf(rules));
+      install = await installCoordinationSection(root, doc.persistentSection);
+      files.push(reportOf(install));
+    }
+  } else if (values.install) {
+    return usage(
+      values.repo
+        ? `--install needs a local checkout of ${values.repo}; run it from that checkout.`
+        : "--install needs a local GitHub checkout; run it from the project, or pass --repo from its checkout.",
+    );
   }
-  const code = install && install.status !== "written" && install.status !== "kept" ? 1 : 0;
+  const refused = !dryRun && files.some((f) => f.status === "not-written");
+  const code = refused ? 1 : 0;
   if (values.json) {
     await output(
       JSON.stringify(
         {
           ...doc,
+          files,
           ...(install
             ? {
                 install: {
@@ -130,20 +150,114 @@ export async function runOnboard(
     return code;
   }
   await output(onboardingText(doc));
-  if (install) {
-    const line =
-      install.status === "written"
-        ? `Added the pdb coordination section to ${install.file} (a local change: commit it with your work).`
-        : install.status === "kept"
-          ? `${install.file} already has the current pdb coordination section; nothing was changed.`
-          : install.status === "committed-with-error"
-            ? `Updated ${install.file}, but ${install.reason}.`
-            : `Did not change ${install.file ?? "AGENTS.md"}: ${install.reason}.`;
-    stderr(`pdb: ${line}\n`);
-    for (const note of install.cleanup) stderr(`pdb: ${note}\n`);
-  }
+  for (const file of files) stderr(`pdb: ${fileLine(file, dryRun)}\n`);
   return code;
 }
+
+/** One file's outcome in the onboarding receipt, for a real or a previewed run. */
+export interface FileReport {
+  file: string;
+  status: "written" | "would-write" | "kept" | "not-written";
+  reason?: string;
+}
+
+const reportOf = (outcome: {
+  file: string | null;
+  status: "written" | "kept" | "not-written" | "committed-with-error";
+  reason?: string;
+}): FileReport => ({
+  file: outcome.file ?? RULES_FILE_NAME,
+  status:
+    outcome.status === "written" ? "written" : outcome.status === "kept" ? "kept" : "not-written",
+  ...("reason" in outcome && outcome.reason ? { reason: outcome.reason } : {}),
+});
+
+/** The generated rules markdown for a verified project, from the shared English document. */
+async function generatedRulesMarkdown(
+  repository: string,
+  runtime: OnboardRuntime,
+): Promise<string> {
+  const rules = await import("../rules/datalog/rules-command.js");
+  const { declaredRulesContext } = await import("../rules/declared-context.js");
+  const { projectRulesContext } = await import("../rules/project-context.js");
+  const { project, limits } = await projectRulesContext({
+    repository,
+    runtime: runtime as Parameters<typeof projectRulesContext>[0] extends { runtime: infer R }
+      ? R
+      : never,
+  });
+  const document = rules.rulesDocument(
+    { ...declaredRulesContext(), project },
+    {},
+    undefined,
+    limits,
+  );
+  return rules.rulesMarkdownFile(document);
+}
+
+/** What `installRulesFile` would do, without writing (#1027 `--dry-run`). */
+async function previewRulesFile(root: string, markdown: string): Promise<FileReport> {
+  const { withRulesFile } = await import("../config/rulesfile.js");
+  const current = await readTextOrNull(join(root, RULES_FILE_NAME));
+  if (current.state === "unreadable")
+    return { file: RULES_FILE_NAME, status: "not-written", reason: current.why };
+  const next = withRulesFile(current.text, markdown);
+  if ("refuse" in next)
+    return { file: RULES_FILE_NAME, status: "not-written", reason: next.refuse };
+  if ("unchanged" in next) return { file: RULES_FILE_NAME, status: "kept" };
+  return { file: RULES_FILE_NAME, status: "would-write" };
+}
+
+/** What the managed AGENTS.md install would do, without writing (#1027 `--dry-run`). */
+async function previewCoordinationSection(root: string, section: string): Promise<FileReport> {
+  const { withCoordinationSection } = await import("../config/agentsguide.js");
+  const names = (await import("node:fs/promises"))
+    .readdir(root)
+    .then((entries) => entries.filter((n) => n.toLowerCase() === "agents.md"))
+    .catch(() => [] as string[]);
+  const candidates = await names;
+  if (candidates.length > 1)
+    return {
+      file: "AGENTS.md",
+      status: "not-written",
+      reason: "both agents.md copies exist; keep one, then retry",
+    };
+  const file = candidates[0] ?? "AGENTS.md";
+  const current = await readTextOrNull(join(root, file));
+  if (current.state === "unreadable") return { file, status: "not-written", reason: current.why };
+  const next = withCoordinationSection(current.text, section);
+  if ("refuse" in next)
+    return { file, status: "not-written", reason: `${file} was not changed: ${next.refuse}` };
+  if ("unchanged" in next) return { file, status: "kept" };
+  return { file, status: "would-write" };
+}
+
+const readTextOrNull = async (
+  path: string,
+): Promise<{ state: "text"; text: string | null } | { state: "unreadable"; why: string }> => {
+  try {
+    return { state: "text", text: await readFile(path, "utf8") };
+  } catch (error) {
+    const code = (error as { code?: unknown }).code;
+    if (code === "ENOENT") return { state: "text", text: null };
+    return { state: "unreadable", why: `the existing file cannot be read (${String(code)})` };
+  }
+};
+
+const fileLine = (file: FileReport, dryRun: boolean): string => {
+  switch (file.status) {
+    case "written":
+      return `wrote ${file.file} (a local change: commit it with your work).`;
+    case "would-write":
+      return dryRun
+        ? `dry run: would write ${file.file}.`
+        : `wrote ${file.file} (a local change: commit it with your work).`;
+    case "kept":
+      return `${file.file} is already current; nothing was changed.`;
+    default:
+      return `did not change ${file.file}${file.reason ? `: ${file.reason}` : ""}.`;
+  }
+};
 
 /** The first-use hint line (one short stderr pointer). */
 export const firstUseHintText =
