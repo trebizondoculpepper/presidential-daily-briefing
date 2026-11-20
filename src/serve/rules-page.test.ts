@@ -224,6 +224,8 @@ async function server(args: string[], files: Record<string, string> = {}, built 
                 "/web/pipeline.css",
                 { type: "text/css; charset=utf-8", body: "/* pipeline.css */" },
               ],
+              ["/web/work.js", { type: "text/javascript; charset=utf-8", body: "/* work.js */" }],
+              ["/web/work.css", { type: "text/css; charset=utf-8", body: "/* work.css */" }],
             ]
           : [],
       ),
@@ -563,5 +565,50 @@ describe("purpose-first rule presentation (#578)", () => {
     expect(rulesPageHtml(missing, rulesFormalText(missing), page)).toContain(
       "Purpose not supplied",
     );
+  });
+});
+
+describe("GET /work-preview (#753)", () => {
+  it("serves the opt-in Svelte bootstrap, unlisted in navigation, with no GitHub request", async () => {
+    const { running, github, port } = await server(["--repo", "example/project"]);
+    try {
+      const reply = await call(port, "/work-preview?repo=example%2Fproject&role=designer");
+      expect(reply.status).toBe(200);
+      expect(reply.headers["content-security-policy"]).toContain("script-src 'self'");
+      expect(reply.body).toContain("<h1>Work (preview)</h1>");
+      expect(reply.body).toContain(
+        '<div id="work-app" data-api="/api/v1/briefing" data-ticket-api="/api/v1/tickets">',
+      );
+      expect(reply.body).toContain('<script src="/web/work.js" defer></script>');
+      expect(reply.body).toContain('<link rel="stylesheet" href="/web/work.css">');
+      expect(reply.body).not.toMatch(/\sstyle=|<script>/);
+      // Opt-in: no page's navigation links to the preview, and the default Work page is unchanged.
+      for (const page of [
+        "/work-preview?repo=example%2Fproject",
+        "/rules?repo=example%2Fproject",
+      ]) {
+        const body = (await call(port, page)).body;
+        expect(body).not.toMatch(/<nav[^>]*>[^]*?href="\/work-preview/);
+      }
+      const work = await call(port, "/?repo=example%2Fproject");
+      expect(work.body).not.toContain("work-app");
+      expect((await call(port, "/web/work.js")).headers["content-type"]).toBe(
+        "text/javascript; charset=utf-8",
+      );
+      expect(github).toEqual([]);
+    } finally {
+      await running.close();
+    }
+  });
+
+  it("says the assets are not built instead of loading forever", async () => {
+    const { running, port } = await server(["--repo", "example/project"], {}, false);
+    try {
+      const reply = await call(port, "/work-preview?repo=example%2Fproject");
+      expect(reply.body).toContain("frontend assets are not built");
+      expect(reply.body).not.toContain("/web/work.js");
+    } finally {
+      await running.close();
+    }
   });
 });

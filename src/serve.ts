@@ -69,6 +69,7 @@ import type {
 import { defaultRulesPageRuntime, readRules, rulesBootstrapHtml } from "./serve/rules-page.js";
 import { readWebAssets } from "./serve/webassets.js";
 import { pipelineAssets, pipelineBootstrapHtml } from "./serve/pipeline-page.js";
+import { workPreviewAssets, workPreviewBootstrapHtml } from "./serve/work-preview-page.js";
 import type { LiveApplicationResult } from "./serve/liveapp.js";
 import { setupPage, setupScript } from "./serve/setup-page.js";
 import {
@@ -566,6 +567,28 @@ export async function startServe(
           served,
           context.url.searchParams,
           dashboard.has(pipelineAssets.script) && dashboard.has(pipelineAssets.stylesheet),
+        );
+        response.writeHead(200, {
+          "content-type": "text/html; charset=utf-8",
+          "cache-control": "no-store",
+          "x-content-type-options": "nosniff",
+          "referrer-policy": "no-referrer",
+          "content-security-policy": dashboardSecurityPolicy,
+        });
+        response.end(
+          request.method === "HEAD"
+            ? undefined
+            : withProcessIdentity(html, processIdentity, selectedPage ?? undefined),
+        );
+        return;
+      }
+      if (path === "/work-preview") {
+        // Svelte Work preview (#753): a static bootstrap after the shell's project selection
+        // check; the component reads /api/v1/briefing and /api/v1/tickets/N. No GitHub read here.
+        const html = workPreviewBootstrapHtml(
+          served,
+          context.url.searchParams,
+          dashboard.has(workPreviewAssets.script) && dashboard.has(workPreviewAssets.stylesheet),
         );
         response.writeHead(200, {
           "content-type": "text/html; charset=utf-8",

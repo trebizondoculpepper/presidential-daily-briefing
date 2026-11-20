@@ -49,6 +49,8 @@ const expected = [
   "dist/web/pipeline.js",
   "dist/web/rules.css",
   "dist/web/rules.js",
+  "dist/web/work.css",
+  "dist/web/work.js",
   "package.json",
   "third-party/README.md",
   "third-party/datascript-LICENSE",
@@ -310,11 +312,17 @@ async function serveSmoke(bin: string, env: NodeJS.ProcessEnv, cwd: string): Pro
     const pipelinePage = await (await fetch(`${url}pipeline?repo=example%2Fparity`)).text();
     if (!pipelinePage.includes('<div id="pipeline-app" data-api="/api/v1/metrics">'))
       throw new Error(`Installed pdb serve /pipeline is wrong: ${pipelinePage.slice(0, 400)}`);
+    // #753: the opt-in Svelte Work preview and its built assets, served the same way.
+    const workPage = await (await fetch(`${url}work-preview?repo=example%2Fparity`)).text();
+    if (!workPage.includes('<div id="work-app" data-api="/api/v1/briefing"'))
+      throw new Error(`Installed pdb serve /work-preview is wrong: ${workPage.slice(0, 400)}`);
     for (const [path, type, marker] of [
       ["web/rules.js", "text/javascript", "rules-app"],
       ["web/rules.css", "text/css", "rule-formal"],
       ["web/pipeline.js", "text/javascript", "pipeline-app"],
       ["web/pipeline.css", "text/css", "pipeline-table"],
+      ["web/work.js", "text/javascript", "work-app"],
+      ["web/work.css", "text/css", "work-row"],
     ] as const) {
       const asset = await fetch(`${url}${path}`);
       const text = await asset.text();

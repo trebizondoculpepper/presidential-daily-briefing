@@ -118,3 +118,7 @@ claiming a screen-reader pass from a DOM tree.
 
 Promotion to the default Work page, migration of other pages, a component library,
 and unrelated task mutations remain separate follow-ups after preview feedback.
+
+## Implementation note (steps 1 and 2)
+
+`/work-preview` is registered in the shared page registry with `preview: true`, which serves it but keeps it out of every page's navigation; `/` is unchanged. The static bootstrap (`src/serve/work-preview-page.ts`) mounts `src/web/work/App.svelte`, built by the existing Vite+ web build into `dist/web/work.js` and `dist/web/work.css`, listed in the package files and checked by the packed-install test under the strict CSP. The typed client (`src/web/work/client.ts`) parses the existing `/api/v1/briefing` envelope in the supplied order, keys rows by repository plus action ID, keeps open rows by identity across refreshes, moves focus to the nearest surviving row when the focused one disappears, discards late responses by generation, keeps the earlier list labelled Updating during a refresh, and loads `/api/v1/tickets/N` details only on expansion, coalesced and scoped to project, role and agent. Step 3 (wide/narrow screenshots, keyboard and reduced-motion verification, and the try-it instructions) follows separately.

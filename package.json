@@ -33,7 +33,9 @@
     "dist/web/rules.js",
     "dist/web/rules.css",
     "dist/web/pipeline.js",
-    "dist/web/pipeline.css"
+    "dist/web/pipeline.css",
+    "dist/web/work.js",
+    "dist/web/work.css"
   ],
   "type": "module",
   "publishConfig": {
