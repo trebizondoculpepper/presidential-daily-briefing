@@ -39,6 +39,26 @@
         {c.label}: {c.figure.incomplete.count} ticket{c.figure.incomplete.count === 1 ? "" : "s"}
         could not be dated, so these counts are a lower bound.
       </p>
+      {#if c.figure.incomplete.members.length}
+        <!-- The tickets behind that count; they are not in the dated "in this window" lists. -->
+        <details class="pipeline-members">
+          <summary>
+            {c.label}: {c.figure.incomplete.members.length} undated ticket{c.figure.incomplete
+              .members.length === 1
+              ? ""
+              : "s"}
+          </summary>
+          <ul>
+            {#each c.figure.incomplete.members.slice(0, shown) as member (member)}
+              {@const href = ticketLink(member)}
+              <li>{#if href}<a {href}>{member}</a>{:else}{member}{/if}</li>
+            {/each}
+          </ul>
+          {#if c.figure.incomplete.members.length > shown}
+            <p>{c.figure.incomplete.members.length - shown} more not listed.</p>
+          {/if}
+        </details>
+      {/if}
     {/if}
   {/each}
 

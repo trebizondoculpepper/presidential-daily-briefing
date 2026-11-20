@@ -178,4 +178,17 @@ describe("assessment pace (#687)", () => {
       expect(parseAssessmentResponse(bad), String(days)).toBeNull();
     }
   });
+
+  it("links the undated tickets behind the lower-bound warning (#1144 review)", () => {
+    const body = envelope(tickets, "2026-11-01T00:00:00.000Z");
+    const incoming = body.result.metrics.impact.volume.incoming;
+    incoming.incomplete = { count: 1, members: ["o/r#9"] };
+    incoming.lowerBound = true;
+    const out = html(body);
+    expect(out).toContain(
+      "New tickets: 1 ticket could not be dated, so these counts are a lower bound.",
+    );
+    expect(out).toContain("<summary>New tickets: 1 undated ticket</summary>");
+    expect(out).toContain('<a href="/ticket?repo=o%2Fr&amp;n=9">o/r#9</a>');
+  });
 });
