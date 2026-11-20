@@ -79,9 +79,26 @@
   <p class="pipeline-note">
     {result.totalOpen} open ticket{result.totalOpen === 1 ? "" : "s"} in total;
     {notShown} in other stages (unassessed, in review or unknown) are not in this table.
-    {#if result.stateUnknown.count}
-      <span class="warn">The stage of {result.stateUnknown.count} could not be established.</span>
+    {#if result.stages.unknown.count}
+      <span class="warn"
+        >The workflow stage of {result.stages.unknown.count} open ticket{result.stages.unknown.count === 1 ? "" : "s"} could not be established.</span
+      >
     {/if}
   </p>
-  <p class="pipeline-note">Observed at <time datetime={result.observedAt}>{result.observedAt}</time>.</p>
+  {#if result.stateUnknown.count}
+    <p class="warn" role="status">
+      Whether {result.stateUnknown.count} ticket{result.stateUnknown.count === 1 ? " is" : "s are"} open
+      or closed could not be established; {result.stateUnknown.count === 1 ? "it is" : "they are"} not in
+      the open total.
+    </p>
+  {/if}
+  <p class="pipeline-note">
+    {#if response.freshness}
+      Facts collected at <time datetime={response.freshness.observedAt}>{response.freshness.observedAt}</time>
+      ({response.freshness.source === "live" ? "fresh read" : `${response.freshness.source}, ${formatAge(response.freshness.ageSeconds * 1000)} old`}{response.freshness.stale ? ", stale" : ""});
+    {:else}
+      Collection time not supplied;
+    {/if}
+    figures computed at <time datetime={result.observedAt}>{result.observedAt}</time>.
+  </p>
 </section>

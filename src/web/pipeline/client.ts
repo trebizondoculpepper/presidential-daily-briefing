@@ -17,6 +17,11 @@ export interface InventoryResponse {
   status: "complete" | "incomplete" | "error";
   repository: string | null;
   warnings: string[];
+  /**
+   * When the underlying facts were collected and whether they came from the cache (#1141
+   * review); `result.observedAt` is only when the figures were computed. Null when not supplied.
+   */
+  freshness: { source: string; observedAt: string; ageSeconds: number; stale: boolean } | null;
   result: InventoryResult;
 }
 
@@ -65,6 +70,15 @@ export function parseInventoryResponse(body: unknown): InventoryResponse | null 
   const stages = result.stages;
   if (!shownStages.every((s) => validStage(stages[s])) || !validStage(stages.unknown)) return null;
   const selection = isObject(body.selection) ? body.selection : {};
+  const f = isObject(body.freshness) ? body.freshness : null;
+  const freshness =
+    f &&
+    typeof f.source === "string" &&
+    typeof f.observedAt === "string" &&
+    typeof f.ageSeconds === "number" &&
+    typeof f.stale === "boolean"
+      ? { source: f.source, observedAt: f.observedAt, ageSeconds: f.ageSeconds, stale: f.stale }
+      : null;
   return {
     status:
       body.status === "complete" || body.status === "incomplete" || body.status === "error"
@@ -72,6 +86,7 @@ export function parseInventoryResponse(body: unknown): InventoryResponse | null 
         : "error",
     repository: typeof selection.repository === "string" ? selection.repository : null,
     warnings: isStrings(body.warnings) ? body.warnings : [],
+    freshness,
     result: result as unknown as InventoryResult,
   };
 }

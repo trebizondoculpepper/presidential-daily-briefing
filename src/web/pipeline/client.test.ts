@@ -182,4 +182,29 @@ describe("stage inventory table (#684)", () => {
     expect(html({ status: "loading" })).toContain("Loading the inventory");
     expect(html({ status: "no-project" })).toContain("Choose a project");
   });
+
+  it("separates collection time from computation time, and stage-unknown from state-unknown (#1141 review)", () => {
+    const body = {
+      ...envelope([ticket(1, "ready", 1)]),
+      freshness: {
+        source: "cached",
+        observedAt: "2026-11-20T11:50:00Z",
+        ageSeconds: 600,
+        ttlSeconds: 900,
+        expiresAt: "2026-11-20T12:05:00Z",
+        stale: false,
+        refreshError: null,
+      },
+    };
+    body.result.stages.unknown = { ...body.result.stages.unknown, count: 2 };
+    body.result.stateUnknown = { count: 1, members: ["o/r#9"] };
+    const out = html({ status: "ready", response: parseInventoryResponse(body)! });
+    expect(out).toContain('Facts collected at <time datetime="2026-11-20T11:50:00Z">');
+    expect(out).toContain("(cached, 10m old)");
+    expect(out).toContain("figures computed at");
+    expect(out).toContain("The workflow stage of 2 open tickets could not be established.");
+    expect(out).toContain(
+      "Whether 1 ticket is open or closed could not be established; it is not in the open total.",
+    );
+  });
 });
