@@ -358,8 +358,32 @@ describe("routine briefing: discover all, rank, hydrate only the shortlist (#368
     // Ranked by discovered relevance: ready+unblocked, then ready+blocked, then parked.
     expect(shortlist.notice).toContain("(#10, #9, #5, #6, #7, ...)");
     expect(shortlist.notice).toContain(
-      "1 of them carry status:ready and no discovered open blocker, so the read bound left them out rather than a rule.",
+      "1 of them carry status:ready and no discovered open blocker but were not read, so their eligibility is unproven rather than denied.",
     );
+  });
+
+  it("separates a failed read from a shortlist omission in the notice (#893 review)", async () => {
+    // The ready, unblocked ticket beyond the bound is not read because its own read failed:
+    // the notice must not present that as a shortlist exclusion.
+    const issues = [...[1, 2, 3, 4].map((n) => ready(n)), ready(5), ready(6)];
+    const fake = fakeGitHub(issues, [], { issue: { 6: null } });
+    const snapshot = await collectShortlist(
+      repo,
+      {
+        select: async (candidates) => candidates.issues.map((i) => i.url),
+        bounds: { maxHydrated: 6 },
+      },
+      fake.query,
+      clock,
+    );
+    const shortlist = snapshot.shortlist!;
+    const failed = shortlist.notHydrated.find((item) => item.number === 6)!;
+    expect(failed.reason).toBe("unavailable");
+    expect(shortlist.notice).toContain(
+      "1 of them carry status:ready and no discovered open blocker but were not read, so their eligibility is unproven rather than denied; 1 of those reads failed or were stopped.",
+    );
+    // The failed read is disclosed as unknown evidence, never as a bound exclusion.
+    expect(snapshot.warnings.join(" ")).toContain("Shortlist reads failed");
   });
 
   it("carries discovery completeness into selection passes, not only the final record", async () => {

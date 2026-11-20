@@ -382,10 +382,14 @@ export async function collectShortlist(
       .map((item) => `#${item.number}`)
       .join(", ");
     const admitted = ordered.filter((item) => omissionRank(item) === 0);
-    // A ready, unblocked candidate was never read, so no rule has judged it: say that the read
-    // bound, not a rule, kept it out, and count them so the omission is auditable (#893).
+    // #893 review: discovery facts cannot say what a rule would decide, and the recorded reason
+    // separates "not read" from "read and failed". State only what is known: these candidates
+    // were not read, so their eligibility is unproven rather than denied.
+    const unread = admitted.filter(
+      (item) => item.reason === "hydration-cap" || item.reason === "not-shortlisted",
+    ).length;
     const ready = admitted.length
-      ? ` ${admitted.length} of them carry status:ready and no discovered open blocker, so the read bound left them out rather than a rule.`
+      ? ` ${admitted.length} of them carry status:ready and no discovered open blocker but were not read, so their eligibility is unproven rather than denied${admitted.length === unread ? "" : `; ${admitted.length - unread} of those reads failed or were stopped`}.`
       : "";
     return `Shortlist: ${items.length} of ${order.length - gone.size} open item(s) were discovered but not hydrated (${sample}${items.length > 5 ? ", ..." : ""}); their comments, reviews, checks and records are unknown, not empty, so this ordering is provisional${capped ? " (hydration bound reached)" : ""}.${ready} Inspect one with pdb --issue N, or read everything with --full.`;
   };
