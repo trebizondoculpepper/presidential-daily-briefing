@@ -434,14 +434,19 @@ normal stop. Native timeout must exceed the package deadline. Exact hook definit
 requires normal native trust. See doc/rebrief.md for setup/removal and trial limits.
 `;
 
-const claudeHelp = `Usage: pdb rebrief claude-stop --state-dir PATH --repo owner/name
+const claudeHelp = `Usage: pdb rebrief claude-stop [--installed | --state-dir PATH --repo owner/name]
        --role implementer|designer [--agent NAME] [--project PATH]
-       [--entry KEY | --harness NAME] --natural-stop-confirmed
+       [--entry KEY | --harness NAME] [--natural-stop-confirmed]
        [--deadline-ms 1..10000] [--cap N] [--transport service|http-mcp]
 Native Claude Code Stop adapter (#771): one JSON Stop event on stdin, one native JSON
 response on stdout. Claude Code fires Stop only when the main agent finishes a turn
 on its own (never on a user interrupt; API errors fire StopFailure), so the hook may
-pass --natural-stop-confirmed. The event is the payload's prompt_id within its
+pass --natural-stop-confirmed. Installed mode (pdb install claude) omits
+--state-dir/--repo: the repository is resolved from the event cwd's verified Git
+root and remote, the identity through resolveReadIdentity, and the private state
+directory is derived (owner-only, under the OS temporary directory) keyed by
+repository and session, initializing once on the first eligible Stop. The event is
+the payload's prompt_id within its
 session_id; a Stop already continued by a hook (stop_hook_active true), one with
 pending background_tasks or session_crons (paused, not finished), a missing
 prompt_id, missing/mismatched state, invalid input, cancellation or failure gives {}
@@ -540,7 +545,8 @@ async function runNativeStop(
     const installed = values.installed === true;
     // Installed-mode binding (#770) is Codex-specific; Claude installed registration is a
     // separate slice and must not silently reuse the Codex cwd-derived binding.
-    if (installed && profile.platform !== "codex") throw new Error("unsupported installed mode");
+    if (installed && !["codex", "claude-code"].includes(profile.platform))
+      throw new Error("unsupported installed mode");
     const deadline = Number(
       values["deadline-ms"] ?? (installed ? codexInstalledDeadlineMs : defaults.deadlineMs),
     );
@@ -596,30 +602,44 @@ async function runNativeStop(
       if (values.role !== undefined && !["implementer", "designer"].includes(values.role))
         throw new Error("invalid role");
       const requestedRole = values.role as "implementer" | "designer" | undefined;
-      const effectiveIdentity = runtime.prepareIdentity
-        ? await runtime.prepareIdentity({
-            project: target.root,
-            repository,
-            agent: values.agent,
-            entry: values.entry,
-            harness: values.harness,
-            role: requestedRole,
-            requireProject: true,
-            intent: "readonly",
-          })
-        : undefined;
-      const identity = effectiveIdentity
-        ? effectiveReadIdentity(effectiveIdentity, "tool")
-        : await resolveReadIdentity({
-            toolAgent: values.agent,
-            project: target.root,
-            repository,
-            entry: values.entry,
-            harness: values.harness,
-            env: runtime.env ?? process.env,
-            fs: runtime.fs,
-            git,
-          });
+      // Claude Code is a detected harness but has no active per-session binding provider (only
+      // codex does), so prepareEffectiveIdentity can never resolve an installed global Claude
+      // hook, making it return {} without checking for work. Resolve the local identity entry
+      // read-only first (its ambiguity checks cover detectClientEntry/resolveEntry and it never
+      // writes); fall back to the prepared identity when the host provides one (reviewed #1126).
+      const readOnly = async () =>
+        resolveReadIdentity({
+          toolAgent: values.agent,
+          project: target.root,
+          repository,
+          entry: values.entry,
+          harness: values.harness,
+          env: runtime.env ?? process.env,
+          fs: runtime.fs,
+          git,
+        });
+      const prepared = async () =>
+        runtime.prepareIdentity
+          ? effectiveReadIdentity(
+              await runtime.prepareIdentity({
+                project: target.root,
+                repository,
+                agent: values.agent,
+                entry: values.entry,
+                harness: values.harness,
+                role: requestedRole,
+                requireProject: true,
+                intent: "readonly",
+              }),
+              "tool",
+            )
+          : readOnly();
+      const identity =
+        profile.platform === "claude-code"
+          ? (await readOnly()).agent
+            ? await readOnly()
+            : await prepared()
+          : await prepared();
       if (!identity.agent) throw new Error("missing identity");
       // An explicit --role wins; otherwise the stored identity's triage role decides the view
       // rather than a hardcoded implementer default (reviewed #1124 finding).
@@ -691,7 +711,7 @@ async function runNativeStop(
         { ...runtime, signal: controller.signal },
       );
     }
-  } catch (error) {
+  } catch {
     response = {};
   } finally {
     if (timer) clearTimeout(timer);

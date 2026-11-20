@@ -8,6 +8,9 @@ import { claudeInstallArgumentsFor, claudeInstallHelp, runClaudeInstall } from "
 
 const exec = promisify(execFile);
 
+/** Injected installed pdb CLI path (source checkouts cannot resolve it). */
+const PDB = "/npm/lib/node_modules/pdb/dist/cli.mjs";
+
 async function initTempRepo(prefix: string): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), prefix));
   await exec("git", ["init"], { cwd: dir });
@@ -104,7 +107,7 @@ describe("runClaudeInstall (#769)", () => {
           ],
           "install",
         ),
-        { cwd: dir, env: {} },
+        { cwd: dir, env: {}, pdbPath: PDB },
         async (text) => void out1.push(text),
       );
       expect(code1, out1.join("")).toBe(0);
@@ -136,7 +139,7 @@ describe("runClaudeInstall (#769)", () => {
           ],
           "install",
         ),
-        { cwd: dir, env: {} },
+        { cwd: dir, env: {}, pdbPath: PDB },
         async (text) => void out2.push(text),
       );
       expect(code2).toBe(0);
@@ -156,7 +159,7 @@ describe("runClaudeInstall (#769)", () => {
           ["claude", "--repo", "example/project", "--yes", "--json"],
           "uninstall",
         ),
-        { cwd: dir, env: {} },
+        { cwd: dir, env: {}, pdbPath: PDB },
         async (text) => void out3.push(text),
       );
       expect(code3).toBe(0);
@@ -196,6 +199,7 @@ describe("runClaudeInstall (#769)", () => {
         {
           cwd: dir,
           env: {},
+          pdbPath: PDB,
           confirm: async () => false,
           stderr: (text) => void err.push(text),
         },
@@ -238,6 +242,7 @@ describe("runClaudeInstall (#769)", () => {
         {
           cwd: dir,
           env: {},
+          pdbPath: PDB,
           stderr: () => {},
           confirm: async () => {
             events.push("confirm");
@@ -274,7 +279,7 @@ describe("runClaudeInstall (#769)", () => {
           ],
           "install",
         ),
-        { cwd: dir, env: {} },
+        { cwd: dir, env: {}, pdbPath: PDB },
         async () => {},
       );
       expect(setupCode).toBe(0);
@@ -284,6 +289,7 @@ describe("runClaudeInstall (#769)", () => {
         {
           cwd: dir,
           env: {},
+          pdbPath: PDB,
           stderr: () => {},
           confirm: async () => {
             await writeFile(
@@ -341,7 +347,7 @@ describe("runClaudeInstall (#769)", () => {
           ],
           "install",
         ),
-        { cwd: dir, env: {} },
+        { cwd: dir, env: {}, pdbPath: PDB },
         async (text) => void out.push(text),
       );
       expect(code, out.join("")).toBe(0);
@@ -409,7 +415,7 @@ describe("runClaudeInstall (#769)", () => {
           ],
           "install",
         ),
-        { cwd: dir, env: codexEnv },
+        { cwd: dir, env: codexEnv, pdbPath: PDB },
         async (text) => void out.push(text),
       );
       expect(code, out.join("")).toBe(0);

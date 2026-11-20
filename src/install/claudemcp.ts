@@ -33,6 +33,14 @@ export async function resolveInstalledPdbMcp(): Promise<string | null> {
   return `${installed.root}/dist/mcp.mjs`;
 }
 
+/** Resolve the installed `pdb` packaged CLI path, or null when not an npm install. */
+export async function resolveInstalledPdb(): Promise<string | null> {
+  const installed = await installedVersion();
+  if (!installed.installed || !installed.root) return null;
+  // package.json `bin.pdb` points at dist/cli.mjs; the packaged entry is the executable.
+  return `${installed.root}/dist/cli.mjs`;
+}
+
 export interface ClaudeMcpOptions {
   /** STDIO default; HTTP is explicit (no auto-detection). */
   transport: "stdio" | "http";
@@ -172,14 +180,24 @@ function manifestWriteRefusal(
   };
 }
 
-/** Raw Claude MCP config and ownership-manifest snapshot bound between preview and apply (#769). */
+/** Raw Claude MCP config, hook settings and ownership-manifest snapshot bound between preview and apply (#769, #771). */
 export interface ClaudeInstallSnapshot {
   configRaw: string | null;
+  /** Raw Claude settings file holding the owned Stop hook, so a concurrent hook change is detected. */
+  hooksRaw: string | null;
   manifestRaw: string | null;
 }
 
 const claudeTargetPath = (scope: InstallScope): string =>
   scope.kind === "project" ? claudeProjectMcpPath(scope) : claudeUserConfigFile(scope);
+
+/** Claude settings path within a project or user-wide scope (mirrors claudehook.claudeSettingsPath). */
+const claudeHookSettingsPath = (scope: InstallScope, claudeConfigDir?: boolean): string =>
+  scope.kind === "project"
+    ? `${scope.root}/.claude/settings.local.json`
+    : claudeConfigDir
+      ? `${scope.homeDir}/settings.json`
+      : `${scope.homeDir}/.claude/settings.json`;
 
 const readOptionalFile = async (
   path: string,
@@ -193,24 +211,28 @@ const readOptionalFile = async (
   }
 };
 
-/** Capture raw Claude MCP config and manifest contents for preview-to-apply conflict checks (#769). */
+/** Capture raw Claude MCP config, hook settings and manifest contents for preview-to-apply conflict checks (#769). */
 export async function readClaudeInstallSnapshot(
   scope: InstallScope,
   manifestPath: string,
+  hookSettingsPath: string,
   fs?: ManifestRuntime["fs"],
 ): Promise<ClaudeInstallSnapshot> {
   return {
     configRaw: await readOptionalFile(claudeTargetPath(scope), fs),
+    hooksRaw: await readOptionalFile(hookSettingsPath, fs),
     manifestRaw: await readOptionalFile(manifestPath, fs),
   };
 }
 
-/** Whether the raw Claude MCP config or ownership manifest changed since a preview snapshot (#769). */
+/** Whether the raw Claude MCP config, hook settings or ownership manifest changed since a preview snapshot (#769). */
 export const claudeInstallSnapshotChanged = (
   expected: ClaudeInstallSnapshot,
   current: ClaudeInstallSnapshot,
 ): boolean =>
-  expected.configRaw !== current.configRaw || expected.manifestRaw !== current.manifestRaw;
+  expected.configRaw !== current.configRaw ||
+  expected.hooksRaw !== current.hooksRaw ||
+  expected.manifestRaw !== current.manifestRaw;
 
 /**
  * Install (or keep/replace) the PDB MCP entry in the project `.mcp.json` (project scope) or the
@@ -224,18 +246,35 @@ export async function installClaudeMcp(params: {
   dryRun?: boolean;
   adopt?: boolean;
   pdbMcp?: string;
+  /** When true, the global scope's homeDir is an explicit CLAUDE_CONFIG_DIR. */
+  claudeConfigDir?: boolean;
   /** Platform used to shape the STDIO command (win32 launches through Node); tests inject. */
   platform?: NodeJS.Platform;
   runtime?: ManifestRuntime;
   expectedSnapshot?: ClaudeInstallSnapshot;
 }): Promise<ClaudeMcpResult> {
-  const { scope, options, manifestPath, pdbVersion, dryRun, adopt, runtime, expectedSnapshot } =
-    params;
+  const {
+    scope,
+    options,
+    manifestPath,
+    pdbVersion,
+    dryRun,
+    adopt,
+    runtime,
+    claudeConfigDir,
+    expectedSnapshot,
+  } = params;
   // Project scope uses the native project `.mcp.json`; --global targets the user config home.
   const file = claudeTargetPath(scope);
   const allowedRoot = scope.kind === "project" ? scope.root : scope.homeDir;
+  const hookSettingsPath = claudeHookSettingsPath(scope, claudeConfigDir);
   if (!dryRun && expectedSnapshot) {
-    const currentSnapshot = await readClaudeInstallSnapshot(scope, manifestPath, runtime?.fs);
+    const currentSnapshot = await readClaudeInstallSnapshot(
+      scope,
+      manifestPath,
+      hookSettingsPath,
+      runtime?.fs,
+    );
     if (claudeInstallSnapshotChanged(expectedSnapshot, currentSnapshot)) {
       return {
         mcp: {
@@ -300,13 +339,20 @@ export async function uninstallClaudeMcp(params: {
   manifestPath: string;
   dryRun?: boolean;
   runtime?: ManifestRuntime;
+  claudeConfigDir?: boolean;
   expectedSnapshot?: ClaudeInstallSnapshot;
 }): Promise<ClaudeMcpResult> {
-  const { scope, manifestPath, dryRun, runtime, expectedSnapshot } = params;
+  const { scope, manifestPath, dryRun, runtime, claudeConfigDir, expectedSnapshot } = params;
   const file = claudeTargetPath(scope);
   const allowedRoot = scope.kind === "project" ? scope.root : scope.homeDir;
+  const hookSettingsPath = claudeHookSettingsPath(scope, claudeConfigDir);
   if (!dryRun && expectedSnapshot) {
-    const currentSnapshot = await readClaudeInstallSnapshot(scope, manifestPath, runtime?.fs);
+    const currentSnapshot = await readClaudeInstallSnapshot(
+      scope,
+      manifestPath,
+      hookSettingsPath,
+      runtime?.fs,
+    );
     if (claudeInstallSnapshotChanged(expectedSnapshot, currentSnapshot)) {
       return {
         mcp: {

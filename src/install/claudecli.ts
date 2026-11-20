@@ -5,8 +5,8 @@
  * doc/design/codex-installer.md's shared CLI/result shapes. Default scope is the current
  * repository (project `.mcp.json`); `--global` targets the user-wide Claude config. Identity is
  * resolved/recovered through the existing `pdb setup identity` service for project scope. The
- * Stop hook item is never invented: it stays `not-attempted`/`HOOK_NOT_AVAILABLE` until a
- * packaged session-bound adapter exists.
+ * Stop hook item registers the owned `pdb rebrief claude-stop --installed` entry in the scope's
+ * Claude settings file (project `.claude/settings.local.json`, user settings.json).
  */
 import { parseArgs } from "node:util";
 import { homedir } from "node:os";
@@ -22,10 +22,16 @@ import {
   claudeInstallSnapshotChanged,
   installClaudeMcp,
   readClaudeInstallSnapshot,
+  resolveInstalledPdb,
   resolveInstalledPdbMcp,
   uninstallClaudeMcp,
   type ClaudeInstallSnapshot,
 } from "./claudemcp.js";
+import {
+  installClaudeStopHook,
+  uninstallClaudeStopHook,
+  claudeSettingsPath,
+} from "./claudehook.js";
 
 /** A registered installer client; only Claude is implemented by this module. */
 export type ClaudeInstallClient = "claude";
@@ -37,8 +43,7 @@ export type ClaudeInstallErrorCode =
   | "IDENTITY_AMBIGUOUS"
   | "UNSUPPORTED_SCOPE"
   | "UNSUPPORTED_CLIENT_VERSION"
-  | "LOCKED"
-  | "HOOK_NOT_AVAILABLE";
+  | "LOCKED";
 
 /** Installer item kinds: the managed native entries plus the identity preparation outcome. */
 export type ClaudeInstallItemKind = InstallItemKind | "identity";
@@ -66,7 +71,10 @@ export interface ClaudeInstallItem {
 /** The installer scope, with `repository` carried on the project variant for reporting. */
 export type ClaudeInstallScope =
   | (Extract<InstallScope, { kind: "project" }> & { repository: string })
-  | Extract<InstallScope, { kind: "global" }>;
+  | (Extract<InstallScope, { kind: "global" }> & {
+      /** True when `homeDir` is an explicit CLAUDE_CONFIG_DIR rather than the user home. */
+      claudeConfigDir: boolean;
+    });
 
 export interface ClaudeInstallResult {
   schemaVersion: 1;
@@ -159,10 +167,12 @@ export const claudeInstallHelp = (operation: "install" | "uninstall"): string =>
   operation === "install"
     ? `Usage: pdb install claude [--global] [--transport stdio|http] [--url URL] [--role implementer|designer]
                        [--entry KEY | --harness NAME] [--repo owner/name] [--dry-run] [--json] [--yes]
-Configure the PDB MCP connection for Claude Code. Default scope is the current repository
-(project .mcp.json); --global targets the user-wide Claude config. STDIO is the default;
---transport http with --url is explicit. --dry-run previews exact changes and writes nothing.
-A Claude Stop hook is not installed (hook adapter is a separate slice).`
+Configure the PDB MCP connection and Stop hook for Claude Code. Default scope is the current
+repository (project .mcp.json and .claude/settings.local.json); --global targets the user-wide
+Claude config. STDIO is the default; --transport http with --url is explicit. --dry-run previews
+exact changes and writes nothing. The install also registers the owned Stop hook so a finished
+Claude turn runs pdb's continuation check; Claude asks you to approve the Stop hook command once
+during setup.`
     : `Usage: pdb uninstall claude [--global] [--dry-run] [--json] [--yes]
 Remove only PDB-managed Claude entries in the selected scope; identity, project settings and
 unrelated entries survive. Already absent is a no-op. --global is required to touch user-wide
@@ -331,7 +341,9 @@ export async function resolveClaudeInstallScope(
     const homeDir = process.env.HOME ?? homedir();
     const claudeHome = process.env.CLAUDE_CONFIG_DIR?.trim();
     const home = claudeHome ? resolveHome(claudeHome, homeDir) : homeDir;
-    return { kind: "global", stateDir: home, homeDir: home };
+    // When CLAUDE_CONFIG_DIR is set, `home` is the Claude config directory itself: the global
+    // hook settings file lives at `<home>/settings.json` there, not `<home>/.claude/settings.json`.
+    return { kind: "global", stateDir: home, homeDir: home, claudeConfigDir: !!claudeHome };
   }
   try {
     // Resolve the verified working-tree root first (never a parent or global fallback).
@@ -371,6 +383,8 @@ const mcpFileFor = (scope: ClaudeInstallScope): string =>
 export interface ClaudeRunRuntime extends ConfigRuntime {
   confirm?: (prompt: string) => Promise<boolean>;
   stderr?: (text: string) => void | Promise<void>;
+  /** Inject the installed pdb CLI path for tests; resolves from the running package when omitted. */
+  pdbPath?: string;
 }
 
 function formatClaudeInstallOutput(
@@ -404,6 +418,9 @@ async function evaluateClaudeInstallPlan(params: {
     args.operation === "install" && args.transport === "stdio"
       ? await resolveInstalledPdbMcp()
       : null;
+  // The owned Stop hook invokes the same package's pdb CLI (resolved once for install and uninstall).
+  const installedPdbPath =
+    args.operation === "install" ? (runtime.pdbPath ?? (await resolveInstalledPdb())) : null;
   if (!dryRun && args.operation === "install" && args.transport === "stdio" && !pdbMcp) {
     const refused: ClaudeInstallResult = {
       schemaVersion: 1,
@@ -426,15 +443,14 @@ async function evaluateClaudeInstallPlan(params: {
         },
         {
           kind: "hook",
-          file:
-            scope.kind === "project"
-              ? `${scope.root}/.claude/settings.local.json`
-              : `${scope.homeDir}/.claude/settings.json`,
-          action: "skipped",
+          file: claudeSettingsPath(
+            scope,
+            scope.kind === "global" ? scope.claudeConfigDir : undefined,
+          ),
+          action: "kept",
           outcome: "not-attempted",
-          code: "HOOK_NOT_AVAILABLE",
-          message:
-            "Installed hook adapter is a separate slice; withheld until it can bind a session.",
+          code: "UNSUPPORTED_SCOPE",
+          message: "The running PDB is not an npm installation; the Stop hook was not written.",
           diff: null,
           retry: null,
         },
@@ -454,7 +470,11 @@ async function evaluateClaudeInstallPlan(params: {
     expectedSnapshot &&
     claudeInstallSnapshotChanged(
       expectedSnapshot,
-      await readClaudeInstallSnapshot(scope, manifestPathForScope),
+      await readClaudeInstallSnapshot(
+        scope,
+        manifestPathForScope,
+        claudeSettingsPath(scope, scope.kind === "global" ? scope.claudeConfigDir : undefined),
+      ),
     );
   // Resolve/recover the per-repository identity before writing the project MCP entry so the
   // installed server uses the intended identity (attended-installer-delivery.md). A refusal is
@@ -518,15 +538,64 @@ async function evaluateClaudeInstallPlan(params: {
             manifestPath: manifestPathForScope,
             pdbVersion: "0.1.0",
             dryRun,
+            claudeConfigDir: scope.kind === "global" ? scope.claudeConfigDir : undefined,
             expectedSnapshot,
           })
         : await uninstallClaudeMcp({
             scope,
             manifestPath: manifestPathForScope,
             dryRun,
+            claudeConfigDir: scope.kind === "global" ? scope.claudeConfigDir : undefined,
             expectedSnapshot,
           });
   const mcp = performed.mcp;
+  const hook = conflicted
+    ? {
+        hook: {
+          action: "kept" as const,
+          outcome: "refused" as const,
+          ownership: "absent" as const,
+          code: "CONFLICT" as const,
+          message:
+            "Claude configuration or ownership manifest changed since the preview; re-run to inspect the updated plan.",
+          diff: null,
+          manifestRecord: null,
+        },
+      }
+    : identityBlocked && scope.kind === "project" && args.operation === "install"
+      ? {
+          hook: {
+            action: "kept" as const,
+            outcome: "not-attempted" as const,
+            ownership: "absent" as const,
+            code: "IDENTITY_REQUIRED" as const,
+            message:
+              "Stop-hook registration withheld: the Claude identity could not be resolved; fix identity and re-run.",
+            diff: null,
+            manifestRecord: null,
+          },
+        }
+      : args.operation === "uninstall"
+        ? await uninstallClaudeStopHook({
+            scope,
+            manifestPath: manifestPathForScope,
+            dryRun,
+            claudeConfigDir: scope.kind === "global" ? scope.claudeConfigDir : undefined,
+            expectedHooksRaw: expectedSnapshot?.hooksRaw,
+          })
+        : await installClaudeStopHook({
+            scope,
+            options: {
+              role: scope.kind === "project" ? args.role : undefined,
+              entry: scope.kind === "project" ? (identityEntry ?? args.entry) : undefined,
+            },
+            manifestPath: manifestPathForScope,
+            pdbVersion: "0.1.0",
+            dryRun,
+            claudeConfigDir: scope.kind === "global" ? scope.claudeConfigDir : undefined,
+            pdbPath: installedPdbPath ?? undefined,
+            expectedHooksRaw: expectedSnapshot?.hooksRaw,
+          });
   const mcpConfigured =
     args.operation === "install" &&
     !dryRun &&
@@ -568,16 +637,18 @@ async function evaluateClaudeInstallPlan(params: {
     },
     {
       kind: "hook",
-      file:
-        scope.kind === "project"
-          ? `${scope.root}/.claude/settings.local.json`
-          : `${scope.homeDir}/.claude/settings.json`,
-      action: "skipped",
-      outcome: "not-attempted",
-      code: "HOOK_NOT_AVAILABLE",
-      message: "Installed hook adapter is a separate slice; withheld until it can bind a session.",
-      diff: null,
-      retry: null,
+      file: claudeSettingsPath(scope, scope.kind === "global" ? scope.claudeConfigDir : undefined),
+      action: hook.hook.action,
+      outcome: hook.hook.outcome,
+      code: hook.hook.code,
+      message: hook.hook.message,
+      diff: hook.hook.diff,
+      retry:
+        hook.hook.outcome === "refused" ||
+        hook.hook.outcome === "failed" ||
+        hook.hook.outcome === "committed-with-error"
+          ? `pdb ${args.operation} claude${args.global ? " --global" : ""}${args.repo ? ` --repo ${args.repo}` : ""} --yes`
+          : null,
     },
   ];
   const result: ClaudeInstallResult = {
@@ -603,6 +674,9 @@ async function evaluateClaudeInstallPlan(params: {
       args.operation === "install"
         ? "Claude will start the PDB MCP server on the next session after you approve it."
         : "",
+      hook.hook.outcome === "applied" || hook.hook.outcome === "kept"
+        ? "Run the workspace trust flow in Claude Code and approve the PDB Stop hook (changing a trusted definition needs normal review again)."
+        : "",
     ].filter(Boolean),
   };
   const refusedOrFailed = result.items.some(
@@ -621,7 +695,7 @@ async function evaluateClaudeInstallPlan(params: {
 
 /**
  * Run `pdb install claude` / `pdb uninstall claude`. Identity is resolved/recovered for project
- * scope (never invented for --global); the hook item is withheld (HOOK_NOT_AVAILABLE).
+ * scope (never invented for --global); the Stop hook item registers the owned installed entry.
  */
 export async function runClaudeInstall(
   args: ClaudeInstallArguments,
@@ -659,15 +733,14 @@ export async function runClaudeInstall(
         },
         {
           kind: "hook",
-          file:
-            scope.kind === "project"
-              ? `${scope.root}/.claude/settings.local.json`
-              : `${scope.homeDir}/.claude/settings.json`,
-          action: "skipped",
+          file: claudeSettingsPath(
+            scope,
+            scope.kind === "global" ? scope.claudeConfigDir : undefined,
+          ),
+          action: "kept",
           outcome: "not-attempted",
-          code: "HOOK_NOT_AVAILABLE",
-          message:
-            "Installed hook adapter is a separate slice; withheld until it can bind a session.",
+          code: "UNSUPPORTED_SCOPE",
+          message: "The install was refused before the Stop hook was written.",
           diff: null,
           retry: null,
         },
@@ -706,7 +779,11 @@ export async function runClaudeInstall(
   }
   let expectedSnapshot: ClaudeInstallSnapshot | undefined;
   if (!args.yes && runtime.confirm) {
-    expectedSnapshot = await readClaudeInstallSnapshot(scope, manifestPathForScope);
+    expectedSnapshot = await readClaudeInstallSnapshot(
+      scope,
+      manifestPathForScope,
+      claudeSettingsPath(scope, scope.kind === "global" ? scope.claudeConfigDir : undefined),
+    );
     const preview = await evaluateClaudeInstallPlan({
       args,
       scope,
