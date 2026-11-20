@@ -50,6 +50,16 @@ export const servedPages: readonly ServedPage[] = [
     shipped: true,
     section: "work",
   },
+  // Pipeline Health (#575, #684): API-first; the page reads /api/v1/metrics.
+  {
+    id: "pipeline",
+    path: "/pipeline",
+    label: "Pipeline",
+    scope: "project",
+    parameters: ["repo"],
+    carries: [],
+    shipped: true,
+  },
   {
     id: "rules",
     path: "/rules",

@@ -45,6 +45,8 @@ const expected = [
   "dist/mcp.mjs",
   "dist/mcp.mjs.map",
   // #853: the built Rules page assets (vite.web.config.ts), served by pdb serve.
+  "dist/web/pipeline.css",
+  "dist/web/pipeline.js",
   "dist/web/rules.css",
   "dist/web/rules.js",
   "package.json",
@@ -304,9 +306,15 @@ async function serveSmoke(bin: string, env: NodeJS.ProcessEnv, cwd: string): Pro
       throw new Error(
         `Installed pdb serve /api/v1/rules is wrong: ${JSON.stringify(rulesData).slice(0, 400)}`,
       );
+    // #684: the Pipeline Health page and its built assets, served the same way.
+    const pipelinePage = await (await fetch(`${url}pipeline?repo=example%2Fparity`)).text();
+    if (!pipelinePage.includes('<div id="pipeline-app" data-api="/api/v1/metrics">'))
+      throw new Error(`Installed pdb serve /pipeline is wrong: ${pipelinePage.slice(0, 400)}`);
     for (const [path, type, marker] of [
       ["web/rules.js", "text/javascript", "rules-app"],
       ["web/rules.css", "text/css", "rule-formal"],
+      ["web/pipeline.js", "text/javascript", "pipeline-app"],
+      ["web/pipeline.css", "text/css", "pipeline-table"],
     ] as const) {
       const asset = await fetch(`${url}${path}`);
       const text = await asset.text();

@@ -1,0 +1,31 @@
+/* Pipeline Health (#684): table layout, narrow screens and keyboard focus. */
+.pipeline-table-scroll {
+  overflow-x: auto;
+}
+.pipeline-table {
+  border-collapse: collapse;
+  min-width: 100%;
+}
+.pipeline-table th,
+.pipeline-table td {
+  padding: 0.25rem 0.75rem;
+  text-align: left;
+}
+.pipeline-table td {
+  font-variant-numeric: tabular-nums;
+}
+.pipeline-members > summary {
+  cursor: pointer;
+}
+.pipeline-members > summary:focus-visible,
+.pipeline-actions button:focus-visible,
+.pipeline-members a:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+@media (max-width: 40rem) {
+  .pipeline-table th,
+  .pipeline-table td {
+    padding: 0.25rem 0.4rem;
+  }
+}
