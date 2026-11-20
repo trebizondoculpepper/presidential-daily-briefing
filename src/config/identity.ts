@@ -604,9 +604,19 @@ function legacyOnlyNames(legacy: Table | null, current: Table, except: string): 
   return taken;
 }
 
+/**
+ * #1047: a harness default (an entry key without a dot, such as `codex`) may share its name with
+ * that harness's own preserved automatic session aliases (`codex.session_<64 hex>`), which are the
+ * same logical agent; any other entry with the name is still a duplicate.
+ */
+const ownSessionAlias = (entry: string, key: string): boolean =>
+  !entry.includes(".") &&
+  new RegExp(`^${entry.replace(/[-]/g, "\\-")}\\.session_[0-9a-f]{64}$`).test(key);
+
 function namesInUse(document: Table | null, except: string, taken = new Set<string>()) {
   const agents = document !== null && isTable(document.agents) ? document.agents : {};
   for (const [key, table] of Object.entries(agents)) {
+    if (ownSessionAlias(except, key)) continue;
     if (key !== except && isTable(table) && typeof table.name === "string") {
       taken.add(table.name.toLowerCase());
     }
@@ -1333,11 +1343,15 @@ export async function migrateSessionIdentity(
   const recognize = (document: Table | null) => {
     const pattern = sessionEntry(harness);
     const agents = document !== null && isTable(document.agents) ? document.agents : {};
-    const bindings = [...bindingsFor(document)].filter(
-      ([key, entry]) =>
-        key.startsWith(`${bindingPrefix}_`) && pattern.test(entry) && entry in agents,
+    const session = [...bindingsFor(document)].filter(
+      ([key, entry]) => key.startsWith(`${bindingPrefix}_`) && pattern.test(entry),
     );
-    return { bindings, entries: [...new Set(bindings.map(([, entry]) => entry))].sort() };
+    const bindings = session.filter(([, entry]) => entry in agents);
+    // A recognized binding whose session entry is missing is unresolved evidence, not first use.
+    const missing = [
+      ...new Set(session.filter(([, entry]) => !(entry in agents)).map(([, e]) => e)),
+    ];
+    return { bindings, entries: [...new Set(bindings.map(([, entry]) => entry))].sort(), missing };
   };
   const decide = (
     document: Table | null,
@@ -1359,6 +1373,13 @@ export async function migrateSessionIdentity(
         obsoleteBindings: bindings.filter(([, entry]) => entry !== harness).length,
       };
     }
+    const { missing } = recognize(document);
+    if (missing.length)
+      throw new ConfigError(
+        "identity-unresolved",
+        `Session binding(s) point at missing automatic identit${missing.length === 1 ? "y" : "ies"} (${missing.join(", ")}); no default was allocated in their place.`,
+        `Set the default explicitly: pdb config set identity.name NAME --entry ${harness} and pdb config set identity.triage_role ROLE --entry ${harness}, then retry.`,
+      );
     if (!entries.length) return { state: "none" };
     const records = entries.map((entry) => ({ entry, record: recordFor(document, entry) }));
     const pairs = new Set(

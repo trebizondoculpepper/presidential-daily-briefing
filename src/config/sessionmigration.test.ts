@@ -3,7 +3,12 @@
  * doc/design/stable-harness-identity.md), with the real store and lock in a disposable checkout.
  */
 import { describe, expect, it } from "vite-plus/test";
-import { migrateSessionIdentity, parseIdentityDocument, readIdentityBindings } from "./identity.js";
+import {
+  migrateSessionIdentity,
+  parseIdentityDocument,
+  readIdentityBindings,
+  setIdentity,
+} from "./identity.js";
 import { withIdentityFixture as fixture } from "../testing/identity.js";
 
 const digest = (c: string) => c.repeat(64);
@@ -101,5 +106,39 @@ describe("session identity recovery (#1047)", () => {
       await f.fs.writeText(f.file, raw);
       await expect(migrate(f as never)).rejects.toMatchObject({ code: "conflict" });
       expect(await f.fs.readText(f.file)).toBe(raw);
+    }));
+
+  it("refuses a session binding whose entry is missing instead of allocating a default (#1189 review)", async () =>
+    fixture(async (f) => {
+      const raw = `schemaVersion = 1\n[agentBindings]\n${binding("1", "a")}`;
+      await f.fs.writeText(f.file, raw);
+      await expect(migrate(f as never)).rejects.toMatchObject({ code: "identity-unresolved" });
+      expect(await f.fs.readText(f.file)).toBe(raw);
+    }));
+
+  it("the advertised recovery can name the default after one of its own session aliases (#1189 review)", async () =>
+    fixture(async (f) => {
+      await f.fs.writeText(
+        f.file,
+        `schemaVersion = 1\n${legacy("a", "first_agent")}${legacy("b", "second_agent", "implementer")}[agents.other]\nname = "other_agent"\n[agentBindings]\n${binding("1", "a")}${binding("2", "b")}`,
+      );
+      await expect(migrate(f as never)).rejects.toMatchObject({ code: "identity-unresolved" });
+      // As `pdb config set identity.name first_agent --entry codex` does (no reuse option).
+      const set = (entry: string, key: string, value: string) =>
+        setIdentity({ root: f.root, repository: f.repository }, entry, key, value, {
+          fs: f.fs,
+          git: f.git,
+          random: f.random,
+        });
+      await set("codex", "identity.name", "first_agent");
+      await set("codex", "identity.triage_role", "designer");
+      expect(await migrate(f as never)).toMatchObject({
+        state: "canonical",
+        record: { name: "first_agent" },
+      });
+      // The exception is narrow: a name held by an unrelated entry is still a duplicate.
+      await expect(set("codex", "identity.name", "other_agent")).rejects.toMatchObject({
+        code: "conflict",
+      });
     }));
 });
