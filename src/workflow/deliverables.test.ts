@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vite-plus/test";
 import { evaluateUnassignDecision } from "../rules/datalog/unassign.js";
+import { evaluateClaimAdmission } from "../rules/datalog/engine.js";
 import {
+  adoptionFacts,
   applyDeliverables,
   deliverablesArguments,
   deliverablesText,
@@ -64,6 +66,10 @@ function github(
     onRun?: (args: string[], state: { comments: DeliveryComment[] }) => void;
     issueType?: "Issue" | "PullRequest" | null;
     pageSize?: number;
+    /** Other issues' comments, by number, for cross-issue ownership reads (#1019). */
+    others?: Record<number, DeliveryComment[] | null>;
+    /** Issues referencing each PR URL (closing or cross-reference); default: just N. */
+    refs?: Record<string, { issues: number[]; complete?: boolean; unreadable?: boolean }>;
   } = {},
 ) {
   const state = {
@@ -91,6 +97,50 @@ function github(
     };
   };
   const query = async (q: string, v: Record<string, string | number>): Promise<unknown> => {
+    if (q.includes("viewer{") && v.number !== undefined && v.number !== N) {
+      const other = setup.others?.[Number(v.number)];
+      if (other === undefined) throw new Error("issue unavailable");
+      if (other === null)
+        return {
+          viewer: { __typename: "User", login: viewer },
+          repository: { issueOrPullRequest: null },
+        };
+      return {
+        viewer: { __typename: "User", login: viewer },
+        repository: {
+          issueOrPullRequest: {
+            __typename: "Issue",
+            number: Number(v.number),
+            title: "Other",
+            url: `https://github.com/${repo}/issues/${v.number}`,
+            state: "OPEN",
+            labels: { nodes: [], pageInfo: { hasNextPage: false } },
+            closedByPullRequestsReferences: { nodes: [], pageInfo: { hasNextPage: false } },
+            comments: { nodes: other, pageInfo: { hasPreviousPage: false, startCursor: null } },
+          },
+        },
+      };
+    }
+    if (q.includes("timelineItems(itemTypes:[CROSS_REFERENCED_EVENT]")) {
+      const r = setup.refs?.[String(v.url)] ?? { issues: [N] };
+      const node = (n: number) => ({ number: n, repository: { nameWithOwner: repo } });
+      return {
+        resource: {
+          __typename: "PullRequest",
+          closingIssuesReferences: {
+            nodes: prs.get(String(v.url))?.closingIssuesReferences.nodes ?? [node(N)],
+            pageInfo: { hasNextPage: false },
+          },
+          timelineItems: {
+            nodes: [
+              ...r.issues.map((n) => ({ source: { __typename: "Issue", ...node(n) } })),
+              ...(r.unreadable ? [{ source: null }] : []),
+            ],
+            pageInfo: { hasNextPage: r.complete === false },
+          },
+        },
+      };
+    }
     if (q.includes("viewer{"))
       return {
         viewer: { __typename: "User", login: viewer },
@@ -1856,6 +1906,243 @@ describe("a throttled reset record re-checks the reset prerequisites (#345)", ()
 describe("deliverables unassign: human-directed responsibility release (#1019)", () => {
   const both = () =>
     post(rec("submit", { deliverables: [member(998), member(999)], membership: "complete" }));
+
+  describe("adoption facts for claim admission (#1149 review)", () => {
+    const admit = (facts: Awaited<ReturnType<typeof adoptionFacts>>) =>
+      evaluateClaimAdmission({
+        ...facts,
+        state: "OPEN",
+        labels: ["status:awaiting-review"],
+        labelsComplete: true,
+        nativeComplete: true,
+        openBlockers: 0,
+        openPrCount: 2,
+        platform: null,
+        platforms: [],
+        ownedClaimsComplete: true,
+        claimedByOther: false,
+      });
+    const release = async (submit: DeliveryComment, prs: FakePr[]) => {
+      const { rt } = github({ comments: [submit], prs, labels: ["status:awaiting-review"] });
+      const done = await applyDeliverables(
+        repo,
+        request("unassign", { agent: "maint", from: "alice" }),
+        rt,
+      );
+      expect(done.exitCode).toBe(0);
+      return adoptionFacts(repo, N, rt);
+    };
+
+    it("admits the replacement's claim once the released agent held everything (#891/#930 shape)", async () => {
+      const facts = await release(both(), [fakePr(998), fakePr(999)]);
+      expect(facts).toMatchObject({
+        release: { from: "alice", preservedPrUrls: [prLink(998), prLink(999)], unknownPrUrls: [] },
+        ticketResponsible: false,
+      });
+      expect([...admit(facts)]).toEqual([]);
+    });
+
+    it("keeps refusing while another agent still holds the ticket (split ownership)", async () => {
+      const split = post(
+        rec("submit", {
+          agent: "bob",
+          responsible: "alice",
+          deliverables: [member(998)],
+          membership: "complete",
+        }),
+      );
+      const facts = await release(split, [fakePr(998)]);
+      expect(facts?.ticketResponsible).toBe(true);
+      expect(admit(facts)).toContain("CLAIM-NOT-READY");
+    });
+
+    const released = (o: Parameters<typeof github>[0]) =>
+      (async () => {
+        const g = github({ comments: [both()], labels: ["status:awaiting-review"], ...o });
+        await applyDeliverables(repo, request("unassign", { agent: "maint", from: "alice" }), g.rt);
+        return adoptionFacts(repo, N, g.rt);
+      })();
+    const prs = () => [fakePr(998), fakePr(999)];
+
+    it("finds a PR owned through another issue's record, even without a closing link", async () => {
+      const elsewhere = post(
+        rec("attach", { agent: "bob", issue: 77, deliverables: [member(998)] }),
+      );
+      const facts = await released({
+        prs: prs(),
+        others: { 77: [elsewhere] },
+        refs: { [prLink(998)]: { issues: [N, 77] } },
+      });
+      expect(facts?.release?.ownedPrUrls).toEqual([prLink(998)]);
+      // PR 999 alone is still preserved unowned work, so the ticket stays adoptable.
+      expect([...admit(facts)]).toEqual([]);
+    });
+
+    it("treats unread or incomplete referencing histories as unknown, never unowned", async () => {
+      const unread = await released({
+        prs: prs(),
+        refs: { [prLink(998)]: { issues: [N, 78] } },
+      });
+      expect(unread?.release?.unknownPrUrls).toEqual([prLink(998)]);
+      const more = await released({
+        prs: prs(),
+        refs: { [prLink(999)]: { issues: [N], complete: false } },
+      });
+      expect(more?.release?.unknownPrUrls).toEqual([prLink(999)]);
+      const all = await released({
+        prs: prs(),
+        refs: {
+          [prLink(998)]: { issues: [N, 78] },
+          [prLink(999)]: { issues: [N], complete: false },
+        },
+      });
+      expect(admit(all)).toContain("CLAIM-NOT-READY");
+    });
+
+    it("treats a member record in another repository as unknown ownership (#1149 review)", async () => {
+      const foreign = fakePr(998, {
+        closingIssuesReferences: {
+          nodes: [
+            { number: N, repository: { nameWithOwner: repo } },
+            { number: 5, repository: { nameWithOwner: other } },
+          ],
+        },
+      });
+      const facts = await released({ prs: [foreign, fakePr(999)] });
+      expect(facts?.release?.unknownPrUrls).toEqual([prLink(998)]);
+    });
+
+    it("treats a referencing issue that reads as missing as unknown ownership (#1149 review)", async () => {
+      const facts = await released({
+        prs: prs(),
+        others: { 79: null },
+        refs: { [prLink(998)]: { issues: [N, 79] } },
+      });
+      expect(facts?.release?.unknownPrUrls).toEqual([prLink(998)]);
+    });
+
+    it("treats a cross-reference with an unreadable source as unknown ownership (#1149 review)", async () => {
+      const facts = await released({
+        prs: prs(),
+        refs: { [prLink(998)]: { issues: [N], unreadable: true } },
+      });
+      expect(facts?.release?.unknownPrUrls).toEqual([prLink(998)]);
+    });
+
+    it("records each preserved PR's target for the adoption guidance", async () => {
+      const facts = await released({ prs: prs() });
+      expect(facts?.targets).toEqual({ [prLink(998)]: null, [prLink(999)]: null });
+    });
+
+    it("lets the released agent itself adopt and submit again: the release starts a new cycle", async () => {
+      const g = github({ comments: [both()], prs: prs(), labels: ["status:awaiting-review"] });
+      await applyDeliverables(repo, request("unassign", { agent: "maint", from: "alice" }), g.rt);
+      g.state.labels.push("agent:alice");
+      const submit = await applyDeliverables(
+        repo,
+        request("submit", { agent: "alice", reason: null, prs: [prLink(998), prLink(999)] }),
+        g.rt,
+      );
+      expect(submit.exitCode, JSON.stringify(submit)).toBe(0);
+      expect(posted(g.state).map((r) => r?.op)).toEqual(["unassign", "submit"]);
+    });
+
+    it("runs the full suggested sequence: attach then submit leave every PR owned by the adopter", async () => {
+      const g = github({
+        comments: [
+          post(
+            rec("submit", {
+              deliverables: [member(997), member(998), member(999)],
+              membership: "open",
+            }),
+          ),
+        ],
+        prs: [fakePr(997), fakePr(998), fakePr(999)],
+        labels: ["status:awaiting-review"],
+      });
+      await applyDeliverables(repo, request("unassign", { agent: "maint", from: "alice" }), g.rt);
+      g.state.labels.push("agent:kavya");
+      for (const n of [997, 998]) {
+        const step = await applyDeliverables(
+          repo,
+          request("attach", {
+            agent: "kavya",
+            reason: "adopt preserved work",
+            prs: [prLink(n)],
+            membership: "open",
+          }),
+          g.rt,
+        );
+        expect(step.exitCode, JSON.stringify(step)).toBe(0);
+      }
+      const submit = await applyDeliverables(
+        repo,
+        request("submit", { agent: "kavya", reason: null, prs: [prLink(999)] }),
+        g.rt,
+      );
+      expect(submit.exitCode, JSON.stringify(submit)).toBe(0);
+      const facts = await adoptionFacts(repo, N, g.rt);
+      // No member is left unowned: nothing remains to adopt.
+      expect(facts?.release?.preservedPrUrls ?? []).toEqual([]);
+    });
+
+    it("refuses an attach that names a member another agent holds, even beside an unowned one (#1149 review)", async () => {
+      const g = github({
+        comments: [
+          post(rec("submit", { deliverables: [member(998)], membership: "open" })),
+          post(rec("attach", { agent: "bob", deliverables: [member(999)] })),
+        ],
+        prs: prs(),
+        labels: ["status:awaiting-review"],
+      });
+      // Release alice only: 998 becomes unowned, 999 stays bob's.
+      await applyDeliverables(repo, request("unassign", { agent: "maint", from: "alice" }), g.rt);
+      g.state.labels.push("agent:kavya");
+      const mixed = await planDeliverables(
+        repo,
+        request("attach", {
+          agent: "kavya",
+          reason: "adopt",
+          prs: [prLink(998), prLink(999)],
+          membership: "open",
+        }),
+        g.rt,
+      );
+      expect(refused(mixed, "MEMBER_HELD").recovery.join(" ")).toContain("handoff --agent bob");
+      const unowned = await planDeliverables(
+        repo,
+        request("attach", {
+          agent: "kavya",
+          reason: "adopt",
+          prs: [prLink(998)],
+          membership: "open",
+        }),
+        g.rt,
+      );
+      expect(unowned.ok, JSON.stringify(unowned)).toBe(true);
+    });
+
+    it("lets the adopter become responsible with the suggested submit command", async () => {
+      const g = github({
+        comments: [both()],
+        prs: prs(),
+        labels: ["status:awaiting-review"],
+      });
+      await applyDeliverables(repo, request("unassign", { agent: "maint", from: "alice" }), g.rt);
+      g.state.labels.push("agent:kavya");
+      const submit = await planDeliverables(
+        repo,
+        request("submit", { agent: "kavya", reason: null, prs: [prLink(998), prLink(999)] }),
+        g.rt,
+      );
+      expect(submit.ok, JSON.stringify(submit)).toBe(true);
+    });
+
+    it("reports nothing without an applied release, so ordinary admission is unchanged", async () => {
+      const { rt } = github({ comments: [both()], prs: [fakePr(998), fakePr(999)] });
+      expect(await adoptionFacts(repo, N, rt)).toBeUndefined();
+    });
+  });
 
   it("parses --from, which only unassign takes and unassign needs", () => {
     const ok = deliverablesArguments([

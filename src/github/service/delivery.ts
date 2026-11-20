@@ -348,6 +348,55 @@ export async function pullByUrl(query: Query, url: string): Promise<LivePr | nul
   }
 }
 
+/**
+ * Issues that may record a pull request as a delivery member (#1019): those it closes and those
+ * whose comments cross-reference it (delivery records name their members in visible text, so
+ * GitHub records the reference). `complete` is false when either list has more pages; null when
+ * the pull request is unreadable.
+ */
+export async function pullReferencingIssues(
+  query: Query,
+  url: string,
+): Promise<{ issues: { repository: string; number: number }[]; complete: boolean } | null> {
+  try {
+    const data = await query(
+      `query($url:URI!){resource(url:$url){__typename ... on PullRequest{closingIssuesReferences(first:50){nodes{number repository{nameWithOwner}} pageInfo{hasNextPage}} timelineItems(itemTypes:[CROSS_REFERENCED_EVENT],first:100){nodes{... on CrossReferencedEvent{source{__typename ... on Issue{number repository{nameWithOwner}}}}} pageInfo{hasNextPage}}}}}`,
+      { url },
+    );
+    const r = isRecord(data) ? data.resource : null;
+    if (!isRecord(r) || r.__typename !== "PullRequest") return null;
+    const closing = r.closingIssuesReferences;
+    const timeline = r.timelineItems;
+    if (!isRecord(closing) || !Array.isArray(closing.nodes) || !isRecord(timeline)) return null;
+    if (!Array.isArray(timeline.nodes)) return null;
+    const issues: { repository: string; number: number }[] = [];
+    const add = (n: unknown): boolean => {
+      if (!isRecord(n) || !int(n.number) || !isRecord(n.repository)) return false;
+      if (!str(n.repository.nameWithOwner)) return false;
+      issues.push({ repository: n.repository.nameWithOwner, number: n.number });
+      return true;
+    };
+    if (!closing.nodes.every(add)) return null;
+    // A reference whose source cannot be read (an inaccessible issue) may record an owner: the
+    // list is then incomplete, never complete (#1149 review; shortlist.ts treats it alike).
+    let unreadable = false;
+    for (const t of timeline.nodes) {
+      const source = isRecord(t) ? t.source : null;
+      if (!isRecord(source)) {
+        unreadable = true;
+        continue;
+      }
+      // Pull requests that mention it hold no delivery records; only issues do.
+      if (source.__typename === "Issue" && !add(source)) return null;
+    }
+    const more = (c: Record<string, unknown>): boolean =>
+      !isRecord(c.pageInfo) || c.pageInfo.hasNextPage !== false;
+    return { issues, complete: !unreadable && !more(closing) && !more(timeline) };
+  } catch {
+    return null;
+  }
+}
+
 /** The viewer and the issue (or a pull request in its place) for a deliverables plan (#943). */
 export interface DeliverableIssueRead {
   viewer: { __typename?: string; login?: string } | null;

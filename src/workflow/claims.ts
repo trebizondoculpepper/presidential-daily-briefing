@@ -16,6 +16,7 @@ import {
 } from "./claimactivity.js";
 import type { QuestionResolutionRecord } from "./claimactivity.js";
 import { evaluateClaimAdmission } from "../rules/datalog/engine.js";
+import type { ClaimAdmissionInput } from "../rules/datalog/engine.js";
 import type { HumanContext } from "../config/humancontext.js";
 import { claimHumanMarker, recordedHuman } from "./claimbinding.js";
 import { workflow } from "./definition.js";
@@ -222,6 +223,61 @@ export type ReworkAuthority =
   | { path: "legacy" }
   | { path: "delivery" }
   | { refusal: { error: string; prerequisite: string; recovery: string[] } };
+
+/**
+ * Adoption facts for a claim on released work (#1019): read by an injected host reader and
+ * passed unchanged to the native claim admission, which alone decides `adoptable`.
+ */
+export type ClaimAdoptionFacts = Pick<
+  ClaimAdmissionInput,
+  "release" | "ticketResponsible" | "responsibilityUnknown"
+> & {
+  /**
+   * Host guidance only, never a native fact: each preserved PR's recorded target as
+   * `owner/name:branch`, or null for the ticket repository's default branch.
+   */
+  targets?: Record<string, string | null>;
+};
+
+/** Preserved PRs confirmed unowned: neither owned elsewhere nor of unknown ownership. */
+const adoptable = (release: NonNullable<ClaimAdoptionFacts["release"]>): readonly string[] =>
+  release.preservedPrUrls.filter(
+    (u) => !release.ownedPrUrls?.includes(u) && !release.unknownPrUrls?.includes(u),
+  );
+
+/**
+ * How the adopter becomes responsible (#1149 review): submit applies one target to every --pr,
+ * so PRs are grouped by recorded target. All groups but the last are attached first (membership
+ * open) while the claim is held; the last group's submit completes membership and releases it.
+ */
+function adoptionNote(
+  release: NonNullable<ClaimAdoptionFacts["release"]>,
+  targets: Record<string, string | null>,
+  number: number,
+  agent: string,
+  repository: string,
+): string {
+  const urls = adoptable(release);
+  const groups = new Map<string | null, string[]>();
+  for (const u of urls) {
+    const t = targets[u] ?? null;
+    groups.set(t, [...(groups.get(t) ?? []), u]);
+  }
+  const args = (t: string | null, prs: string[]) =>
+    `${prs.map((u) => ` --pr ${u}`).join("")}${t ? ` --target ${shellQuote(t)}` : ""}`;
+  const entries = [...groups.entries()];
+  const last = entries.pop();
+  const steps = [
+    ...entries.map(
+      ([t, prs]) =>
+        `pdb deliverables ${number} attach --agent ${agent}${args(t, prs)} --membership open --reason "adopt preserved work" --repo ${repository}`,
+    ),
+    ...(last
+      ? [`pdb submit ${number} --agent ${agent}${args(last[0], last[1])} --repo ${repository}`]
+      : []),
+  ];
+  return `Adopting preserved work released from ${release.from}: continue ${urls.join(", ")} rather than opening a duplicate PR, then become responsible with ${steps.join(", then ")}.`;
+}
 
 /**
  * The retained-claim admission guard (#412, doc/design/blocked-retained-claims.md), injected so
@@ -695,6 +751,7 @@ export async function planClaim(
   permission: PermissionLookup = permissionLookup(repository),
   reworkAuthority?: () => Promise<ReworkAuthority>,
   admission?: Admission,
+  adoption?: () => Promise<ClaimAdoptionFacts | undefined>,
 ): Promise<ClaimPlan> {
   const exception: { waiting: number[]; notes: string[] } = { waiting: [], notes: [] };
   const plan = await planClaimFor(
@@ -705,6 +762,7 @@ export async function planClaim(
     reworkAuthority,
     admission,
     exception,
+    adoption,
   );
   if (!plan.ok || !exception.waiting.length) return plan;
   return {
@@ -722,6 +780,7 @@ async function planClaimFor(
   reworkAuthority: (() => Promise<ReworkAuthority>) | undefined,
   admission: Admission | undefined,
   exception: { waiting: number[]; notes: string[] },
+  adoption?: () => Promise<ClaimAdoptionFacts | undefined>,
 ): Promise<ClaimPlan> {
   const { number, agent, branch = null, platform = null, rework = false } = request;
   const { item, claims, claimsComplete, repoLabels } = await readTicket(
@@ -974,7 +1033,28 @@ async function planClaimFor(
   const restrictions = facts.labels
     .filter((l) => l.startsWith(claimPolicy.platformPrefix))
     .map((l) => l.slice(claimPolicy.platformPrefix.length));
+  // #1019: released work with a preserved open PR is offered for adoption (D-ADOPT); its facts
+  // reach the native admission, which alone decides whether the open PR or a held status still
+  // refuses the claim. Read only when an open PR could otherwise refuse it.
+  let adopting: ClaimAdoptionFacts | undefined;
+  // Membership need not close the ticket (delivery-lifecycle.md), so the reader runs whenever an
+  // open PR or a held status could refuse the claim, not only for closing references.
+  const pickable = claimPolicy.pickable.some((l) => label(item, l));
+  if (!rework && adoption && (openPrs.length > 0 || !pickable)) {
+    try {
+      adopting = await adoption();
+    } catch (error) {
+      return refuse(
+        "EVIDENCE_INCOMPLETE",
+        { ...facts, pullRequests: openPrs.map((p) => p.url) },
+        `The delivery records of #${number} could not be read (${error instanceof Error ? error.message : "unknown error"}), so whether its open pull request is preserved unowned work is unknown; nothing was written.`,
+        [command(`who ${number}`), `${triage} --issue ${number}`],
+      );
+    }
+  }
+  const { targets: adoptionTargets, ...adoptionFacts } = adopting ?? {};
   const denials = evaluateClaimAdmission({
+    ...adoptionFacts,
     state: item.state,
     labels: facts.labels,
     labelsComplete: !item.labels.pageInfo?.hasNextPage,
@@ -1108,10 +1188,13 @@ async function planClaimFor(
     facts,
     changes,
     recheck: { agent },
-    ...(ignored.length || deliveryPath
+    ...(ignored.length || deliveryPath || adopting?.release
       ? {
           notes: [
             ...ignoredNote(ignored),
+            ...(adopting?.release
+              ? [adoptionNote(adopting.release, adoptionTargets ?? {}, number, agent, repository)]
+              : []),
             ...(deliveryPath
               ? [
                   `Rework by the ticket-responsible agent: after the claim, a delivery record reopens membership (membership open, reason "rework claim"); finish with pdb submit ${number} --agent ${agent} --repo ${repository}.`,

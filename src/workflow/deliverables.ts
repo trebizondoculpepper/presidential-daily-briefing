@@ -11,14 +11,26 @@ import { identitySelection, identitySelectionOptions } from "../config/commandid
  * Before every write the issue is read and folded again and the plan recomputed, so a write is
  * only ever made on fresh evidence and a retry completes only what is missing.
  */
-import { deliverableIssue, olderCommentsPage, pullByUrl } from "../github/service/delivery.js";
+import {
+  deliverableIssue,
+  olderCommentsPage,
+  pullByUrl,
+  pullReferencingIssues,
+} from "../github/service/delivery.js";
 import { issueWrites, WRITE } from "../github/service/issuewrites.js";
 import type { LivePr } from "../github/service/delivery.js";
 import { parseArgs } from "node:util";
 import { workflow } from "./definition.js";
 import { claimPolicy, failStep, retryLine, shellQuote, ticketGuard, writeStep } from "./claims.js";
 import type { Query } from "../github/github.js";
-import type { Comment, GhRun, GraphQuery, PlanStep, ReworkAuthority } from "./claims.js";
+import type {
+  ClaimAdoptionFacts,
+  Comment,
+  GhRun,
+  GraphQuery,
+  PlanStep,
+  ReworkAuthority,
+} from "./claims.js";
 import {
   attestApplicability,
   deliverableKey,
@@ -876,14 +888,16 @@ export async function planDeliverables(
     const plan = ownRecord.plan ?? submitPlan(agent);
     const where = `A submit is recorded (comment ${own.comment})`;
     // A later `membership open` rework record by the caller starts a new cycle: its claim is a
-    // new one, so a fresh submit is planned below instead of completing the old plan.
+    // new one, so a fresh submit is planned below instead of completing the old plan. So does a
+    // later human-directed release of the caller (#1019): an adoption claim after it is new work.
     const reworked = after.some((a) => {
       const c = trustedRecords.find((t) => String(t.comment.databaseId) === a.comment);
       return (
-        a.op === "membership" &&
-        a.agent === agent &&
-        c?.record.membership === "open" &&
-        c.record.reason === reworkReason
+        (a.op === "membership" &&
+          a.agent === agent &&
+          c?.record.membership === "open" &&
+          c.record.reason === reworkReason) ||
+        (a.op === "unassign" && c?.record.from === agent)
       );
     });
     if (resume || !(holds && reworked)) {
@@ -1094,9 +1108,32 @@ export async function planDeliverables(
         return notResponsible(
           `neither holds the claim on #${number} nor is ticket-responsible, so it cannot attach deliverables`,
         );
+      // Attach never moves a member another agent holds (#1149 review): that is a handoff.
+      const held = deliverables.flatMap((d) => {
+        const m = memberOf(d);
+        return m?.responsible && m.responsible !== agent ? [{ d, by: m.responsible }] : [];
+      });
+      if (held.length)
+        return refuse(
+          "MEMBER_HELD",
+          facts,
+          `${held.map((h) => `${deliverableLabel(h.d)} is held by ${h.by}`).join("; ")}; attach records the attaching agent as responsible, so it never takes over another agent's member. Attach only unowned or new deliverables, or have the holder hand it off.`,
+          [
+            cmd(`who ${number}`),
+            ...[...new Set(held.map((h) => h.by))].map((by) =>
+              cmd(`deliverables ${number} handoff --agent ${by} --to ${agent} --reason TEXT`),
+            ),
+          ],
+        );
       const fresh = deliverables.filter((d) => {
         const m = memberOf(d);
-        return !m || JSON.stringify(m.deliverable.target) !== JSON.stringify(d.target);
+        // An unowned member (after a human-directed release, #1019) is not "already required"
+        // for this purpose: attaching it is how an adopter becomes responsible for it.
+        return (
+          !m ||
+          m.responsible === null ||
+          JSON.stringify(m.deliverable.target) !== JSON.stringify(d.target)
+        );
       });
       if (!fresh.length && (!r.membership || r.membership === fold.membership))
         return noop("Every named deliverable is already required with that target.");
@@ -1454,6 +1491,134 @@ export async function planDeliverables(
 }
 
 /**
+ * Whether another issue records an agent as responsible for this PR (#1149 review): every issue
+ * the PR closes or that cross-references it is folded with the shared delivery reader. An issue
+ * whose records cannot be read, or reference lists with more pages, make the ownership unknown.
+ */
+async function memberOwnershipElsewhere(
+  pr: LivePr,
+  self: { repository: string; number: number },
+  rt: DeliverablesRuntime,
+): Promise<"none" | "owned" | "unknown"> {
+  const refs = await pullReferencingIssues(rt.query as unknown as Query, pr.url);
+  if (!refs || !refs.complete) return "unknown";
+  const seen = new Set<string>();
+  let result: "none" | "owned" | "unknown" = "none";
+  for (const i of refs.issues) {
+    const key = `${i.repository.toLowerCase()}#${i.number}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    if (sameRepo(i.repository, self.repository) && i.number === self.number) continue;
+    // Another repository's records need that repository's permission check, which this read
+    // does not have (#1149 review): its ownership is unknown, never unowned.
+    if (!sameRepo(i.repository, self.repository)) {
+      result = "unknown";
+      continue;
+    }
+    try {
+      const read = await readIssue(i.repository, i.number, rt.query);
+      const item = read.item;
+      // An unreadable referenced issue is unknown ownership, never "nobody" (#1149 review).
+      if (!item || item.__typename !== "Issue") {
+        result = "unknown";
+        continue;
+      }
+      const history = await readDeliveryComments(i.repository, i.number, item.comments, rt.query);
+      const { fold } = await readDeliveryFold(
+        history.comments,
+        history.complete,
+        { repository: i.repository, issue: i.number },
+        rt.trust,
+      );
+      if (fold.recordsUnknown) {
+        result = "unknown";
+        continue;
+      }
+      const holds = fold.members.some(
+        (m) =>
+          m.deliverable.kind === "pr" &&
+          sameRepo(m.deliverable.repository, pr.baseRepository?.nameWithOwner ?? "") &&
+          m.deliverable.number === pr.number &&
+          m.responsible !== null,
+      );
+      if (holds) return "owned";
+    } catch {
+      result = "unknown";
+    }
+  }
+  return result;
+}
+
+/**
+ * Adoption facts for `claim` (#1019, doc/design/human-responsibility-release.md): the trusted,
+ * applied human-directed releases on the ticket, its preserved open PR members, and whether the
+ * ticket or those PRs still have (or may have) an owner. Only facts: the native claim admission
+ * (`adoptable`) decides. Undefined when the ticket has no applied release, so ordinary admission
+ * is unchanged; an unreadable fold reports unknown responsibility, never "unowned".
+ */
+export async function adoptionFacts(
+  repository: string,
+  number: number,
+  rt: DeliverablesRuntime,
+): Promise<ClaimAdoptionFacts | undefined> {
+  const read = await readIssue(repository, number, rt.query);
+  const item = read.item;
+  if (!item || item.__typename !== "Issue") return undefined;
+  const history = await readDeliveryComments(repository, number, item.comments, rt.query);
+  const { records, fold } = await readDeliveryFold(
+    history.comments,
+    history.complete,
+    { repository, issue: number },
+    rt.trust,
+  );
+  if (fold.recordsUnknown) return { responsibilityUnknown: true };
+  const releases = fold.applied
+    .filter((a) => a.op === "unassign")
+    .flatMap((a) => {
+      const rec = records.find(
+        (r) => r.status === "trusted" && String(r.comment.databaseId) === a.comment,
+      );
+      return rec?.status === "trusted" && rec.record.from ? [rec.record.from] : [];
+    });
+  if (!releases.length) return undefined;
+  const preserved: string[] = [];
+  const unknown: string[] = [];
+  const owned: string[] = [];
+  const targets: Record<string, string | null> = {};
+  for (const m of fold.members) {
+    if (m.deliverable.kind !== "pr" || m.responsible !== null) continue;
+    const url = `https://github.com/${m.deliverable.repository}/pull/${m.deliverable.number}`;
+    const pr = await readPr(url, rt.query).catch(() => null);
+    if (!pr) {
+      // Unreadable: it may still be open and owned elsewhere, so it is unknown, never unowned.
+      unknown.push(url);
+      preserved.push(url);
+      continue;
+    }
+    if (pr.state !== "OPEN") continue;
+    preserved.push(pr.url);
+    const t = m.deliverable.target;
+    const branch = t.branch ?? (sameRepo(t.repository, repository) ? null : pr.baseRefName);
+    targets[pr.url] =
+      sameRepo(t.repository, repository) && t.branch === null ? null : `${t.repository}:${branch}`;
+    const elsewhere = await memberOwnershipElsewhere(pr, { repository, number }, rt);
+    if (elsewhere === "owned") owned.push(pr.url);
+    if (elsewhere === "unknown") unknown.push(pr.url);
+  }
+  return {
+    release: {
+      trust: "trusted",
+      from: releases[releases.length - 1]!,
+      preservedPrUrls: preserved,
+      ownedPrUrls: owned,
+      unknownPrUrls: unknown,
+    },
+    ticketResponsible: fold.ticketResponsible !== null,
+    targets,
+  };
+}
+
+/**
  * `claim --rework` authority from the delivery records (doc "Rework authority"): legacy rules
  * only while no trusted delivery record exists; otherwise only the ticket-responsible agent. An
  * unknown fold refuses MARKER_UNVERIFIED and never falls back to the v1 done handoff.
@@ -1754,7 +1919,7 @@ named pull requests, folds the trusted delivery records, then posts one record c
   void        Maintainer override: exclude one malformed trusted record (VOID_NOT_APPLICABLE
               for anything else)
 The authenticated account must have write, maintain or admin permission (MARKER_UNVERIFIED).
-Refusals: CLAIM_HELD, NOT_RESPONSIBLE, NOT_REQUIRED, TARGET_MISMATCH, EVIDENCE_INCOMPLETE,
+Refusals: CLAIM_HELD, NOT_RESPONSIBLE, MEMBER_HELD, NOT_REQUIRED, TARGET_MISMATCH, EVIDENCE_INCOMPLETE,
 LEGACY_NOT_APPLICABLE, ATTEST_NOT_APPLICABLE, RESET_HAS_OPEN_PR, VOID_NOT_APPLICABLE,
 DELIVERY_DIVERGED, MARKER_UNVERIFIED, RECORD_MALFORMED, RECORD_UNSUPPORTED, each with recovery
 commands. Re-running the same command is safe: a record already posted is not posted again.

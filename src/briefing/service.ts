@@ -305,8 +305,16 @@ async function presentBriefingFor(
         order: options.order,
         ...(retained ? { ownedClaims: retained.ownedClaims } : {}),
         ...(retained?.claimActivity ? { claimActivity: retained.claimActivity } : {}),
-        responsible: responsibility.responsible,
-        responsibilityUnknown: responsibility.unknown.map((u) => u.issue),
+        // Ticket owners join PR owners only for the native rules (#1149 review).
+        responsible: new Map([
+          ...responsibility.responsible,
+          ...[...responsibility.ticketOwners].map(([u, a]) => [u, [a]] as [string, string[]]),
+        ]),
+        responsibilityUnknown: [
+          ...responsibility.unknown.map((u) => u.issue),
+          ...responsibility.unknownPrs,
+        ],
+        releaseDirections: responsibility.releaseDirections,
         ...datalogReviewFacts(snapshot),
         checkRequiredness: datalogCheckFacts(snapshot),
         limit: Number.MAX_SAFE_INTEGER,

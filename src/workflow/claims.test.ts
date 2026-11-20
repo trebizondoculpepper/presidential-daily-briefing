@@ -572,6 +572,136 @@ describe("claim and needs-human (doc/design/workflow.md)", () => {
     expect(text).toContain("--add-label agent:kavya");
   });
 
+  describe("claim: adopting preserved work after a human-directed release (#1019)", () => {
+    const pr = (n: number) => `https://github.com/${repo}/pull/${n}`;
+    const released = (extra = {}) => ({
+      release: { trust: "trusted", from: "alice", preservedPrUrls: [pr(12)], ...extra },
+    });
+    const adopt = (facts: unknown, labels = ["status:awaiting-review"]) => {
+      const env = fake({ labels, openPrs: [12] });
+      return planClaim(
+        repo,
+        { number: 7, agent: "kavya" },
+        env.query,
+        env.permission,
+        undefined,
+        undefined,
+        async () => facts as never,
+      );
+    };
+
+    it("admits the claim the briefing's D-ADOPT recommends, despite awaiting-review and the open PR", async () => {
+      const plan = accepted(await adopt(released()));
+      expect(plan.notes?.join(" ")).toMatch(/Adopting preserved work released from alice/);
+      expect(plan.notes?.join(" ")).toContain("pdb submit 7 --agent kavya");
+    });
+
+    it("reads adoption facts when the preserved PR does not close the ticket (#1149 review)", async () => {
+      const env = fake({ labels: ["status:awaiting-review"] });
+      let read = false;
+      const plan = accepted(
+        await planClaim(
+          repo,
+          { number: 7, agent: "kavya" },
+          env.query,
+          env.permission,
+          undefined,
+          undefined,
+          async () => {
+            read = true;
+            return released() as never;
+          },
+        ),
+      );
+      expect(read).toBe(true);
+      expect(plan.notes?.join(" ")).toContain(`--pr ${pr(12)}`);
+    });
+
+    it("suggests submitting only the PRs confirmed unowned (#1149 review)", async () => {
+      const env = fake({ labels: ["status:awaiting-review"], openPrs: [12, 13, 14] });
+      const plan = accepted(
+        await planClaim(
+          repo,
+          { number: 7, agent: "kavya" },
+          env.query,
+          env.permission,
+          undefined,
+          undefined,
+          async () =>
+            ({
+              release: {
+                trust: "trusted",
+                from: "alice",
+                preservedPrUrls: [pr(12), pr(13), pr(14)],
+                ownedPrUrls: [pr(13)],
+                unknownPrUrls: [pr(14)],
+              },
+            }) as never,
+        ),
+      );
+      const note = plan.notes!.join(" ");
+      expect(note).toContain(`--pr ${pr(12)}`);
+      expect(note).not.toContain(pr(13));
+      expect(note).not.toContain(pr(14));
+    });
+
+    it("groups the adoption steps by recorded target (#1149 review)", async () => {
+      const env = fake({ labels: ["status:awaiting-review"], openPrs: [12, 13] });
+      const plan = accepted(
+        await planClaim(
+          repo,
+          { number: 7, agent: "kavya" },
+          env.query,
+          env.permission,
+          undefined,
+          undefined,
+          async () =>
+            ({
+              release: { trust: "trusted", from: "alice", preservedPrUrls: [pr(12), pr(13)] },
+              targets: { [pr(12)]: null, [pr(13)]: "other/lib:release/(legacy)" },
+            }) as never,
+        ),
+      );
+      const note = plan.notes!.join(" ");
+      expect(note).toContain(
+        `pdb deliverables 7 attach --agent kavya --pr ${pr(12)} --membership open`,
+      );
+      expect(note).toContain(
+        `pdb submit 7 --agent kavya --pr ${pr(13)} --target 'other/lib:release/(legacy)'`,
+      );
+    });
+
+    it("lets the native rules refuse while the ticket is owned, the PR is owned or unknown, or the fold is unread", async () => {
+      for (const facts of [
+        { ...released(), ticketResponsible: true },
+        released({ ownedPrUrls: [pr(12)] }),
+        released({ unknownPrUrls: [pr(12)] }),
+        { responsibilityUnknown: true },
+        undefined,
+      ])
+        expect(["NOT_READY", "HAS_OPEN_PR"]).toContain(refused(await adopt(facts)).error);
+    });
+
+    it("refuses rather than guessing when the delivery records cannot be read", async () => {
+      const env = fake({ labels: ["status:awaiting-review"], openPrs: [12] });
+      const plan = refused(
+        await planClaim(
+          repo,
+          { number: 7, agent: "kavya" },
+          env.query,
+          env.permission,
+          undefined,
+          undefined,
+          async () => {
+            throw new Error("rate limited");
+          },
+        ),
+      );
+      expect(plan.error).toBe("EVIDENCE_INCOMPLETE");
+      expect(env.writes).toEqual([]);
+    });
+  });
+
   it("writes the employing human only while human resolution is enabled (#1152 review)", async () => {
     const human = {
       state: "current" as const,
