@@ -2,7 +2,7 @@
 ;; Each witness is a vector of where-clauses binding ?value for subject ?t.
 {:policy-version 1
  :many
- ["required-evidence-gap" "missing-required" "label" "owner" "responsible" "platform" "attention" "blocker" "dependent" "closes" "closing" "check" "review" "receipt" "provider-review" "provider-finding" "thread" "matched" "overridden" "unlocks-dependent" "permit" "deny" "unknown" "unlock-unknown" "question-record" "release"]
+ ["required-evidence-gap" "missing-required" "label" "owner" "responsible" "platform" "attention" "blocker" "dependent" "closes" "closing" "check" "review" "receipt" "provider-review" "provider-finding" "thread" "matched" "overridden" "unlocks-dependent" "permit" "deny" "unknown" "unlock-unknown" "question-record" "release" "responsibility-unknown"]
  :constants
  {"small" ["XS" "S"]
   "large" ["L" "XL" "XXL"]
@@ -86,6 +86,7 @@
    "comment-count" "issue comment count"
    "comment-count-known" "whether the issue comment count was read"
    "required-evidence-gap" "unread target required-check evidence"
+   "responsibility-unknown" "delivery responsibility could not be read"
    "mergeable" "mergeability"
    "name" "name"
    "native-complete" "completeness of native dependency evidence"

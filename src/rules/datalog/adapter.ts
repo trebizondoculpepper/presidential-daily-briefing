@@ -306,6 +306,9 @@ function normalize(
     for (const p of s.closedByPullRequestsReferences?.nodes ?? [])
       if (p.state === "OPEN") put(id, "closing", ids.get(p.url) ?? nextId++);
     for (const agent of options.responsible?.get(s.url) ?? []) put(id, "responsible", agent);
+    // #1018/#1126: an issue whose delivery responsibility could not be read is never treated as
+    // unowned; preservation/adoption rules gate on this fact (reviewed #1109 finding).
+    if (options.responsibilityUnknown?.includes(s.url)) put(id, "responsibility-unknown", true);
     const activity = options.claimActivity?.get(s.url);
     if (activity) {
       put(id, "claim-activity", activity.state);
@@ -327,8 +330,12 @@ function normalize(
       for (const preserved of direction.preservedPrs) {
         const p = ids.get(preserved) ?? nextId++;
         put(r, "release-pr", p);
-        // The preserved PR continues the unowned work; assert the open state the host read.
+        // The preserved PR continues the unowned work; assert the open state the host read and
+        // any responsibility the host folded, so an owned member is never adopted (reviewed #1109).
         if (!ids.has(preserved)) put(p, "state", "OPEN");
+        for (const agent of options.responsible?.get(preserved) ?? []) put(p, "responsible", agent);
+        if (options.responsibilityUnknown?.includes(preserved))
+          put(p, "responsibility-unknown", true);
       }
     }
     if (pr) {

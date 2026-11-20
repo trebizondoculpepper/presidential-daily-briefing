@@ -19,8 +19,12 @@
 ;; direction separately from agent/client strings; an arbitrary flag or shared login is never it.
 ;; Absent or unknown trust is not a trusted direction: the ordinary open-PR deny stays in force.
 [(human-release ?t ?r) [?t "release" ?r] [?r "release-trust" "trusted"]]
-[(released-unowned ?t) (human-release ?t ?r) (not (claimed ?t)) (not [?t "responsible" _])]
-[(preserved-pr ?t) (human-release ?t ?r) [?t "release" ?r] [?r "release-pr" ?p] [?p "state" "OPEN"]]
+;; An unread delivery responsibility is never "nobody": confirmed-unknown responsibility keeps the
+;; work out of adoption until it is read (reviewed #1109 finding).
+[(released-unowned ?t) (human-release ?t ?r) (not (claimed ?t)) (not [?t "responsible" _]) (not [?t "responsibility-unknown" true])]
+;; The preserved PR itself must be unowned: a PR another agent still owns is not admissible work
+;; (reviewed #1109 finding); a genuinely unowned preserved PR still qualifies.
+[(preserved-pr ?t) (human-release ?t ?r) [?t "release" ?r] [?r "release-pr" ?p] [?p "state" "OPEN"] (not [?p "responsible" _]) (not [?p "responsibility-unknown" true])]
 ;; An otherwise-eligible agent may continue existing unowned work with a preserved open PR after
 ;; a human-directed release: ordinary new-implementation admission must not duplicate an open PR
 ;; (D-DENY-OPEN-PR stays for ordinary work), but preserved unowned work is the explicit exception.

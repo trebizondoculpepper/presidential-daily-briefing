@@ -394,6 +394,7 @@ function requiredRoles(clauses: Clause[]): string[] | null {
 /** Denials: each predicate alternative that binds a documented denial ID with `str`. */
 function compileDenials(predicates: CompiledPredicate[], ctx: Context): CompiledDenial[] {
   const out: CompiledDenial[] = [];
+  const byId = new Map<string, { p: CompiledPredicate; alternatives: Clause[][] }>();
   for (const p of predicates)
     for (const alt of p.alternatives) {
       const named = alt.clauses.filter(
@@ -407,25 +408,35 @@ function compileDenials(predicates: CompiledPredicate[], ctx: Context): Compiled
       for (const c of named) {
         if (c.type !== "bind" || !("lit" in c.args[0])) continue;
         const denialId = String(c.args[0].lit);
-        // Several alternatives may bind the same denial ID (e.g. an inventory status reached by
-        // both ordinary and adoptable paths): enumerate the denial once, from the first matching
-        // alternative, so the document model lists distinct rules.
-        if (out.some((d) => d.id === denialId)) continue;
         const clauses = alt.clauses.filter((x) => x !== c);
-        out.push({
-          id: denialId,
-          ...(ctx.bundle.denialPurposes?.[denialId] !== undefined
-            ? { purpose: ctx.bundle.denialPurposes[denialId] }
-            : {}),
-          predicate: p.name,
-          clauses,
-          calls: callsOf(clauses),
-        });
+        const existing = byId.get(denialId);
+        // Several alternatives may bind the same denial ID (e.g. an inventory status reached by
+        // both ordinary and adoptable paths). One document-model entry, with the alternatives
+        // combined as a disjunction, so no condition is dropped (reviewed #1126 finding).
+        if (existing) existing.alternatives.push(clauses);
+        else byId.set(denialId, { p, alternatives: [clauses] });
       }
     }
-  for (const id of Object.keys(ctx.bundle.denials))
-    if (!out.some((d) => d.id === id))
+  for (const id of Object.keys(ctx.bundle.denials)) {
+    const entry = byId.get(id);
+    if (!entry) {
       ctx.problems.push(`denial ${id}: no predicate alternative binds it with str`);
+      continue;
+    }
+    const combined =
+      entry.alternatives.length === 1
+        ? entry.alternatives[0]
+        : ([{ type: "or" as const, join: null, alternatives: entry.alternatives }] as Clause[]);
+    out.push({
+      id,
+      ...(ctx.bundle.denialPurposes?.[id] !== undefined
+        ? { purpose: ctx.bundle.denialPurposes[id] }
+        : {}),
+      predicate: entry.p.name,
+      clauses: combined,
+      calls: callsOf(combined),
+    });
+  }
   return out;
 }
 

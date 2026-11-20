@@ -1,8 +1,8 @@
 {
   "modelVersion": 2,
   "policyVersion": 1,
-  "rulesHash": "53a48184687c5d536e0f018868d46102431990c22489dd8488a54b790f192a2c",
-  "narrationHash": "0a388a4eb5dd4f97250ad71847a8ac3b718bb1588ae667db11b97e4b3a16185e",
+  "rulesHash": "9e9fdd78a0e78308cb73ae67990069a8aa43d33da42795e36ea54ff317cad82c",
+  "narrationHash": "79dcf582a89932432b9f18bad4eb5ec2aae90e7a66b86ba128ea91a1518a5699",
   "sources": [
     "policy/schema.edn",
     "policy/rules.edn",
@@ -62,6 +62,7 @@
       "comment-count": "issue comment count",
       "comment-count-known": "whether the issue comment count was read",
       "required-evidence-gap": "unread target required-check evidence",
+      "responsibility-unknown": "delivery responsibility could not be read",
       "mergeable": "mergeability",
       "name": "name",
       "native-complete": "completeness of native dependency evidence",
@@ -6354,6 +6355,25 @@
                   "many": true
                 }
               ]
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "fact",
+                  "scope": "entity",
+                  "entity": {
+                    "var": "?t"
+                  },
+                  "attribute": "responsibility-unknown",
+                  "value": {
+                    "lit": true
+                  },
+                  "phrase": "delivery responsibility could not be read",
+                  "many": true
+                }
+              ]
             }
           ],
           "source": {
@@ -6422,6 +6442,44 @@
               },
               "phrase": "state",
               "many": false
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "fact",
+                  "scope": "entity",
+                  "entity": {
+                    "var": "?p"
+                  },
+                  "attribute": "responsible",
+                  "value": {
+                    "wild": true
+                  },
+                  "phrase": "responsible agent",
+                  "many": true
+                }
+              ]
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "fact",
+                  "scope": "entity",
+                  "entity": {
+                    "var": "?p"
+                  },
+                  "attribute": "responsibility-unknown",
+                  "value": {
+                    "lit": true
+                  },
+                  "phrase": "delivery responsibility could not be read",
+                  "many": true
+                }
+              ]
             }
           ],
           "source": {
@@ -20671,69 +20729,6 @@
       "calls": ["issue", "platform-ok"]
     },
     {
-      "id": "D-DENY-INVENTORY-UNKNOWN",
-      "purpose": "Withhold new implementation pickup while the viewer's claim inventory is incomplete.",
-      "predicate": "implementation-deny",
-      "clauses": [
-        {
-          "type": "call",
-          "predicate": "issue",
-          "args": [
-            {
-              "var": "?t"
-            }
-          ]
-        },
-        {
-          "type": "call",
-          "predicate": "open",
-          "args": [
-            {
-              "var": "?t"
-            }
-          ]
-        },
-        {
-          "type": "call",
-          "predicate": "available",
-          "args": [
-            {
-              "var": "?t"
-            }
-          ]
-        },
-        {
-          "type": "not",
-          "join": null,
-          "body": [
-            {
-              "type": "call",
-              "predicate": "claimed",
-              "args": [
-                {
-                  "var": "?t"
-                }
-              ]
-            }
-          ]
-        },
-        {
-          "type": "fact",
-          "scope": "context",
-          "entity": {
-            "lit": 1
-          },
-          "attribute": "owned-claims-complete",
-          "value": {
-            "lit": false
-          },
-          "phrase": "completeness of your claim inventory",
-          "many": false
-        }
-      ],
-      "calls": ["issue", "open", "available", "claimed"]
-    },
-    {
       "id": "D-DENY-REFINEMENT",
       "purpose": "Keep work that needs refinement out of pickup, whatever its estimate or readiness label says.",
       "predicate": "implementation-deny",
@@ -20814,6 +20809,196 @@
         }
       ],
       "calls": ["issue"]
+    },
+    {
+      "id": "D-DENY-INVENTORY-UNKNOWN",
+      "purpose": "Withhold new implementation pickup while the viewer's claim inventory is incomplete.",
+      "predicate": "implementation-deny",
+      "clauses": [
+        {
+          "type": "or",
+          "join": null,
+          "alternatives": [
+            [
+              {
+                "type": "call",
+                "predicate": "issue",
+                "args": [
+                  {
+                    "var": "?t"
+                  }
+                ]
+              },
+              {
+                "type": "call",
+                "predicate": "open",
+                "args": [
+                  {
+                    "var": "?t"
+                  }
+                ]
+              },
+              {
+                "type": "call",
+                "predicate": "available",
+                "args": [
+                  {
+                    "var": "?t"
+                  }
+                ]
+              },
+              {
+                "type": "not",
+                "join": null,
+                "body": [
+                  {
+                    "type": "call",
+                    "predicate": "claimed",
+                    "args": [
+                      {
+                        "var": "?t"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "fact",
+                "scope": "context",
+                "entity": {
+                  "lit": 1
+                },
+                "attribute": "owned-claims-complete",
+                "value": {
+                  "lit": false
+                },
+                "phrase": "completeness of your claim inventory",
+                "many": false
+              }
+            ],
+            [
+              {
+                "type": "call",
+                "predicate": "issue",
+                "args": [
+                  {
+                    "var": "?t"
+                  }
+                ]
+              },
+              {
+                "type": "call",
+                "predicate": "open",
+                "args": [
+                  {
+                    "var": "?t"
+                  }
+                ]
+              },
+              {
+                "type": "fact",
+                "scope": "entity",
+                "entity": {
+                  "var": "?t"
+                },
+                "attribute": "release",
+                "value": {
+                  "var": "?rel"
+                },
+                "phrase": "human-directed responsibility release direction",
+                "many": true
+              },
+              {
+                "type": "fact",
+                "scope": "entity",
+                "entity": {
+                  "var": "?rel"
+                },
+                "attribute": "release-trust",
+                "value": {
+                  "lit": "trusted"
+                },
+                "phrase": "release direction trust level",
+                "many": false
+              },
+              {
+                "type": "fact",
+                "scope": "entity",
+                "entity": {
+                  "var": "?rel"
+                },
+                "attribute": "release-pr",
+                "value": {
+                  "var": "?p"
+                },
+                "phrase": "preserved pull request of a release",
+                "many": false
+              },
+              {
+                "type": "fact",
+                "scope": "entity",
+                "entity": {
+                  "var": "?p"
+                },
+                "attribute": "state",
+                "value": {
+                  "lit": "OPEN"
+                },
+                "phrase": "state",
+                "many": false
+              },
+              {
+                "type": "not",
+                "join": null,
+                "body": [
+                  {
+                    "type": "call",
+                    "predicate": "claimed",
+                    "args": [
+                      {
+                        "var": "?t"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "not",
+                "join": null,
+                "body": [
+                  {
+                    "type": "fact",
+                    "scope": "entity",
+                    "entity": {
+                      "var": "?t"
+                    },
+                    "attribute": "responsible",
+                    "value": {
+                      "wild": true
+                    },
+                    "phrase": "responsible agent",
+                    "many": true
+                  }
+                ]
+              },
+              {
+                "type": "fact",
+                "scope": "context",
+                "entity": {
+                  "lit": 1
+                },
+                "attribute": "owned-claims-complete",
+                "value": {
+                  "lit": false
+                },
+                "phrase": "completeness of your claim inventory",
+                "many": false
+              }
+            ]
+          ]
+        }
+      ],
+      "calls": ["issue", "open", "available", "claimed"]
     }
   ],
   "ordering": {
@@ -22606,7 +22791,7 @@
     "evidence": 50,
     "overrides": 5,
     "constants": 14,
-    "attributes": 123,
-    "clauses": 1411
+    "attributes": 124,
+    "clauses": 1417
   }
 }
