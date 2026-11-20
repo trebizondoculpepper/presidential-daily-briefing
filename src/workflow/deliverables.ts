@@ -1296,16 +1296,36 @@ export async function planDeliverables(
       // #1019 (doc/design/human-responsibility-release.md): a maintainer clears one agent's
       // continuing responsibility while its open PRs, members and membership stay. An active
       // claim is released through the claim path first; this never takes a held claim.
+      // Admission is the shared native Unassign policy (#1147 review), fed verified facts: the
+      // trusted maintainer account is the explicit human direction, permission was checked
+      // above, and the fold is known (an unknown fold was refused before this point).
       const from = r.from!;
-      if (claims.includes(from))
-        return claimHeld(
-          [from],
-          "release that claim first; unassign clears only continuing delivery responsibility",
-        );
       const ticketHeld = fold.ticketResponsible === from;
       const held = fold.members.filter((m) => m.responsible === from);
-      if (!ticketHeld && !held.length)
-        return noop(`${from} holds no ticket or deliverable responsibility on #${number}.`);
+      const claimPresent = claims.includes(from);
+      const { evaluateUnassignDecision } = await import("../rules/datalog/datalog.js");
+      const decision = evaluateUnassignDecision({
+        issueNumber: number,
+        issueState: item.state === "CLOSED" ? "CLOSED" : "OPEN",
+        agent: from,
+        claimPresent,
+        responsibilityPresent: ticketHeld || held.length > 0,
+        claimStart: null,
+        claimHistoryComplete: !claimPresent,
+        trustedHumanContext: true,
+        permission: "allow",
+        overrideUnknownHistory: false,
+      });
+      if (decision.verdict === "noop") return noop(decision.reason);
+      if (decision.verdict === "refuse")
+        return refuse(decision.code, facts, decision.reason, [cmd(`who ${number}`), retry]);
+      // The policy may admit a claim release, but this command writes only the responsibility
+      // record; the claim's own guarded release path removes the label (mechanics, not policy).
+      if (claimPresent)
+        return claimHeld(
+          [from],
+          "release that claim through its own guarded path first; unassign writes only the delivery responsibility record",
+        );
       return accepted(
         draft({
           from,

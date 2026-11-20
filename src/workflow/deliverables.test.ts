@@ -1932,13 +1932,16 @@ describe("deliverables unassign: human-directed responsibility release (#1019)",
       github({ comments: [both()] }).rt,
     );
     expect(plan.ok && plan.noop).toBe(true);
+    // The no-op explanation is the native policy's own text, not restated here.
+    expect(plan.ok && plan.reason).toBeTruthy();
     refused(
       await planDeliverables(
         repo,
         request("unassign", { agent: "maint", from: "alice" }),
         github({ comments: [both()], labels: ["agent:alice"] }).rt,
       ),
-      "CLAIM_HELD",
+      // Decided by the native Unassign policy: the claim's history is not read here.
+      "EVIDENCE_INCOMPLETE",
     );
   });
 });
