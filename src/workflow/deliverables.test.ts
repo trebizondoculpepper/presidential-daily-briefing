@@ -2075,6 +2075,42 @@ describe("deliverables unassign: human-directed responsibility release (#1019)",
       expect(facts?.release?.preservedPrUrls ?? []).toEqual([]);
     });
 
+    it("refuses an attach that names a member another agent holds, even beside an unowned one (#1149 review)", async () => {
+      const g = github({
+        comments: [
+          post(rec("submit", { deliverables: [member(998)], membership: "open" })),
+          post(rec("attach", { agent: "bob", deliverables: [member(999)] })),
+        ],
+        prs: prs(),
+        labels: ["status:awaiting-review"],
+      });
+      // Release alice only: 998 becomes unowned, 999 stays bob's.
+      await applyDeliverables(repo, request("unassign", { agent: "maint", from: "alice" }), g.rt);
+      g.state.labels.push("agent:kavya");
+      const mixed = await planDeliverables(
+        repo,
+        request("attach", {
+          agent: "kavya",
+          reason: "adopt",
+          prs: [prLink(998), prLink(999)],
+          membership: "open",
+        }),
+        g.rt,
+      );
+      expect(refused(mixed, "MEMBER_HELD").recovery.join(" ")).toContain("handoff --agent bob");
+      const unowned = await planDeliverables(
+        repo,
+        request("attach", {
+          agent: "kavya",
+          reason: "adopt",
+          prs: [prLink(998)],
+          membership: "open",
+        }),
+        g.rt,
+      );
+      expect(unowned.ok, JSON.stringify(unowned)).toBe(true);
+    });
+
     it("lets the adopter become responsible with the suggested submit command", async () => {
       const g = github({
         comments: [both()],

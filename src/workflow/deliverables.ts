@@ -1108,6 +1108,23 @@ export async function planDeliverables(
         return notResponsible(
           `neither holds the claim on #${number} nor is ticket-responsible, so it cannot attach deliverables`,
         );
+      // Attach never moves a member another agent holds (#1149 review): that is a handoff.
+      const held = deliverables.flatMap((d) => {
+        const m = memberOf(d);
+        return m?.responsible && m.responsible !== agent ? [{ d, by: m.responsible }] : [];
+      });
+      if (held.length)
+        return refuse(
+          "MEMBER_HELD",
+          facts,
+          `${held.map((h) => `${deliverableLabel(h.d)} is held by ${h.by}`).join("; ")}; attach records the attaching agent as responsible, so it never takes over another agent's member. Attach only unowned or new deliverables, or have the holder hand it off.`,
+          [
+            cmd(`who ${number}`),
+            ...[...new Set(held.map((h) => h.by))].map((by) =>
+              cmd(`deliverables ${number} handoff --agent ${by} --to ${agent} --reason TEXT`),
+            ),
+          ],
+        );
       const fresh = deliverables.filter((d) => {
         const m = memberOf(d);
         // An unowned member (after a human-directed release, #1019) is not "already required"
@@ -1902,7 +1919,7 @@ named pull requests, folds the trusted delivery records, then posts one record c
   void        Maintainer override: exclude one malformed trusted record (VOID_NOT_APPLICABLE
               for anything else)
 The authenticated account must have write, maintain or admin permission (MARKER_UNVERIFIED).
-Refusals: CLAIM_HELD, NOT_RESPONSIBLE, NOT_REQUIRED, TARGET_MISMATCH, EVIDENCE_INCOMPLETE,
+Refusals: CLAIM_HELD, NOT_RESPONSIBLE, MEMBER_HELD, NOT_REQUIRED, TARGET_MISMATCH, EVIDENCE_INCOMPLETE,
 LEGACY_NOT_APPLICABLE, ATTEST_NOT_APPLICABLE, RESET_HAS_OPEN_PR, VOID_NOT_APPLICABLE,
 DELIVERY_DIVERGED, MARKER_UNVERIFIED, RECORD_MALFORMED, RECORD_UNSUPPORTED, each with recovery
 commands. Re-running the same command is safe: a record already posted is not posted again.

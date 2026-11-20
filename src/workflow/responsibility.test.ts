@@ -218,6 +218,17 @@ describe("human-directed release reaches native adoption (#1019)", () => {
     expect(r.adopted).toBe(false);
   });
 
+  it("treats a PR with a truncated closing-issue list as unknown (#1149 review)", async () => {
+    const snap = released(true);
+    snap.pullRequests[0]!.closingIssuesReferences.pageInfo = {
+      hasNextPage: true,
+      endCursor: "c",
+    } as never;
+    const r = await native(snap, "bob");
+    expect(r.facts.unknownPrs).toEqual([pr().url]);
+    expect(r.adopted).toBe(false);
+  });
+
   it("treats a PR closing a truncated, marker-free issue as unknown (#1149 review)", async () => {
     const snap = released(true);
     const other = withComments(issue(2, ["status:awaiting-review"]), [], true);

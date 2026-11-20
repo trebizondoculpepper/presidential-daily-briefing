@@ -147,6 +147,8 @@ export async function readSnapshotResponsibility(
   const inventory = new Set(snapshot.issues.map((i) => i.url.toLowerCase()));
   for (const p of snapshot.pullRequests)
     if (
+      // A truncated closing list may omit an issue that owns the PR (#1149 review).
+      p.closingIssuesReferences.pageInfo?.hasNextPage !== false ||
       p.closingIssuesReferences.nodes.some(
         (i) => unreadIssues.has(i.url.toLowerCase()) || !inventory.has(i.url.toLowerCase()),
       )
