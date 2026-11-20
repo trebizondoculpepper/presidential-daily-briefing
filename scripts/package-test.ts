@@ -37,6 +37,8 @@ const windows = process.platform === "win32";
 const npm = (args: string[], cwd: string) =>
   run(windows ? "npm.cmd" : "npm", args, { cwd, shell: windows });
 const root = resolve(".");
+/** The single owner-approved install hint (#1026); see src/install/postinstall.test.ts. */
+const ONBOARDING_HINT = "Run pdb onboard in your project for onboarding instructions.";
 const expected = [
   "LICENSE",
   "README.md",
@@ -873,9 +875,18 @@ try {
   );
   if (manifest?.license !== "GPL-3.0-or-later")
     throw new Error("Installed package must identify the owner-selected GPL-3.0-or-later license.");
-  if (manifest?.scripts?.postinstall || manifest?.scripts?.install || manifest?.scripts?.preinstall)
-    throw new Error("The package must not run install scripts on installation.");
-  console.log("ok   installed globally into an isolated prefix without install scripts");
+  // #1026 / doc/design/onboarding-rules-files.md: the one permitted install script is the
+  // literal onboarding hint. Any other preinstall/install/postinstall hook still fails.
+  const hint = `node -e "console.log('${ONBOARDING_HINT}')"`;
+  if (manifest?.scripts?.preinstall || manifest?.scripts?.install)
+    throw new Error("The package must not run preinstall or install scripts.");
+  if (manifest?.scripts?.postinstall !== hint)
+    throw new Error(
+      `The only permitted install script is the #1026 onboarding hint, found ${JSON.stringify(
+        manifest?.scripts?.postinstall ?? null,
+      )}.`,
+    );
+  console.log("ok   installed globally into an isolated prefix with only the onboarding hint");
   for (const file of expectedFiles.filter((f) => f.endsWith(".map"))) {
     const map = JSON.parse(await readFile(join(packageDir, file), "utf8")) as {
       sources?: unknown[];

@@ -47,6 +47,7 @@
     "lint": "vp lint",
     "fmt": "vp fmt",
     "test": "vp test run",
+    "postinstall": "node -e \"console.log('Run pdb onboard in your project for onboarding instructions.')\"",
     "prepare": "vp config --hooks --no-agent",
     "smoke": "tsx scripts/smoke.ts dist/cli.mjs",
     "prepack": "npm run build",
