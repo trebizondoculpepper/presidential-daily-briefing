@@ -518,6 +518,7 @@ export function rulesDocument(
         id: o.id,
         roles: o.roles,
         outcomes: o.outcomes,
+        work: o.work,
         purpose: o.purpose,
         sourceFile: "policy/obligations.edn",
       })),
@@ -668,8 +669,9 @@ export function rulesText(doc: RulesDocument): string {
     );
     for (const o of doc.obligations) {
       const roleNote = o.roles ? o.roles.map(mdCode).join(", ") : "all";
+      const workNote = o.work ? o.work.map(mdCode).join(", ") : "any";
       push(
-        `- ${mdCode(o.id)} (outcomes: ${o.outcomes.map(mdCode).join(", ")}; roles: ${roleNote}): ${mdEscape(o.purpose)}`,
+        `- ${mdCode(o.id)} (outcomes: ${o.outcomes.map(mdCode).join(", ")}; roles: ${roleNote}; work: ${workNote}): ${mdEscape(o.purpose)}`,
       );
     }
   }
@@ -877,7 +879,10 @@ export function rulesFormalText(doc: RulesDocument): string {
     );
     for (const o of doc.obligations) {
       const roleNote = o.roles ? o.roles.join(", ") : "all";
-      push(`  ${o.id} (outcomes: ${o.outcomes.join(", ")}; roles: ${roleNote}): ${o.purpose}`);
+      const workNote = o.work ? o.work.join(", ") : "any";
+      push(
+        `  ${o.id} (outcomes: ${o.outcomes.join(", ")}; roles: ${roleNote}; work: ${workNote}): ${o.purpose}`,
+      );
     }
   }
 
