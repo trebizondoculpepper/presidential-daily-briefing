@@ -55,12 +55,12 @@ export type SafeEngineCause =
 
 export const missingModuleRecovery = ["npm ci", "pdb doctor"];
 
-/** How to stay inside the engine's experimental subject/datom bound (#1132). */
-export const scopeLimitRecovery = [
-  "pdb --issue N",
-  "a smaller --since window",
-  "a smaller --limit",
-];
+/**
+ * How to stay inside the engine's experimental subject/datom bound (#1132). Only an
+ * issue-focused read reduces the subjects the engine evaluates: `--limit` is applied after
+ * evaluation and `--since` keeps the complete open inventory (review finding on #1182).
+ */
+export const scopeLimitRecovery = ["pdb --issue N"];
 
 /** The structured cause of an engine failure, or null when the evidence does not prove one. */
 export function safeEngineCause(error: unknown): SafeEngineCause | null {
@@ -137,7 +137,7 @@ export function engineFailure(error: unknown, fallback: string): BriefingEngineE
     return new BriefingEngineError(
       "decision-engine-failed",
       `Datalog evaluation stopped at the engine's capacity bound: ${cause.limit ?? "the documented number of"} ${cause.unit ?? "subjects"} at most.`,
-      `Narrow the request (${scopeLimitRecovery.join(", ")}) and retry; this is a capacity limit, not a missing dependency.`,
+      `Narrow it to a single ticket (${scopeLimitRecovery.join(", ")}) and retry; this is a capacity limit, not a missing dependency.`,
       cause,
     );
   return new BriefingEngineError(

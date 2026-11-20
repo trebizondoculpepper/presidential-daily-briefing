@@ -349,7 +349,7 @@ it("names the engine's subject bound instead of suggesting dependency repair (#1
     category: "scope-limit",
     limit: 500,
     unit: "subjects",
-    recovery: ["pdb --issue N", "a smaller --since window", "a smaller --limit"],
+    recovery: ["pdb --issue N"],
   });
 });
 
