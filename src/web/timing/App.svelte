@@ -4,6 +4,7 @@
     chartBars,
     formatDuration,
     latencyLoader,
+    pickupDelayLoader,
     selection,
     ticketLink,
     timingDays,
@@ -11,11 +12,13 @@
   } from "./client.js";
   import type { LatencyState, TimingDays, TimingState } from "./client.js";
   import LatencySection from "./LatencySection.svelte";
+  import PickupDelay from "./PickupDelay.svelte";
 
   let { api }: { api: string } = $props();
   let state: TimingState = $state({ status: "loading" });
   let impact: LatencyState = $state({ status: "loading" });
   let complexity: LatencyState = $state({ status: "loading" });
+  let pickupDelay: TimingState = $state({ status: "loading" });
   let days: TimingDays = $state(7);
   let refresh = $state(() => {});
   let choose = $state((_d: TimingDays) => {});
@@ -36,13 +39,16 @@
     const complexityLoader = latencyLoader(api, "complexity", fetcher, (next) => {
       complexity = next;
     });
+    const delayLoader = pickupDelayLoader(api, fetcher, (next) => {
+      pickupDelay = next;
+    });
     // One fresh collection: the first section bypasses the cache; the other re-reads that cache
     // only after a complete, successful read, and otherwise reads fresh itself.
     refresh = () =>
       void loader.refresh().then((first) =>
         first?.status === "ready" && first.response.status === "complete"
-          ? Promise.all([impactLoader.reload(), complexityLoader.reload()])
-          : Promise.all([impactLoader.refresh(), complexityLoader.refresh()]),
+          ? Promise.all([impactLoader.reload(), complexityLoader.reload(), delayLoader.reload()])
+          : Promise.all([impactLoader.refresh(), complexityLoader.refresh(), delayLoader.refresh()]),
       );
     choose = (d) => {
       const url = new URL(window.location.href);
@@ -56,6 +62,7 @@
       void loader.load(sel);
       void impactLoader.load(sel);
       void complexityLoader.load(sel);
+      void delayLoader.load(sel);
     };
     load();
     window.addEventListener("popstate", load);
@@ -175,3 +182,4 @@
 
 <LatencySection metric="impact" state={impact} pageLoading={state.status === "loading"} />
 <LatencySection metric="complexity" state={complexity} pageLoading={state.status === "loading"} />
+<PickupDelay state={pickupDelay} pageLoading={state.status === "loading"} />

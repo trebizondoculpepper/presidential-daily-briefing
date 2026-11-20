@@ -10,6 +10,8 @@ import {
   groupOrder,
   latencyLoader,
   parseLatencyResponse,
+  parsePickupDelayResponse,
+  pickupDelayLoader,
   parseTimingResponse,
   selection,
   ticketLink,
@@ -237,5 +239,43 @@ describe("timing page: creation to first complexity assessment (#823)", () => {
     });
     expect(r.stats.members.unknown).toHaveLength(2);
     expect(parseLatencyResponse(body, "impact")!.stats.completed).toBe(1);
+  });
+});
+
+describe("timing page: creation to first pickup by current impact (#821)", () => {
+  const delay = (groups: Record<string, unknown>) => {
+    const b = envelope(groups) as { result: Record<string, unknown> };
+    b.result.view = "pickup-delay";
+    b.result.groupBasis = "current-valid-impact";
+    return b;
+  };
+
+  it("parses the pickup-delay view's groups, keeping open, unknown and closed apart", () => {
+    const r = parsePickupDelayResponse(delay({ L: stats([2, 6], 1, 1), M: stats([]) }))!;
+    expect(r.groups.map((g) => g.name)).toEqual(["M", "L"]);
+    expect(r.groups[1]!.stats).toMatchObject({
+      completed: 2,
+      median: 4 * hour,
+      open: { count: 1 },
+      unknown: 1,
+    });
+    // The two views never read each other's shape.
+    expect(parsePickupDelayResponse(envelope({}))).toBeNull();
+    expect(parseTimingResponse(delay({}))).toBeNull();
+  });
+
+  it("requests the pickup-delay view with the page's window", async () => {
+    const urls: string[] = [];
+    const fetcher = (async (u: RequestInfo | URL) => {
+      urls.push(String(u));
+      return new Response(JSON.stringify(delay({ L: stats([1]) })), { status: 200 });
+    }) as typeof fetch;
+    const states: unknown[] = [];
+    await pickupDelayLoader("/api/v1/metrics", fetcher, (s) => void states.push(s)).load({
+      repository: repo,
+      days: 7,
+    });
+    expect(urls[0]).toBe("/api/v1/metrics?view=pickup-delay&repo=example%2Fproject&days=7");
+    expect(states.at(-1)).toMatchObject({ status: "ready" });
   });
 });
