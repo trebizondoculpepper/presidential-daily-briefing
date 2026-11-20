@@ -39,6 +39,9 @@ export interface WorkRow {
   reasonCodes: string[];
   why: string | null;
   nextCommand: string | null;
+  /** Supplied follow-on commands, in order (e.g. claim after releasing); never truncated. */
+  thenCommand: string | null;
+  inspection: string | null;
   owners: string[];
   /** Ownership and blocker evidence as supplied by the subject. */
   labels: string[];
@@ -92,6 +95,8 @@ function parseRow(
     reasonCodes: isStrings(a.reasonCodes) ? a.reasonCodes : [],
     why,
     nextCommand: str(a.nextCommand),
+    thenCommand: str(a.thenCommand),
+    inspection: isObject(a.inspection) ? str(a.inspection.command) : str(a.inspection),
     owners: isStrings(subject.owners) ? subject.owners : [],
     labels: isStrings(subject.labels) ? subject.labels : [],
     impact: size(a.impact),
@@ -473,6 +478,14 @@ export function expansionController(
 }
 
 /** The selection from the page URL: repository, role and agent, validated. */
+/** The consolidated ticket view for a row, carrying the selected role and agent. */
+export function ticketHref(c: WorkContext, number: number): string {
+  const q = new URLSearchParams({ repo: c.repository, n: String(number) });
+  if (c.role) q.set("role", c.role);
+  if (c.agent) q.set("agent", c.agent);
+  return `/ticket?${q}`;
+}
+
 export function selectedContext(search: string): WorkContext | null {
   const q = new URLSearchParams(search);
   const repo = q.get("repo");

@@ -6,6 +6,7 @@
     focusAfter,
     queueLoader,
     selectedContext,
+    ticketHref,
   } from "./client.js";
   import type { DetailState, QueueState, WorkContext, WorkRow } from "./client.js";
 
@@ -133,6 +134,8 @@
           {#if open.has(row.key)}
             {@const d = details[row.key]}
             {#if row.nextCommand}<p>Next: <code>{row.nextCommand}</code></p>{/if}
+            {#if row.thenCommand}<p>Then: <code>{row.thenCommand}</code></p>{/if}
+            {#if row.inspection}<p>{row.inspection}</p>{/if}
             {#if row.labels.length}<p class="labels">Labels: {row.labels.join(", ")}</p>{/if}
             {#if row.subjectKind === "pr"}
               <p><a href={row.target}>Open pull request #{row.number}</a> (pull-request detail is not read here; the ticket view covers issues only).</p>
@@ -153,7 +156,7 @@
               {#if d.detail.observedAt}<p class="evidence">Detail observed {d.detail.observedAt}.</p>{/if}
               {#if d.detail.stale}<p class="warn">Stale detail: retained from an earlier read.</p>{/if}
               {#if !d.detail.complete}<p class="warn">Partial detail: {d.detail.warnings.join(" ")}</p>{/if}
-              <p><a href={d.detail.url}>Open on GitHub</a> · <a href={`/ticket?repo=${encodeURIComponent(context?.repository ?? "")}&n=${row.number}`}>Full ticket view</a></p>
+              <p><a href={d.detail.url}>Open on GitHub</a> · <a href={context ? ticketHref(context, row.number) : "/ticket"}>Full ticket view</a></p>
             {/if}
           {/if}
         </div>

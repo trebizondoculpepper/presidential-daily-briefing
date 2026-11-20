@@ -14,6 +14,7 @@ import {
   queueUrl,
   reconcileOpen,
   selectedContext,
+  ticketHref,
   type QueueState,
   type WorkContext,
 } from "./client.js";
@@ -384,5 +385,26 @@ describe("work preview: coverage and staleness (#1164 review)", () => {
       envelope([{ ...action(1), target: `https://github.com/${repo}/pull/7` }]),
     )!.rows[0]!;
     expect(row.subjectKind).toBe("pr");
+  });
+});
+
+describe("work preview: supplied commands and drill-down context (#1164 review)", () => {
+  it("keeps the supplied follow-on and inspection commands", () => {
+    const row = parseWorkQueue(
+      envelope([
+        {
+          ...action(1),
+          thenCommand: "pdb claim 1",
+          inspection: { command: "pdb --issue 1" },
+        } as never,
+      ]),
+    )!.rows[0]!;
+    expect(row).toMatchObject({ thenCommand: "pdb claim 1", inspection: "pdb --issue 1" });
+  });
+
+  it("carries role and agent into the full ticket view", () => {
+    expect(ticketHref(ctx({ role: "designer" }), 7)).toBe(
+      "/ticket?repo=example%2Fproject&n=7&role=designer&agent=kavya",
+    );
   });
 });
