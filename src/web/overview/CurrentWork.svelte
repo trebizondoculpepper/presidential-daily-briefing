@@ -25,8 +25,20 @@
       Presence: {response.presence}.
     </p>
     {#each response.warnings as w}<p class="warn">{w}</p>{/each}
+    {#if response.unknownResponsibility.length}
+      <p class="warn">
+        Responsibility unknown (unread or unverifiable delivery records):
+        {#each response.unknownResponsibility as t, i}{i ? ", " : ""}<a href={ticketHref(t.number)}>#{t.number}</a>{/each}
+      </p>
+    {/if}
     {#if response.agents.length === 0}
-      <p>{response.status === "incomplete" ? "No claims or responsibilities were found, but the read was partial." : "No agent holds a claim or delivery responsibility."}</p>
+      <p>
+        {response.status === "incomplete"
+          ? "No claims or responsibilities were found, but the read was partial."
+          : response.unknownResponsibility.length
+            ? "No agent holds a claim or known delivery responsibility; responsibility for the tickets above is unknown."
+            : "No agent holds a claim or delivery responsibility."}
+      </p>
     {:else}
       <ul class="work-agents">
         {#each response.agents as a (a.agent)}

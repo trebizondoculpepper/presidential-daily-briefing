@@ -48,6 +48,11 @@ export interface WorkResponse {
   observedAt: string | null;
   presence: string;
   agents: WorkAgent[];
+  /**
+   * Open tickets whose delivery records are unread or unverifiable (no responsibility object),
+   * as the Activity page reports them: responsibility is unknown, never absent.
+   */
+  unknownResponsibility: { number: number; url: string }[];
 }
 
 function pull(p: unknown): WorkPull | null {
@@ -128,6 +133,20 @@ export function parseWorkResponse(body: unknown): WorkResponse | null {
     observedAt: str(freshness.fetchedAt) ?? str(r.fetchedAt),
     presence: str(r.presence) ?? "unknown",
     agents,
+    unknownResponsibility: (isObject(r.delivery) && Array.isArray(r.delivery.tickets)
+      ? r.delivery.tickets
+      : []
+    ).flatMap((t) =>
+      // An absent responsibility object means unread/unverifiable records; a present object with
+      // ticket: null is a known unassigned ticket, not an evidence gap (activity-page.ts).
+      isObject(t) &&
+      t.closure === "open" &&
+      !t.responsibility &&
+      typeof t.number === "number" &&
+      typeof t.url === "string"
+        ? [{ number: t.number, url: t.url }]
+        : [],
+    ),
   };
 }
 

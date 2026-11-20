@@ -98,3 +98,21 @@ describe("overview current work (#825)", () => {
     expect(pending[2]!.url).toBe("/api/v1/team?repo=example%2Fother&refresh=true");
   });
 });
+
+describe("overview current work: unknown responsibility (#1185 review)", () => {
+  it("keeps open tickets with unread delivery records as unknown, not as an all-clear", () => {
+    const r = parseWorkResponse(
+      team([], {
+        delivery: {
+          tickets: [
+            { number: 4, url: url(4), closure: "open" },
+            { number: 5, url: url(5), closure: "open", responsibility: { ticket: null } },
+            { number: 6, url: url(6), closure: "closed" },
+          ],
+        },
+      }),
+    )!;
+    expect(r.agents).toEqual([]);
+    expect(r.unknownResponsibility).toEqual([{ number: 4, url: url(4) }]);
+  });
+});
