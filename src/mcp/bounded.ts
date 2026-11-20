@@ -93,13 +93,21 @@ export const boundedEnvelope = z.strictObject({
     .object({
       code: z.string(),
       message: z.string(),
-      /** #346: a safe engine cause (validated module name and recovery commands), when known. */
+      /** #346/#1132: a safe engine cause (validated fields and recovery commands), when known. */
       cause: z
-        .object({
-          category: z.literal("missing-module"),
-          module: z.string().max(214).nullable(),
-          recovery: z.array(z.string()),
-        })
+        .union([
+          z.object({
+            category: z.literal("missing-module"),
+            module: z.string().max(214).nullable(),
+            recovery: z.array(z.string()),
+          }),
+          z.object({
+            category: z.literal("scope-limit"),
+            limit: z.number().int().positive().nullable(),
+            unit: z.enum(["subjects", "datoms"]).nullable(),
+            recovery: z.array(z.string()),
+          }),
+        ])
         .optional(),
     })
     .nullable(),

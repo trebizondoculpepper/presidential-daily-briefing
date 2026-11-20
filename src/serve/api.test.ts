@@ -786,6 +786,38 @@ describe("pdb serve maps domain errors (#373 review)", () => {
     }
   });
 
+  it("a subject-limit engine bound is a capacity diagnosis, not a dependency one (#1132)", async () => {
+    const s = await setup(["--repo", repo], {
+      loadEngine: async () => {
+        throw Object.assign(
+          new Error(
+            "experimental-scope-exceeded: at most 500 subjects are supported. No other scheduler was run.",
+          ),
+          { code: "experimental-scope-exceeded" },
+        );
+      },
+    });
+    try {
+      const reply = await call(s.running.port, "/api/v1/briefing");
+      expect(reply.status).toBe(500);
+      expect(reply.json.error).toMatchObject({
+        code: "INTERNAL",
+        cause: { category: "scope-limit", limit: 500, unit: "subjects" },
+      });
+      expect(reply.json.error.message).toContain("at most 500 subjects");
+      expect(reply.json.error.message).toContain("capacity limit");
+      expect(reply.json.error.message).not.toContain("pdb doctor checks");
+      expect(reply.json.error.next.slice(0, 3)).toEqual([
+        "pdb --issue N",
+        "a smaller --since window",
+        "a smaller --limit",
+      ]);
+      expect(reply.json.error.next).not.toContain("pdb doctor");
+    } finally {
+      await s.close();
+    }
+  });
+
   it("who answers an unavailable issue with its diagnosis, not a 500", async () => {
     const s = await setup(["--repo", repo], { collectIssueFocus: moved("someone/else") });
     try {

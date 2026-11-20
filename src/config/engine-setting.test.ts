@@ -3,7 +3,13 @@ import { InMemoryTransport } from "@modelcontextprotocol/server";
 import { boundedEnvelope, createServer } from "../mcp.js";
 import { describe, it, expect } from "vite-plus/test";
 import { parseConfig, settingFor } from "./config.js";
-import { BriefingEngineError, engineFailure, resolveEngineSetting } from "./engine-setting.js";
+import {
+  BriefingEngineError,
+  engineFailure,
+  resolveEngineSetting,
+  safeEngineCause,
+  safeEngineCauseText,
+} from "./engine-setting.js";
 import { emptyFileSystem, fakeGit, SYNTHETIC_ROOT } from "../../scripts/benchmark-isolation.js";
 import { presentBriefing, readBriefing } from "../briefing/service.js";
 import { main } from "../cli.js";
@@ -318,6 +324,87 @@ it("carries a missing engine module's safe cause into the MCP error envelope (#3
     const rendered = JSON.stringify(raw);
     expect(rendered).not.toContain("/private/home");
     expect(rendered).not.toContain("Cannot find package");
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});
+
+const scopeBound = () =>
+  Object.assign(
+    new Error(
+      "experimental-scope-exceeded: at most 500 subjects are supported. No other scheduler was run.",
+    ),
+    { code: "experimental-scope-exceeded" },
+  );
+
+it("names the engine's subject bound instead of suggesting dependency repair (#1132)", () => {
+  const failure = engineFailure(scopeBound(), "unused");
+  expect(failure.code).toBe("decision-engine-failed");
+  expect(failure.message).toContain("500 subjects");
+  expect(failure.message).toContain("capacity limit");
+  expect(failure.message).toContain("not a missing dependency");
+  expect(failure.message).not.toContain("pdb doctor checks");
+  expect(safeEngineCause(failure)).toEqual({
+    category: "scope-limit",
+    limit: 500,
+    unit: "subjects",
+    recovery: ["pdb --issue N", "a smaller --since window", "a smaller --limit"],
+  });
+});
+
+it("keeps an unstated scope bound typed but without inventing a number (#1132)", () => {
+  const failure = engineFailure(
+    Object.assign(new Error("experimental-scope-exceeded: unknown bound"), {
+      code: "experimental-scope-exceeded",
+    }),
+    "unused",
+  );
+  expect(safeEngineCause(failure)).toMatchObject({
+    category: "scope-limit",
+    limit: null,
+    unit: null,
+  });
+  expect(safeEngineCauseText(safeEngineCause(failure)!)).toContain("documented number of subjects");
+});
+
+it("carries the subject-limit diagnosis into the MCP error envelope (#1132)", async () => {
+  const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+  const server = createServer(
+    { repo: snapshot.repository, project: SYNTHETIC_ROOT },
+    {
+      collect: async () => snapshot,
+      currentRepository: async () => snapshot.repository,
+      dependencyReport,
+      guide: local(),
+      estimation: local(),
+      fs: local().fs,
+      git: local().git,
+      env: {},
+      loadEngine: async () => {
+        throw scopeBound();
+      },
+    },
+  );
+  await server.connect(serverSide);
+  const client = new Client({ name: "scope-limit", version: "1" });
+  await client.connect(clientSide);
+  try {
+    const raw = await client.callTool({
+      name: "triage_briefing",
+      arguments: { agent: "tester", role: "implementer" },
+    });
+    const result = boundedEnvelope.parse(raw.structuredContent);
+    expect(raw.isError).toBe(true);
+    expect(result.error).toMatchObject({
+      code: "decision-engine-failed",
+      cause: { category: "scope-limit", limit: 500, unit: "subjects" },
+    });
+    expect(result.error?.message).toContain("at most 500 subjects");
+    expect(result.error?.message).toContain("capacity limit");
+    // The dependency-repair advice belongs to a missing module, never to a capacity bound.
+    expect(result.error?.message).not.toContain("pdb doctor checks the engine's dependencies");
+    expect(result.error?.message).not.toContain("No other scheduler was run");
   } finally {
     await client.close();
     await server.close();

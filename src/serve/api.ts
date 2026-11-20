@@ -913,7 +913,9 @@ export function readApi(
             next: [
               ...(cause?.recovery ?? []),
               cliCommand(view, served?.repository ?? "owner/name", number),
-              "pdb doctor",
+              // #1132: a capacity bound is not an installation problem, so do not send the
+              // reader to a dependency doctor for it.
+              ...(cause?.category === "scope-limit" ? [] : ["pdb doctor"]),
             ],
           };
         } else throw error;

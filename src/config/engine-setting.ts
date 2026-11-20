@@ -28,37 +28,66 @@ export class BriefingEngineError extends Error {
   }
 }
 
-/** Why the Datalog engine failed, where the error's own fields prove it (#346). */
+/** Why the Datalog engine failed, where the error's own fields prove it (#346, #1132). */
 export type EngineFailureCause =
   | { category: "missing-module"; module: string | null }
+  /** #1132: a documented capacity bound, not a broken installation. */
+  | { category: "scope-limit"; limit: number | null; unit: "subjects" | "datoms" | null }
   | { category: "unknown" };
 
 /** Safe, bounded cause for API and MCP error bodies: validated fields only, no message text. */
-export interface SafeEngineCause {
-  category: "missing-module";
-  /** A validated package specifier, or null when the name could not be shown safely. */
-  module: string | null;
-  /** Delivered recovery commands. */
-  recovery: string[];
-}
+export type SafeEngineCause =
+  | {
+      category: "missing-module";
+      /** A validated package specifier, or null when the name could not be shown safely. */
+      module: string | null;
+      /** Delivered recovery commands. */
+      recovery: string[];
+    }
+  | {
+      category: "scope-limit";
+      /** The supported bound, or null when the engine's message did not state one. */
+      limit: number | null;
+      unit: "subjects" | "datoms" | null;
+      /** Delivered recovery commands. */
+      recovery: string[];
+    };
 
 export const missingModuleRecovery = ["npm ci", "pdb doctor"];
 
-/** The structured cause of a missing engine module, or null for any other engine failure. */
+/** How to stay inside the engine's experimental subject/datom bound (#1132). */
+export const scopeLimitRecovery = [
+  "pdb --issue N",
+  "a smaller --since window",
+  "a smaller --limit",
+];
+
+/** The structured cause of an engine failure, or null when the evidence does not prove one. */
 export function safeEngineCause(error: unknown): SafeEngineCause | null {
   if (!(error instanceof BriefingEngineError)) return null;
   const cause = error.engineCause;
-  if (cause?.category !== "missing-module") return null;
-  const module =
-    cause.module !== null && cause.module.length <= 214 && packageSpecifier.test(cause.module)
-      ? cause.module
-      : null;
-  return { category: "missing-module", module, recovery: [...missingModuleRecovery] };
+  if (cause?.category === "missing-module") {
+    const module =
+      cause.module !== null && cause.module.length <= 214 && packageSpecifier.test(cause.module)
+        ? cause.module
+        : null;
+    return { category: "missing-module", module, recovery: [...missingModuleRecovery] };
+  }
+  if (cause?.category === "scope-limit")
+    return {
+      category: "scope-limit",
+      limit: cause.limit,
+      unit: cause.unit,
+      recovery: [...scopeLimitRecovery],
+    };
+  return null;
 }
 
 /** One sentence naming the cause, built only from the safe fields. */
 export const safeEngineCauseText = (cause: SafeEngineCause) =>
-  `Missing module ${cause.module ?? "(name not shown)"}: in a PDB source checkout run npm ci at its root, or reinstall the published package; pdb doctor checks dependencies.`;
+  cause.category === "missing-module"
+    ? `Missing module ${cause.module ?? "(name not shown)"}: in a PDB source checkout run npm ci at its root, or reinstall the published package; pdb doctor checks dependencies.`
+    : `The Datalog engine supports at most ${cause.limit ?? "its documented number of"} ${cause.unit ?? "subjects"} for one read, and this request exceeded that capacity bound. Narrow it (for example ${cause.recovery.join(", ")}) and retry: this is a capacity limit, not a missing dependency or a broken installation.`;
 
 /** A bare npm package specifier (optionally scoped): never a path. */
 const packageSpecifier = /^(?:@[a-z0-9][\w.-]*\/)?[a-z0-9][\w.-]*$/i;
@@ -70,6 +99,16 @@ const packageSpecifier = /^(?:@[a-z0-9][\w.-]*\/)?[a-z0-9][\w.-]*$/i;
  */
 export function engineFailureCause(error: unknown): EngineFailureCause {
   const code = (error as { code?: unknown } | null)?.code;
+  if (code === "experimental-scope-exceeded") {
+    // #1132: the engine's own bound, parsed strictly so no arbitrary message text is echoed.
+    const message = error instanceof Error ? error.message : "";
+    const parsed = /at most (\d{1,9}) (subjects|datoms) are supported/.exec(message);
+    return {
+      category: "scope-limit",
+      limit: parsed ? Number(parsed[1]) : null,
+      unit: parsed ? (parsed[2] as "subjects" | "datoms") : null,
+    };
+  }
   if (code !== "ERR_MODULE_NOT_FOUND" && code !== "MODULE_NOT_FOUND")
     return { category: "unknown" };
   const message = error instanceof Error ? error.message : "";
@@ -92,6 +131,13 @@ export function engineFailure(error: unknown, fallback: string): BriefingEngineE
       "decision-engine-failed",
       `The Datalog engine could not be loaded: missing module ${cause.module ?? "(name not shown)"}. No fallback was run.`,
       "In a source checkout run npm ci at its root (then npm run build when running dist), or reinstall the published package; pdb doctor checks dependencies.",
+      cause,
+    );
+  if (cause.category === "scope-limit")
+    return new BriefingEngineError(
+      "decision-engine-failed",
+      `Datalog evaluation stopped at the engine's capacity bound: ${cause.limit ?? "the documented number of"} ${cause.unit ?? "subjects"} at most.`,
+      `Narrow the request (${scopeLimitRecovery.join(", ")}) and retry; this is a capacity limit, not a missing dependency.`,
       cause,
     );
   return new BriefingEngineError(
