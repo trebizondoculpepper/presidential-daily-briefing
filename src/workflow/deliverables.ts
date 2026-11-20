@@ -11,7 +11,12 @@ import { identitySelection, identitySelectionOptions } from "../config/commandid
  * Before every write the issue is read and folded again and the plan recomputed, so a write is
  * only ever made on fresh evidence and a retry completes only what is missing.
  */
-import { deliverableIssue, olderCommentsPage, pullByUrl } from "../github/service/delivery.js";
+import {
+  deliverableIssue,
+  olderCommentsPage,
+  pullByUrl,
+  pullReferencingIssues,
+} from "../github/service/delivery.js";
 import { issueWrites, WRITE } from "../github/service/issuewrites.js";
 import type { LivePr } from "../github/service/delivery.js";
 import { parseArgs } from "node:util";
@@ -1461,6 +1466,55 @@ export async function planDeliverables(
 }
 
 /**
+ * Whether another issue records an agent as responsible for this PR (#1149 review): every issue
+ * the PR closes or that cross-references it is folded with the shared delivery reader. An issue
+ * whose records cannot be read, or reference lists with more pages, make the ownership unknown.
+ */
+async function memberOwnershipElsewhere(
+  pr: LivePr,
+  self: { repository: string; number: number },
+  rt: DeliverablesRuntime,
+): Promise<"none" | "owned" | "unknown"> {
+  const refs = await pullReferencingIssues(rt.query as unknown as Query, pr.url);
+  if (!refs || !refs.complete) return "unknown";
+  const seen = new Set<string>();
+  let result: "none" | "owned" | "unknown" = "none";
+  for (const i of refs.issues) {
+    const key = `${i.repository.toLowerCase()}#${i.number}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    if (sameRepo(i.repository, self.repository) && i.number === self.number) continue;
+    try {
+      const read = await readIssue(i.repository, i.number, rt.query);
+      const item = read.item;
+      if (!item || item.__typename !== "Issue") continue;
+      const history = await readDeliveryComments(i.repository, i.number, item.comments, rt.query);
+      const { fold } = await readDeliveryFold(
+        history.comments,
+        history.complete,
+        { repository: i.repository, issue: i.number },
+        rt.trust,
+      );
+      if (fold.recordsUnknown) {
+        result = "unknown";
+        continue;
+      }
+      const holds = fold.members.some(
+        (m) =>
+          m.deliverable.kind === "pr" &&
+          sameRepo(m.deliverable.repository, pr.baseRepository?.nameWithOwner ?? "") &&
+          m.deliverable.number === pr.number &&
+          m.responsible !== null,
+      );
+      if (holds) return "owned";
+    } catch {
+      result = "unknown";
+    }
+  }
+  return result;
+}
+
+/**
  * Adoption facts for `claim` (#1019, doc/design/human-responsibility-release.md): the trusted,
  * applied human-directed releases on the ticket, its preserved open PR members, and whether the
  * ticket or those PRs still have (or may have) an owner. Only facts: the native claim admission
@@ -1494,32 +1548,29 @@ export async function adoptionFacts(
   if (!releases.length) return undefined;
   const preserved: string[] = [];
   const unknown: string[] = [];
+  const owned: string[] = [];
   for (const m of fold.members) {
     if (m.deliverable.kind !== "pr" || m.responsible !== null) continue;
     const url = `https://github.com/${m.deliverable.repository}/pull/${m.deliverable.number}`;
     const pr = await readPr(url, rt.query).catch(() => null);
     if (!pr) {
+      // Unreadable: it may still be open and owned elsewhere, so it is unknown, never unowned.
       unknown.push(url);
       preserved.push(url);
       continue;
     }
     if (pr.state !== "OPEN") continue;
     preserved.push(pr.url);
-    // A PR that also closes another issue may be owned there; that issue's records are not read
-    // here, so its ownership is unknown, never unowned (fails closed, like #1149's briefing read).
-    const closes = pr.closingIssuesReferences?.nodes;
-    if (
-      !closes ||
-      closes.length >= 50 ||
-      closes.some((i) => !sameRepo(i.repository.nameWithOwner, repository) || i.number !== number)
-    )
-      unknown.push(pr.url);
+    const elsewhere = await memberOwnershipElsewhere(pr, { repository, number }, rt);
+    if (elsewhere === "owned") owned.push(pr.url);
+    if (elsewhere === "unknown") unknown.push(pr.url);
   }
   return {
     release: {
       trust: "trusted",
       from: releases[releases.length - 1]!,
       preservedPrUrls: preserved,
+      ownedPrUrls: owned,
       unknownPrUrls: unknown,
     },
     ticketResponsible: fold.ticketResponsible !== null,

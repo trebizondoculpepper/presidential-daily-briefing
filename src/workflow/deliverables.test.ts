@@ -66,6 +66,10 @@ function github(
     onRun?: (args: string[], state: { comments: DeliveryComment[] }) => void;
     issueType?: "Issue" | "PullRequest" | null;
     pageSize?: number;
+    /** Other issues' comments, by number, for cross-issue ownership reads (#1019). */
+    others?: Record<number, DeliveryComment[]>;
+    /** Issues referencing each PR URL (closing or cross-reference); default: just N. */
+    refs?: Record<string, { issues: number[]; complete?: boolean }>;
   } = {},
 ) {
   const state = {
@@ -93,6 +97,42 @@ function github(
     };
   };
   const query = async (q: string, v: Record<string, string | number>): Promise<unknown> => {
+    if (q.includes("viewer{") && v.number !== undefined && v.number !== N) {
+      const other = setup.others?.[Number(v.number)];
+      if (!other) throw new Error("issue unavailable");
+      return {
+        viewer: { __typename: "User", login: viewer },
+        repository: {
+          issueOrPullRequest: {
+            __typename: "Issue",
+            number: Number(v.number),
+            title: "Other",
+            url: `https://github.com/${repo}/issues/${v.number}`,
+            state: "OPEN",
+            labels: { nodes: [], pageInfo: { hasNextPage: false } },
+            closedByPullRequestsReferences: { nodes: [], pageInfo: { hasNextPage: false } },
+            comments: { nodes: other, pageInfo: { hasPreviousPage: false, startCursor: null } },
+          },
+        },
+      };
+    }
+    if (q.includes("timelineItems(itemTypes:[CROSS_REFERENCED_EVENT]")) {
+      const r = setup.refs?.[String(v.url)] ?? { issues: [N] };
+      const node = (n: number) => ({ number: n, repository: { nameWithOwner: repo } });
+      return {
+        resource: {
+          __typename: "PullRequest",
+          closingIssuesReferences: {
+            nodes: [node(N)],
+            pageInfo: { hasNextPage: false },
+          },
+          timelineItems: {
+            nodes: r.issues.map((n) => ({ source: { __typename: "Issue", ...node(n) } })),
+            pageInfo: { hasNextPage: r.complete === false },
+          },
+        },
+      };
+    }
     if (q.includes("viewer{"))
       return {
         viewer: { __typename: "User", login: viewer },
@@ -1908,24 +1948,63 @@ describe("deliverables unassign: human-directed responsibility release (#1019)",
       expect(admit(facts)).toContain("CLAIM-NOT-READY");
     });
 
-    it("treats a preserved PR that also closes another issue as unknown ownership", async () => {
-      const shared = fakePr(998, {
-        closingIssuesReferences: {
-          nodes: [
-            { number: N, repository: { nameWithOwner: repo } },
-            { number: 77, repository: { nameWithOwner: repo } },
-          ],
-        },
+    const released = (o: Parameters<typeof github>[0]) =>
+      (async () => {
+        const g = github({ comments: [both()], labels: ["status:awaiting-review"], ...o });
+        await applyDeliverables(repo, request("unassign", { agent: "maint", from: "alice" }), g.rt);
+        return adoptionFacts(repo, N, g.rt);
+      })();
+    const prs = () => [fakePr(998), fakePr(999)];
+
+    it("finds a PR owned through another issue's record, even without a closing link", async () => {
+      const elsewhere = post(
+        rec("attach", { agent: "bob", issue: 77, deliverables: [member(998)] }),
+      );
+      const facts = await released({
+        prs: prs(),
+        others: { 77: [elsewhere] },
+        refs: { [prLink(998)]: { issues: [N, 77] } },
       });
-      const facts = await release(both(), [shared, fakePr(999)]);
-      expect(facts?.release?.unknownPrUrls).toEqual([prLink(998)]);
+      expect(facts?.release?.ownedPrUrls).toEqual([prLink(998)]);
       // PR 999 alone is still preserved unowned work, so the ticket stays adoptable.
       expect([...admit(facts)]).toEqual([]);
-      const onlyShared = await release(
-        post(rec("submit", { deliverables: [member(998)], membership: "complete" })),
-        [shared],
+    });
+
+    it("treats unread or incomplete referencing histories as unknown, never unowned", async () => {
+      const unread = await released({
+        prs: prs(),
+        refs: { [prLink(998)]: { issues: [N, 78] } },
+      });
+      expect(unread?.release?.unknownPrUrls).toEqual([prLink(998)]);
+      const more = await released({
+        prs: prs(),
+        refs: { [prLink(999)]: { issues: [N], complete: false } },
+      });
+      expect(more?.release?.unknownPrUrls).toEqual([prLink(999)]);
+      const all = await released({
+        prs: prs(),
+        refs: {
+          [prLink(998)]: { issues: [N, 78] },
+          [prLink(999)]: { issues: [N], complete: false },
+        },
+      });
+      expect(admit(all)).toContain("CLAIM-NOT-READY");
+    });
+
+    it("lets the adopter become responsible with the suggested submit command", async () => {
+      const g = github({
+        comments: [both()],
+        prs: prs(),
+        labels: ["status:awaiting-review"],
+      });
+      await applyDeliverables(repo, request("unassign", { agent: "maint", from: "alice" }), g.rt);
+      g.state.labels.push("agent:kavya");
+      const submit = await planDeliverables(
+        repo,
+        request("submit", { agent: "kavya", reason: null, prs: [prLink(998), prLink(999)] }),
+        g.rt,
       );
-      expect(admit(onlyShared)).toContain("D-DENY-OPEN-PR");
+      expect(submit.ok, JSON.stringify(submit)).toBe(true);
     });
 
     it("reports nothing without an applied release, so ordinary admission is unchanged", async () => {

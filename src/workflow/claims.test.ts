@@ -522,6 +522,27 @@ describe("claim and needs-human (doc/design/workflow.md)", () => {
       expect(plan.notes?.join(" ")).toContain("pdb submit 7 --agent kavya");
     });
 
+    it("reads adoption facts when the preserved PR does not close the ticket (#1149 review)", async () => {
+      const env = fake({ labels: ["status:awaiting-review"] });
+      let read = false;
+      const plan = accepted(
+        await planClaim(
+          repo,
+          { number: 7, agent: "kavya" },
+          env.query,
+          env.permission,
+          undefined,
+          undefined,
+          async () => {
+            read = true;
+            return released() as never;
+          },
+        ),
+      );
+      expect(read).toBe(true);
+      expect(plan.notes?.join(" ")).toContain(`--pr ${pr(12)}`);
+    });
+
     it("lets the native rules refuse while the ticket is owned, the PR is owned or unknown, or the fold is unread", async () => {
       for (const facts of [
         { ...released(), ticketResponsible: true },

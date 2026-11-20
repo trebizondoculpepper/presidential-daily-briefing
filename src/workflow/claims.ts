@@ -973,7 +973,10 @@ async function planClaimFor(
   // reach the native admission, which alone decides whether the open PR or a held status still
   // refuses the claim. Read only when an open PR could otherwise refuse it.
   let adopting: ClaimAdoptionFacts | undefined;
-  if (!rework && adoption && openPrs.length > 0) {
+  // Membership need not close the ticket (delivery-lifecycle.md), so the reader runs whenever an
+  // open PR or a held status could refuse the claim, not only for closing references.
+  const pickable = claimPolicy.pickable.some((l) => label(item, l));
+  if (!rework && adoption && (openPrs.length > 0 || !pickable)) {
     try {
       adopting = await adoption();
     } catch (error) {
@@ -1126,7 +1129,7 @@ async function planClaimFor(
             ...ignoredNote(ignored),
             ...(adopting?.release
               ? [
-                  `Adopting preserved work released from ${adopting.release.from}: continue ${adopting.release.preservedPrUrls.join(", ")} rather than opening a duplicate PR, then become responsible with pdb submit ${number} --agent ${agent} --repo ${repository}.`,
+                  `Adopting preserved work released from ${adopting.release.from}: continue ${adopting.release.preservedPrUrls.join(", ")} rather than opening a duplicate PR, then become responsible with pdb submit ${number} --agent ${agent}${adopting.release.preservedPrUrls.map((u) => ` --pr ${u}`).join("")} --repo ${repository}.`,
                 ]
               : []),
             ...(deliveryPath
