@@ -36,6 +36,7 @@ import {
   writeStep,
 } from "./claims.js";
 import type {
+  Authority,
   ClaimFacts,
   ClaimPlan,
   ClaimRefusal,
@@ -177,7 +178,16 @@ export async function foldRefinement(
   comments: readonly Comment[],
   permission: PermissionLookup,
 ): Promise<RefinementFold> {
-  const trust = (c: Comment) => commentAuthority(c, permission);
+  return foldRefinementTrusted(repository, issue, comments, (c) => commentAuthority(c, permission));
+}
+
+/** The same fold with the caller's #212 trust decision (the briefing's shared permission cache). */
+export async function foldRefinementTrusted(
+  repository: string,
+  issue: number,
+  comments: readonly Comment[],
+  trust: (comment: Comment) => Promise<Authority>,
+): Promise<RefinementFold> {
   const notes = ordered(comments);
   const classified = await classifyMarkers(
     notes,

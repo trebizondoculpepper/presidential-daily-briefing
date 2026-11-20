@@ -1,8 +1,8 @@
 {
   "modelVersion": 3,
   "policyVersion": 1,
-  "rulesHash": "39486d647713840eb170804461a5cae8fe90bec46bba5941bd9f5c19f0fc2f74",
-  "narrationHash": "e65d793bc58b1a58733508a624010befabd28fdd9acace390d5c0c52c6c35b30",
+  "rulesHash": "2973c655a682c640d6b7051bfb2a77e13f215fa861b3c69778c81546db790f67",
+  "narrationHash": "2d29c9146ed3a575871835a24353d4b053736d094356cfa3df0a531f4092b2ec",
   "sources": [
     "policy/schema.edn",
     "policy/rules.edn",

@@ -65,6 +65,22 @@ export interface DatalogOptions {
   role: BlendedRole | "human";
   /** Human role only: question records per issue URL. Absent for the agent roles. */
   questionRecords?: ReadonlyMap<string, readonly QuestionRecordFact[]>;
+  /**
+   * #1098: refinement facts per issue URL, folded by the host from the collected records
+   * (src/workflow/refinementread.ts) exactly as `nativeRefinementGuidance` asserts them. Absent:
+   * not read, so no refinement rule applies to the issue.
+   */
+  refinements?: ReadonlyMap<
+    string,
+    {
+      requests: readonly {
+        state: "open" | "resolved";
+        estimated: boolean;
+        question: { trust: "trusted"; version: 2; outcome: "none" | "resolved" | "withdrawn" };
+      }[];
+      complete: boolean;
+    }
+  >;
   /** Per-issue human-directed responsibility releases (#1018). Absent: not read. */
   releaseDirections?: ReadonlyMap<string, readonly ReleaseDirectionFact[]>;
   agent?: string;
@@ -313,6 +329,21 @@ function normalize(
     if (activity) {
       put(id, "claim-activity", activity.state);
       if (activity.reason) put(id, "wait-reason", activity.reason);
+    }
+    const refinement = options.refinements?.get(s.url);
+    if (refinement) {
+      if (!refinement.complete) put(id, "refinement-complete", false);
+      for (const q of refinement.requests) {
+        const r = nextId++;
+        const question = nextId++;
+        put(id, "refinement", r);
+        put(r, "refinement-state", q.state);
+        if (q.state === "resolved") put(r, "refinement-estimated", q.estimated);
+        put(r, "refinement-question", question);
+        put(question, "record-trust", q.question.trust);
+        put(question, "record-version", q.question.version);
+        put(question, "record-outcome", q.question.outcome);
+      }
     }
     for (const record of options.questionRecords?.get(s.url) ?? []) {
       const r = nextId++;

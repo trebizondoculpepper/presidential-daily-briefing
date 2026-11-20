@@ -729,7 +729,7 @@
       "affinity": "designer",
       "owned": false,
       "clauses": "[1 \"role\" ?role] [(not= ?role \"human\")] (refinement-work ?t) (refinement-unanswered ?t)",
-      "why": "Needs refinement: answer its blocking questions from existing designs and decisions, and escalate only what needs a human decision through needs-human.",
+      "why": "Needs refinement: clarify enough to implement it assuming its dependencies were met. Answer its blocking questions from existing designs and decisions, and escalate only what needs a human decision through needs-human.",
       "codes": ["designer-duty"],
       "query": "[:find ?t :in $ % :where (foreground ?t) [1 \"role\" ?role] [(not= ?role \"human\")] (refinement-work ?t) (refinement-unanswered ?t)]",
       "witnesses": {}
@@ -743,7 +743,7 @@
       "affinity": "designer",
       "owned": false,
       "clauses": "[1 \"role\" ?role] [(not= ?role \"human\")] (refinement-work ?t) (refinement-answered ?t) (not (refinement-unanswered ?t)) (not (refinement-empty ?t))",
-      "why": "Every blocking question is settled: resolve the refinement so the item returns for estimation. Resolving does not make it ready.",
+      "why": "Every blocking question is settled: resolve it with pdb refine resolve and the request ID from refine status, so the item returns for estimation. Resolving does not make it ready.",
       "codes": ["designer-duty"],
       "query": "[:find ?t :in $ % :where (foreground ?t) [1 \"role\" ?role] [(not= ?role \"human\")] (refinement-work ?t) (refinement-answered ?t) (not (refinement-unanswered ?t)) (not (refinement-empty ?t))]",
       "witnesses": {}

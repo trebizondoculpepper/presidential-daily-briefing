@@ -19,6 +19,8 @@ export const commandTemplates: Record<string, string> = {
   // #413: an explicit resume; the read-only team inventory for reviewing several claims.
   resume: "pdb claim resume {number} --repo {repo} --agent {agent}",
   team: "pdb team --repo {repo}",
+  // #1098: a refinement's recorded questions, question IDs, answers and request IDs (#1095, #1096).
+  "refine-status": "pdb refine status {number} --repo {repo}",
 };
 export const commandKinds: Record<string, string> = {
   "estimate-complexity": "complexity",
@@ -30,8 +32,8 @@ export const commandKinds: Record<string, string> = {
   document: "detail",
   "continue-implementation": "detail",
   design: "detail",
-  // #1092: refinement is read on the ticket until the refinement commands land (#1095, #1096).
-  refine: "detail",
+  // #1098: refinement work starts from its recorded questions and answers (pdb refine status).
+  refine: "refine-status",
   inspect: "detail",
   "inspect-assessment": "detail",
   "answer-questions": "detail",
