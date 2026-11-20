@@ -409,6 +409,8 @@ const definingFields: Record<DeliveryOp, (keyof DeliveryRecord)[]> = {
   reassign: ["to"],
   reset: ["plan"],
   void: ["voids"],
+  // #1019: releasing the same agent is the same operation; `expected` is the guarded fold.
+  unassign: ["from"],
 };
 const defining = (rec: Partial<DeliveryRecord> & { op: DeliveryOp }): string =>
   JSON.stringify([

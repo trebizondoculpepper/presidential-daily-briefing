@@ -30,6 +30,8 @@ export const deliveryOps = [
   "reassign",
   "reset",
   "void",
+  // #1019: an explicit human-directed release of one agent's responsibility; never a reset.
+  "unassign",
 ] as const;
 export type DeliveryOp = (typeof deliveryOps)[number];
 
@@ -70,6 +72,12 @@ export interface DeliveryRecord {
   legacyRelease?: string;
   evidence?: string;
   plan?: { remove: string[]; add: string[] };
+  /**
+   * unassign (#1019): the agent whose responsibility is released, and the responsibility records
+   * it held when the release was planned (ticket and each member it held, by deliverable label).
+   */
+  from?: string;
+  expected?: { ticket: string | null; members: { deliverable: string; record: string | null }[] };
   /** reset: the reset-relevant labels observed when it was planned; absent on older records. */
   observedLabels?: string[];
   evaluationRevision?: string;
@@ -251,6 +259,21 @@ export function deliveryRecordProblem(v: unknown): string | null {
     case "void":
       if (!isString(v.voids)) return "void names no comment";
       break;
+    case "unassign": {
+      if (!isString(v.from)) return "unassign names no agent to release";
+      const e = v.expected;
+      if (
+        !isObject(e) ||
+        !(e.ticket === null || isString(e.ticket)) ||
+        !Array.isArray(e.members) ||
+        !e.members.every(
+          (m) =>
+            isObject(m) && isString(m.deliverable) && (m.record === null || isString(m.record)),
+        )
+      )
+        return "unassign has no expected responsibility records";
+      break;
+    }
     case "complete":
       if (
         !isString(v.evaluationRevision) ||
@@ -425,7 +448,7 @@ export interface RequiredMember {
 }
 export interface RejectedRecord {
   comment: string;
-  error: "HANDOFF_STALE" | "VOID_NOT_APPLICABLE";
+  error: "HANDOFF_STALE" | "VOID_NOT_APPLICABLE" | "UNASSIGN_STALE";
   why: string;
   /**
    * HANDOFF_STALE only (#192): the rejected transfer and the responsibility in force when it was
@@ -744,6 +767,65 @@ export function foldDelivery(records: ClassifiedRecord[], historyComplete: boole
       case "void":
         if (voids.has(rec.voids as string)) applied();
         break;
+      case "unassign": {
+        // #1019 (doc/design/human-responsibility-release.md): release only what `from` still
+        // holds at the guarded records; a replacement owner or a newer record is a conflict and
+        // nothing is cleared. Members and membership stay; other owners are untouched.
+        if (priorUnknown) {
+          fold.unverifiableTransfers.push(id);
+          unknown(`unassign ${id} by ${r.login} cannot be validated: an earlier record is unknown`);
+          break;
+        }
+        const from = rec.from as string;
+        const expected = rec.expected!;
+        const stale: string[] = [];
+        if (fold.ticketResponsible === from) {
+          if (fold.ticketResponsibilityRecord !== expected.ticket)
+            stale.push(
+              `ticket responsibility record is ${fold.ticketResponsibilityRecord ?? "none"}, expected ${expected.ticket ?? "none"}`,
+            );
+        } else if (expected.ticket !== null && fold.ticketResponsible !== null)
+          stale.push(
+            `ticket responsibility moved to ${fold.ticketResponsible} (record ${fold.ticketResponsibilityRecord ?? "none"})`,
+          );
+        // Guards use the full deliverable identity (#1146 review): labels shorten commit ids.
+        const held = fold.members.filter((m) => m.responsible === from);
+        for (const m of held) {
+          const key = deliverableKey(m.deliverable);
+          const want = expected.members.find((x) => x.deliverable === key);
+          if (!want || want.record !== m.responsibilityRecord)
+            stale.push(
+              `${deliverableLabel(m.deliverable)} responsibility record is ${m.responsibilityRecord ?? "none"}, expected ${want?.record ?? "not to be held"}`,
+            );
+        }
+        // A planned member now held by someone else is a replacement owner: a conflict, never
+        // skipped (#1146 review). Already unowned stays a no-op; unplanned owners are untouched.
+        for (const want of expected.members) {
+          const m = fold.members.find((x) => deliverableKey(x.deliverable) === want.deliverable);
+          if (m && m.responsible !== null && m.responsible !== from)
+            stale.push(
+              `${deliverableLabel(m.deliverable)} responsibility moved to ${m.responsible} (record ${m.responsibilityRecord ?? "none"})`,
+            );
+        }
+        if (stale.length) {
+          fold.rejected.push({
+            comment: id,
+            error: "UNASSIGN_STALE",
+            why: `release of ${from}: ${stale.join("; ")}`,
+          });
+          break;
+        }
+        if (fold.ticketResponsible === from) {
+          fold.ticketResponsible = null;
+          fold.ticketResponsibilityRecord = id;
+        }
+        for (const m of held) {
+          m.responsible = null;
+          m.responsibilityRecord = id;
+        }
+        applied();
+        break;
+      }
       case "complete":
         // Effectiveness needs live closure evidence and the recorded revision (#191).
         fold.completions.push(id);
