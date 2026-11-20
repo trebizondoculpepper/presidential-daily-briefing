@@ -5,7 +5,7 @@
  */
 import { spawnSync } from "node:child_process";
 
-const pages = ["rules", "pipeline", "work", "timing", "overview"];
+const pages = ["rules", "pipeline", "work", "timing", "overview", "discussion"];
 pages.forEach((page, i) => {
   const result = spawnSync(
     "npx",

@@ -1,0 +1,57 @@
+/* Discussion page (#1103). The strict CSP allows no inline styles. */
+.discussion-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+}
+.discussion-actions .scope {
+  display: flex;
+  gap: 0.75rem;
+  border: none;
+  padding: 0;
+  margin: 0;
+}
+.explain {
+  color: #57606a;
+  max-width: 60rem;
+}
+.warn {
+  color: #9a6700;
+}
+.error {
+  color: #cf222e;
+}
+.empty {
+  color: #57606a;
+}
+table.discussion {
+  border-collapse: collapse;
+  width: 100%;
+  max-width: 70rem;
+  margin: 1rem 0;
+}
+table.discussion caption {
+  text-align: left;
+  font-weight: 600;
+  padding-bottom: 0.25rem;
+}
+table.discussion th,
+table.discussion td {
+  text-align: left;
+  padding: 0.35rem 0.5rem;
+  border-bottom: 1px solid #d0d7de;
+  vertical-align: top;
+}
+table.discussion td:first-child,
+table.discussion td:last-child {
+  white-space: nowrap;
+}
+table.discussion .state,
+table.discussion .why {
+  color: #57606a;
+  font-weight: 400;
+}
+.unknown ul {
+  margin: 0.5rem 0;
+}

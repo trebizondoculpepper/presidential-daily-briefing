@@ -17,6 +17,7 @@ const entries = {
   work: "src/web/work/main.ts",
   timing: "src/web/timing/main.ts",
   overview: "src/web/overview/main.ts",
+  discussion: "src/web/discussion/main.ts",
 } as const;
 const entry = (process.env.PDB_WEB_ENTRY ?? "rules") as keyof typeof entries;
 if (!(entry in entries)) throw new Error(`Unknown PDB_WEB_ENTRY ${entry}.`);

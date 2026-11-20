@@ -49,6 +49,8 @@ const expected = [
   // #853: the built Rules page assets (vite.web.config.ts), served by pdb serve.
   "dist/web/overview.css",
   "dist/web/overview.js",
+  "dist/web/discussion.css",
+  "dist/web/discussion.js",
   "dist/web/pipeline.css",
   "dist/web/pipeline.js",
   "dist/web/rules.css",
