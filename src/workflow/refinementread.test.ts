@@ -32,4 +32,11 @@ describe("readSnapshotRefinements (#1098)", () => {
     const i = { ...issue(4, [refinementLabel]), state: "CLOSED" };
     expect((await readSnapshotRefinements(snapshot([i], []), trusted)).size).toBe(0);
   });
+
+  it("keeps facts for a labelled issue when authority is unread (offline), as incomplete", async () => {
+    const i = issue(5, ["status:ready", refinementLabel]);
+    const unknown = async () => ({ status: "unknown" as const, reason: "offline" });
+    const facts = await readSnapshotRefinements(snapshot([i], []), unknown as never);
+    expect(facts.get(i.url)?.complete).toBe(false);
+  });
 });
