@@ -149,7 +149,7 @@
    :affinity "implementer"
    :owned false
    :when [[1 "role" ?role] [(not= ?role "human")] (issue ?t) (needs-complexity ?t) (large-impact ?t)]
-   :why "High impact {impact}, but effort is {complexityState}; estimate it to test implementation value."
+   :why "High impact {impact}, but effort is {complexityState}; estimate it to test implementation value. If its dependencies were done, could work begin? Yes: estimate with a rationale. No: pdb refine request with a question."
    :codes ["assessment" "cross-role-boost"]}
 
   {:id "D-COMPLEXITY"
@@ -160,7 +160,7 @@
    :affinity "implementer"
    :owned false
    :when [[1 "role" ?role] [(not= ?role "human")] (issue ?t) (needs-complexity ?t)]
-   :why "Effort is {complexityState}; sizing improves the evidence for choosing work."
+   :why "Effort is {complexityState}; sizing improves the evidence for choosing work. If its dependencies were done, could work begin? Yes: estimate with a rationale. No: pdb refine request with a question."
    :codes ["assessment"]}
 
   {:id "D-IMPACT-BOOST"
@@ -171,7 +171,7 @@
    :affinity "designer"
    :owned false
    :when [[1 "role" ?role] [(not= ?role "human")] (issue ?t) (needs-impact ?t) (small-complexity ?t)]
-   :why "Complexity {complexity} is small, but benefit is {impactState}; assess impact to test for an easy win."
+   :why "Complexity {complexity} is small, but benefit is {impactState}; assess impact to test for an easy win. If its dependencies were done, could work begin? Yes: estimate with a rationale. No: pdb refine request with a question."
    :codes ["assessment" "cross-role-boost"]}
 
   {:id "D-IMPACT"
@@ -182,7 +182,7 @@
    :affinity "designer"
    :owned false
    :when [[1 "role" ?role] [(not= ?role "human")] (issue ?t) (needs-impact ?t)]
-   :why "Benefit is {impactState}; assess it before comparing implementation value."
+   :why "Benefit is {impactState}; assess it before comparing implementation value. If its dependencies were done, could work begin? Yes: estimate with a rationale. No: pdb refine request with a question."
    :codes ["assessment"]}
 
   {:id "D-BAD-ASSESSMENTS"
