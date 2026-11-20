@@ -13,6 +13,7 @@
  * another request lands concurrently or an earlier label write failed. It adds no CLI or browser
  * flow (#1095, #1096).
  */
+import { denialText, evaluatePolicy } from "../rules/datalog/engine.js";
 import { createHash } from "node:crypto";
 import {
   classifyMarkers,
@@ -844,4 +845,269 @@ export async function resolveRefinement(
 ): Promise<ClaimResult> {
   const plan = await planRefinementResolve(repository, input, writes.query, writes.permission);
   return writeThenIndex(repository, plan, input.number, input.agent, writes);
+}
+
+/**
+ * A read-only preview of `resolveRefinement` (#1096): the resolve record, then the label removal a
+ * real run would make if no other request stays outstanding; for an already recorded resolve,
+ * the current label reconciliation. Nothing is written.
+ */
+export async function previewRefinementResolve(
+  repository: string,
+  input: RefinementResolveInput,
+  query: GraphQuery | TicketReads,
+  permission: PermissionLookup,
+): Promise<ClaimPlan> {
+  const plan = await planRefinementResolve(repository, input, query, permission);
+  if (!plan.ok) return plan;
+  if (plan.noop) {
+    const label = await planRefinementLabel(
+      repository,
+      input.number,
+      input.agent,
+      query,
+      permission,
+    );
+    if (!label.ok) return label;
+    return { ...plan, noop: label.noop, changes: label.changes };
+  }
+  const read = await readComplete(repository, input.number, input.agent, query);
+  if (isRefusal(read)) return read;
+  const fold = await foldRefinement(repository, input.number, read.comments, permission);
+  // Unverifiable evidence stays unknown (#1139 review): the label reconciliation would refuse,
+  // so the preview promises no label change.
+  if (fold.unknown.length)
+    return {
+      ...plan,
+      notes: [
+        ...(plan.notes ?? []),
+        `${refinementLabel} changes cannot be confirmed: records could not be verified (${fold.unknown.join("; ")}).`,
+      ],
+    };
+  const othersOutstanding = fold.requests.some((q) => q.opId !== input.request && !q.resolved);
+  const present = read.item.labels.nodes.some((l) => l.name === refinementLabel);
+  const labelSteps: PlanStep[] = [];
+  if (!othersOutstanding && present)
+    labelSteps.push(
+      writeStep("labels", {
+        kind: "labels-edit",
+        repository,
+        number: input.number,
+        add: [],
+        remove: [refinementLabel],
+      }),
+    );
+  // Another request stays outstanding: the real run keeps (or repairs) the label.
+  if (othersOutstanding && !present) {
+    const { repoLabels } = await readTicket(
+      repository,
+      input.number,
+      input.agent,
+      query,
+      "",
+      refinementLabel,
+    );
+    if (!repoLabels.has(refinementLabel))
+      labelSteps.push(
+        writeStep("create-label", {
+          kind: "label-create",
+          repository,
+          name: refinementLabel,
+          color: "d4c5f9",
+        }),
+      );
+    labelSteps.push(
+      writeStep("labels", {
+        kind: "labels-edit",
+        repository,
+        number: input.number,
+        add: [refinementLabel],
+        remove: [],
+      }),
+    );
+  }
+  return { ...plan, changes: [...plan.changes, ...labelSteps] };
+}
+
+/** One request as `pdb refine status` lists it. */
+export interface RefinementStatusRequest {
+  request: string;
+  /** The request's question: its comment URL is the question ID `pdb question` takes. */
+  question: string;
+  /** The question's first trusted explicit outcome, or none. */
+  outcome: "none" | "resolve" | "withdraw";
+  state: "open" | "resolved";
+  /** The resolve record's comment URL, when resolved. */
+  resolvedBy: string | null;
+  dependencies: string[];
+}
+export type RefinementStatus =
+  | {
+      ok: true;
+      facts: ClaimFacts;
+      requests: RefinementStatusRequest[];
+      /** Records that could not be verified: the listing is incomplete, never settled. */
+      unknown: string[];
+      rejected: string[];
+      labelPresent: boolean;
+      /**
+       * Whether the index label agrees with the outstanding requests (contract: disagreement is
+       * incomplete evidence, `refinement-complete false`, until the label is reconciled).
+       */
+      labelAgrees: boolean;
+    }
+  | ClaimRefusal;
+
+/**
+ * Read one ticket's refinement requests (#1096): each request's question ID, outcome and state,
+ * from the trusted records. Read-only; unknown records are reported, never treated as settled.
+ */
+export async function readRefinementStatus(
+  repository: string,
+  number: number,
+  agent: string,
+  query: GraphQuery | TicketReads,
+  permission: PermissionLookup,
+): Promise<RefinementStatus> {
+  const read = await readComplete(repository, number, agent, query);
+  if (isRefusal(read)) return read;
+  const fold = await foldRefinement(repository, number, read.comments, permission);
+  const labelPresent = read.item.labels.nodes.some((l) => l.name === refinementLabel);
+  const url = (id: string) =>
+    `https://github.com/${repository}/issues/${number}#issuecomment-${id}`;
+  return {
+    ok: true,
+    facts: read.facts,
+    requests: fold.requests.map((q) => ({
+      request: q.opId,
+      question: url(q.comment),
+      outcome: q.outcome,
+      state: q.resolved ? "resolved" : "open",
+      resolvedBy: q.resolved ? url(q.resolved.comment) : null,
+      dependencies: q.dependencies,
+    })),
+    unknown: fold.unknown,
+    rejected: fold.rejected,
+    labelPresent,
+    labelAgrees: labelPresent === fold.requests.some((q) => !q.resolved),
+  };
+}
+
+/** The refinement decisions and denials the native policy may select for a ticket. */
+const refinementDecisions = new Set([
+  "D-REFINE",
+  "D-REFINE-RESOLVE",
+  "D-REFINE-EMPTY",
+  "D-REFINE-INCOMPLETE",
+  "D-REESTIMATE",
+]);
+const refinementDenials = ["D-DENY-REFINEMENT", "D-DENY-REESTIMATE", "D-DENY-REFINEMENT-UNKNOWN"];
+
+/** The native policy's guidance for one ticket's refinement state; null where none applies. */
+export interface RefinementGuidance {
+  /** The refinement decision the policy selects (e.g. D-REFINE-RESOLVE), or null. */
+  rule: string | null;
+  /** That decision's generated explanation. */
+  why: string | null;
+  /** The refinement pickup denial in force, or null. */
+  denialRule: string | null;
+  denial: string | null;
+}
+
+/**
+ * Ask the native policy which refinement decision and pickup denial apply to a ticket in this
+ * refinement state (#1139 review): the rules decide, the CLI only renders. The ticket is otherwise
+ * neutral (open, ready, estimated, unblocked), so only its refinement facts select the rule.
+ */
+export function nativeRefinementGuidance(facts: RefinementFacts): RefinementGuidance {
+  const t = 100;
+  const datoms: [number, string, string | number | boolean][] = [
+    [1, "forward-complete", true],
+    [t, "kind", "issue"],
+    [t, "state", "OPEN"],
+    [t, "number", 1],
+    [t, "target", "https://github.com/o/r/issues/1"],
+    [t, "created", 0],
+    [t, "labels-complete", true],
+    [t, "reverse-complete", true],
+    [t, "native-complete", true],
+    [t, "open-blockers", 0],
+    [t, "blocking-complete", true],
+    [t, "impact-state", "current"],
+    [t, "impact-size", "M"],
+    [t, "complexity-state", "current"],
+    [t, "complexity-size", "M"],
+    [t, "head", "not-a-pr"],
+    [t, "label", "status:ready"],
+  ];
+  if (!facts.complete) datoms.push([t, "refinement-complete", false]);
+  facts.requests.forEach((q, i) => {
+    const r = 200 + i;
+    const question = 300 + i;
+    datoms.push([t, "refinement", r], [r, "refinement-state", q.state]);
+    if (q.state === "resolved") datoms.push([r, "refinement-estimated", q.estimated]);
+    datoms.push(
+      [r, "refinement-question", question],
+      [question, "record-trust", q.question.trust],
+      [question, "record-version", q.question.version],
+      [question, "record-outcome", q.question.outcome],
+    );
+  });
+  const result = evaluatePolicy({
+    viewer: { role: "designer", agent: "", platform: "", order: "impact" },
+    datoms,
+  });
+  const decision = result.decisions.find(
+    (d) => d.subject === t && refinementDecisions.has(d.ruleId),
+  );
+  const denied = refinementDenials.find((id) =>
+    result.denials.some((d) => d.subject === t && d.ruleId === id),
+  );
+  return {
+    rule: decision?.ruleId ?? null,
+    why: decision?.why.text ?? null,
+    denialRule: denied ?? null,
+    denial: denied ? denialText(denied) : null,
+  };
+}
+
+/**
+ * The native facts of a status read, for guidance: trusted requests and their outcomes, with
+ * incomplete evidence or an index disagreement as `complete: false`. Estimates are not read here,
+ * so a resolved request counts as awaiting re-estimation (fail closed).
+ */
+export function statusFacts(status: RefinementStatus): RefinementFacts | null {
+  if (!status.ok) return null;
+  return {
+    requests: status.requests.map((q) => ({
+      state: q.state,
+      estimated: false,
+      question: {
+        trust: "trusted",
+        version: 2,
+        outcome: q.outcome === "none" ? "none" : q.outcome === "resolve" ? "resolved" : "withdrawn",
+      },
+    })),
+    complete: !status.unknown.length && status.labelAgrees,
+  };
+}
+
+/**
+ * The facts a planned resolve would produce (#1139 review), for dry-run guidance: the named
+ * request counted as resolved and the index label as reconciled (a real run reconciles it).
+ * Unverifiable records still make the facts incomplete.
+ */
+export function projectedResolveFacts(
+  status: RefinementStatus,
+  request: string,
+): RefinementFacts | null {
+  if (!status.ok) return null;
+  const facts = statusFacts({ ...status, labelAgrees: true });
+  if (!facts) return null;
+  return {
+    ...facts,
+    requests: facts.requests.map((q, i) =>
+      status.requests[i]!.request === request ? { ...q, state: "resolved", estimated: false } : q,
+    ),
+  };
 }

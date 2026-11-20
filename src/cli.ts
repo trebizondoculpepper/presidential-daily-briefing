@@ -52,13 +52,31 @@ import {
 import { briefingRoleNames, roleSectionIds } from "./briefing/roles.js";
 import { labelsFromSnapshot, normalizeLabelRequest } from "./github/labels.js";
 import { doctorStaleHours } from "./workflow/ticketdoctor.js";
-import { previewRefinementRequest, requestRefinement } from "./workflow/refinement.js";
+import {
+  previewRefinementRequest,
+  previewRefinementResolve,
+  nativeRefinementGuidance,
+  projectedResolveFacts,
+  readRefinementStatus,
+  requestRefinement,
+  resolveRefinement,
+  statusFacts,
+} from "./workflow/refinement.js";
+import type { RefinementGuidance } from "./workflow/refinement.js";
 import {
   refineArgumentsFor,
   refineHelp,
   refineJson,
+  refineResolveArgumentsFor,
+  refineResolveUsage,
+  refineStatusArgumentsFor,
+  refineStatusUsage,
   refineText,
   refineUsage,
+  resolveJson,
+  resolveText,
+  statusJson,
+  statusText,
 } from "./workflow/refinecli.js";
 import {
   applyPlan,
@@ -422,6 +440,9 @@ ${crashDisclosure()}
   refine request N [--agent NAME] --designer NAME --why TEXT --question TEXT... [--dependency owner/name#M...] [--dry-run]
                         Mark a ticket as needing refinement with concrete blocking questions;
                         denies implementation pickup until resolved and re-estimated (refine --help)
+  refine status N       List a ticket's refinement requests, question IDs and answers
+  refine resolve N --request OPID --why TEXT [--dry-run]
+                        Clear an answered refinement request; the ticket returns for estimation
   question resolve|withdraw N [--agent NAME] --question URL --why TEXT [--dry-run]
                         Record that a needs-human question was answered or withdrawn (explicit,
                         with a reason; never inferred from replies, labels or closure)
@@ -2079,28 +2100,88 @@ async function run(
     return result.exitCode;
   }
   if (args[0] === "refine") {
-    // Help before validation, at the group or after the subcommand (refine request --help).
-    const helpAt = args[1] === "request" ? 2 : 1;
+    // Help before validation, at the group or after the subcommand (refine resolve --help).
+    const op = args[1];
+    const known = op === "request" || op === "resolve" || op === "status";
+    const helpAt = known ? 2 : 1;
     if (args[helpAt] === "--help" || args[helpAt] === "-h" || args.length === 1) {
       await output(refineHelp);
       return args.length === 1 ? 1 : 0;
     }
-    const parsed = refineArgumentsFor(args.slice(1), identitySelectionOptions);
+    const usage =
+      op === "resolve" ? refineResolveUsage : op === "status" ? refineStatusUsage : refineUsage;
+    const parsed =
+      op === "resolve"
+        ? refineResolveArgumentsFor(args.slice(1), identitySelectionOptions)
+        : op === "status"
+          ? refineStatusArgumentsFor(args.slice(1), identitySelectionOptions)
+          : refineArgumentsFor(args.slice(1), identitySelectionOptions);
     if (identity) parsed.repo ??= await runtime.currentRepository();
-    const values = {
-      ...parsed,
-      ...identitySelection(parsed),
-      agent: await commandActor({ ...parsed, ...identitySelection(parsed) }, identity, refineUsage),
-    };
-    const repository = values.repo ?? (await runtime.currentRepository());
+    if (op === "status") {
+      // An observational read (#1139 review, effective-identity.md "Read-only operations"):
+      // the non-initializing optional viewer; with no safe selection it reads unattributed.
+      const viewer = await commandViewer({ ...parsed, ...identitySelection(parsed) }, identity);
+      const repository = parsed.repo ?? (await runtime.currentRepository());
+      const gh = ghOf(runtime);
+      const status = await readRefinementStatus(
+        repository,
+        parsed.number,
+        viewer ?? "",
+        gh.tickets,
+        gh.repos.permissionOf(repository),
+      );
+      await output(parsed.json ? statusJson(status) : statusText(status));
+      return !status.ok ? 1 : status.unknown.length || !status.labelAgrees ? 2 : 0;
+    }
+    const agent = await commandActor({ ...parsed, ...identitySelection(parsed) }, identity, usage);
+    const repository = parsed.repo ?? (await runtime.currentRepository());
     // One composed GH facade (#1136 review): the permission check, ticket reads and writes all use
     // the same typed boundary, so no global executor is reached.
     const gh = ghOf(runtime);
     const query = gh.tickets;
     const permission = gh.repos.permissionOf(repository);
+    const writes = { run: gh.run, query, permission };
+    if (op === "resolve") {
+      const values = parsed as ReturnType<typeof refineResolveArgumentsFor>;
+      const input = { number: values.number, agent, request: values.request, why: values.why };
+      // Read live immediately before writing; never act on a cached snapshot.
+      const result = values.dryRun
+        ? await (async () => {
+            const plan = await previewRefinementResolve(repository, input, query, permission);
+            return { ...plan, exitCode: plan.ok ? 0 : 1 };
+          })()
+        : await resolveRefinement(repository, input, writes);
+      // The next step is the native policy's, for the state read back afterwards. A failed
+      // read-back never discards the write receipt (#1139 review): the guidance is then unknown.
+      let native: RefinementGuidance | null = null;
+      if (result.ok)
+        try {
+          const read = await readRefinementStatus(
+            repository,
+            values.number,
+            agent,
+            query,
+            permission,
+          );
+          // A dry run writes nothing: evaluate the state the planned resolve would produce.
+          const facts = values.dryRun
+            ? projectedResolveFacts(read, values.request)
+            : statusFacts(read);
+          native = facts ? nativeRefinementGuidance(facts) : null;
+        } catch {
+          native = null;
+        }
+      await output(
+        values.json
+          ? resolveJson(result, values.request, native)
+          : resolveText(result, values.request, values.dryRun, native),
+      );
+      return result.exitCode;
+    }
+    const values = parsed as ReturnType<typeof refineArgumentsFor>;
     const input = {
       number: values.number,
-      agent: values.agent,
+      agent,
       designer: values.designer,
       why: values.why,
       questions: values.questions,
@@ -2112,11 +2193,7 @@ async function run(
           const plan = await previewRefinementRequest(repository, input, query, permission);
           return { ...plan, exitCode: plan.ok ? 0 : 1 };
         })()
-      : await requestRefinement(repository, input, {
-          run: gh.run,
-          query,
-          permission,
-        });
+      : await requestRefinement(repository, input, writes);
     await output(values.json ? refineJson(result) : refineText(result, values.dryRun));
     return result.exitCode;
   }
