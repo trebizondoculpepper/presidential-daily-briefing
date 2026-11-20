@@ -83,6 +83,16 @@ export const servedPages: readonly ServedPage[] = [
     carries: [],
     shipped: true,
   },
+  // Discussion (#1103): API-first; the page reads /api/v1/discussion.
+  {
+    id: "discussion",
+    path: "/discussion",
+    label: "Discussion",
+    scope: "project",
+    parameters: ["repo", "state"],
+    carries: [],
+    shipped: true,
+  },
   {
     id: "rules",
     path: "/rules",

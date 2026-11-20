@@ -46,7 +46,9 @@ const expected = [
   "dist/cli.mjs.map",
   "dist/mcp.mjs",
   "dist/mcp.mjs.map",
-  // #853: the built Rules page assets (vite.web.config.ts), served by pdb serve.
+  // #853: the built page assets (vite.web.config.ts), served by pdb serve.
+  "dist/web/discussion.css",
+  "dist/web/discussion.js",
   "dist/web/pipeline.css",
   "dist/web/pipeline.js",
   "dist/web/rules.css",

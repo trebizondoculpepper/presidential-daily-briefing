@@ -71,6 +71,7 @@ import { readWebAssets } from "./serve/webassets.js";
 import { pipelineAssets, pipelineBootstrapHtml } from "./serve/pipeline-page.js";
 import { workPreviewAssets, workPreviewBootstrapHtml } from "./serve/work-preview-page.js";
 import { timingAssets, timingBootstrapHtml } from "./serve/timing-page.js";
+import { discussionAssets, discussionBootstrapHtml } from "./serve/discussion-page.js";
 import type { LiveApplicationResult } from "./serve/liveapp.js";
 import { setupPage, setupScript } from "./serve/setup-page.js";
 import {
@@ -612,6 +613,28 @@ export async function startServe(
           served,
           context.url.searchParams,
           dashboard.has(timingAssets.script) && dashboard.has(timingAssets.stylesheet),
+        );
+        response.writeHead(200, {
+          "content-type": "text/html; charset=utf-8",
+          "cache-control": "no-store",
+          "x-content-type-options": "nosniff",
+          "referrer-policy": "no-referrer",
+          "content-security-policy": dashboardSecurityPolicy,
+        });
+        response.end(
+          request.method === "HEAD"
+            ? undefined
+            : withProcessIdentity(html, processIdentity, selectedPage ?? undefined),
+        );
+        return;
+      }
+      if (path === "/discussion") {
+        // Discussion (#1103): a static bootstrap after the shell's project selection check; the
+        // component reads /api/v1/discussion. No GitHub read loading the page.
+        const html = discussionBootstrapHtml(
+          served,
+          context.url.searchParams,
+          dashboard.has(discussionAssets.script) && dashboard.has(discussionAssets.stylesheet),
         );
         response.writeHead(200, {
           "content-type": "text/html; charset=utf-8",

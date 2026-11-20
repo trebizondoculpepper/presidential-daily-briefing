@@ -231,6 +231,14 @@ async function server(args: string[], files: Record<string, string> = {}, built 
               ["/web/timing.css", { type: "text/css; charset=utf-8", body: "/* timing.css */" }],
               ["/web/work.js", { type: "text/javascript; charset=utf-8", body: "/* work.js */" }],
               ["/web/work.css", { type: "text/css; charset=utf-8", body: "/* work.css */" }],
+              [
+                "/web/discussion.js",
+                { type: "text/javascript; charset=utf-8", body: "/* discussion.js */" },
+              ],
+              [
+                "/web/discussion.css",
+                { type: "text/css; charset=utf-8", body: "/* discussion.css */" },
+              ],
             ]
           : [],
       ),
@@ -612,6 +620,37 @@ describe("GET /work-preview (#753)", () => {
       const reply = await call(port, "/work-preview?repo=example%2Fproject");
       expect(reply.body).toContain("frontend assets are not built");
       expect(reply.body).not.toContain("/web/work.js");
+    } finally {
+      await running.close();
+    }
+  });
+});
+
+describe("GET /discussion (#1103)", () => {
+  it("serves a static bootstrap in the shared navigation, with no GitHub request", async () => {
+    const { running, github, port } = await server(["--repo", "example/project"]);
+    try {
+      const reply = await call(port, "/discussion?repo=example%2Fproject&state=all");
+      expect(reply.status).toBe(200);
+      expect(reply.headers["content-security-policy"]).toContain("script-src 'self'");
+      expect(reply.body).toContain("<h1>Discussion</h1>");
+      expect(reply.body).toContain('<div id="discussion-app" data-api="/api/v1/discussion">');
+      expect(reply.body).toContain('<script src="/web/discussion.js" defer></script>');
+      expect(reply.body).not.toMatch(/\sstyle=|<script>/);
+      expect(reply.body).toMatch(
+        /<nav class="wide-pages"[^>]*>[\s\S]*?href="\/discussion\?repo=example%2Fproject"[^>]*>Discussion<\/a>/,
+      );
+      expect(github).toEqual([]);
+    } finally {
+      await running.close();
+    }
+  });
+
+  it("says the assets are not built instead of loading forever", async () => {
+    const { running, port } = await server(["--repo", "example/project"], {}, false);
+    try {
+      const reply = await call(port, "/discussion?repo=example%2Fproject");
+      expect(reply.body).toContain("frontend assets are not built");
     } finally {
       await running.close();
     }
