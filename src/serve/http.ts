@@ -41,8 +41,15 @@ export interface ServeError {
   code: ServeErrorCode;
   message: string;
   next: string[];
-  /** #346: a safe, structured engine cause (validated fields only), when one is known. */
-  cause?: { category: "missing-module"; module: string | null; recovery: string[] };
+  /** #346/#1132: a safe, structured engine cause (validated fields only), when one is known. */
+  cause?:
+    | { category: "missing-module"; module: string | null; recovery: string[] }
+    | {
+        category: "scope-limit";
+        limit: number | null;
+        unit: "subjects" | "datoms" | null;
+        recovery: string[];
+      };
 }
 
 /** An HTTP failure carried to the router, which renders the error envelope. */

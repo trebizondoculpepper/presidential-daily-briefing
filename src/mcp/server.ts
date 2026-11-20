@@ -801,15 +801,14 @@ export function createServer(
             ? "cancelled"
             : "collection-failed";
       const cause = safeEngineCause(error);
-      return errorWithIdentity(
-        tool,
-        view,
-        selection,
-        args.number,
-        code,
-        cause ? `${failures[code]} ${safeEngineCauseText(cause)}` : failures[code],
-        cause,
-      );
+      // #1132: a documented capacity bound is not a dependency problem, so its text replaces the
+      // generic "check the engine's dependencies" guidance instead of being appended to it.
+      const message = cause
+        ? cause.category === "scope-limit"
+          ? safeEngineCauseText(cause)
+          : `${failures[code]} ${safeEngineCauseText(cause)}`
+        : failures[code];
+      return errorWithIdentity(tool, view, selection, args.number, code, message, cause);
     }
   };
 
