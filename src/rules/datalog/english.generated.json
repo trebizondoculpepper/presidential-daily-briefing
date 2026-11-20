@@ -1,8 +1,8 @@
 {
   "modelVersion": 3,
   "policyVersion": 1,
-  "rulesHash": "a3d982002f118b2bbe2eebd4894a35e4e345090cf3984dab7885f325074c9ae7",
-  "narrationHash": "cb00e92a351f0511a89cda129707056685dc2ace2aace27e7b6286cf08883dff",
+  "rulesHash": "be898939138017e1ccffa08057159521ea5beec0dee567ee0e46aade7334941c",
+  "narrationHash": "11f36e44d491c3af6b24ccb51689dce23e7a8f2aa641bf1aa8e991752ddaed55",
   "sources": [
     "policy/schema.edn",
     "policy/rules.edn",
@@ -21453,7 +21453,7 @@
   "obligations": [
     {
       "id": "O-CLAIM-PUBLISH-EARLY",
-      "purpose": "Minimize unpublished work: once a coherent change passes the applicable local checks, commit and push it promptly, then open a draft PR as soon as there is useful work to inspect and keep it updated. Do not wait for the whole ticket to finish; the draft states what works, what remains and any known failures.",
+      "purpose": "Minimize unpublished work: once a coherent change passes local checks, commit and push it promptly and open a draft PR as soon as there is useful work to inspect, keeping it updated. Do not wait for the whole ticket; the draft states what works, what remains and known failures, for recovery and review.",
       "outcomes": ["claimed", "noop", "partial"],
       "work": ["repository-changing"],
       "roles": ["implementer", "designer"],

@@ -307,7 +307,7 @@
       "outcome": ["claimed", "noop", "partial"],
       "work": ["repository-changing"],
       "role": ["implementer", "designer"],
-      "purpose": "Minimize unpublished work: once a coherent change passes the applicable local checks, commit and push it promptly, then open a draft PR as soon as there is useful work to inspect and keep it updated. Do not wait for the whole ticket to finish; the draft states what works, what remains and any known failures."
+      "purpose": "Minimize unpublished work: once a coherent change passes local checks, commit and push it promptly and open a draft PR as soon as there is useful work to inspect, keeping it updated. Do not wait for the whole ticket; the draft states what works, what remains and known failures, for recovery and review."
     },
     {
       "id": "O-CLAIM-ACCEPTANCE",
