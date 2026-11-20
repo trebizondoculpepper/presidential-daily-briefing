@@ -1303,7 +1303,7 @@ export async function planDeliverables(
       const ticketHeld = fold.ticketResponsible === from;
       const held = fold.members.filter((m) => m.responsible === from);
       const claimPresent = claims.includes(from);
-      const { evaluateUnassignDecision } = await import("../rules/datalog/datalog.js");
+      const { evaluateUnassignDecision } = await import("../rules/datalog/unassign.js");
       const decision = evaluateUnassignDecision({
         issueNumber: number,
         issueState: item.state === "CLOSED" ? "CLOSED" : "OPEN",
