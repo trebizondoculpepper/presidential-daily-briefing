@@ -123,6 +123,7 @@ const audience: Record<
   "D-UNASSIGN-REFUSE-CLAIM-START-MISSING": { role: "human", kind: "any" },
   "D-UNASSIGN-ALLOW": { role: "human", kind: "any" },
   "D-UNASSIGN-ALLOW-OVERRIDE": { role: "human", kind: "any" },
+  "D-UNASSIGN-ALLOW-RESPONSIBILITY": { role: "human", kind: "any" },
 };
 const roles = ["implementer", "designer", "human"] as const;
 

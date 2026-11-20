@@ -1,8 +1,8 @@
 {
   "modelVersion": 2,
   "policyVersion": 1,
-  "rulesHash": "9e9fdd78a0e78308cb73ae67990069a8aa43d33da42795e36ea54ff317cad82c",
-  "narrationHash": "79dcf582a89932432b9f18bad4eb5ec2aae90e7a66b86ba128ea91a1518a5699",
+  "rulesHash": "450b845b5cd68c33a1067972e79b1718fe9f9c38d103e134b385fce01f6252bc",
+  "narrationHash": "01eef8dbf2c064ef5bbd7e640659ad826115b4762935e7f24d9d6256beebb7cc",
   "sources": [
     "policy/schema.edn",
     "policy/rules.edn",
@@ -21,6 +21,7 @@
       "unassign-subject": "human unassign evaluation subject",
       "unassign-agent": "agent claim targeted by human unassign",
       "claim-present": "whether the target agent claim label is currently present",
+      "responsibility-present": "whether the target agent still holds delivery responsibility",
       "claim-start": "recorded timestamp when the target agent claim began",
       "claim-history-complete": "completeness of claim label and timeline history",
       "trusted-human-context": "verified same-origin explicit human-mode request",
@@ -5254,7 +5255,7 @@
     },
     {
       "id": "D-UNASSIGN-NOOP",
-      "purpose": "Report an idempotent no-op when the selected agent claim is already absent and history is complete.",
+      "purpose": "Report an idempotent no-op when the selected agent claim is already absent (and no continuing responsibility remains) and history is complete.",
       "kind": "unassign-noop",
       "band": 1,
       "preference": 1,
@@ -5334,6 +5335,19 @@
           },
           "phrase": "whether the target agent claim label is currently present",
           "many": false
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?t"
+          },
+          "attribute": "responsibility-present",
+          "value": {
+            "lit": false
+          },
+          "phrase": "whether the target agent still holds delivery responsibility",
+          "many": true
         },
         {
           "type": "fact",
@@ -5958,6 +5972,144 @@
       "source": {
         "file": "policy/decisions.edn",
         "index": 55
+      }
+    },
+    {
+      "id": "D-UNASSIGN-ALLOW-RESPONSIBILITY",
+      "purpose": "Allow Human-view Unassign when the agent holds only continuing delivery responsibility without a claim label, clearing that responsibility while preserving the work.",
+      "kind": "unassign-allow",
+      "band": 1,
+      "preference": 2,
+      "codes": ["unassign", "allow", "responsibility"],
+      "roles": ["human"],
+      "clauses": [
+        {
+          "type": "call",
+          "predicate": "foreground",
+          "args": [
+            {
+              "var": "?t"
+            }
+          ]
+        },
+        {
+          "type": "fact",
+          "scope": "viewer",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "role",
+          "value": {
+            "lit": "human"
+          },
+          "phrase": "role",
+          "many": false
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?t"
+          },
+          "attribute": "unassign-subject",
+          "value": {
+            "lit": true
+          },
+          "phrase": "human unassign evaluation subject",
+          "many": false
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "trusted-human-context",
+          "value": {
+            "lit": true
+          },
+          "phrase": "verified same-origin explicit human-mode request",
+          "many": false
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "permission",
+          "value": {
+            "lit": "allow"
+          },
+          "phrase": "verified repository write permission for the serving user",
+          "many": false
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?t"
+          },
+          "attribute": "claim-present",
+          "value": {
+            "lit": false
+          },
+          "phrase": "whether the target agent claim label is currently present",
+          "many": false
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?t"
+          },
+          "attribute": "responsibility-present",
+          "value": {
+            "lit": true
+          },
+          "phrase": "whether the target agent still holds delivery responsibility",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?t"
+          },
+          "attribute": "claim-history-complete",
+          "value": {
+            "lit": true
+          },
+          "phrase": "completeness of claim label and timeline history",
+          "many": false
+        }
+      ],
+      "templateClauses": 1,
+      "calls": ["foreground"],
+      "evidence": [
+        {
+          "name": "agent",
+          "scope": "rule",
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "unassign-agent",
+              "value": {
+                "var": "?value"
+              },
+              "phrase": "agent claim targeted by human unassign",
+              "many": false
+            }
+          ]
+        }
+      ],
+      "source": {
+        "file": "policy/decisions.edn",
+        "index": 56
       }
     }
   ],
@@ -22782,16 +22934,16 @@
     }
   ],
   "coverage": {
-    "decisions": 56,
+    "decisions": 57,
     "predicates": 115,
     "alternatives": 250,
     "denials": 12,
     "queries": 25,
     "keyQueries": 4,
-    "evidence": 50,
+    "evidence": 51,
     "overrides": 5,
     "constants": 14,
-    "attributes": 124,
-    "clauses": 1417
+    "attributes": 125,
+    "clauses": 1426
   }
 }

@@ -15,6 +15,12 @@ export interface UnassignRuleFacts {
   issueState: "OPEN" | "CLOSED";
   agent: string;
   claimPresent: boolean;
+  /**
+   * The target agent still holds delivery responsibility without a claim label (#1018). The
+   * Human-unassign UI targets claims and leaves this absent (falsy); the release integration
+   * (#1019) supplies it so responsibility-only release is decided by the shared policy.
+   */
+  responsibilityPresent?: boolean;
   claimStart: string | null;
   claimHistoryComplete: boolean;
   trustedHumanContext: boolean;
@@ -75,6 +81,7 @@ export function evaluateUnassignDecision(facts: UnassignRuleFacts): UnassignDeci
     [UNASSIGN_SUBJECT_ID, "head", "not-a-pr"],
     [UNASSIGN_SUBJECT_ID, "unassign-agent", facts.agent],
     [UNASSIGN_SUBJECT_ID, "claim-present", facts.claimPresent],
+    [UNASSIGN_SUBJECT_ID, "responsibility-present", facts.responsibilityPresent ?? false],
     [UNASSIGN_SUBJECT_ID, "claim-history-complete", facts.claimHistoryComplete],
     [UNASSIGN_SUBJECT_ID, "claim-start", facts.claimStart ?? ""],
   ];
@@ -89,6 +96,7 @@ export function evaluateUnassignDecision(facts: UnassignRuleFacts): UnassignDeci
     `issue:#${facts.issueNumber}(${facts.issueState})`,
     `agent:${facts.agent}`,
     `claimPresent:${String(facts.claimPresent)}`,
+    `responsibilityPresent:${String(facts.responsibilityPresent ?? false)}`,
     `claimStart:${facts.claimStart ?? "unknown"}`,
     `historyComplete:${String(facts.claimHistoryComplete)}`,
     `permission:${facts.permission}`,

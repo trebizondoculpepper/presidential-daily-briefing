@@ -18,7 +18,7 @@ describe("rule-attached literal purposes (#578)", () => {
     const bundle = buildPolicy();
     const model = compileEnglish(bundle);
     const doc = rulesDocument(declaredRulesContext(), {}, model);
-    expect(doc.narration).toMatchObject({ total: 68, supplied: 68, missing: [] });
+    expect(doc.narration).toMatchObject({ total: 69, supplied: 69, missing: [] });
     for (const definition of bundle.definitions) {
       expect(model.decisions.find((r) => r.id === definition.id)?.purpose).toBe(definition.purpose);
       expect(doc.decisions.find((r) => r.id === definition.id)?.purpose).toBe(definition.purpose);
@@ -63,8 +63,8 @@ describe("rule-attached literal purposes (#578)", () => {
     const after = rulesDocument(declaredRulesContext(), {}, annotated);
     expect(before.schemaVersion).toBe(after.schemaVersion);
     expect(rulesText(before)).toBe(rulesText(after));
-    expect(before.narration).toMatchObject({ total: 68, supplied: 0 });
-    expect(before.narration.missing).toHaveLength(68);
+    expect(before.narration).toMatchObject({ total: 69, supplied: 0 });
+    expect(before.narration.missing).toHaveLength(69);
     expect(rulesText(after)).not.toContain(bundle.definitions[0].purpose);
   });
 

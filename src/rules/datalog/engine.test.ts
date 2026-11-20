@@ -9,6 +9,7 @@ import {
   firstSubjectId,
   maxSubjects,
 } from "./engine.js";
+import { evaluateUnassignDecision } from "./unassign.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -162,5 +163,39 @@ describe("native claim admission (#1086, #1018)", () => {
     expect(denials).toContain("D-DENY-INVENTORY-UNKNOWN");
     expect(denials).toContain("CLAIM-INVENTORY-UNKNOWN");
     expect(denials).not.toContain("CLAIM-NOT-READY");
+  });
+});
+
+describe("native human-unassign decisions (#588, #1018)", () => {
+  const base = {
+    issueNumber: 1,
+    issueState: "OPEN" as const,
+    agent: "previous",
+    claimStart: "2026-11-19T00:00:00.000Z",
+    claimHistoryComplete: true,
+    trustedHumanContext: true,
+    permission: "allow" as const,
+    overrideUnknownHistory: false,
+  };
+
+  it("allows responsibility-only release without a claim label (#1018)", () => {
+    const allowed = evaluateUnassignDecision({
+      ...base,
+      claimPresent: false,
+      responsibilityPresent: true,
+    });
+    expect(allowed.verdict).toBe("allow");
+    expect(allowed.code).toBe("UNASSIGN_ALLOWED");
+    expect(allowed.witness.join(" ")).toContain("responsibilityPresent:true");
+  });
+
+  it("keeps a no-op when there is neither a claim nor continuing responsibility", () => {
+    const noop = evaluateUnassignDecision({
+      ...base,
+      claimPresent: false,
+      responsibilityPresent: false,
+    });
+    expect(noop.verdict).toBe("noop");
+    expect(noop.code).toBe("UNASSIGN_NOOP");
   });
 });
