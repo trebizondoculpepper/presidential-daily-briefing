@@ -120,6 +120,8 @@ export interface LatencyResponse {
   warnings: string[];
   window: { from: string; through: string };
   coverageNote: string | null;
+  /** This response's own freshness; null when the envelope supplied none (not "fresh"). */
+  freshness: { observedAt: string; stale: boolean } | null;
   stats: DurationStats;
 }
 
@@ -152,6 +154,12 @@ export function parseLatencyResponse(
     window: { from: r.window.from, through: r.window.through },
     coverageNote:
       isObject(r.coverage) && typeof r.coverage.note === "string" ? r.coverage.note : null,
+    freshness:
+      isObject(body.freshness) &&
+      typeof body.freshness.observedAt === "string" &&
+      typeof body.freshness.stale === "boolean"
+        ? { observedAt: body.freshness.observedAt, stale: body.freshness.stale }
+        : null,
     stats: m.firstAssessmentLatency,
   };
 }

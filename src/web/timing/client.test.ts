@@ -183,6 +183,17 @@ describe("timing page: creation to first impact assessment (#822)", () => {
       coverageNote: "partial history",
       warnings: ["w"],
     });
+    // No freshness supplied stays null, never "fresh" (#1178 review).
+    expect(r.freshness).toBeNull();
+    const fresh = parseLatencyResponse(
+      { ...queue(stats([1])), freshness: { observedAt: "2026-11-20T10:00:00Z", stale: true } },
+      "impact",
+    )!;
+    expect(fresh.freshness).toEqual({ observedAt: "2026-11-20T10:00:00Z", stale: true });
+    // Open (not yet assessed) tickets are kept with their members for display (#1178 review).
+    const waiting = parseLatencyResponse(queue(stats([], 2)), "impact")!;
+    expect(waiting.stats.open.count).toBe(2);
+    expect(waiting.stats.members.open).toHaveLength(2);
     expect(parseLatencyResponse(queue({ median: "x" }), "impact")).toBeNull();
     expect(parseLatencyResponse(envelope({}), "impact")).toBeNull();
   });

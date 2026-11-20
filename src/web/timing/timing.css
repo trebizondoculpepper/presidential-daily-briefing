@@ -387,3 +387,6 @@
 .timing-chart .mw50 {
   left: calc(100% - 1px);
 }
+.section-status {
+  color: #57606a;
+}
