@@ -29,3 +29,10 @@
     padding: 0.25rem 0.4rem;
   }
 }
+.pipeline-cell-members > summary {
+  cursor: pointer;
+}
+.pipeline-cell-members > summary:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}

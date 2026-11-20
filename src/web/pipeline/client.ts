@@ -6,7 +6,10 @@
  */
 import type { InventoryResult, InventoryStage } from "../../metrics/inventory.js";
 import type { WaitingImpactResult } from "../../metrics/waitingimpact.js";
-import type { AssessmentQueueResult } from "../../metrics/assessmentqueue.js";
+import type {
+  AssessmentQueueResult,
+  AssessmentQueueSeriesFigure,
+} from "../../metrics/assessmentqueue.js";
 
 /** The stages this section shows (#684): the canonical ready, blocked and agent-claimed states. */
 export const shownStages = [
@@ -145,6 +148,47 @@ export interface AssessmentResponse {
 }
 export type AssessmentState = ViewState<AssessmentResponse>;
 
+function validDay(v: unknown): boolean {
+  return (
+    isObject(v) &&
+    typeof v.day === "string" &&
+    isStrings(v.members) &&
+    ((v.status === "known" && typeof v.count === "number") ||
+      (v.status === "unknown" && v.count === null && typeof v.observed === "number"))
+  );
+}
+/** One daily series figure (#687): days, the partial current day, average and gaps. */
+function validSeriesFigure(v: unknown): boolean {
+  if (!isObject(v) || !isObject(v.series) || !isObject(v.average) || !isBucket(v.incomplete))
+    return false;
+  const { days, partial } = v.series;
+  return (
+    Array.isArray(days) &&
+    days.every(validDay) &&
+    isObject(partial) &&
+    typeof partial.day === "string" &&
+    typeof partial.observedThrough === "string" &&
+    typeof partial.observed === "number" &&
+    isStrings(partial.members) &&
+    isNumberOrNull(v.average.value) &&
+    typeof v.average.knownDays === "number" &&
+    typeof v.average.unknownDays === "number" &&
+    typeof v.lowerBound === "boolean"
+  );
+}
+function validVolume(v: unknown): boolean {
+  if (!isObject(v) || !isObject(v.volume) || !isObject(v.revisions)) return false;
+  const r = v.revisions;
+  return (
+    validSeriesFigure(v.volume.incoming) &&
+    validSeriesFigure(v.volume.firstAssessed) &&
+    typeof r.inWindow === "number" &&
+    typeof r.total === "number" &&
+    typeof r.lowerBound === "boolean" &&
+    isBucket(r.unknown)
+  );
+}
+
 function validMetricQueue(v: unknown): boolean {
   if (!isObject(v) || !isObject(v.unassessed) || !isObject(v.states)) return false;
   const u = v.unassessed;
@@ -169,11 +213,16 @@ export function parseAssessmentResponse(body: unknown): AssessmentResponse | nul
     !isObject(result) ||
     result.kind !== "pipeline-metrics" ||
     result.view !== "assessment-queue" ||
+    typeof result.days !== "number" ||
+    !Number.isInteger(result.days) ||
+    result.days < 1 ||
     !isObject(result.window) ||
     typeof result.window.through !== "string" ||
     !isObject(result.metrics) ||
     !validMetricQueue(result.metrics.impact) ||
     !validMetricQueue(result.metrics.complexity) ||
+    !validVolume(result.metrics.impact) ||
+    !validVolume(result.metrics.complexity) ||
     !isObject(result.coverage) ||
     !(result.coverage.note === null || typeof result.coverage.note === "string")
   )
@@ -400,4 +449,34 @@ export function waitingGroupOrder(groups: Record<string, unknown>): string[] {
   const sizes = impactOrder.filter((n) => names.includes(n));
   const other = names.filter((n) => !impactOrder.includes(n) && !explicitGroups.includes(n)).sort();
   return [...sizes, ...other, ...explicitGroups.filter((n) => names.includes(n))];
+}
+
+/**
+ * One day's figure for display (#687): a known count, "unknown (N seen)" when history for that
+ * day was incomplete (what was seen is never shown as a count), or a dash when the series has no
+ * such day.
+ */
+export function volumeCell(figure: AssessmentQueueSeriesFigure, day: string): string {
+  const d = figure.series.days.find((x) => x.day === day);
+  if (!d) return "—";
+  return d.status === "known" ? String(d.count) : `unknown (${d.observed} seen)`;
+}
+
+/** The average per known day, with the days it rests on: "0.7 (3 known, 2 unknown days)". */
+export function volumeAverage(figure: AssessmentQueueSeriesFigure): string {
+  const { value, knownDays, unknownDays } = figure.average;
+  const days = `${knownDays} known, ${unknownDays} unknown day${unknownDays === 1 ? "" : "s"}`;
+  return value === null ? `unknown (${days})` : `${value.toFixed(1)} (${days})`;
+}
+
+/** Every ticket behind a series in the window, including today's partial day, once each. */
+export function seriesMembers(figure: AssessmentQueueSeriesFigure): string[] {
+  return [
+    ...new Set([...figure.series.days.flatMap((d) => d.members), ...figure.series.partial.members]),
+  ];
+}
+
+/** The tickets behind one day's figure (#1144 review): known or observed members for that day. */
+export function volumeDayMembers(figure: AssessmentQueueSeriesFigure, day: string): string[] {
+  return figure.series.days.find((x) => x.day === day)?.members ?? [];
 }
