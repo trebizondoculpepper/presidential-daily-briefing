@@ -166,6 +166,7 @@ import { advanceCheckpoint, overwriteJson, writeSnapshotCache } from "./config/s
 import type { WriteOutcome } from "./config/safejson.js";
 import type { ConfigRuntime } from "./config/configcli.js";
 import { installArgumentsFor, installHelp, runCodexInstallSurface } from "./install/codexcli.js";
+import { oriInstallArgumentsFor, oriInstallHelp, runOriInstall } from "./install/oricli.js";
 import { estimateUsage, runEstimate } from "./estimation/estimate.js";
 import {
   applyDeliverables,
@@ -1846,7 +1847,9 @@ async function run(
     });
     const client = positionals[0];
     if (!client && (args.includes("--help") || args.includes("-h"))) {
-      await output(`${installHelp(operation)}\n\n${claudeInstallHelp(operation)}`);
+      await output(
+        `${installHelp(operation)}\n\n${oriInstallHelp(operation)}\n\n${claudeInstallHelp(operation)}`,
+      );
       return 0;
     }
     const effectiveClient = client ?? "claude";
@@ -1893,8 +1896,35 @@ async function run(
         return 1;
       }
     }
+    if (effectiveClient === "ori") {
+      try {
+        const parsed = oriInstallArgumentsFor(args.slice(1), args[0] as "install" | "uninstall");
+        if (parsed.help) {
+          await output(oriInstallHelp(parsed.operation));
+          return 0;
+        }
+        const configRuntime = runtime.config ?? {};
+        return await runOriInstall(
+          parsed,
+          {
+            ...configRuntime,
+            confirm: configRuntime.confirm ?? ((prompt) => ttyConfirm(prompt, parsed.json)),
+            stderr: runtime.stderr,
+          },
+          output,
+        );
+      } catch (error) {
+        if (error instanceof Error && error.message.startsWith("Unsupported installer client"))
+          throw error;
+        const message = error instanceof Error ? error.message : String(error);
+        const json = args.includes("--json");
+        if (!json) throw new Error(message);
+        await output(JSON.stringify({ kind: "install-error", message }, null, 2) + "\n");
+        return 1;
+      }
+    }
     throw new Error(
-      `Unsupported installer client ${JSON.stringify(effectiveClient)}; supported: codex, claude.`,
+      `Unsupported installer client ${JSON.stringify(effectiveClient)}; supported: codex, ori, claude.`,
     );
   }
   if (args[0] === "onboard") return runOnboard(args.slice(1), output, runtime.config);
