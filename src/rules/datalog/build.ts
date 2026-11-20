@@ -35,6 +35,7 @@ export const sourceFiles = [
   "ordering.edn",
   "queries.edn",
   "decisions.edn",
+  "obligations.edn",
 ];
 
 /** Every problem found, so one build run reports all of them rather than stopping at the first. */
@@ -340,6 +341,33 @@ export function readSources(
           ),
         ]),
       ),
+      // #1113: native action-obligation records with role/outcome applicability and purposes.
+      obligations: vector(
+        need(
+          keyed(file("obligations.edn"), "policy/obligations.edn", ["obligations"]),
+          "obligations",
+          "policy/obligations.edn :obligations",
+        ),
+        "policy/obligations.edn :obligations",
+      ).map((form) => {
+        const where = "policy/obligations.edn :obligations";
+        const m = keyed(form, where, ["id", "outcome", "role", "purpose"]);
+        return {
+          id: text(need(m, "id", `${where} :id`), `${where} :id`),
+          outcome: vector(need(m, "outcome", `${where} :outcome`), `${where} :outcome`).map((x) =>
+            text(x, `${where} :outcome`),
+          ),
+          ...(m.has("role")
+            ? {
+                role: vector(m.get("role") as Form, `${where} :role`).map((x) =>
+                  text(x, `${where} :role`),
+                ),
+              }
+            : {}),
+          // The shared narration contract: nonempty, single-line, at most 320 Unicode code points.
+          purpose: purposeText(need(m, "purpose", `${where} :purpose`), `${where} :purpose`),
+        };
+      }),
       clauses: printEdn(vector(file("rules.edn"), "policy/rules.edn"), "policy/rules.edn"),
       comparison: vector(
         need(ordering, "comparison", "policy/ordering.edn"),

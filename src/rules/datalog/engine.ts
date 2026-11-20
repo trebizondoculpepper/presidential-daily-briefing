@@ -104,6 +104,11 @@ export interface PolicyResult {
   /** Already in policy order. */
   decisions: PolicyDecision[];
   denials: { subject: number; ruleId: string }[];
+  /**
+   * Applicable native action obligations (#1113), in policy/obligations.edn source order, with
+   * the fact that matched: the caller-supplied claim-role (or "none" for an unrestricted duty).
+   */
+  obligations: { id: string; order: number; role: string }[];
   datoms: number;
 }
 
@@ -430,11 +435,23 @@ export function evaluatePolicy(input: PolicyFacts, options: PolicyOptions = {}):
       };
     });
   options.signal?.throwIfAborted();
+  // #1113: applicable native action obligations in policy/obligations.edn source order. The
+  // :claim-obligations query returns [id order role] so bounded display and omissions are
+  // deterministic (a policy-ordered relation, never query-iteration order); policy decides
+  // applicability and the matched role fact travels with each ID.
+  const obligations = [...query(db, queries["claim-obligations"])]
+    .map(([id, order, role]) => ({
+      id: String(id),
+      order: Number(order),
+      role: String(role),
+    }))
+    .sort((a, b) => a.order - b.order);
   return {
     policyVersion: policy.policyVersion,
     rulesHash: options.policy ? rulesHashOf(policy) : rulesHash,
     decisions,
     denials,
+    obligations,
     datoms: facts.length,
   };
 }

@@ -20,6 +20,7 @@ import type {
   CompiledDecision,
   CompiledDenial,
   CompiledEvidence,
+  CompiledObligation,
   CompiledPredicate,
   CompiledQuery,
   EnglishPolicy,
@@ -440,6 +441,45 @@ function compileDenials(predicates: CompiledPredicate[], ctx: Context): Compiled
   return out;
 }
 
+/**
+ * Compile native action obligations to the shared English model (#1113). Each obligation from
+ * policy/obligations.edn keeps its id, purpose, outcome applicability and role restriction; the
+ * clauses are the native `obligation-applies` alternatives as rule-attached witnesses: the
+ * no-role alternative for obligations that apply to every role, the role-restricted alternative
+ * for those with a declared role, so changing an applicability rule changes the generated model.
+ */
+function compileObligations(
+  bundle: PolicyBundle,
+  predicates: CompiledPredicate[],
+  ctx: Context,
+): CompiledObligation[] {
+  const applies = predicates.find((p) => p.name === "obligation-applies");
+  if (!applies) {
+    ctx.problems.push("policy/rules.edn: no obligation-applies predicate for obligations");
+    return [];
+  }
+  const alternatives = applies.alternatives.map((a) => a.clauses);
+  return bundle.obligations.map((o, index) => {
+    const clauses =
+      o.role && o.role.length > 0
+        ? (alternatives.find((cl) =>
+            cl.some((c) => c.type === "fact" && c.attribute === "obligation-role"),
+          ) ?? [])
+        : (alternatives.find(
+            (cl) => !cl.some((c) => c.type === "fact" && c.attribute === "obligation-role"),
+          ) ?? []);
+    return {
+      id: o.id,
+      purpose: o.purpose,
+      outcomes: o.outcome,
+      roles: o.role ?? null,
+      clauses,
+      calls: callsOf(clauses),
+      source: { file: "policy/obligations.edn", index },
+    };
+  });
+}
+
 const countClauses = (cs: Clause[]): number =>
   cs.reduce(
     (n, c) =>
@@ -528,6 +568,7 @@ export function compileEnglish(bundle: PolicyBundle): EnglishPolicy {
     compileQuery(name, q, `policy/queries.edn :key-queries ${name}`, "rules", ctx),
   );
   const denials = compileDenials(predicates, ctx);
+  const obligations = compileObligations(bundle, predicates, ctx);
   const isOrdering = (name: string) => ["q0", "declared-overrides", "q4"].includes(name);
   const sortQuery = queries.find((q) => q.name === "q4");
   if (!sortQuery) ctx.problems.push("policy/queries.edn: no :q4 sort query");
@@ -562,6 +603,7 @@ export function compileEnglish(bundle: PolicyBundle): EnglishPolicy {
       "policy/ordering.edn",
       "policy/queries.edn",
       "policy/decisions.edn",
+      "policy/obligations.edn",
     ],
     lexicon: bundle.lexicon,
     constants: bundle.constants,
@@ -569,6 +611,7 @@ export function compileEnglish(bundle: PolicyBundle): EnglishPolicy {
     decisions,
     predicates,
     denials,
+    obligations,
     ordering: {
       comparison: bundle.comparison,
       overrides: bundle.overrides,
@@ -582,6 +625,7 @@ export function compileEnglish(bundle: PolicyBundle): EnglishPolicy {
       predicates: predicates.length,
       alternatives: predicates.reduce((n, p) => n + p.alternatives.length, 0),
       denials: denials.length,
+      obligations: obligations.length,
       queries: queries.length,
       keyQueries: keyQueries.length,
       evidence: evidenceCount,

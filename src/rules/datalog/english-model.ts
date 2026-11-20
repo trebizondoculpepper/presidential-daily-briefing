@@ -10,7 +10,7 @@
  */
 
 /** Version of this model's own shape. */
-export const ENGLISH_MODEL_VERSION = 2;
+export const ENGLISH_MODEL_VERSION = 3;
 
 /** A clause argument: a variable, a literal value, or DataScript's `_` wildcard. */
 export type Term = { var: string } | { lit: string | number | boolean } | { wild: true };
@@ -104,6 +104,25 @@ export interface CompiledDenial {
   calls: string[];
 }
 
+/**
+ * A native action obligation (#1113): authored in policy/obligations.edn with an id, the action
+ * outcomes it applies to, an optional role restriction and a purpose. The clauses are the
+ * applicable `obligation-applies` alternatives as native witnesses (rule-attached generated
+ * English for the shared document model).
+ */
+export interface CompiledObligation {
+  id: string;
+  purpose: string;
+  /** The claim outcomes this obligation applies to (e.g. claimed, noop, denied, partial). */
+  outcomes: string[];
+  /** Role restriction from obligations.edn, or null when the obligation applies to every role. */
+  roles: string[] | null;
+  /** Applicability clauses (native witnesses) from the obligation-applies predicate. */
+  clauses: Clause[];
+  calls: string[];
+  source: SourceRef;
+}
+
 export interface CompiledQuery {
   name: string;
   find: string[];
@@ -128,6 +147,8 @@ export interface EnglishPolicy {
   decisions: CompiledDecision[];
   predicates: CompiledPredicate[];
   denials: CompiledDenial[];
+  /** Native action obligations in source order (#1113). */
+  obligations: CompiledObligation[];
   ordering: {
     comparison: string[];
     overrides: { winner: string; loser: string }[];
@@ -143,6 +164,7 @@ export interface EnglishPolicy {
     predicates: number;
     alternatives: number;
     denials: number;
+    obligations: number;
     queries: number;
     keyQueries: number;
     evidence: number;

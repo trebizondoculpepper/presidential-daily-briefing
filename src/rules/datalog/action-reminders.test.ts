@@ -7,10 +7,13 @@ import {
   claimObligationsHash,
   formatActionRuleRemindersText,
   selectClaimRuleReminders,
+  selectNativeClaimObligations,
 } from "./action-reminders.js";
 import { rulesHash } from "./adapter.js";
-import { buildPolicy } from "./build.js";
+import { buildPolicy, readSources, validateBundle, policyDir } from "./build.js";
 import { narrationHashOf, rulesHashOf } from "./hash.js";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 describe("native claim-time obligations and action-reminder selection (#1029)", () => {
   it("preserves bundled rulesHash and narrationHash while providing obligationsHash", () => {
@@ -407,5 +410,41 @@ describe("native claim-time obligations and action-reminder selection (#1029)", 
       contextResolved: false,
     });
     expect(formatActionRuleRemindersText(unresolved)).toContain("Coverage (unresolved):");
+  });
+
+  it("selects obligations from native policy edits without editing TypeScript (#1113)", () => {
+    // A policy-side applicability change flows into selection and provenance; no TS catalog path.
+    const editedReader = (name: string) =>
+      name === "obligations.edn"
+        ? readFileSync(join(policyDir, "obligations.edn"), "utf8").replace(
+            ':id "O-CLAIM-BLOCKERS" :outcome ["claimed" "noop"]',
+            ':id "O-CLAIM-BLOCKERS" :outcome ["claimed" "noop"] :role ["implementer"]',
+          )
+        : readFileSync(join(policyDir, name), "utf8");
+    const edited = readSources(editedReader);
+    const recompiled = selectNativeClaimObligations(null, "claimed", edited as never);
+    // Role-restricting a formerly global obligation excludes it for an unresolved role...
+    expect(recompiled.ids).not.toContain("O-CLAIM-BLOCKERS");
+    // ...but a resolved implementer still receives it.
+    const implementer = selectNativeClaimObligations("implementer", "claimed", edited as never);
+    expect(implementer.ids).toContain("O-CLAIM-BLOCKERS");
+    // The shipped policy (no TS edit) still applies it to every role's claimed selection.
+    const shipped = selectClaimRuleReminders({ role: "designer", outcome: "claimed" });
+    expect(shipped.selectedIds).toContain("O-CLAIM-BLOCKERS");
+  });
+
+  it("is source-driven: editing an authored role restriction changes the designer matrix (#1113)", () => {
+    // The designer exclusion of O-CLAIM-DELIVERABLE comes from the authored record, not a copy:
+    // removing its implementer restriction makes a designer receive it too.
+    const editedReader = (name: string) =>
+      name === "obligations.edn"
+        ? readFileSync(join(policyDir, "obligations.edn"), "utf8").replace(
+            ':id "O-CLAIM-DELIVERABLE" :outcome ["claimed" "noop"] :role ["implementer"]',
+            ':id "O-CLAIM-DELIVERABLE" :outcome ["claimed" "noop"]',
+          )
+        : readFileSync(join(policyDir, name), "utf8");
+    const edited = validateBundle(readSources(editedReader));
+    const designer = selectNativeClaimObligations("designer", "claimed", edited);
+    expect(designer.ids).toContain("O-CLAIM-DELIVERABLE");
   });
 });

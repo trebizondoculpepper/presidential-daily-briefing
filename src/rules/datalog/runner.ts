@@ -63,7 +63,12 @@ export interface Scenario {
   line: number;
   viewer: { role: string; agent: string; platform: string; order: string };
   datoms: Datom[];
-  expect: { actions: ExpectedAction[]; denials: [number, string][] };
+  expect: {
+    actions: ExpectedAction[];
+    denials: [number, string][];
+    /** Applicable native action obligation IDs (#1113), when the scenario asserts them. */
+    obligations?: string[];
+  };
 }
 
 type Form = unknown;
@@ -214,7 +219,12 @@ export function readScenarios(source: string, file: string): Scenario[] {
     if (m.has("viewer"))
       for (const [k, v] of fields(m.get("viewer"), `${where} :viewer`, [], Object.keys(viewer)))
         viewer[k as keyof typeof viewer] = text(v, `${where} :viewer :${k}`);
-    const expectation = fields(m.get("expect"), `${where} :expect`, ["actions", "denials"], []);
+    const expectation = fields(
+      m.get("expect"),
+      `${where} :expect`,
+      ["actions", "denials"],
+      ["obligations"],
+    );
     return {
       id,
       doc: text(m.get("doc"), `${where} :doc`),
@@ -233,6 +243,13 @@ export function readScenarios(source: string, file: string): Scenario[] {
           if (extra.length) fail(where, ":denials entries are [subject rule-id]");
           return [integer(subject, `${where} :denials`), text(rule, `${where} :denials`)];
         }),
+        ...(expectation.has("obligations")
+          ? {
+              obligations: vector(expectation.get("obligations"), `${where} :obligations`).map(
+                (x) => text(x, `${where} :obligations`),
+              ),
+            }
+          : {}),
       },
     };
   });
@@ -292,6 +309,15 @@ export function differences(scenario: Scenario, result: PolicyResult): string[] 
   if (!isDeepStrictEqual(wantDenials, gotDenials))
     out.push(
       `denials differ:\n  expected ${JSON.stringify(wantDenials)}\n  actual   ${JSON.stringify(gotDenials)}`,
+    );
+  const wantObligations = (scenario.expect.obligations ?? []).slice().sort();
+  const gotObligations = result.obligations
+    .map((o) => o.id)
+    .slice()
+    .sort();
+  if (!isDeepStrictEqual(wantObligations, gotObligations))
+    out.push(
+      `obligations differ:\n  expected ${JSON.stringify(wantObligations)}\n  actual   ${JSON.stringify(gotObligations)}`,
     );
   return out;
 }

@@ -7,7 +7,11 @@
  */
 import { createHash } from "node:crypto";
 import englishJson from "./english.generated.json" with { type: "json" };
+import policyJson from "./policy.generated.json" with { type: "json" };
 import { rulesHash, policyVersion } from "./adapter.js";
+import { evaluatePolicy } from "./engine.js";
+import type { Datom } from "datascript";
+import type { PolicyBundle } from "./bundle.js";
 import type { EnglishPolicy } from "./english-model.js";
 import { purposeText } from "./narration.js";
 
@@ -129,6 +133,70 @@ export function claimObligationsHash(): string {
 }
 
 const bundledEnglishModel = (): EnglishPolicy => englishJson as EnglishPolicy;
+
+/** The compiled policy artifact (same JSON the engine imports); never recompiles policy/*.edn. */
+const policyBundle = (): PolicyBundle => policyJson as unknown as PolicyBundle;
+
+/** Obligation record entities are assigned after the policy's reserved rule entities. */
+const firstObligationId = 10_000;
+
+/**
+ * Run the native :claim-obligations query for one claim outcome (#1113). The obligation records
+ * come from policy/obligations.edn (roles, outcomes and purposes live in EDN, never a TypeScript
+ * catalog); the engine asserts the viewer role and the supplied claim-outcome fact and selects the
+ * applicable IDs with native witnesses. A policy applicability edit changes selection without
+ * touching command policy text.
+ */
+export function selectNativeClaimObligations(
+  role: string | null | undefined,
+  outcome: ClaimOutcome,
+  policy: PolicyBundle = policyBundle(),
+): { ids: string[]; coverage: "complete" | "partial"; rulesHash: string } {
+  const resolvedRole =
+    role === "implementer" || role === "designer" || role === "human" ? role : null;
+  const datoms: Datom[] = [
+    [1, "claim-outcome", outcome],
+    // Subject facts only: claim-role is asserted only when the caller's role is known, so the
+    // role-restricted rule can never match for an unresolved viewer. The engine's viewer [1 "role"]
+    // is the fallback implementer (a required engine viewer value), but applicability reads the
+    // caller-supplied claim-role fact, not that fallback (reviewed #1140 finding).
+    ...(resolvedRole ? ([[1, "claim-role", resolvedRole]] as Datom[]) : []),
+  ];
+  policy.obligations.forEach((obligation, index) => {
+    const entity = firstObligationId + index;
+    datoms.push([entity, "obligation", obligation.id], [entity, "obligation-order", index]);
+    for (const outcomeId of obligation.outcome)
+      datoms.push([entity, "obligation-outcome", outcomeId]);
+    for (const roleId of obligation.role ?? []) datoms.push([entity, "obligation-role", roleId]);
+  });
+  const result = evaluatePolicy(
+    {
+      viewer: {
+        role:
+          resolvedRole === "human"
+            ? "human"
+            : resolvedRole === "designer"
+              ? "designer"
+              : "implementer",
+        agent: "",
+        platform: "",
+        order: "impact",
+      },
+      datoms,
+    },
+    { policy },
+  );
+  return {
+    ids: result.obligations.map((o) => o.id),
+    coverage:
+      policy.obligations.length === 0
+        ? "complete"
+        : result.obligations.length > 0
+          ? "complete"
+          : "partial",
+    rulesHash: result.rulesHash,
+  };
+}
 
 export interface ClaimReminderFactInput {
   /** Refusal error code from claim planning (e.g. OWNED_BY_OTHER, OTHER_ACTIVE_CLAIM). */
@@ -447,21 +515,39 @@ export function selectClaimRuleReminders(input: SelectClaimRemindersInput): Acti
     }
   }
 
-  for (const obl of CLAIM_OBLIGATIONS) {
-    if (!obl.outcomes.includes(input.outcome)) continue;
-    if (obl.roles !== null && (!normalizedRole || !obl.roles.includes(normalizedRole))) continue;
-    if (seenIds.has(obl.id)) continue;
-    seenIds.add(obl.id);
+  // #1113: applicable obligations and their purposes come from policy/obligations.edn via the
+  // native query, so selection and applicability are policy-owned, never a TypeScript catalog.
+  const nativeObligations = selectNativeClaimObligations(
+    normalizedRole,
+    input.outcome,
+    policyBundle(),
+  );
+  const bundle = policyBundle();
+  for (const id of nativeObligations.ids) {
+    if (seenIds.has(id)) continue;
+    const record = bundle.obligations.find((o) => o.id === id);
+    const english = record ? sanitizeText(record.purpose) : "";
+    if (!english) {
+      unresolvedIds.push(id);
+      continue;
+    }
+    seenIds.add(id);
     obligations.push({
-      id: obl.id,
+      id,
       category: "obligation",
       sourceKind: "procedural-obligation",
-      sourceFile: obl.sourceFile,
-      english: sanitizeText(obl.purpose),
+      sourceFile: "policy/obligations.edn",
+      english,
       purposeSupplied: true,
-      reference: `pdb rules --rule ${obl.id}`,
+      reference: `pdb rules --rule ${id}`,
     });
   }
+  if (nativeObligations.ids.length > 0)
+    missingPurposes.push(
+      ...bundle.obligations
+        .filter((o) => nativeObligations.ids.includes(o.id) && !sanitizeText(o.purpose))
+        .map((o) => o.id),
+    );
 
   const allItems = [...admissionRationale, ...obligations];
   const selectedIds = allItems.map((i) => i.id);

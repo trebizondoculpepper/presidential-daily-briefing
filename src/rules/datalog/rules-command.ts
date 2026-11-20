@@ -7,7 +7,6 @@
  * GitHub or repository configuration, so it works from the installed package anywhere.
  */
 import englishJson from "./english.generated.json" with { type: "json" };
-import { CLAIM_OBLIGATIONS } from "./action-reminders.js";
 import {
   rulesHash as engineRulesHash,
   narrationHash as engineNarrationHash,
@@ -263,8 +262,8 @@ export function rulesDocument(
       `--role must be ${rulesRoles.join(" or ")}, not "${filters.role}"`,
     );
   const projectSelected = filters.rule !== undefined && projectIds.includes(filters.rule);
-  const obligationSelected =
-    filters.rule !== undefined && CLAIM_OBLIGATIONS.some((o) => o.id === filters.rule);
+  const obligationIds = new Set(model.obligations.map((o) => o.id));
+  const obligationSelected = filters.rule !== undefined && obligationIds.has(filters.rule);
   if (
     filters.rule !== undefined &&
     !projectSelected &&
@@ -507,22 +506,21 @@ export function rulesDocument(
       note: "Authored purposes explain intent; generated conditions define the represented policy. A purpose is not evidence that a rule matched a ticket. Mutation guards remain outside this listing.",
     },
     decisions: decisionOut,
-    obligations: CLAIM_OBLIGATIONS.filter((o) => {
-      if (
-        filters.role &&
-        o.roles !== null &&
-        !(o.roles as readonly string[]).includes(filters.role)
-      )
-        return false;
-      if (filters.rule !== undefined) return obligationSelected && o.id === filters.rule;
-      return true;
-    }).map((o) => ({
-      id: o.id,
-      roles: o.roles,
-      outcomes: o.outcomes,
-      purpose: o.purpose,
-      sourceFile: o.sourceFile,
-    })),
+    // #1113: obligations render from the compiled English model (policy/obligations.edn), so a
+    // native edit changes the shared document without touching a TypeScript catalog.
+    obligations: model.obligations
+      .filter((o) => {
+        if (filters.role && o.roles !== null && !o.roles.includes(filters.role)) return false;
+        if (filters.rule !== undefined) return obligationSelected && o.id === filters.rule;
+        return true;
+      })
+      .map((o) => ({
+        id: o.id,
+        roles: o.roles,
+        outcomes: o.outcomes,
+        purpose: o.purpose,
+        sourceFile: "policy/obligations.edn",
+      })),
     eligibility: {
       denials,
       denialQuery:

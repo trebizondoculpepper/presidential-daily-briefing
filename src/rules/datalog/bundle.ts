@@ -33,6 +33,7 @@ export const requiredQueries = [
   "active-dependents",
   "denials",
   "claim-denials",
+  "claim-obligations",
   "other-claims",
   "active-count",
   "missing-active-count",
@@ -89,6 +90,8 @@ export interface PolicyBundle {
   lexicon: Lexicon;
   schema: Schema;
   constants: Record<string, (string | number | boolean)[]>;
+  /** obligations.edn :obligations, in source order (#1113). */
+  obligations: { id: string; outcome: string[]; role?: string[]; purpose: string }[];
   /** rules.edn as one canonical EDN vector. */
   clauses: string;
   comparison: string[];
