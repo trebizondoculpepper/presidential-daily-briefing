@@ -9,6 +9,8 @@ export interface ServedPage {
   carries: readonly string[];
   shipped: boolean;
   section?: string;
+  /** An opt-in preview (#753): served, but never listed in the page navigation. */
+  preview?: boolean;
 }
 export const servedPages: readonly ServedPage[] = [
   {
@@ -49,6 +51,17 @@ export const servedPages: readonly ServedPage[] = [
     carries: [],
     shipped: true,
     section: "work",
+  },
+  // Svelte Work preview (#753): opt-in, unlisted; the default Work page stays at /.
+  {
+    id: "work-preview",
+    path: "/work-preview",
+    label: "Work (preview)",
+    scope: "project",
+    parameters: ["repo", "role", "agent"],
+    carries: ["role", "agent"],
+    shipped: true,
+    preview: true,
   },
   // Pipeline Health (#575, #684): API-first; the page reads /api/v1/metrics.
   {
@@ -229,7 +242,7 @@ export function renderToolbar(context: ShellContext): string {
     return keys.length ? ` data-shell-carries="${htmlEscape(keys.join(" "))}"` : "";
   };
   const links = servedPages
-    .filter((p) => p.shipped && !p.section)
+    .filter((p) => p.shipped && !p.section && !p.preview)
     .map(
       (p) =>
         `<a href="${htmlEscape(pageHref(p, selection, page))}"${carryAttribute(p)}${p.id === active ? ' aria-current="page"' : ""}>${htmlEscape(p.label)}</a>`,

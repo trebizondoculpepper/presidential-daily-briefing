@@ -110,8 +110,11 @@ describe("shared served-page shell (#605)", () => {
       expect(renderToolbar(context(page))).toContain(
         '<p class="working-for" data-working-for role="status" aria-live="polite">Working for: loading…</p>',
       );
-    for (const page of servedPages.filter((p) => p.shipped && !p.section))
+    for (const page of servedPages.filter((p) => p.shipped && !p.section && !p.preview))
       expect(html).toContain(page.label);
+    // #753: an opt-in preview is served but never listed.
+    for (const page of servedPages.filter((p) => p.preview))
+      expect(html).not.toContain(`href="${page.path}`);
     expect(html).not.toContain('href="/settings');
   });
 });

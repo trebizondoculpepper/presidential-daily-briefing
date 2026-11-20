@@ -1,0 +1,111 @@
+/* Work preview (#753). Colour is never the only signal; motion respects reduced-motion. */
+.work-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+}
+.work-status {
+  margin: 0;
+}
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.work-list {
+  list-style: none;
+  padding: 0;
+  margin: 1rem 0;
+}
+.work-row {
+  border-bottom: 1px solid #d0d7de;
+  padding: 0.6rem 0;
+}
+.work-row[aria-busy="true"],
+.work-list[aria-busy="true"] .work-row {
+  opacity: 0.75;
+}
+.work-title {
+  font-size: 1rem;
+  margin: 0;
+}
+.work-title button {
+  all: unset;
+  cursor: pointer;
+  display: inline-flex;
+  gap: 0.4rem;
+  align-items: baseline;
+  overflow-wrap: anywhere;
+}
+.work-title button:focus-visible {
+  outline: 2px solid #0969da;
+  outline-offset: 2px;
+}
+.badges {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  padding: 0;
+  margin: 0.3rem 0;
+}
+.badge {
+  font-size: 0.75rem;
+  border-radius: 1rem;
+  padding: 0.05rem 0.5rem;
+  border: 1px solid currentColor;
+}
+.badge.kind {
+  color: #0550ae;
+  background: #ddf4ff;
+}
+.badge.rule {
+  color: #6e40c9;
+  background: #fbefff;
+}
+.why,
+.evidence,
+.labels {
+  margin: 0.2rem 0;
+}
+.evidence {
+  color: #57606a;
+  font-size: 0.9rem;
+}
+.detail {
+  margin: 0.5rem 0 0 1.4rem;
+  padding-left: 0.6rem;
+  border-left: 3px solid #d0d7de;
+}
+.skeleton {
+  height: 3.2rem;
+  margin: 0.6rem 0;
+  border-radius: 0.3rem;
+  background: #eaeef2;
+  animation: work-pulse 1.4s ease-in-out infinite;
+}
+.error {
+  color: #cf222e;
+}
+.warn {
+  color: #9a6700;
+}
+@keyframes work-pulse {
+  50% {
+    opacity: 0.5;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
+  }
+}
+@media (max-width: 40rem) {
+  .detail {
+    margin-left: 0.4rem;
+  }
+}

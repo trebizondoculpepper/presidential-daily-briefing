@@ -14,6 +14,7 @@ import { defineConfig } from "vite-plus";
 const entries = {
   rules: "src/web/rules/main.ts",
   pipeline: "src/web/pipeline/main.ts",
+  work: "src/web/work/main.ts",
 } as const;
 const entry = (process.env.PDB_WEB_ENTRY ?? "rules") as keyof typeof entries;
 if (!(entry in entries)) throw new Error(`Unknown PDB_WEB_ENTRY ${entry}.`);
