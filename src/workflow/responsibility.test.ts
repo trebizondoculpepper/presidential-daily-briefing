@@ -41,7 +41,7 @@ const post = (r: Partial<DeliveryRecord> & Pick<DeliveryRecord, "op">): Delivery
     editor: null,
   };
 };
-const trust = markerTrust(async () => "write");
+const trust = markerTrust(async (login) => (login === "reader" ? "read" : "write"));
 
 function released(withRelease: boolean) {
   const t = issue(1, ["status:awaiting-review", "complexity:S", "impact:M"]);
@@ -198,12 +198,53 @@ describe("human-directed release reaches native adoption (#1019)", () => {
     snap2.issues.push(
       withComments(
         issue(3, ["status:awaiting-review"]),
-        [post({ op: "submit", deliverables: [member] })],
+        [post({ op: "submit", issue: 3, deliverables: [member] })],
         true,
       ),
     );
     const recorded = await native(snap2, "bob");
     expect(recorded.facts.unknownPrs).toEqual([pr().url]);
     expect(recorded.adopted).toBe(false);
+  });
+
+  it("treats a PR closing a truncated, marker-free issue as unknown (#1149 review)", async () => {
+    const snap = released(true);
+    const other = withComments(issue(2, ["status:awaiting-review"]), [], true);
+    snap.issues.push(other);
+    snap.pullRequests[0]!.closingIssuesReferences.nodes.push({
+      number: 2,
+      url: other.url,
+    } as never);
+    const r = await native(snap, "bob");
+    expect(r.facts.unknownPrs).toEqual([pr().url]);
+    expect(r.adopted).toBe(false);
+  });
+
+  it("ignores excluded records on an unread issue: copied or by a non-writer (#1149 review)", async () => {
+    for (const excluded of [
+      post({ op: "submit", issue: 1, deliverables: [member] }), // copied: bound to issue 1
+      {
+        ...post({ op: "submit", issue: 3, deliverables: [member] }),
+        author: { __typename: "User", login: "reader" },
+      },
+    ]) {
+      const snap = released(true);
+      // Issue 3 is unread (truncated, plus a malformed trusted record) but has no closing link.
+      const malformed = {
+        ...post({ op: "submit", issue: 3 }),
+        body: "<!-- github-triage:delivery v1 {bad -->",
+      };
+      snap.issues.push(
+        withComments(
+          issue(3, ["status:awaiting-review"]),
+          [malformed, excluded as DeliveryComment],
+          true,
+        ),
+      );
+      const r = await native(snap, "bob");
+      expect(r.facts.unknown.map((u) => u.issue)).toEqual([issue(3).url]);
+      expect(r.facts.unknownPrs).toEqual([]);
+      expect(r.adopted).toBe(true);
+    }
   });
 });

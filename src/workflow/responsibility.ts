@@ -60,11 +60,31 @@ export async function readSnapshotResponsibility(
   );
   // Records name a repository as written; match it to the collected URL case-insensitively.
   const collected = new Map(snapshot.pullRequests.map((p) => [p.url.toLowerCase(), p.url]));
+  /** Issues whose ownership may be unread, for the PRs that close them (#1149 review). */
+  const unreadIssues = new Set<string>();
+  /** PR members named by records on unfoldable issues, excluding ignored and foreign ones. */
+  const unreadMembers = new Set<string>();
+  const memberUrls = (body: string): string[] => {
+    const parsed = parseDeliveryComment(body);
+    if (parsed.kind !== "record") return [];
+    return parsed.record.deliverables.flatMap((d) => {
+      if (d.kind !== "pr") return [];
+      const url = pullUrl(d.repository, d.number);
+      return [collected.get(url.toLowerCase()) ?? url];
+    });
+  };
   for (const issue of snapshot.issues) {
     signal?.throwIfAborted();
     const comments = issue.comments.nodes;
-    if (!comments.some((c) => parseDeliveryComment(c.body).kind !== "none")) continue;
+    if (!comments.some((c) => parseDeliveryComment(c.body).kind !== "none")) {
+      // A truncated history may hold an unread record even when none was collected.
+      if (issue.comments.pageInfo.hasNextPage) unreadIssues.add(issue.url.toLowerCase());
+      continue;
+    }
     if (!trust) {
+      // Authority unread: every recognised record's members are unknown, never unowned.
+      unreadIssues.add(issue.url.toLowerCase());
+      for (const c of comments) for (const u of memberUrls(c.body)) unreadMembers.add(u);
       facts.unknown.push({
         issue: issue.url,
         because: ["delivery record authors' permissions were not read"],
@@ -79,6 +99,11 @@ export async function readSnapshotResponsibility(
     );
     if (fold.recordsUnknown) {
       facts.unknown.push({ issue: issue.url, because: fold.unknownBecause });
+      unreadIssues.add(issue.url.toLowerCase());
+      // Records the contract excludes (no authority, or bound to another ticket) name nothing.
+      for (const r of records)
+        if (r.status !== "ignored" && r.status !== "foreign")
+          for (const u of memberUrls(r.comment.body)) unreadMembers.add(u);
       continue;
     }
     for (const member of fold.members)
@@ -113,26 +138,13 @@ export async function readSnapshotResponsibility(
     }
     if (directions.length) facts.releaseDirections.set(issue.url, directions);
   }
-  // A PR whose ownership may be recorded on an issue we could not fold is unknown, never
-  // unowned (#1149 review): it closes that issue, or a parsable record there names it as a
-  // member (membership need not be a closing link). The native rules decide with that fact.
-  const unknownIssues = new Set(facts.unknown.map((u) => u.issue.toLowerCase()));
-  const unknownPrs = new Set<string>();
+  // A PR whose ownership may be recorded on an issue we could not fully read is unknown, never
+  // unowned (#1149 review): it closes such an issue, or an admissible record there names it.
+  // The native rules decide with that fact.
+  const unknownPrs = new Set<string>(unreadMembers);
   for (const p of snapshot.pullRequests)
-    if (p.closingIssuesReferences.nodes.some((i) => unknownIssues.has(i.url.toLowerCase())))
+    if (p.closingIssuesReferences.nodes.some((i) => unreadIssues.has(i.url.toLowerCase())))
       unknownPrs.add(p.url);
-  for (const issue of snapshot.issues) {
-    if (!unknownIssues.has(issue.url.toLowerCase())) continue;
-    for (const c of issue.comments.nodes) {
-      const parsed = parseDeliveryComment(c.body);
-      if (parsed.kind !== "record") continue;
-      for (const d of parsed.record.deliverables)
-        if (d.kind === "pr") {
-          const url = pullUrl(d.repository, d.number);
-          unknownPrs.add(collected.get(url.toLowerCase()) ?? url);
-        }
-    }
-  }
   facts.unknownPrs = [...unknownPrs];
   return facts;
 }
