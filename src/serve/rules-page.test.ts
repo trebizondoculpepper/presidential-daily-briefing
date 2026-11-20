@@ -216,6 +216,14 @@ async function server(args: string[], files: Record<string, string> = {}, built 
           ? [
               ["/web/rules.js", { type: "text/javascript; charset=utf-8", body: "/* rules.js */" }],
               ["/web/rules.css", { type: "text/css; charset=utf-8", body: "/* rules.css */" }],
+              [
+                "/web/pipeline.js",
+                { type: "text/javascript; charset=utf-8", body: "/* pipeline.js */" },
+              ],
+              [
+                "/web/pipeline.css",
+                { type: "text/css; charset=utf-8", body: "/* pipeline.css */" },
+              ],
             ]
           : [],
       ),
@@ -382,6 +390,50 @@ describe("GET /api/v1/rules and /rules (#392, #853)", () => {
         expect((await call(port, path, { origin: "http://evil.example" })).status).toBe(403);
         expect((await call(port, path, { origin: `http://127.0.0.1:${port}` })).status).toBe(200);
       }
+    } finally {
+      await running.close();
+    }
+  });
+});
+
+describe("GET /pipeline (#684)", () => {
+  it("serves a static bootstrap for the selected project, with no GitHub request", async () => {
+    const { running, github, port } = await server(["--repo", "example/project"]);
+    try {
+      const reply = await call(port, "/pipeline?repo=example%2Fproject");
+      expect(reply.status).toBe(200);
+      expect(reply.headers["content-security-policy"]).toContain("script-src 'self'");
+      expect(reply.body).toContain("<h1>Pipeline health</h1>");
+      expect(reply.body).toContain('<div id="pipeline-app" data-api="/api/v1/metrics">');
+      expect(reply.body).toContain('<script src="/web/pipeline.js" defer></script>');
+      expect(reply.body).toContain('<link rel="stylesheet" href="/web/pipeline.css">');
+      expect(reply.body).not.toMatch(/\sstyle=|<script>/);
+      // The page is in the shared navigation, carrying the project.
+      expect(reply.body).toContain('href="/pipeline?repo=example%2Fproject"');
+      const script = await call(port, "/web/pipeline.js");
+      expect(script.headers["content-type"]).toBe("text/javascript; charset=utf-8");
+      expect(github).toEqual([]);
+    } finally {
+      await running.close();
+    }
+  });
+
+  it("shows the shared project selector when several projects are served and none is chosen", async () => {
+    const { running, port } = await server(["--project", checkout, "--repo", "other/repo"]);
+    try {
+      const reply = await call(port, "/pipeline");
+      expect(reply.body).not.toContain('id="pipeline-app"');
+    } finally {
+      await running.close();
+    }
+  });
+
+  it("says the assets are not built instead of loading forever", async () => {
+    const { running, port } = await server(["--repo", "example/project"], {}, false);
+    try {
+      const reply = await call(port, "/pipeline?repo=example%2Fproject");
+      expect(reply.body).toContain("frontend assets are not built");
+      expect(reply.body).not.toContain("/web/pipeline.js");
     } finally {
       await running.close();
     }

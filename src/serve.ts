@@ -68,6 +68,7 @@ import type {
 } from "./serve/types.js";
 import { defaultRulesPageRuntime, readRules, rulesBootstrapHtml } from "./serve/rules-page.js";
 import { readWebAssets } from "./serve/webassets.js";
+import { pipelineAssets, pipelineBootstrapHtml } from "./serve/pipeline-page.js";
 import type { LiveApplicationResult } from "./serve/liveapp.js";
 import { setupPage, setupScript } from "./serve/setup-page.js";
 import {
@@ -556,6 +557,28 @@ export async function startServe(
           filters: read.filters,
           view: read.view,
         });
+        return;
+      }
+      if (path === "/pipeline") {
+        // Pipeline Health (#684): a static bootstrap after the shell's project selection check;
+        // the component reads /api/v1/metrics?view=inventory. No GitHub read loading the page.
+        const html = pipelineBootstrapHtml(
+          served,
+          context.url.searchParams,
+          dashboard.has(pipelineAssets.script) && dashboard.has(pipelineAssets.stylesheet),
+        );
+        response.writeHead(200, {
+          "content-type": "text/html; charset=utf-8",
+          "cache-control": "no-store",
+          "x-content-type-options": "nosniff",
+          "referrer-policy": "no-referrer",
+          "content-security-policy": dashboardSecurityPolicy,
+        });
+        response.end(
+          request.method === "HEAD"
+            ? undefined
+            : withProcessIdentity(html, processIdentity, selectedPage ?? undefined),
+        );
         return;
       }
       if (path === "/rules") {

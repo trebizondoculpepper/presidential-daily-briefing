@@ -87,6 +87,11 @@ invent English explanations or alter supplied formal semantics.
   `scripts/check-svelte.ts` compiles every component with warnings as errors instead.
   Component scripts hold presentation only; logic lives in `tsc`-checked modules.
 
+### Pipeline Health (#684)
+
+- `/pipeline` is the second API-first page: a static bootstrap whose component (`src/web/pipeline`) reads the existing `/api/v1/metrics?view=inventory` (#883). It shows the current ready, blocked and agent-claimed stage inventory with count, typical (median) and oldest age, unknown ages, and a bounded drill-down to `/ticket`. Stages are exclusive native stages, and the table says how many open tickets are in stages it does not show. Reads happen on load, on project change and on Refresh; there is no polling.
+- `scripts/build-web.ts` builds each page separately with `vite.web.config.ts`, as a self-contained IIFE with its own CSS file. No shared chunk is imported, no globals leak, and no styles are injected, so classic same-origin scripts load under the strict CSP.
+
 ## Incremental adoption
 
 #853 is a focused endpoint-plus-page migration. It does not authorize rewriting

@@ -18,6 +18,8 @@ export type WebAssetReader = () => Promise<Map<string, WebAsset>>;
 const files = [
   ["/web/rules.js", "rules.js", "text/javascript; charset=utf-8"],
   ["/web/rules.css", "rules.css", "text/css; charset=utf-8"],
+  ["/web/pipeline.js", "pipeline.js", "text/javascript; charset=utf-8"],
+  ["/web/pipeline.css", "pipeline.css", "text/css; charset=utf-8"],
 ] as const;
 
 /** The directories that may hold the built assets: the packaged dist, then a checkout's dist. */
