@@ -73,6 +73,16 @@ export const servedPages: readonly ServedPage[] = [
     carries: [],
     shipped: true,
   },
+  // Overview (#574, #824): API-first; the page reads /api/v1/metrics?view=news.
+  {
+    id: "overview",
+    path: "/overview",
+    label: "Overview",
+    scope: "project",
+    parameters: ["repo", "news"],
+    carries: [],
+    shipped: true,
+  },
   // Timing (#576, #820): API-first; the page reads /api/v1/metrics?view=timing.
   {
     id: "timing",

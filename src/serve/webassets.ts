@@ -26,6 +26,10 @@ const pages = [
     ["/web/pipeline.css", "pipeline.css", "text/css; charset=utf-8"],
   ],
   [
+    ["/web/overview.js", "overview.js", "text/javascript; charset=utf-8"],
+    ["/web/overview.css", "overview.css", "text/css; charset=utf-8"],
+  ],
+  [
     ["/web/timing.js", "timing.js", "text/javascript; charset=utf-8"],
     ["/web/timing.css", "timing.css", "text/css; charset=utf-8"],
   ],

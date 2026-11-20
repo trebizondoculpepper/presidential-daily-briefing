@@ -46,7 +46,9 @@ const expected = [
   "dist/cli.mjs.map",
   "dist/mcp.mjs",
   "dist/mcp.mjs.map",
-  // #853: the built page assets (vite.web.config.ts), served by pdb serve.
+  // #853: the built Rules page assets (vite.web.config.ts), served by pdb serve.
+  "dist/web/overview.css",
+  "dist/web/overview.js",
   "dist/web/discussion.css",
   "dist/web/discussion.js",
   "dist/web/pipeline.css",
@@ -327,6 +329,8 @@ async function serveSmoke(bin: string, env: NodeJS.ProcessEnv, cwd: string): Pro
       ["web/rules.css", "text/css", "rule-formal"],
       ["web/pipeline.js", "text/javascript", "pipeline-app"],
       ["web/pipeline.css", "text/css", "pipeline-table"],
+      ["web/overview.js", "text/javascript", "overview-app"],
+      ["web/overview.css", "text/css", "news-list"],
       ["web/timing.js", "text/javascript", "timing-app"],
       ["web/timing.css", "text/css", "timing-chart"],
       ["web/work.js", "text/javascript", "work-app"],

@@ -225,6 +225,14 @@ async function server(args: string[], files: Record<string, string> = {}, built 
                 { type: "text/css; charset=utf-8", body: "/* pipeline.css */" },
               ],
               [
+                "/web/overview.js",
+                { type: "text/javascript; charset=utf-8", body: "/* overview.js */" },
+              ],
+              [
+                "/web/overview.css",
+                { type: "text/css; charset=utf-8", body: "/* overview.css */" },
+              ],
+              [
                 "/web/timing.js",
                 { type: "text/javascript; charset=utf-8", body: "/* timing.js */" },
               ],
@@ -682,6 +690,27 @@ describe("GET /timing (#820)", () => {
     try {
       const reply = await call(port, "/timing?repo=example%2Fproject");
       expect(reply.body).toContain("frontend assets are not built");
+    } finally {
+      await running.close();
+    }
+  });
+});
+
+describe("GET /overview (#824)", () => {
+  it("serves a static bootstrap in the shared navigation, with no GitHub request", async () => {
+    const { running, github, port } = await server(["--repo", "example/project"]);
+    try {
+      const reply = await call(port, "/overview?repo=example%2Fproject&news=1h");
+      expect(reply.status).toBe(200);
+      expect(reply.headers["content-security-policy"]).toContain("script-src 'self'");
+      expect(reply.body).toContain("<h1>Overview</h1>");
+      expect(reply.body).toContain('<div id="overview-app" data-api="/api/v1/metrics">');
+      expect(reply.body).toContain('<script src="/web/overview.js" defer></script>');
+      expect(reply.body).not.toMatch(/\sstyle=|<script>/);
+      expect(reply.body).toMatch(
+        /<nav class="wide-pages"[^>]*>[\s\S]*?href="\/overview\?repo=example%2Fproject"[^>]*>Overview<\/a>/,
+      );
+      expect(github).toEqual([]);
     } finally {
       await running.close();
     }
