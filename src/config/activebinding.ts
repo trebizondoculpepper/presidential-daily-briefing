@@ -42,7 +42,10 @@ export interface ActiveBinding {
   readonly entry: string;
 }
 
-/** No raw session/thread value is returned, persisted or used as an entry key. */
+/**
+ * No raw session/thread value is returned, persisted or used as an entry key. `entry` is the
+ * harness's canonical default entry; `key` correlates this session's binding with it.
+ */
 export function activeBinding(options: {
   env: Environment;
   root: string;
@@ -73,7 +76,9 @@ export function activeBinding(options: {
     provider: provider.id,
     harness: provider.harness,
     key: `${provider.id}_${digest}`,
-    entry: `${provider.harness}.session_${digest}`,
+    // #1047 (doc/design/stable-harness-identity.md): one persistent default per harness; the
+    // session digest only correlates this session with it and is never an entry key.
+    entry: provider.harness,
   };
 }
 

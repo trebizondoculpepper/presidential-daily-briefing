@@ -52,7 +52,7 @@ export async function createIdentityFixture() {
       random,
       requireName: true,
       reuseExistingIdentity: true,
-      binding: { key: b.key, expectedEntry: null, newSessionHarness: b.harness },
+      binding: { key: b.key, expectedEntry: null },
     });
   };
   return { root, repository, file, excluded, fs, git, random, binding, setup };

@@ -66,22 +66,25 @@ describe("effective identity preparation (#677)", () => {
       expect(await f.fs.readText(f.file)).not.toContain(env.CODEX_THREAD_ID);
     }));
 
-  it("requires selection for an unbound generic entry, then reuses its exact existing name and role", async () =>
+  it("reuses an existing default entry's exact name and role, automatically or when selected (#1047)", async () =>
     fixture(async (f) => {
       const raw =
         'schemaVersion = 1\n[agents.codex]\nname = "kept_agent"\ntriage_role = "designer"\n';
       await f.fs.writeText(f.file, raw);
-      const ambiguous = await run(f);
-      expect(ambiguous.state).toBe("unresolved");
-      expect(ambiguous.diagnostic?.recovery).toContain("--entry");
-      expect(await f.fs.readText(f.file)).toBe(raw);
+      // #1047: the existing default is this harness's identity; a new session reuses it.
+      const automatic = await run(f);
+      expect(automatic).toMatchObject({
+        agent: "kept_agent",
+        source: "binding",
+        triageRole: "designer",
+      });
+      expect(automatic.setup.notices.join(" ")).not.toContain("created");
       const selected = await run(f, { entry: "codex" });
       expect(selected).toMatchObject({
         agent: "kept_agent",
         source: "entry",
         triageRole: "designer",
         role: "implementer",
-        setup: { state: "bound" },
       });
       expect(selected.setup.notices.join(" ")).not.toContain("created");
       const reuse = await run(f, { role: undefined });
@@ -218,7 +221,34 @@ describe("effective identity preparation (#677)", () => {
       expect(results.map((r) => r.role)).toEqual(["implementer", "designer"]);
     }));
 
-  it("two same-harness agents keep separate persisted identities", async () =>
+  it("a normal run makes earlier session records the default; a read never migrates (#1047)", async () =>
+    fixture(async (f) => {
+      const b = f.binding(env.CODEX_THREAD_ID);
+      const sessionEntry = `codex.session_${"a".repeat(64)}`;
+      const raw = `schemaVersion = 1\n[agents."${sessionEntry}"]\nname = "earlier_agent"\ntriage_role = "designer"\n[agentBindings]\n"${b.key}" = "${sessionEntry}"\n`;
+      await f.fs.writeText(f.file, raw);
+      // Read-only: still attributed to the earlier identity, with the correction explained.
+      const read = await run(f, { intent: "readonly", role: undefined });
+      expect(read).toMatchObject({ state: "resolved", agent: "earlier_agent" });
+      expect(read.setup.notices.join(" ")).toMatch(/still stored as a session entry/);
+      expect(await f.fs.readText(f.file)).toBe(raw);
+      // A normal run establishes [agents.codex] from that record and keeps the old entry.
+      const normal = await run(f, { role: undefined });
+      expect(normal).toMatchObject({
+        state: "resolved",
+        agent: "earlier_agent",
+        triageRole: "designer",
+        entry: "codex",
+      });
+      expect(normal.setup.notices.join(" ")).toMatch(
+        /default codex identity from earlier sessions/,
+      );
+      const doc = parseIdentityDocument((await f.fs.readText(f.file))!);
+      expect(Object.keys(doc.agents as object).sort()).toEqual(["codex", sessionEntry].sort());
+      expect((await readIdentityBindings(f.root, f.fs)).get(b.key)).toBe("codex");
+    }));
+
+  it("two sessions of one harness resolve to the same default identity (#1047)", async () =>
     fixture(async (f) => {
       const settled = await Promise.allSettled([
         run(f),
@@ -227,8 +257,9 @@ describe("effective identity preparation (#677)", () => {
       expect(settled.every((r) => r.status === "fulfilled")).toBe(true);
       const results = settled.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []));
       expect(results.every((r) => r.state === "resolved")).toBe(true);
-      expect(new Set(results.map((r) => r.agent)).size).toBe(2);
-      expect((await readIdentityBindings(f.root, f.fs)).size).toBe(2);
+      expect(new Set(results.map((r) => r.agent)).size).toBe(1);
+      const bindings = await readIdentityBindings(f.root, f.fs);
+      expect(new Set(bindings.values())).toEqual(new Set(["codex"]));
     }));
 
   it("does not borrow local identity for a different repository", async () =>
@@ -503,8 +534,8 @@ describe("effective identity preparation (#677)", () => {
         expect(winner).toBeDefined();
         expect(result.state).toBe("resolved");
         expect(result.diagnostic).toBeNull();
-        if (kind === "same-session") expect(result.agent).toBe(winner!.record.name);
-        else expect(result.agent).not.toBe(winner!.record.name);
+        // #1047: either session's concurrent write establishes the one default identity.
+        expect(result.agent).toBe(winner!.record.name);
         expect((await readIdentityBindings(f.root, f.fs)).size).toBe(
           kind === "same-session" ? 1 : 2,
         );

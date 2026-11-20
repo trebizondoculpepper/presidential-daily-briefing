@@ -13,16 +13,17 @@ describe("verified local execution binding (#677)", () => {
     const a = activeBinding({ ...context, env: { ...env, CODEX_TOOL_CALL_ID: "call-one" } });
     const b = activeBinding({ ...context, env: { ...env, CODEX_TOOL_CALL_ID: "call-two" } });
     expect(a).toEqual(b);
-    expect(a?.entry).toMatch(/^codex\.session_[a-f0-9]{64}$/);
+    // #1047: the entry is the harness's canonical default; only the key carries the session.
+    expect(a?.entry).toBe("codex");
     expect(a?.key).toMatch(/^codex-thread_[a-f0-9]{64}$/);
     expect(JSON.stringify(a)).not.toContain(env.CODEX_THREAD_ID);
     expect(JSON.stringify(a)).not.toContain(env.CODEX_SESSION_ID);
   });
-  it("separates agents sharing a checkout and root session", () => {
+  it("correlates each thread separately but selects the same default entry (#1047)", () => {
     const a = activeBinding({ ...context, env });
     const b = activeBinding({ ...context, env: { ...env, CODEX_THREAD_ID: "thread-private-b" } });
     expect(a?.key).not.toBe(b?.key);
-    expect(a?.entry).not.toBe(b?.entry);
+    expect(a?.entry).toBe(b?.entry);
   });
   it("scopes bindings to the repository and checkout", () => {
     const a = activeBinding({ ...context, env });
