@@ -2254,6 +2254,20 @@ async function run(
       ),
     };
     const repository = values.repo ?? (await runtime.currentRepository());
+    // #690: a claim records its employing human from the shared resolver (never guessed).
+    if (
+      args[0] === "claim" &&
+      !("questions" in values) &&
+      !("outcome" in values) &&
+      humanContextEnabled()
+    ) {
+      const human = identity?.result
+        ? identity.result.human
+        : runtime.briefingHuman
+          ? await runtime.briefingHuman(false).catch(() => undefined)
+          : undefined;
+      if (human) (values as { employingHuman?: HumanContext }).employingHuman = human;
+    }
     const query = executorsOf(runtime).query;
     // Per run: a permission learned now is never reused by a later invocation.
     const permission = ghOf(runtime).repos.permissionOf(repository);

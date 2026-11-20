@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 import { createHash } from "node:crypto";
 import { main } from "../cli.js";
 import {
@@ -10,6 +10,7 @@ import {
 } from "../github/github.js";
 import {
   applyPlan,
+  claimMarkerFor,
   claimText,
   parseQuestionMarker,
   planClaim,
@@ -23,6 +24,7 @@ import type { ReworkAuthority } from "./claims.js";
 import type { ClaimAccepted, ClaimPlan, ClaimRefusal } from "./claims.js";
 import { by, issue, page, repo, time } from "../testing/snapshots.js";
 import { parseResolutionComment } from "./claimactivity.js";
+import { readClaimBinding } from "./claimbinding.js";
 import { permissions } from "../testing/fakegh.js";
 
 /** Split a command as a POSIX shell would: single quotes, whitespace, and `#` comments. */
@@ -189,6 +191,40 @@ describe("claim and needs-human (doc/design/workflow.md)", () => {
       "status:ready",
     ]);
     expect(env.writes[2].at(-1)).toMatch(/branch `issue-7`[\s\S]*<!-- github-triage:claim:/);
+  });
+  it("records the employing human with the claim, bound to it, without changing the claim marker (#690)", async () => {
+    const env = fake({ labels: ["status:ready"] });
+    const human = {
+      state: "current" as const,
+      host: "github.com",
+      login: "sal",
+      source: "gh-login" as const,
+      observedAt: "2026-11-20T10:00:00.000Z",
+    };
+    const plan = accepted(
+      await planClaim(repo, { number: 7, agent: "kavya", employingHuman: human }, env.query),
+    );
+    const body = plan.changes.find((c) => c.step === "comment")!.command.at(-1)!;
+    expect(body).toContain(claimMarkerFor(repo, 7, "kavya"));
+    expect(body).toContain("Employing human: `sal` (current).");
+    const bound = await readClaimBinding(
+      [{ body, createdAt: "2026-11-20T10:00:05Z", author: { login: "sal" } }],
+      {
+        repository: repo,
+        issue: 7,
+        agent: "kavya",
+        claim: /claim:([0-9a-f]{16})/.exec(claimMarkerFor(repo, 7, "kavya"))![1]!,
+        since: "2026-11-20T10:00:00Z",
+        complete: true,
+      },
+      async () => ({ status: "trusted" }),
+    );
+    expect(bound).toMatchObject({ state: "bound", login: "sal", provenance: "current" });
+    // Without a resolved human (resolution disabled), the claim comment is unchanged.
+    const plain = accepted(await planClaim(repo, { number: 7, agent: "kavya" }, env.query));
+    expect(plain.changes.find((c) => c.step === "comment")!.command.at(-1)).not.toContain(
+      "claim-human",
+    );
   });
   it("comments on every new acquisition, and on retry repairs only a missing comment", async () => {
     const first = await claim({ labels: ["status:ready"], repoLabels: ["agent:kavya"] });
@@ -496,6 +532,42 @@ describe("claim and needs-human (doc/design/workflow.md)", () => {
     expect(env.writes).toEqual([]);
     expect(text).toContain("DRY RUN");
     expect(text).toContain("--add-label agent:kavya");
+  });
+
+  it("writes the employing human only while human resolution is enabled (#1152 review)", async () => {
+    const human = {
+      state: "current" as const,
+      host: "github.com",
+      login: "sal",
+      source: "gh-login" as const,
+      observedAt: "2026-11-20T10:00:00.000Z",
+    };
+    const dryRun = async () => {
+      const env = fake({ labels: ["status:ready"] });
+      let text = "";
+      await main(
+        ["claim", "7", "--agent", "kavya", "--dry-run", "--json", "--repo", repo],
+        async (t) => void (text = t),
+        {
+          collect: async () => {
+            throw new Error("no briefing");
+          },
+          currentRepository: async () => repo,
+          query: env.query,
+          ghRun: env.run,
+          briefingHuman: async () => human,
+        },
+      );
+      return text;
+    };
+    // The test environment sets PDB_NO_HUMAN_CONTEXT: nothing is recorded.
+    expect(await dryRun()).not.toContain("claim-human");
+    vi.stubEnv("PDB_NO_HUMAN_CONTEXT", "");
+    try {
+      expect(await dryRun()).toContain("claim-human");
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });
 
