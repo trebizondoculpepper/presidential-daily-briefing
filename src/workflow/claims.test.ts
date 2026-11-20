@@ -543,6 +543,34 @@ describe("claim and needs-human (doc/design/workflow.md)", () => {
       expect(plan.notes?.join(" ")).toContain(`--pr ${pr(12)}`);
     });
 
+    it("suggests submitting only the PRs confirmed unowned (#1149 review)", async () => {
+      const env = fake({ labels: ["status:awaiting-review"], openPrs: [12, 13, 14] });
+      const plan = accepted(
+        await planClaim(
+          repo,
+          { number: 7, agent: "kavya" },
+          env.query,
+          env.permission,
+          undefined,
+          undefined,
+          async () =>
+            ({
+              release: {
+                trust: "trusted",
+                from: "alice",
+                preservedPrUrls: [pr(12), pr(13), pr(14)],
+                ownedPrUrls: [pr(13)],
+                unknownPrUrls: [pr(14)],
+              },
+            }) as never,
+        ),
+      );
+      const note = plan.notes!.join(" ");
+      expect(note).toContain(`--pr ${pr(12)}`);
+      expect(note).not.toContain(pr(13));
+      expect(note).not.toContain(pr(14));
+    });
+
     it("lets the native rules refuse while the ticket is owned, the PR is owned or unknown, or the fold is unread", async () => {
       for (const facts of [
         { ...released(), ticketResponsible: true },

@@ -226,6 +226,12 @@ export type ClaimAdoptionFacts = Pick<
   "release" | "ticketResponsible" | "responsibilityUnknown"
 >;
 
+/** Preserved PRs confirmed unowned: neither owned elsewhere nor of unknown ownership. */
+const adoptable = (release: NonNullable<ClaimAdoptionFacts["release"]>): readonly string[] =>
+  release.preservedPrUrls.filter(
+    (u) => !release.ownedPrUrls?.includes(u) && !release.unknownPrUrls?.includes(u),
+  );
+
 /**
  * The retained-claim admission guard (#412, doc/design/blocked-retained-claims.md), injected so
  * this module needs no activity reader: given the agent's other open claims, either every one is
@@ -1129,7 +1135,11 @@ async function planClaimFor(
             ...ignoredNote(ignored),
             ...(adopting?.release
               ? [
-                  `Adopting preserved work released from ${adopting.release.from}: continue ${adopting.release.preservedPrUrls.join(", ")} rather than opening a duplicate PR, then become responsible with pdb submit ${number} --agent ${agent}${adopting.release.preservedPrUrls.map((u) => ` --pr ${u}`).join("")} --repo ${repository}.`,
+                  `Adopting preserved work released from ${adopting.release.from}: continue ${adoptable(adopting.release).join(", ")} rather than opening a duplicate PR, then become responsible with pdb submit ${number} --agent ${agent}${adoptable(
+                    adopting.release,
+                  )
+                    .map((u) => ` --pr ${u}`)
+                    .join("")} --repo ${repository}.`,
                 ]
               : []),
             ...(deliveryPath

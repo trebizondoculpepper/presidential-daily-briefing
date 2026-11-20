@@ -888,14 +888,16 @@ export async function planDeliverables(
     const plan = ownRecord.plan ?? submitPlan(agent);
     const where = `A submit is recorded (comment ${own.comment})`;
     // A later `membership open` rework record by the caller starts a new cycle: its claim is a
-    // new one, so a fresh submit is planned below instead of completing the old plan.
+    // new one, so a fresh submit is planned below instead of completing the old plan. So does a
+    // later human-directed release of the caller (#1019): an adoption claim after it is new work.
     const reworked = after.some((a) => {
       const c = trustedRecords.find((t) => String(t.comment.databaseId) === a.comment);
       return (
-        a.op === "membership" &&
-        a.agent === agent &&
-        c?.record.membership === "open" &&
-        c.record.reason === reworkReason
+        (a.op === "membership" &&
+          a.agent === agent &&
+          c?.record.membership === "open" &&
+          c.record.reason === reworkReason) ||
+        (a.op === "unassign" && c?.record.from === agent)
       );
     });
     if (resume || !(holds && reworked)) {

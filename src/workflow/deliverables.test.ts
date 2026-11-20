@@ -1991,6 +1991,19 @@ describe("deliverables unassign: human-directed responsibility release (#1019)",
       expect(admit(all)).toContain("CLAIM-NOT-READY");
     });
 
+    it("lets the released agent itself adopt and submit again: the release starts a new cycle", async () => {
+      const g = github({ comments: [both()], prs: prs(), labels: ["status:awaiting-review"] });
+      await applyDeliverables(repo, request("unassign", { agent: "maint", from: "alice" }), g.rt);
+      g.state.labels.push("agent:alice");
+      const submit = await applyDeliverables(
+        repo,
+        request("submit", { agent: "alice", reason: null, prs: [prLink(998), prLink(999)] }),
+        g.rt,
+      );
+      expect(submit.exitCode, JSON.stringify(submit)).toBe(0);
+      expect(posted(g.state).map((r) => r?.op)).toEqual(["unassign", "submit"]);
+    });
+
     it("lets the adopter become responsible with the suggested submit command", async () => {
       const g = github({
         comments: [both()],
