@@ -37,12 +37,14 @@ const envelope = (actions: ReturnType<typeof action>[], extra: Record<string, un
   result: {
     repository: repo,
     rankedActions: { total: actions.length + 2, omitted: 2, items: actions },
-    subjects: Object.fromEntries(
-      actions.map((a) => [
-        a.target,
-        { title: `Ticket ${a.target.slice(-1)}`, owners: [], labels: ["status:ready"] },
-      ]),
-    ),
+    // The real API shape: CompactSubject[] (src/briefing/compact.ts), not an object by URL.
+    subjects: actions.map((a) => ({
+      url: a.target,
+      number: Number(a.target.slice(a.target.lastIndexOf("/") + 1)),
+      title: `Ticket ${a.target.slice(-1)}`,
+      owners: ["agent:kavya"],
+      labels: ["status:ready"],
+    })),
   },
   ...extra,
 });
@@ -210,9 +212,32 @@ describe("work preview: loading states, late responses and contexts (#753)", () 
     const [a, b] = await Promise.all([d.load(ctx(), 1), d.load(ctx(), 1)]);
     expect(requests).toBe(1);
     expect(a).toEqual(b);
-    expect(d.current(ctx())).toBe(true);
+    const generation = d.generation();
+    expect(d.current(ctx(), generation)).toBe(true);
     await d.load(ctx({ role: "designer" }), 1);
     expect(requests).toBe(2);
-    expect(d.current(ctx())).toBe(false);
+    expect(d.current(ctx(), generation)).toBe(false);
+  });
+
+  it("discards details from before a same-context refresh and reads them again (#1164 review)", async () => {
+    let requests = 0;
+    const fetcher = (async () => {
+      requests++;
+      return new Response(
+        JSON.stringify({
+          result: { kind: "ticket-status", title: "T", state: "OPEN", url: url(1) },
+        }),
+        { status: 200 },
+      );
+    }) as typeof fetch;
+    const d = detailLoader("/api/v1/tickets", fetcher);
+    const before = d.generation();
+    await d.load(ctx(), 1);
+    d.invalidate();
+    // A result loaded before the refresh is no longer current, and the next load reads again.
+    expect(d.current(ctx(), before)).toBe(false);
+    await d.load(ctx(), 1);
+    expect(requests).toBe(2);
+    expect(d.current(ctx(), d.generation())).toBe(true);
   });
 });

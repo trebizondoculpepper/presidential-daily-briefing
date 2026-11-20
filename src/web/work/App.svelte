@@ -32,20 +32,30 @@
 
   let details$: ReturnType<typeof detailLoader> | null = null;
 
-  async function toggle(row: WorkRow) {
+  /** Read one open row's detail; a result from an older context or refresh is discarded. */
+  async function loadDetail(row: WorkRow) {
+    if (!context || row.number === null || !details$) return;
+    const c = context;
+    const generation = details$.generation();
+    details = { ...details, [row.key]: { status: "loading" } };
+    const result = await details$.load(c, row.number);
+    if (details$.current(c, generation) && open.has(row.key))
+      details = { ...details, [row.key]: result };
+  }
+
+  function toggle(row: WorkRow) {
+    // The expansion is committed first, so the panel and its loading status show at once and
+    // several rows can be opened while their details are pending.
     const next = new Set(open);
-    if (next.has(row.key)) next.delete(row.key);
-    else {
-      next.add(row.key);
-      if (context && row.number !== null && details$ && (!details[row.key] || details[row.key]!.status === "error")) {
-        const c = context;
-        details = { ...details, [row.key]: { status: "loading" } };
-        const result = await details$.load(c, row.number);
-        // A late detail for an older project, role or agent is discarded.
-        if (details$.current(c)) details = { ...details, [row.key]: result };
-      }
+    if (next.has(row.key)) {
+      next.delete(row.key);
+      open = next;
+      return;
     }
+    next.add(row.key);
     open = next;
+    const d = details[row.key];
+    if (!d || d.status === "error") void loadDetail(row);
   }
 
   onMount(() => {
@@ -65,9 +75,11 @@
       if (next.status === "ready" && !next.updating) {
         const after = next.queue.rows;
         open = reconcileOpen(open, after);
-        const kept = new Set(after.map((r) => r.key));
-        details = Object.fromEntries(Object.entries(details).filter(([k]) => kept.has(k)));
-        announcement = `Work list updated: ${after.length} shown${next.queue.total !== null ? ` of ${next.queue.total}` : ""}.`;
+        // Details from before this refresh are older evidence than the new list: re-read the
+        // open rows that survived, and drop everything else.
+        details$?.invalidate();
+        details = {};
+        for (const row of after) if (open.has(row.key)) void loadDetail(row);
         if (focusedKey) {
           const target = focusAfter(focusedKey, before, after);
           await tick();
@@ -162,7 +174,7 @@
                 <p>PRs: {#each d.detail.pullRequests as pr, i}{i ? ", " : ""}<a href={pr.url}>#{pr.number}</a>{/each}</p>
               {/if}
               {#if d.detail.nextSteps.length}
-                <ul>{#each d.detail.nextSteps as step}<li>{step.why}{#if step.command} <code>{step.command}</code>{/if}</li>{/each}</ul>
+                <ul>{#each d.detail.nextSteps as step}<li>{step.why}{#if step.command}{" "}<code>{step.command}</code>{/if}</li>{/each}</ul>
               {/if}
               {#if !d.detail.complete}<p class="warn">Partial detail: {d.detail.warnings.join(" ")}</p>{/if}
               <p><a href={d.detail.url}>Open on GitHub</a> · <a href={`/ticket?repo=${encodeURIComponent(context?.repository ?? "")}&n=${row.number}`}>Full ticket view</a></p>

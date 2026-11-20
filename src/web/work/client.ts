@@ -64,14 +64,14 @@ const issueNumber = (url: string): number | null => {
 function parseRow(
   repository: string,
   a: unknown,
-  subjects: Record<string, unknown>,
+  subjects: ReadonlyMap<string, Record<string, unknown>>,
 ): WorkRow | null {
   if (!isObject(a)) return null;
   const id = str(a.id);
   const kind = str(a.kind);
   const target = str(a.target);
   if (!id || !kind || !target) return null;
-  const subject = isObject(subjects[target]) ? (subjects[target] as Record<string, unknown>) : {};
+  const subject = subjects.get(target) ?? {};
   const why = isObject(a.why) ? str(a.why.text) : null;
   const size = (v: unknown): string | null => (isObject(v) ? str(v.size) : null);
   return {
@@ -100,7 +100,11 @@ export function parseWorkQueue(body: unknown): WorkQueue | null {
   const repository = str(selection.repository) ?? str(result.repository);
   const ranked = isObject(result.rankedActions) ? result.rankedActions : null;
   if (!repository || !ranked || !Array.isArray(ranked.items)) return null;
-  const subjects = isObject(result.subjects) ? result.subjects : {};
+  // The briefing's subjects are a CompactSubject[] (src/briefing/compact.ts), keyed here by URL.
+  const subjects = new Map<string, Record<string, unknown>>();
+  if (Array.isArray(result.subjects))
+    for (const subject of result.subjects)
+      if (isObject(subject) && typeof subject.url === "string") subjects.set(subject.url, subject);
   const rows: WorkRow[] = [];
   for (const item of ranked.items) {
     const row = parseRow(repository, item, subjects);
@@ -323,17 +327,30 @@ export type DetailState =
  */
 export function detailLoader(api: string, fetcher: typeof fetch) {
   let scope = "";
+  let generation = 0;
   let controller = new AbortController();
   const cache = new Map<string, Promise<DetailState>>();
+  const drop = () => {
+    controller.abort();
+    controller = new AbortController();
+    cache.clear();
+    generation++;
+  };
   return {
+    /** A context change: abort pending reads and drop every cached detail. */
     reset(c: WorkContext | null) {
       const next = c ? contextKey(c) : "";
       if (next === scope) return;
-      controller.abort();
-      controller = new AbortController();
-      cache.clear();
+      drop();
       scope = next;
     },
+    /**
+     * A completed refresh of the same context: details from before it are older evidence than
+     * the new list, so pending and cached ones are discarded and must be read again.
+     */
+    invalidate: drop,
+    /** The generation a load starts in; pass it to `current` before accepting the result. */
+    generation: () => generation,
     load(c: WorkContext, number: number): Promise<DetailState> {
       this.reset(c);
       const key = `${scope} ${number}`;
@@ -341,8 +358,7 @@ export function detailLoader(api: string, fetcher: typeof fetch) {
       if (pending) return pending;
       const q = new URLSearchParams({ repo: c.repository });
       if (c.agent) q.set("agent", c.agent);
-      const mine = controller;
-      const promise = readJson(`${api}/${number}?${q}`, fetcher, mine.signal).then(
+      const promise = readJson(`${api}/${number}?${q}`, fetcher, controller.signal).then(
         (read): DetailState => {
           if (!read.ok) {
             cache.delete(key);
@@ -362,8 +378,8 @@ export function detailLoader(api: string, fetcher: typeof fetch) {
       cache.set(key, promise);
       return promise;
     },
-    /** Whether a detail is still current for this context (a late result after reset is not). */
-    current: (c: WorkContext) => contextKey(c) === scope,
+    /** Whether a result loaded in generation `loaded` is still current for this context. */
+    current: (c: WorkContext, loaded: number) => contextKey(c) === scope && loaded === generation,
   };
 }
 
