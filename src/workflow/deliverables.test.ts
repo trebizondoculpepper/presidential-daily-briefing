@@ -67,7 +67,7 @@ function github(
     issueType?: "Issue" | "PullRequest" | null;
     pageSize?: number;
     /** Other issues' comments, by number, for cross-issue ownership reads (#1019). */
-    others?: Record<number, DeliveryComment[]>;
+    others?: Record<number, DeliveryComment[] | null>;
     /** Issues referencing each PR URL (closing or cross-reference); default: just N. */
     refs?: Record<string, { issues: number[]; complete?: boolean }>;
   } = {},
@@ -99,7 +99,12 @@ function github(
   const query = async (q: string, v: Record<string, string | number>): Promise<unknown> => {
     if (q.includes("viewer{") && v.number !== undefined && v.number !== N) {
       const other = setup.others?.[Number(v.number)];
-      if (!other) throw new Error("issue unavailable");
+      if (other === undefined) throw new Error("issue unavailable");
+      if (other === null)
+        return {
+          viewer: { __typename: "User", login: viewer },
+          repository: { issueOrPullRequest: null },
+        };
       return {
         viewer: { __typename: "User", login: viewer },
         repository: {
@@ -2001,6 +2006,15 @@ describe("deliverables unassign: human-directed responsibility release (#1019)",
         },
       });
       const facts = await released({ prs: [foreign, fakePr(999)] });
+      expect(facts?.release?.unknownPrUrls).toEqual([prLink(998)]);
+    });
+
+    it("treats a referencing issue that reads as missing as unknown ownership (#1149 review)", async () => {
+      const facts = await released({
+        prs: prs(),
+        others: { 79: null },
+        refs: { [prLink(998)]: { issues: [N, 79] } },
+      });
       expect(facts?.release?.unknownPrUrls).toEqual([prLink(998)]);
     });
 

@@ -1501,7 +1501,11 @@ async function memberOwnershipElsewhere(
     try {
       const read = await readIssue(i.repository, i.number, rt.query);
       const item = read.item;
-      if (!item || item.__typename !== "Issue") continue;
+      // An unreadable referenced issue is unknown ownership, never "nobody" (#1149 review).
+      if (!item || item.__typename !== "Issue") {
+        result = "unknown";
+        continue;
+      }
       const history = await readDeliveryComments(i.repository, i.number, item.comments, rt.query);
       const { fold } = await readDeliveryFold(
         history.comments,
