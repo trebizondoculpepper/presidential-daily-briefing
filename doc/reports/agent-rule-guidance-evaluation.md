@@ -81,3 +81,12 @@ Publish an append-only trial table with fixture, repetition, condition, prompt h
 | Evidence that any particular reason helps or hurts                   | Not established |
 
 Adopt explanations only if repeated controlled trials demonstrate a useful improvement relative to token/latency cost without increasing unnecessary refusal or inventing exceptions. Otherwise simplify or reject the extra prose. Report effects by rule; an aggregate gain can hide a regression. Claim exclusivity, dependency eligibility and other state invariants still belong in executable checks regardless of prompt performance. Better prompting does not replace lifecycle enforcement. Keep #78 open for the runner/budget/trials after reviewing this protocol; do not close it with this documentation contribution.
+
+## Current-policy preparation (#496)
+
+The historical R1–R8 table and F1–F12 expectations above remain the original study
+proposal, not a current native-policy oracle. The owner authorized a separate
+bounded preparation on 2026-11-20. See [the runnable fixture/scoring preparation](guidance-fixture-preparation.md)
+for eight pinned current-native scenarios, matched updated prompt variants,
+scripted positive/negative traces, scoring limits and reproduction commands.
+No real-model study has been performed; #78 still requires separate trial approval.
