@@ -54,6 +54,9 @@ export interface OriMcpOptions {
   entry: string | null;
   /** The verified project root, for `--project` args on project scope. */
   projectRoot?: string;
+  /** The verified repository (owner/name), pinned via --repo in the entry so the MCP server
+   * resolves that repository rather than a gh-default account (ori-mcp-acceptance.md finding 2). */
+  repository?: string;
   /** Windows executes the packaged .mjs through Node (used by the native shell runner). */
   platform?: NodeJS.Platform;
 }
@@ -64,6 +67,7 @@ export function buildOriMcpEntry(options: {
   transport: OriMcpOptions["transport"];
   url: string | null;
   projectRoot?: string;
+  repository?: string;
   entry?: string | null;
   platform?: NodeJS.Platform;
 }): Record<string, unknown> {
@@ -74,6 +78,7 @@ export function buildOriMcpEntry(options: {
   const args: string[] = [];
   if (options.projectRoot !== undefined) {
     args.push("--project", options.projectRoot);
+    if (options.repository) args.push("--repo", options.repository);
     if (options.entry) args.push("--entry", options.entry);
   }
   // Windows cannot execute a JavaScript file directly; launch the packaged script through Node.
@@ -89,6 +94,7 @@ export function desiredOriMcpEntryText(options: {
   transport: OriMcpOptions["transport"];
   url: string | null;
   projectRoot?: string;
+  repository?: string;
   entry?: string | null;
   platform?: NodeJS.Platform;
 }): string {
@@ -171,7 +177,11 @@ function manifestWriteRefusal(
   file: string,
   mcp: InstallEditResult,
 ): InstallEditResult {
-  if (outcome.status === "written" || outcome.status === "committed-with-error") return mcp;
+  if (outcome.status === "written") return mcp;
+  // A committed-with-error write is a partial outcome: keep the completed MCP action but surface
+  // the ownership-manifest durability failure so the CLI exits non-zero (reviewed #1150 finding).
+  if (outcome.status === "committed-with-error")
+    return { ...mcp, outcome: "committed-with-error" as const };
   return {
     action: mcp.action,
     outcome: "refused",
@@ -282,6 +292,7 @@ export async function installOriMcp(params: {
         transport: options.transport,
         url: options.url,
         projectRoot: scope.kind === "project" ? scope.root : undefined,
+        repository: options.repository,
         entry: options.entry,
         platform: options.platform,
       });

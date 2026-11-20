@@ -127,7 +127,7 @@ describe("runOriInstall (#772)", () => {
       expect(written.mcpServers.pdb).toEqual({
         type: "stdio",
         command: PDBMCP,
-        args: ["--project", realRoot, "--entry", "ori"],
+        args: ["--project", realRoot, "--repo", "example/project", "--entry", "ori"],
       });
 
       const out2: string[] = [];
@@ -203,19 +203,27 @@ describe("runOriInstall (#772)", () => {
     }
   });
 
-  it("refuses HTTP install without a valid URL", async () => {
+  it("refuses HTTP installs: HTTP MCP is not a verified Ori integration", async () => {
     const dir = await initTempRepo("pdb-oricli-http-");
     try {
       const out: string[] = [];
       const code = await runOriInstall(
-        oriInstallArgumentsFor(["ori", "--transport", "http", "--yes", "--json"], "install"),
+        oriInstallArgumentsFor(
+          ["ori", "--transport", "http", "--url", "http://127.0.0.1:4372/mcp", "--yes", "--json"],
+          "install",
+        ),
         { cwd: dir, env: {}, pdbMcpPath: PDBMCP },
         async (text) => void out.push(text),
       );
       expect(code).toBe(2);
-      expect(JSON.parse(out.join(""))).toMatchObject({
-        items: [{ kind: "mcp", outcome: "refused", code: "UNSUPPORTED_SCOPE" }],
+      const res = JSON.parse(out.join("")) as {
+        items: { kind: string; outcome: string; code: string; message: string }[];
+      };
+      expect(res.items.find((i) => i.kind === "mcp")).toMatchObject({
+        outcome: "refused",
+        code: "UNSUPPORTED_SCOPE",
       });
+      expect(res.items[0].message).toContain("not a verified Ori integration");
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -276,6 +284,44 @@ describe("runOriInstall (#772)", () => {
       // The shared setup initialized the entry in pdb.toml (a dotted key is quoted).
       const pdbToml = await readFile(join(dir, "pdb.toml"), "utf8");
       expect(pdbToml).toContain("ori.pdb");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not persist identity during a dry-run preview with --role", async () => {
+    const dir = await initTempRepo("pdb-oricli-dry-role-");
+    try {
+      const out: string[] = [];
+      const code = await runOriInstall(
+        oriInstallArgumentsFor(
+          [
+            "ori",
+            "--repo",
+            "example/project",
+            "--entry",
+            "ori.pdb",
+            "--role",
+            "implementer",
+            "--dry-run",
+            "--json",
+          ],
+          "install",
+        ),
+        { cwd: dir, env: {}, pdbMcpPath: PDBMCP },
+        async (text) => void out.push(text),
+      );
+      expect(code, out.join("")).toBe(0);
+      const res = JSON.parse(out.join("")) as {
+        dryRun: boolean;
+        items: { kind: string; outcome: string }[];
+      };
+      expect(res.dryRun).toBe(true);
+      expect(res.items.find((i) => i.kind === "mcp")).toMatchObject({ outcome: "planned" });
+      // A read-only preview must not write the identity (attended-installer contract).
+      await expect(readFile(join(dir, "pdb.toml"), "utf8")).rejects.toMatchObject({
+        code: "ENOENT",
+      });
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

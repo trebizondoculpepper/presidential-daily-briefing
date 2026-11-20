@@ -1908,6 +1908,7 @@ async function run(
           {
             ...configRuntime,
             confirm: configRuntime.confirm ?? ((prompt) => ttyConfirm(prompt, parsed.json)),
+            stderr: runtime.stderr,
           },
           output,
         );

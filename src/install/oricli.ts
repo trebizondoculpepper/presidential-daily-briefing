@@ -13,6 +13,8 @@ import { parseArgs } from "node:util";
 import { homedir } from "node:os";
 import { ConfigError, nodeFileSystem, type GitRunner } from "../config/config.js";
 import type { ConfigRuntime } from "../config/configcli.js";
+import { prepareEffectiveIdentity } from "../config/effectiveidentity.js";
+import type { EffectiveHuman } from "../config/effectiveidentity.js";
 import { resolveEntry } from "../config/harness.js";
 import { IDENTITY_FILE, readIdentity } from "../config/identity.js";
 import { createGitService, type GitService } from "../git/service.js";
@@ -98,6 +100,8 @@ export interface OriInstallArguments {
   dryRun: boolean;
   json: boolean;
   yes: boolean;
+  /** Adopting a foreign PDB entry is explicit (owned-only replacement exception). */
+  adopt: boolean;
   help: boolean;
 }
 
@@ -120,6 +124,7 @@ export function oriInstallArgumentsFor(
       "dry-run": { type: "boolean" },
       json: { type: "boolean" },
       yes: { type: "boolean" },
+      adopt: { type: "boolean" },
       help: { type: "boolean" },
     },
   });
@@ -132,6 +137,19 @@ export function oriInstallArgumentsFor(
     throw new Error("--transport applies to install only; uninstall removes whatever is owned.");
   if (values.url !== undefined && values.transport !== "http")
     throw new Error("--url requires --transport http.");
+  if (values.url !== undefined) {
+    let parsed: URL;
+    try {
+      parsed = new URL(values.url);
+    } catch {
+      throw new Error("--url must be a valid http(s) URL.");
+    }
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      throw new Error("--url must use http or https.");
+    }
+    if (!parsed.hostname) throw new Error("--url must include a host.");
+    values.url = parsed.toString();
+  }
   if (values.entry !== undefined && values.harness !== undefined)
     throw new Error("Give --entry or --harness, not both.");
   if (values.repo !== undefined && !/^[\w.-]+\/[\w.-]+$/.test(values.repo))
@@ -151,19 +169,21 @@ export function oriInstallArgumentsFor(
     dryRun: values["dry-run"] === true,
     json: values.json === true,
     yes: values.yes === true,
+    adopt: values.adopt === true,
     help: values.help === true,
   };
 }
 
 export const oriInstallHelp = (operation: "install" | "uninstall"): string =>
   operation === "install"
-    ? `Usage: pdb install ori [--global] [--transport stdio|http] [--url URL] [--role implementer|designer]
-                      [--entry KEY | --harness NAME] [--repo owner/name] [--dry-run] [--json] [--yes]
+    ? `Usage: pdb install ori [--global] [--role implementer|designer]
+                      [--entry KEY | --harness NAME] [--repo owner/name] [--adopt] [--dry-run] [--json] [--yes]
 Configure the PDB MCP connection for Ori. Default scope is the current repository (project
 .ori/mcp.json); --global targets the user-wide .ori/mcp.json under your home directory. STDIO is
-the default; --transport http with --url is explicit. --dry-run previews exact changes and writes
-nothing. Ori MCP servers from a project .ori/mcp.json start only after you approve them in
-an attended run (ori-mcp-acceptance.md). Ori records no native Stop hook, so none is installed.`
+the current transport (HTTP MCP is not a verified Ori integration). --dry-run previews exact
+changes and writes nothing. Ori MCP servers from a project .ori/mcp.json start only after you
+approve them in an attended run (ori-mcp-acceptance.md). Ori records no native Stop hook, so none
+is installed.`
     : `Usage: pdb uninstall ori [--global] [--dry-run] [--json] [--yes]
 Remove only PDB-managed Ori entries in the selected scope; identity, project settings and
 unrelated entries survive. Already absent is a no-op. --global is required to touch user-wide
@@ -197,6 +217,7 @@ async function prepareIdentity(
   args: OriInstallArguments,
   scope: OriInstallScope,
   runtime: OriRunRuntime,
+  dryRun: boolean,
 ): Promise<OriIdentityOutcome> {
   if (args.operation !== "install" || scope.kind !== "project")
     return { entry: null, created: false, refused: null, retry: null };
@@ -235,15 +256,15 @@ async function prepareIdentity(
   // the entry (attended-installer-delivery.md "reuse shared identity resolution/allocation", as
   // the Codex/Claude installers do); a read-only install without a role only reads the record.
   if (args.role !== null && args.role !== undefined) {
-    const { prepareEffectiveIdentity } = await import("../config/effectiveidentity.js");
-    type EffectiveHuman = import("../config/effectiveidentity.js").EffectiveHuman;
     const prepared = await prepareEffectiveIdentity(
       {
         project: scope.root,
         repository: scope.repository,
         entry: targetEntry,
         role: args.role,
-        intent: "normal",
+        // Read-only previews must never write: a fresh checkout's identity is planned, not
+        // persisted, until the user approves (attended-installer read-only preview contract).
+        intent: dryRun ? "dry-run" : "normal",
       },
       {
         cwd: scope.root,
@@ -382,6 +403,7 @@ export async function resolveOriInstallScope(
 
 export interface OriRunRuntime extends ConfigRuntime {
   confirm?: (prompt: string) => Promise<boolean>;
+  stderr?: (text: string) => void | Promise<void>;
   /** Inject the installed pdb-mcp path for tests; resolves from the running package when omitted. */
   pdbMcpPath?: string;
 }
@@ -459,7 +481,7 @@ async function evaluateOriInstallPlan(params: {
   // explicit partial outcome, never silently swallowed.
   const identity = conflicted
     ? { entry: null, created: false, refused: null, retry: null }
-    : await prepareIdentity(args, scope, runtime);
+    : await prepareIdentity(args, scope, runtime, dryRun);
   const identityEntry = identity.entry;
   let identityItem: OriInstallItem | null = null;
   if (identity.refused !== null) {
@@ -509,10 +531,12 @@ async function evaluateOriInstallPlan(params: {
               url: args.url,
               entry: identityEntry ?? args.entry,
               projectRoot: scope.kind === "project" ? scope.root : undefined,
+              repository: scope.kind === "project" ? scope.repository : undefined,
             },
             manifestPath: manifestPathForScope,
             pdbVersion: "0.1.0",
             dryRun,
+            adopt: args.adopt,
             pdbMcp: runtime.pdbMcpPath ?? undefined,
             expectedSnapshot,
           })
@@ -554,7 +578,7 @@ async function evaluateOriInstallPlan(params: {
       diff: mcp.diff,
       retry:
         mcp.outcome === "refused"
-          ? `pdb ${args.operation} ori${args.repo ? ` --repo ${args.repo}` : ""} --yes`
+          ? `pdb ${args.operation} ori${args.global ? " --global" : ""}${args.repo ? ` --repo ${args.repo}` : ""} --yes`
           : null,
     },
   ];
@@ -573,11 +597,20 @@ async function evaluateOriInstallPlan(params: {
       receiptVerified: "unknown",
     },
     next: [
-      scope.kind === "project"
-        ? "Configured the Ori MCP server for this project (STDIO unless --transport http)."
-        : "Configured the Ori MCP server in your user-wide .ori/mcp.json.",
+      mcp.outcome === "applied" || mcp.outcome === "kept" || mcp.outcome === "committed-with-error"
+        ? args.operation === "install"
+          ? scope.kind === "project"
+            ? "Configured the Ori MCP server for this project (STDIO)."
+            : "Configured the Ori MCP server in your user-wide .ori/mcp.json."
+          : "Removed the PDB-managed Ori MCP entry in the selected scope."
+        : mcp.outcome === "refused"
+          ? `The Ori MCP entry was not written: ${mcp.code ?? "refused"}. Fix the reported issue and re-run.`
+          : "",
       dryRun ? "Dry run: remove --dry-run (or confirm) to write." : "",
-      args.operation === "install"
+      args.operation === "install" &&
+      (mcp.outcome === "applied" ||
+        mcp.outcome === "kept" ||
+        mcp.outcome === "committed-with-error")
         ? "Approve the PDB MCP server in an attended Ori run before it starts (ori-mcp-acceptance.md)."
         : "",
     ].filter(Boolean),
@@ -608,11 +641,7 @@ export async function runOriInstall(
 ): Promise<number> {
   const scope = await resolveOriInstallScope(args, runtime);
   const manifestPathForScope = manifestPath(scope, "ori");
-  if (
-    args.operation === "install" &&
-    args.transport === "http" &&
-    (args.url === null || !/^https?:\/\/\S+$/i.test(args.url))
-  ) {
+  if (args.operation === "install" && args.transport === "http") {
     const refused: OriInstallResult = {
       schemaVersion: 1,
       kind: "install-result",
@@ -628,9 +657,9 @@ export async function runOriInstall(
           outcome: "refused",
           code: "UNSUPPORTED_SCOPE",
           message:
-            "HTTP transport requires a valid explicit --url (http(s) endpoint); this command cannot invent a server address.",
+            "HTTP MCP transport is not a verified Ori integration (ori-mcp-acceptance.md records only STDIO); use STDIO.",
           diff: null,
-          retry: `pdb install ori --transport http --url http://127.0.0.1:4372/mcp${args.repo ? ` --repo ${args.repo}` : ""}`,
+          retry: `pdb install ori${args.repo ? ` --repo ${args.repo}` : ""}`,
         },
       ],
       status: {
@@ -639,7 +668,7 @@ export async function runOriInstall(
         executed: "unknown",
         receiptVerified: "unknown",
       },
-      next: ["Supply a valid --url with --transport http, then re-run."],
+      next: ["Use STDIO (the verified Ori transport): pdb install ori."],
     };
     if (args.json) await output(JSON.stringify(refused, null, 2) + "\n");
     else
@@ -679,7 +708,11 @@ export async function runOriInstall(
       return 2;
     }
     const previewText = formatOriInstallOutput(preview.result, scope, args.operation, false);
-    await output(previewText);
+    // In JSON mode the human-readable preview belongs on stderr so stdout stays parseable JSON
+    // (Codex installer convention; a declined interactive confirm still emits only the JSON result).
+    if (!args.json) await output(previewText);
+    else if (runtime.stderr) await runtime.stderr(previewText);
+    else process.stderr.write(previewText);
     const approved = await runtime.confirm(
       `Apply pdb ${args.operation} ori in ${scope.kind === "project" ? scope.root : scope.homeDir}?`,
     );

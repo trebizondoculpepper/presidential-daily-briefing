@@ -171,14 +171,21 @@ export async function withScopeLock<T>(
       ),
     };
   let value: T;
+  let primaryRefused = false;
   try {
     value = await work();
+    primaryRefused =
+      typeof value === "object" &&
+      value !== null &&
+      "status" in value &&
+      (value as { status?: unknown }).status === "refused";
   } finally {
-    // A failed release leaves a lock that blocks later commands; surface it as an explicit partial
-    // outcome instead of discarding it (shared-write contract).
+    // A failed release leaves a lock that blocks later commands; surface it as an explicit
+    // partial outcome instead of discarding it — unless the work itself already refused (a
+    // refused work result is the primary outcome; never replace it with the release error).
     const cleanup = await held();
     const problem = releaseProblem(lock, cleanup);
-    if (problem) {
+    if (!primaryRefused && problem) {
       return {
         status: "refused",
         reason: refusal("WRITE_FAILED", problem, "committed-with-error"),
