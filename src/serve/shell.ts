@@ -59,7 +59,6 @@ export const servedPages: readonly ServedPage[] = [
     parameters: ["repo"],
     carries: [],
     shipped: true,
-    section: "work",
   },
   {
     id: "rules",

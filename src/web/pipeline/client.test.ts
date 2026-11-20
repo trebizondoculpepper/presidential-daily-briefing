@@ -126,9 +126,14 @@ describe("pipeline client (#684)", () => {
     await loader.load("new/repo");
     expect(calls).toHaveLength(2);
     const refreshed = loader.refresh();
-    pending.get("/api/v1/metrics?view=inventory&repo=new%2Frepo")!(reply(200, newer));
+    pending.get("/api/v1/metrics?view=inventory&repo=new%2Frepo&refresh=true")!(reply(200, newer));
     await refreshed;
-    expect(calls).toHaveLength(3);
+    // #1141 review: Refresh bypasses the server cache; ordinary loads do not.
+    expect(calls).toEqual([
+      "/api/v1/metrics?view=inventory&repo=old%2Frepo",
+      "/api/v1/metrics?view=inventory&repo=new%2Frepo",
+      "/api/v1/metrics?view=inventory&repo=new%2Frepo&refresh=true",
+    ]);
     await loader.load(null);
     expect(states.at(-1)).toEqual({ status: "no-project" });
   });

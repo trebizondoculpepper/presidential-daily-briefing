@@ -101,10 +101,13 @@ export async function fetchInventory(
   repository: string,
   fetcher: typeof fetch,
   signal?: AbortSignal,
+  /** An explicit Refresh: bypass the server's short-lived cache for fresh facts. */
+  refresh = false,
 ): Promise<InventoryState> {
   let response: Response;
   try {
-    response = await fetcher(`${api}?view=inventory&repo=${encodeURIComponent(repository)}`, {
+    const query = `view=inventory&repo=${encodeURIComponent(repository)}${refresh ? "&refresh=true" : ""}`;
+    response = await fetcher(`${api}?${query}`, {
       headers: { accept: "application/json" },
       ...(signal ? { signal } : {}),
     });
@@ -155,7 +158,7 @@ export function inventoryLoader(
   let current: AbortController | null = null;
   let sequence = 0;
   let loaded: string | null | undefined;
-  const read = async (repository: string | null): Promise<void> => {
+  const read = async (repository: string | null, refresh = false): Promise<void> => {
     loaded = repository;
     current?.abort();
     const mine = ++sequence;
@@ -167,13 +170,14 @@ export function inventoryLoader(
     const controller = new AbortController();
     current = controller;
     report({ status: "loading" });
-    const state = await fetchInventory(api, repository, fetcher, controller.signal);
+    const state = await fetchInventory(api, repository, fetcher, controller.signal, refresh);
     if (mine === sequence && !controller.signal.aborted) report(state);
   };
   return {
     load: (repository: string | null) =>
       repository === loaded ? Promise.resolve() : read(repository),
-    refresh: () => read(loaded ?? null),
+    // Refresh asks the server for fresh facts, not its cached entry (#1141 review).
+    refresh: () => read(loaded ?? null, true),
   };
 }
 

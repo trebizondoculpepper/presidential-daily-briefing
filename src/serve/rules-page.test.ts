@@ -408,8 +408,11 @@ describe("GET /pipeline (#684)", () => {
       expect(reply.body).toContain('<script src="/web/pipeline.js" defer></script>');
       expect(reply.body).toContain('<link rel="stylesheet" href="/web/pipeline.css">');
       expect(reply.body).not.toMatch(/\sstyle=|<script>/);
-      // The page is in the shared navigation, carrying the project.
-      expect(reply.body).toContain('href="/pipeline?repo=example%2Fproject"');
+      // #1141 review: Pipeline is in the shared toolbar navigation of every page.
+      const rules = await call(port, "/rules?repo=example%2Fproject");
+      expect(rules.body).toMatch(
+        /<nav class="wide-pages"[^>]*>[\s\S]*?href="\/pipeline\?repo=example%2Fproject"[^>]*>Pipeline<\/a>/,
+      );
       const script = await call(port, "/web/pipeline.js");
       expect(script.headers["content-type"]).toBe("text/javascript; charset=utf-8");
       expect(github).toEqual([]);
