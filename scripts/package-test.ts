@@ -49,6 +49,8 @@ const expected = [
   "dist/web/pipeline.js",
   "dist/web/rules.css",
   "dist/web/rules.js",
+  "dist/web/timing.css",
+  "dist/web/timing.js",
   "dist/web/work.css",
   "dist/web/work.js",
   "package.json",
@@ -321,6 +323,8 @@ async function serveSmoke(bin: string, env: NodeJS.ProcessEnv, cwd: string): Pro
       ["web/rules.css", "text/css", "rule-formal"],
       ["web/pipeline.js", "text/javascript", "pipeline-app"],
       ["web/pipeline.css", "text/css", "pipeline-table"],
+      ["web/timing.js", "text/javascript", "timing-app"],
+      ["web/timing.css", "text/css", "timing-chart"],
       ["web/work.js", "text/javascript", "work-app"],
       ["web/work.css", "text/css", "work-row"],
     ] as const) {

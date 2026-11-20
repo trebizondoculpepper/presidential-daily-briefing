@@ -35,7 +35,9 @@
     "dist/web/pipeline.js",
     "dist/web/pipeline.css",
     "dist/web/work.js",
-    "dist/web/work.css"
+    "dist/web/work.css",
+    "dist/web/timing.js",
+    "dist/web/timing.css"
   ],
   "type": "module",
   "publishConfig": {
