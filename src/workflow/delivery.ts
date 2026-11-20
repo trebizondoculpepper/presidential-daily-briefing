@@ -788,13 +788,23 @@ export function foldDelivery(records: ClassifiedRecord[], historyComplete: boole
           stale.push(
             `ticket responsibility moved to ${fold.ticketResponsible} (record ${fold.ticketResponsibilityRecord ?? "none"})`,
           );
+        // Guards use the full deliverable identity (#1146 review): labels shorten commit ids.
         const held = fold.members.filter((m) => m.responsible === from);
         for (const m of held) {
-          const label = deliverableLabel(m.deliverable);
-          const want = expected.members.find((x) => x.deliverable === label);
+          const key = deliverableKey(m.deliverable);
+          const want = expected.members.find((x) => x.deliverable === key);
           if (!want || want.record !== m.responsibilityRecord)
             stale.push(
-              `${label} responsibility record is ${m.responsibilityRecord ?? "none"}, expected ${want?.record ?? "not to be held"}`,
+              `${deliverableLabel(m.deliverable)} responsibility record is ${m.responsibilityRecord ?? "none"}, expected ${want?.record ?? "not to be held"}`,
+            );
+        }
+        // A planned member now held by someone else is a replacement owner: a conflict, never
+        // skipped (#1146 review). Already unowned stays a no-op; unplanned owners are untouched.
+        for (const want of expected.members) {
+          const m = fold.members.find((x) => deliverableKey(x.deliverable) === want.deliverable);
+          if (m && m.responsible !== null && m.responsible !== from)
+            stale.push(
+              `${deliverableLabel(m.deliverable)} responsibility moved to ${m.responsible} (record ${m.responsibilityRecord ?? "none"})`,
             );
         }
         if (stale.length) {

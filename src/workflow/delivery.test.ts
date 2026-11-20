@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 import {
   attestApplicability,
+  deliverableKey,
   deliverableLabel,
   deliveryMarker,
   deliveryOpId,
@@ -670,7 +671,7 @@ describe("unassign: human-directed responsibility release (#1019)", () => {
         expected: {
           ticket: String(submit.databaseId),
           members: members.map((d) => ({
-            deliverable: deliverableLabel(d),
+            deliverable: deliverableKey(d),
             record: String(submit.databaseId),
           })),
         },
@@ -766,5 +767,35 @@ describe("unassign: human-directed responsibility release (#1019)", () => {
         ),
       ),
     ).toMatchObject({ kind: "record" });
+  });
+
+  it("rejects a release whose planned member moved to a replacement owner (#1146 review)", async () => {
+    const submit = submitBoth();
+    const handoff = at(
+      record("handoff", {
+        agent: "alice",
+        to: "bob",
+        scope: "deliverable",
+        deliverables: [pr(999)],
+        expectedResponsibilityRecord: String(submit.databaseId),
+      }),
+    );
+    const f = await fold([submit, handoff, release(submit)]);
+    expect(f.rejected[0]).toMatchObject({ error: "UNASSIGN_STALE" });
+    expect(f.rejected[0]!.why).toContain("moved to bob");
+    expect(f.ticketResponsible).toBe("alice");
+    expect(f.members.map((m) => m.responsible)).toEqual(["alice", "bob"]);
+  });
+
+  it("guards commits by full identity, even when their short labels collide (#1146 review)", async () => {
+    const a = commit("abcdef123456aaaa");
+    const b = commit("abcdef123456bbbb");
+    expect(deliverableLabel(a)).toBe(deliverableLabel(b));
+    const submit = at(
+      record("submit", { agent: "alice", deliverables: [a, b], membership: "complete" }),
+    );
+    const f = await fold([submit, release(submit, {}, [a, b])]);
+    expect(f.rejected).toEqual([]);
+    expect(f.members.every((m) => m.responsible === null)).toBe(true);
   });
 });
