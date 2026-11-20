@@ -213,4 +213,60 @@ describe("Ori MCP install/uninstall (#772, attended-installer-delivery.md)", () 
       await rm(dir, { recursive: true, force: true });
     }
   });
+
+  it("refuses an uninstall when mcpServers has an invalid shape", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "pdb-ori-badschema-"));
+    try {
+      const root = dir;
+      const scope = { kind: "project" as const, root, gitCommonDir: join(dir, ".git") };
+      const manifestPath = join(dir, ".git", "pdb", "install", "ori.json");
+      const mcpFile = join(root, ".ori", "mcp.json");
+      await nodeSafeFs.mkdir(join(root, ".ori"));
+      // mcpServers must be a JSON object; an array is invalid and must not be silently removed.
+      await nodeSafeFs.createSynced(mcpFile, JSON.stringify({ mcpServers: [] }, null, 2));
+      const removed = await uninstallOriMcp({ scope, manifestPath, runtime: { now: fixedNow } });
+      expect(removed.mcp).toMatchObject({ outcome: "refused", code: "UNSUPPORTED_SCHEMA" });
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("persists an ownership record when an existing foreign entry is adopted", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "pdb-ori-adopt-"));
+    try {
+      const root = dir;
+      const scope = { kind: "project" as const, root, gitCommonDir: join(dir, ".git") };
+      const manifestPath = join(dir, ".git", "pdb", "install", "ori.json");
+      const mcpFile = join(root, ".ori", "mcp.json");
+      await nodeSafeFs.mkdir(join(root, ".ori"));
+      await nodeSafeFs.createSynced(
+        mcpFile,
+        JSON.stringify({ mcpServers: { pdb: { command: "existing-server" } } }, null, 2),
+      );
+      const install = await installOriMcp({
+        scope,
+        options: {
+          transport: "stdio",
+          url: null,
+          entry: null,
+          projectRoot: root,
+          platform: "linux",
+        },
+        manifestPath,
+        pdbVersion: "0.1.0",
+        pdbMcp,
+        adopt: true,
+        runtime: { now: fixedNow },
+      });
+      expect(install.mcp.outcome).toBe("adopted");
+      // The ownership record travels with the result and is persisted by the shared writer, so a
+      // later uninstall can remove the adopted entry (the manifest key is the resolved file path).
+      expect(install.mcp.manifestRecord).not.toBeNull();
+      const write = await nodeSafeFs.readFile(join(dir, ".git", "pdb", "install", "ori.json"));
+      expect(write).toContain('"kind": "mcp"');
+      expect(write).toContain('"client": "ori"');
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });

@@ -313,9 +313,13 @@ export async function installOriMcp(params: {
       });
       // Persist the ownership record so a later uninstall/rerun recognizes this entry as owned;
       // a persistence failure is an explicit partial outcome, never unconditional success.
+      // Adoption also owns the entry (a foreign entry adopted becomes PDB's), so its record is
+      // persisted too (reviewed #1150 finding).
       if (
         !dryRun &&
-        (mcp.outcome === "applied" || mcp.outcome === "committed-with-error") &&
+        (mcp.outcome === "applied" ||
+          mcp.outcome === "adopted" ||
+          mcp.outcome === "committed-with-error") &&
         mcp.manifestRecord
       ) {
         const wrote = await writeInstallManifestRecord(

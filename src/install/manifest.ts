@@ -606,6 +606,18 @@ export async function removeJsonEntry(params: {
       };
     }
     doc = parsed;
+    const schemaProblem = params.adapter.validateSchema?.(doc) ?? null;
+    if (schemaProblem !== null) {
+      return {
+        action: "kept",
+        outcome: "refused",
+        ownership: "absent",
+        code: "UNSUPPORTED_SCHEMA",
+        message: `${safeFile}: ${schemaProblem}`,
+        diff: null,
+        manifestRecord: null,
+      };
+    }
   } catch (error) {
     if (isMissingError(error)) {
       return {

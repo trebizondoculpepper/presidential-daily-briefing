@@ -284,7 +284,19 @@ async function prepareIdentity(
         }),
       },
     );
+    // An unresolved or failed identity preparation (nothing persisted) must refuse with recovery;
+    // a proposed (dry-run creation) result is planned, not kept (reviewed #1150 finding).
     if (prepared.state === "unresolved" || prepared.state === "failed") {
+      if (prepared.setup.state === "persisted-with-error") {
+        // The identity write actually completed before a later step failed: report the outcome.
+        return {
+          entry: prepared.entry,
+          created: false,
+          refused:
+            prepared.setup.notices.join("; ") || "The identity was persisted but failed cleanup.",
+          retry: `pdb config set identity.triage_role implementer --entry ${targetEntry}`,
+        };
+      }
       const diagnostic = prepared.diagnostic;
       return {
         entry: null,
@@ -302,6 +314,15 @@ async function prepareIdentity(
         planned: true,
         created: false,
         refused: null,
+        retry: prepared.diagnostic?.recovery ?? null,
+      };
+    }
+    // A true setup failure means nothing was written: refuse with recovery.
+    if (prepared.setup.state === "failed") {
+      return {
+        entry: null,
+        created: false,
+        refused: prepared.diagnostic?.message ?? "IDENTITY_REQUIRED",
         retry: prepared.diagnostic?.recovery ?? null,
       };
     }
@@ -439,7 +460,10 @@ async function evaluateOriInstallPlan(params: {
     args.operation === "install" && args.transport === "stdio"
       ? (runtime.pdbMcpPath ?? (await resolveInstalledOriMcp()))
       : null;
-  if (!dryRun && args.operation === "install" && args.transport === "stdio" && !pdbMcp) {
+  // A STDIO entry uses a packaged pdb-mcp path; from a source checkout none can be resolved, so
+  // neither a plan nor an apply should present a command that cannot run (attended-installer
+  // "never a checkout or .mjs helper"). Refusing in dry-run too keeps previews truthful.
+  if (args.operation === "install" && args.transport === "stdio" && !pdbMcp) {
     const refused: OriInstallResult = {
       schemaVersion: 1,
       kind: "install-result",
@@ -457,7 +481,7 @@ async function evaluateOriInstallPlan(params: {
           message:
             "The running PDB is not an npm installation, so the installed pdb-mcp command cannot be resolved; refusing to write an entry that cannot run.",
           diff: null,
-          retry: null,
+          retry: `pdb install ori${args.global ? " --global" : ""}${args.repo ? ` --repo ${args.repo}` : ""}`,
         },
       ],
       status: {
@@ -560,9 +584,18 @@ async function evaluateOriInstallPlan(params: {
               kind: "identity" as const,
               file: null,
               action: "kept" as const,
-              outcome: "kept" as const,
+              outcome:
+                identity.planned === true
+                  ? ("planned" as const)
+                  : identity.created === true
+                    ? ("applied" as const)
+                    : ("kept" as const),
               code: null,
-              message: `Using identity entry [agents.${identityEntry}] for this repository.`,
+              message: identity.planned
+                ? `Would configure [agents.${identityEntry}] in pdb.toml with role ${args.role}.`
+                : identity.created
+                  ? `Setup/reused identity entry [agents.${identityEntry}] for this repository.`
+                  : `Using identity entry [agents.${identityEntry}] for this repository.`,
               diff: null,
               retry: null,
             },
@@ -659,7 +692,7 @@ export async function runOriInstall(
           message:
             "HTTP MCP transport is not a verified Ori integration (ori-mcp-acceptance.md records only STDIO); use STDIO.",
           diff: null,
-          retry: `pdb install ori${args.repo ? ` --repo ${args.repo}` : ""}`,
+          retry: `pdb install ori${args.global ? " --global" : ""}${args.repo ? ` --repo ${args.repo}` : ""}${args.entry ? ` --entry ${args.entry}` : ""}`,
         },
       ],
       status: {
