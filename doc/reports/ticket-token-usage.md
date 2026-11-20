@@ -38,9 +38,9 @@ Usage fields per response: `input_tokens`, `cache_read_input_tokens`, `cache_cre
 
 [`span-usage.ts`](examples/token-usage/span-usage.ts) dedupes responses by `message.id`, sums each response's counters (from `usage.iterations[]` when present) inside an interval, and reports main-loop and sidechain usage separately.
 
-**#706's claim-to-release window** (15:12:44Z to 17:09:09Z on 20 November): 83 distinct main-loop responses, 180 uncached input tokens, 31,165,616 cache-read tokens, 84,383 cache-write tokens and 50,582 output tokens, all `claude-opus-5-5`, with no sidechain responses. **This over-attributes.** During that window the same session also fixed review findings on #1149 and #1157 while #706's probes ran, so the figure is the session's usage during the span, not #706's.
+**#706's claim-to-release window** (15:12:44Z to 17:09:09Z on 20 November): 83 distinct main-loop responses, 180 uncached input tokens, 31,165,616 cache-read tokens, 84,383 cache-write tokens and 50,582 output tokens, all `claude-opus-5-5`. No counter was missing from any response. No subagent responses fall in the window: the reader checked both the parent transcript's `isSidechain` records and the session's 16 subagent transcripts in `<session>/subagents/`. **This over-attributes.** During that window the same session also fixed review findings on #1149 and #1157 while #706's probes ran, so the figure is the session's usage during the span, not #706's.
 
-**#802's own span**, measured during the work over a fixed interval (18:42:00Z to 18:43:54Z): the first read found 11 distinct main-loop responses, 24 uncached input tokens, 6,158,875 cache-read tokens, 21,934 cache-write tokens and 10,374 output tokens, with no sidechain responses. A later read of **the same interval** found 12 responses, 6,733,226 cache-read tokens and 10,804 output tokens. A response timestamped inside the interval was written to the transcript after the first read, so **the transcript lags the live session**. A reader run at submit time must mark the span incomplete and reconcile it later, never treating the first read as final. (The lag is shown by the same interval growing between reads, not by comparing against a count of tool calls, since one response can carry several tool calls.)
+**#802's own span**, a fixed interval measured during the work (18:42:00Z to 18:43:54Z, first read at or after 18:43:54Z): the first read found 11 distinct main-loop responses, 24 uncached input tokens, 6,158,875 cache-read tokens, 21,934 cache-write tokens and 10,374 output tokens. A later read of **the same interval** found 12 responses, 6,733,226 cache-read tokens and 10,804 output tokens. The added response is timestamped 18:43:51.9Z, before the first read began, so it was written to the transcript at least about 2 seconds after its own timestamp: **the transcript lags the live session**. The late response was most likely the one that issued the read, whose record is completed only after its tool call returns. A reader run at submit time is in exactly that position, so it must mark the span incomplete and reconcile it later. No counter was missing, and no subagent responses fall in the interval.
 
 ## Proposed record (not implemented)
 
@@ -78,7 +78,7 @@ One boundary record per lifecycle event, plus a computed span, both append-only,
 }
 ```
 
-Rules: a missing counter or session ID is `unknown`, never 0. The session ID itself stays local and never goes into a public ticket (record only `present`). A span is reconciled at most once per boundary pair, so a retried submit cannot double-count. Estimated USD, if ever shown, is labelled as an estimate.
+Rules: a missing counter or session ID is `unknown`, never 0. The reader counts, for each counter, the responses that lack it, so a total with missing inputs is reported as a lower bound. The session ID itself stays local and never goes into a public ticket (record only `present`). A span is reconciled at most once per boundary pair, so a retried submit cannot double-count. Estimated USD, if ever shown, is labelled as an estimate.
 
 ## Lifecycle cases
 
@@ -97,24 +97,25 @@ Rules: a missing counter or session ID is `unknown`, never 0. The session ID its
 
 ## Coverage matrix
 
-| Platform and client | Mode                    | Status                                                              |
-| ------------------- | ----------------------- | ------------------------------------------------------------------- |
-| Claude Code         | interactive CLI         | **tested** (this trial)                                             |
-| Claude Code         | `claude -p` / Agent SDK | untested: the SDK documents result-message `usage` and `modelUsage` |
-| Codex               | CLI / `exec --json`     | untested: the ticket links its noninteractive event output          |
-| Codex               | app-server              | untested                                                            |
-| Antigravity         | interactive             | untested                                                            |
-| Ori                 | own client              | untested                                                            |
-| Ori                 | wrappers                | untested                                                            |
-| Kilo                | interactive             | untested                                                            |
-| OpenCode            | interactive             | untested                                                            |
+| Platform and client | Mode                   | Status                                                              |
+| ------------------- | ---------------------- | ------------------------------------------------------------------- |
+| Claude Code         | interactive CLI        | **tested** (this trial)                                             |
+| Claude Code         | `claude -p` (headless) | untested                                                            |
+| Claude Agent SDK    | `query()` stream       | untested: the SDK documents result-message `usage` and `modelUsage` |
+| Codex               | CLI / `exec --json`    | untested: the ticket links its noninteractive event output          |
+| Codex               | app-server             | untested                                                            |
+| Antigravity         | interactive            | untested                                                            |
+| Ori                 | own client             | untested                                                            |
+| Ori                 | wrappers               | untested                                                            |
+| Kilo                | interactive            | untested                                                            |
+| OpenCode            | interactive            | untested                                                            |
 
 Each untested row needs its own small verification ticket, run in that real client and recording the client, model, version, OS and evidence. Those tickets are filed after this report is reviewed, as #802 requires.
 
 ## Sources
 
 - Claude Agent SDK, Track cost and usage: https://code.claude.com/docs/en/agent-sdk/cost-tracking. Deduplicate by message ID; per-step `output_tokens` is a placeholder; `usage` excludes subagents while `total_cost_usd` and `modelUsage` include them; USD is a client-side estimate; resumed sessions restore earlier spend.
-- Claude Code session transcripts: https://code.claude.com/docs/en/sessions.md (where transcripts are stored).
+- Claude Code session transcripts: https://code.claude.com/docs/en/sessions.md (where transcripts are stored). Subagent transcripts are written separately under `<session>/subagents/*.jsonl`, as observed in this session's directory (16 transcripts).
 
 ## Reproduce
 
