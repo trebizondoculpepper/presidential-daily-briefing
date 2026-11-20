@@ -145,6 +145,47 @@ export interface AssessmentResponse {
 }
 export type AssessmentState = ViewState<AssessmentResponse>;
 
+function validDay(v: unknown): boolean {
+  return (
+    isObject(v) &&
+    typeof v.day === "string" &&
+    isStrings(v.members) &&
+    ((v.status === "known" && typeof v.count === "number") ||
+      (v.status === "unknown" && v.count === null && typeof v.observed === "number"))
+  );
+}
+/** One daily series figure (#687): days, the partial current day, average and gaps. */
+function validSeriesFigure(v: unknown): boolean {
+  if (!isObject(v) || !isObject(v.series) || !isObject(v.average) || !isBucket(v.incomplete))
+    return false;
+  const { days, partial } = v.series;
+  return (
+    Array.isArray(days) &&
+    days.every(validDay) &&
+    isObject(partial) &&
+    typeof partial.day === "string" &&
+    typeof partial.observedThrough === "string" &&
+    typeof partial.observed === "number" &&
+    isStrings(partial.members) &&
+    isNumberOrNull(v.average.value) &&
+    typeof v.average.knownDays === "number" &&
+    typeof v.average.unknownDays === "number" &&
+    typeof v.lowerBound === "boolean"
+  );
+}
+function validVolume(v: unknown): boolean {
+  if (!isObject(v) || !isObject(v.volume) || !isObject(v.revisions)) return false;
+  const r = v.revisions;
+  return (
+    validSeriesFigure(v.volume.incoming) &&
+    validSeriesFigure(v.volume.firstAssessed) &&
+    typeof r.inWindow === "number" &&
+    typeof r.total === "number" &&
+    typeof r.lowerBound === "boolean" &&
+    isBucket(r.unknown)
+  );
+}
+
 function validMetricQueue(v: unknown): boolean {
   if (!isObject(v) || !isObject(v.unassessed) || !isObject(v.states)) return false;
   const u = v.unassessed;
@@ -174,6 +215,8 @@ export function parseAssessmentResponse(body: unknown): AssessmentResponse | nul
     !isObject(result.metrics) ||
     !validMetricQueue(result.metrics.impact) ||
     !validMetricQueue(result.metrics.complexity) ||
+    !validVolume(result.metrics.impact) ||
+    !validVolume(result.metrics.complexity) ||
     !isObject(result.coverage) ||
     !(result.coverage.note === null || typeof result.coverage.note === "string")
   )

@@ -15,6 +15,12 @@ import {
 } from "./client.js";
 import type { AssessmentState as State } from "./client.js";
 import AssessmentState from "./AssessmentState.svelte";
+import { assessmentQueueView } from "../../metrics/assessmentqueue.js";
+
+/** A real empty metric from the server's view, so volume and revisions have their true shape. */
+const empty = assessmentQueueView("2026-11-20T12:00:00.000Z", 7, [], {
+  completeFrom: "2026-01-01T00:00:00Z",
+}).metrics.impact;
 
 const day = 86_400_000;
 const bucket = (members: string[]) => ({ count: members.length, members });
@@ -27,6 +33,7 @@ const metric = (
     ages?: [number | null, number | null, number];
   } = {},
 ) => ({
+  ...empty,
   unassessed: {
     count: unassessed.length,
     medianAgeMs: extra.ages?.[0] ?? null,
@@ -40,9 +47,6 @@ const metric = (
     unknown: bucket(extra.unknown ?? []),
   },
   stateUnknown: bucket([]),
-  firstAssessmentLatency: {},
-  revisions: { total: 0, inWindow: 0, unknown: bucket([]), lowerBound: false },
-  volume: {},
 });
 const envelope = (impact: ReturnType<typeof metric>, complexity: ReturnType<typeof metric>) => ({
   schemaVersion: 1,

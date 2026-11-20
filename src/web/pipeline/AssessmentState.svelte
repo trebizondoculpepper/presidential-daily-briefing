@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { AssessmentState } from "./client.js";
   import AssessmentQueue from "./AssessmentQueue.svelte";
+  import AssessmentVolume from "./AssessmentVolume.svelte";
 
   let { state }: { state: AssessmentState } = $props();
 </script>
@@ -13,4 +14,5 @@
   <p class="error" role="alert">{state.message}</p>
 {:else}
   <AssessmentQueue response={state.response} />
+  <AssessmentVolume response={state.response} />
 {/if}
