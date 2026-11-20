@@ -6,6 +6,7 @@
  */
 import type { InventoryResult, InventoryStage } from "../../metrics/inventory.js";
 import type { WaitingImpactResult } from "../../metrics/waitingimpact.js";
+import type { AssessmentQueueResult } from "../../metrics/assessmentqueue.js";
 
 /** The stages this section shows (#684): the canonical ready, blocked and agent-claimed states. */
 export const shownStages = [
@@ -133,6 +134,67 @@ export function parseWaitingResponse(body: unknown): WaitingResponse | null {
     return null;
   const envelope = parseEnvelope(body);
   return { ...envelope, result: result as unknown as WaitingImpactResult };
+}
+
+export interface AssessmentResponse {
+  status: "complete" | "incomplete" | "error";
+  repository: string | null;
+  warnings: string[];
+  freshness: InventoryResponse["freshness"];
+  result: AssessmentQueueResult;
+}
+export type AssessmentState = ViewState<AssessmentResponse>;
+
+function validMetricQueue(v: unknown): boolean {
+  if (!isObject(v) || !isObject(v.unassessed) || !isObject(v.states)) return false;
+  const u = v.unassessed;
+  return (
+    typeof u.count === "number" &&
+    isNumberOrNull(u.medianAgeMs) &&
+    isNumberOrNull(u.oldestAgeMs) &&
+    typeof u.unknownAges === "number" &&
+    isStrings(u.members) &&
+    ["stale", "conflict", "unknown"].every((k) =>
+      isBucket((v.states as Record<string, unknown>)[k]),
+    ) &&
+    isBucket(v.stateUnknown)
+  );
+}
+
+/** Every field the assessment section reads (#686), or null. */
+export function parseAssessmentResponse(body: unknown): AssessmentResponse | null {
+  if (!isObject(body) || body.schemaVersion !== 1 || body.kind !== "serve-read") return null;
+  const result = body.result;
+  if (
+    !isObject(result) ||
+    result.kind !== "pipeline-metrics" ||
+    result.view !== "assessment-queue" ||
+    !isObject(result.window) ||
+    typeof result.window.through !== "string" ||
+    !isObject(result.metrics) ||
+    !validMetricQueue(result.metrics.impact) ||
+    !validMetricQueue(result.metrics.complexity) ||
+    !isObject(result.coverage) ||
+    !(result.coverage.note === null || typeof result.coverage.note === "string")
+  )
+    return null;
+  return { ...parseEnvelope(body), result: result as unknown as AssessmentQueueResult };
+}
+
+/**
+ * How the two metrics' missing assessments overlap (#686): issues missing impact only, complexity
+ * only, or both. Counted from the supplied members, so an issue missing both is counted once.
+ */
+export function assessmentOverlap(impact: readonly string[], complexity: readonly string[]) {
+  const i = new Set(impact);
+  const c = new Set(complexity);
+  const both = [...i].filter((m) => c.has(m));
+  return {
+    impactOnly: [...i].filter((m) => !c.has(m)).length,
+    complexityOnly: [...c].filter((m) => !i.has(m)).length,
+    both: both.length,
+    issues: new Set([...i, ...c]).size,
+  };
 }
 
 /** A duration for display: "3d 4h", "5h 12m", "42m", "<1m"; null is unknown. */
@@ -304,6 +366,13 @@ export const inventoryLoader = (
   fetcher: typeof fetch,
   report: (state: InventoryState) => void,
 ) => viewLoader(api, "inventory", parseInventoryResponse, fetcher, report);
+
+/** The assessment-health section's loader (#686). */
+export const assessmentLoader = (
+  api: string,
+  fetcher: typeof fetch,
+  report: (state: AssessmentState) => void,
+) => viewLoader(api, "assessment-queue", parseAssessmentResponse, fetcher, report);
 
 /** The waiting backlog section's loader (#685). */
 export const waitingLoader = (
