@@ -1,6 +1,7 @@
 <script lang="ts">
   import { formatAge, ticketLink, waitingGroupOrder } from "./client.js";
   import type { WaitingResponse } from "./client.js";
+  import Freshness from "./Freshness.svelte";
 
   let { response }: { response: WaitingResponse } = $props();
   /** Members listed per drill-down; the rest are counted, never silently dropped. */
@@ -117,4 +118,5 @@
       backlog.
     </p>
   {/if}
+  <Freshness freshness={response.freshness} computedAt={result.observedAt} />
 </section>

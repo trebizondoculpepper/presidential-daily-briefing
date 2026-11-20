@@ -256,7 +256,24 @@ export function viewLoader<R>(
       repository === loaded ? Promise.resolve() : read(repository),
     // Refresh asks the server for fresh facts, not its cached entry (#1141 review).
     refresh: () => read(loaded ?? null, true),
+    /** Re-read the current project through the cache (after another section refreshed it). */
+    reload: () => read(loaded ?? null, false),
   };
+}
+
+/**
+ * One Refresh for several sections that share the server's metrics collection (#1142 review):
+ * the first bypasses the cache and collects fresh facts once; the others then re-read through
+ * the cache that collection just filled. Forced reads never join each other on the server, so
+ * refreshing every section with `refresh=true` would collect the same facts once per section.
+ */
+export async function refreshSections(
+  sections: readonly { refresh(): Promise<void>; reload(): Promise<void> }[],
+): Promise<void> {
+  const [first, ...rest] = sections;
+  if (!first) return;
+  await first.refresh();
+  await Promise.all(rest.map((s) => s.reload()));
 }
 
 /** The inventory section's fetch (#684). */

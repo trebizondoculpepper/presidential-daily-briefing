@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { inventoryLoader, selectedRepository, waitingLoader } from "./client.js";
+  import { inventoryLoader, refreshSections, selectedRepository, waitingLoader } from "./client.js";
   import type { InventoryState, WaitingState as Waiting } from "./client.js";
   import PipelineState from "./PipelineState.svelte";
   import WaitingState from "./WaitingState.svelte";
@@ -21,7 +21,8 @@
         waiting = next;
       }),
     ];
-    refresh = () => sections.forEach((s) => void s.refresh());
+    // One fresh collection shared by both sections (#1142 review).
+    refresh = () => void refreshSections(sections);
     const load = () => {
       const repository = selectedRepository(window.location.search);
       sections.forEach((s) => void s.load(repository));

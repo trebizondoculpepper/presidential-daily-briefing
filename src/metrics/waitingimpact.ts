@@ -143,7 +143,8 @@ export function waitingImpactView(
     pushToBucket(group.total, t.member);
     const createdMs = Date.parse(createdIsoOf(t) ?? "");
     for (const g of [totals, group]) {
-      if (Number.isFinite(createdMs)) ages.get(g)!.push(Math.max(0, nowMs - createdMs));
+      // As in the inventory, a missing or future creation time is an unknown age, not zero.
+      if (Number.isFinite(createdMs) && createdMs <= nowMs) ages.get(g)!.push(nowMs - createdMs);
       else {
         g.age.unknownCount += 1;
         g.age.unknownMembers.push(t.member);

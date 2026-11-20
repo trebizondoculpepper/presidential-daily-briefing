@@ -133,4 +133,44 @@ describe("waiting backlog by impact (#685)", () => {
       "/api/v1/metrics?view=waiting-impact&repo=o%2Fr&refresh=true",
     ]);
   });
+
+  it("refreshes both sections with one fresh collection (#1142 review)", async () => {
+    const calls: string[] = [];
+    const fetcher = (async (input: RequestInfo | URL) => {
+      calls.push(String(input));
+      return new Response(JSON.stringify(envelope([])), { status: 200 });
+    }) as typeof fetch;
+    const { inventoryLoader, refreshSections } = await import("./client.js");
+    const sections = [
+      inventoryLoader("/api/v1/metrics", fetcher, () => {}),
+      waitingLoader("/api/v1/metrics", fetcher, () => {}),
+    ];
+    for (const s of sections) await s.load("o/r");
+    calls.length = 0;
+    await refreshSections(sections);
+    // Only the first bypasses the cache; the second reads the collection it just refreshed.
+    expect(calls).toEqual([
+      "/api/v1/metrics?view=inventory&repo=o%2Fr&refresh=true",
+      "/api/v1/metrics?view=waiting-impact&repo=o%2Fr",
+    ]);
+  });
+
+  it("shows when the backlog's facts were collected (#1142 review)", () => {
+    const body = {
+      ...envelope([ticket(1, ["estimated", "L"], "ready", 1)]),
+      freshness: {
+        source: "cached",
+        observedAt: "2026-11-20T11:40:00Z",
+        ageSeconds: 1200,
+        ttlSeconds: 900,
+        expiresAt: "x",
+        stale: true,
+        refreshError: null,
+      },
+    };
+    const out = html({ status: "ready", response: parseWaitingResponse(body)! });
+    expect(out).toContain('Facts collected at <time datetime="2026-11-20T11:40:00Z">');
+    expect(out).toContain("(cached, 20m old, stale)");
+    expect(out).toContain("figures computed at");
+  });
 });

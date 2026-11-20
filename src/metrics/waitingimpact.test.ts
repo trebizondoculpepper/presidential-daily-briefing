@@ -188,4 +188,25 @@ describe("waitingImpactView", () => {
       knownCount: 0,
     });
   });
+
+  it("counts a future creation time as an unknown age, as the inventory does (#1142 review)", () => {
+    const future = new Date(Date.parse(now) + 60_000).toISOString();
+    const res = waitingImpactView(
+      now,
+      [
+        ticket(
+          "o/r#1",
+          { state: "estimated", size: "L" },
+          { stage: "ready", createdAt: future, labelsComplete: true },
+        ),
+      ],
+      coverage,
+    );
+    expect(res.groups.L!.age).toMatchObject({
+      knownCount: 0,
+      unknownCount: 1,
+      unknownMembers: ["o/r#1"],
+      medianMs: null,
+    });
+  });
 });
