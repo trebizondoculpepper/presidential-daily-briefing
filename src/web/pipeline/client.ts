@@ -75,6 +75,40 @@ function parseEnvelope(body: Record<string, unknown>): Omit<InventoryResponse, "
   };
 }
 
+const stalledBuckets = ["knownWait", "blocked", "noRecordedProgress", "unknownActivity"] as const;
+function validDetail(v: unknown): boolean {
+  return (
+    isObject(v) &&
+    (stalledBuckets as readonly unknown[]).includes(v.bucket) &&
+    (v.agent === null || typeof v.agent === "string") &&
+    (v.humanOwners === null || isStrings(v.humanOwners)) &&
+    (v.lastActivityAt === null || typeof v.lastActivityAt === "string") &&
+    (v.waitReason === null || typeof v.waitReason === "string")
+  );
+}
+/** The stalled-work fields (#688): threshold, cutoff, buckets and per-ticket details. */
+function validStalled(v: unknown): boolean {
+  return (
+    isObject(v) &&
+    typeof v.thresholdHours === "number" &&
+    typeof v.cutoff === "string" &&
+    stalledBuckets.every((b) => isBucket(v[b])) &&
+    isObject(v.details) &&
+    Object.values(v.details).every(validDetail)
+  );
+}
+
+/** The stalled tickets of one bucket with their details, in the server's order (#688). */
+export function stalledRows(
+  stalled: InventoryResult["stalled"],
+  bucket: (typeof stalledBuckets)[number],
+): { member: string; detail: InventoryResult["stalled"]["details"][string] | null }[] {
+  return stalled[bucket].members.map((member) => ({
+    member,
+    detail: stalled.details[member] ?? null,
+  }));
+}
+
 /** Every field the section reads, so a malformed result is a format error, never a broken render. */
 export function parseInventoryResponse(body: unknown): InventoryResponse | null {
   if (!isObject(body) || body.schemaVersion !== 1 || body.kind !== "serve-read") return null;
@@ -94,6 +128,7 @@ export function parseInventoryResponse(body: unknown): InventoryResponse | null 
     return null;
   const stages = result.stages;
   if (!shownStages.every((s) => validStage(stages[s])) || !validStage(stages.unknown)) return null;
+  if (!validStalled(result.stalled)) return null;
   return { ...parseEnvelope(body), result: result as unknown as InventoryResult };
 }
 

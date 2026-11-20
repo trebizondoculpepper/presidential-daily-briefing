@@ -382,6 +382,8 @@ export async function readMetrics(
         }
       }
       let waiting: boolean | null = null;
+      // #688: the recorded reason of a known wait, from the claim's own wait record.
+      let waitReason: string | null = null;
       if (ownerLabels.length === 1 && commentsComplete) {
         const ownerLabel = ownerLabels[0]!;
         const ownerAgent = ownerLabel.slice(workflow.ownerPrefix.length);
@@ -425,6 +427,14 @@ export async function readMetrics(
                 : retained.activity.state === "active"
                   ? false
                   : null;
+            if (retained.activity.state === "waiting") {
+              const b = retained.activity.blocker;
+              const on =
+                b.kind === "human"
+                  ? `human question on ${b.repository}#${b.issue}`
+                  : `dependency ${b.repository}#${b.issue}`;
+              waitReason = `${retained.activity.reason} (waiting on ${on})`;
+            }
           } catch (error) {
             if (rt.signal?.aborted) throw error;
             waiting = null;
@@ -446,6 +456,12 @@ export async function readMetrics(
         waiting,
         claimed: ownerLabels.length > 0,
         labelsComplete,
+        agent:
+          labelsComplete && ownerLabels.length === 1
+            ? ownerLabels[0]!.slice(workflow.ownerPrefix.length)
+            : null,
+        humanOwners: issue.assignees ?? null,
+        waitReason,
       };
     }
     tickets.push({

@@ -22,6 +22,8 @@ export interface HistoryIssue {
   openBlockers?: number | null;
   /** Open closing PR count when read completely; null when absent/truncated. */
   openClosingPrs?: number | null;
+  /** Assignee logins when read completely (#688); null when absent or truncated (unknown). */
+  assignees?: string[] | null;
 }
 
 /** One merged pull request and the same-repository issues it closes. */
@@ -60,7 +62,7 @@ export interface HistoryReads {
 const commentFields =
   "databaseId url body createdAt author{__typename login} lastEditedAt includesCreatedEdit editor{__typename login}";
 const issueFields =
-  "number createdAt updatedAt lastEditedAt state closedAt stateReason issueDependenciesSummary{blockedBy} closedByPullRequestsReferences(first:10,includeClosedPrs:false){nodes{number state} pageInfo{hasNextPage}} labels(first:100){nodes{name} pageInfo{hasNextPage}} comments(first:100){totalCount nodes{" +
+  "number createdAt updatedAt lastEditedAt state closedAt stateReason issueDependenciesSummary{blockedBy} closedByPullRequestsReferences(first:10,includeClosedPrs:false){nodes{number state} pageInfo{hasNextPage}} labels(first:100){nodes{name} pageInfo{hasNextPage}} assignees(first:20){nodes{login} pageInfo{hasNextPage}} comments(first:100){totalCount nodes{" +
   commentFields +
   "}}";
 const issuePage = (states: string, order: string) =>
@@ -125,6 +127,14 @@ function issueOf(v: unknown): HistoryIssue {
         ? v.closedByPullRequestsReferences.nodes.filter(
             (n) => isRecord(n) && (n.state === undefined || n.state === "OPEN"),
           ).length
+        : null,
+    assignees:
+      isRecord(v.assignees) &&
+      isRecord(v.assignees.pageInfo) &&
+      v.assignees.pageInfo.hasNextPage === false &&
+      Array.isArray(v.assignees.nodes) &&
+      v.assignees.nodes.every((n) => isRecord(n) && str(n.login))
+        ? v.assignees.nodes.map((n) => (n as { login: string }).login)
         : null,
   };
 }

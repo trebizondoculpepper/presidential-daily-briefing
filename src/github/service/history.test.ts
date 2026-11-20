@@ -72,4 +72,21 @@ describe("typed history reads (#931)", () => {
     expect(await reads.issue("o/r", 1)).toBeNull();
     expect(await reads.pullState("o/r", 1)).toBeNull();
   });
+
+  it("reads assignees only when complete; truncated or absent is unknown (#688)", async () => {
+    const read = async (assignees: unknown) =>
+      (
+        await historyReads(async () => page("issues", [issue({ assignees })])).openIssues(
+          "o/r",
+          null,
+        )
+      ).nodes[0]!.assignees;
+    expect(await read({ nodes: [{ login: "salim" }], pageInfo: { hasNextPage: false } })).toEqual([
+      "salim",
+    ]);
+    expect(await read({ nodes: [], pageInfo: { hasNextPage: false } })).toEqual([]);
+    expect(await read({ nodes: [{ login: "a" }], pageInfo: { hasNextPage: true } })).toBeNull();
+    expect(await read(undefined)).toBeNull();
+    expect(await read({ nodes: [{}], pageInfo: { hasNextPage: false } })).toBeNull();
+  });
 });
