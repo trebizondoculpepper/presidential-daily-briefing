@@ -1,13 +1,25 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { inventoryLoader, refreshSections, selectedRepository, waitingLoader } from "./client.js";
-  import type { InventoryState, WaitingState as Waiting } from "./client.js";
+  import {
+    assessmentLoader,
+    inventoryLoader,
+    refreshSections,
+    selectedRepository,
+    waitingLoader,
+  } from "./client.js";
+  import type {
+    AssessmentState as Assessment,
+    InventoryState,
+    WaitingState as Waiting,
+  } from "./client.js";
+  import AssessmentState from "./AssessmentState.svelte";
   import PipelineState from "./PipelineState.svelte";
   import WaitingState from "./WaitingState.svelte";
 
   let { api }: { api: string } = $props();
   let inventory: InventoryState = $state({ status: "loading" });
   let waiting: Waiting = $state({ status: "loading" });
+  let assessment: Assessment = $state({ status: "loading" });
   let refresh = $state(() => {});
 
   onMount(() => {
@@ -19,6 +31,9 @@
       }),
       waitingLoader(api, fetcher, (next) => {
         waiting = next;
+      }),
+      assessmentLoader(api, fetcher, (next) => {
+        assessment = next;
       }),
     ];
     // One fresh collection shared by both sections (#1142 review).
@@ -37,10 +52,13 @@
   <button
     type="button"
     onclick={() => refresh()}
-    disabled={inventory.status === "loading" || waiting.status === "loading"}
+    disabled={inventory.status === "loading" ||
+      waiting.status === "loading" ||
+      assessment.status === "loading"}
   >
     Refresh
   </button>
 </div>
 <PipelineState state={inventory} />
 <WaitingState state={waiting} />
+<AssessmentState state={assessment} />
