@@ -78,7 +78,15 @@ function parseRow(
   if (!id || !kind || !target) return null;
   const subject = subjects.get(target) ?? {};
   const why = isObject(a.why) ? str(a.why.text) : null;
-  const size = (v: unknown): string | null => (isObject(v) ? str(v.size) : null);
+  // The size with its assessment state when not current (stale, unassessed, ...), so an outdated
+  // estimate is never shown as a current one (#1164 review).
+  const size = (v: unknown): string | null => {
+    if (!isObject(v)) return null;
+    const value = str(v.size);
+    const state = str(v.state);
+    if (!value) return state && state !== "current" ? state : null;
+    return state && state !== "current" ? `${value} (${state})` : value;
+  };
   return {
     key: `${repository.toLowerCase()} ${id}`,
     id,

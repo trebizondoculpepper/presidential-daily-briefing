@@ -408,3 +408,22 @@ describe("work preview: supplied commands and drill-down context (#1164 review)"
     );
   });
 });
+
+describe("work preview: assessment state (#1164 review)", () => {
+  it("qualifies a stale or missing estimate instead of showing it as current", () => {
+    const row = parseWorkQueue(
+      envelope([
+        {
+          ...action(1),
+          impact: { size: "L", state: "stale" },
+          complexity: { size: null, state: "unassessed" },
+        } as never,
+      ]),
+    )!.rows[0]!;
+    expect(row).toMatchObject({ impact: "L (stale)", complexity: "unassessed" });
+    const current = parseWorkQueue(
+      envelope([{ ...action(1), impact: { size: "M", state: "current" } } as never]),
+    )!.rows[0]!;
+    expect(current.impact).toBe("M");
+  });
+});
