@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { resolve } from "node:path";
 import { buildPolicy } from "../../../../src/rules/datalog/build.js";
 import { rulesHash } from "../../../../src/rules/datalog/engine.js";
+import { rulesHashOf } from "../../../../src/rules/datalog/hash.js";
 import { readScenarios, runScenario } from "../../../../src/rules/datalog/runner.js";
 
 const source = new URL("../../../../src/rules/datalog/scenarios/policy-cases.edn", import.meta.url);
@@ -92,8 +93,10 @@ export function fixtures(): Fixture[] {
     scenarioHash: string;
     waitingScenarioHash: string;
   };
+  const policy = buildPolicy();
   if (
     frozen.rulesHash !== rulesHash ||
+    frozen.rulesHash !== rulesHashOf(policy) ||
     frozen.scenarioHash !== hash(text) ||
     frozen.waitingScenarioHash !== hash(waitingText)
   )
@@ -102,7 +105,6 @@ export function fixtures(): Fixture[] {
     ...readScenarios(text, fileURLToPath(source)),
     ...readScenarios(waitingText, fileURLToPath(waitingSource)),
   ];
-  const policy = buildPolicy();
   return selections.map(([id, scenario]) => {
     const selected = scenarios.find((s) => s.id === scenario);
     if (!selected) throw new Error(`Missing native scenario ${scenario}`);
