@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
 import {
-  CLAIM_OBLIGATIONS,
   RULE_REMINDERS_MAX_CODE_POINTS,
   RULE_REMINDERS_MAX_ITEMS,
   RULE_REMINDERS_SCHEMA_VERSION,
   claimObligationsHash,
+  obligationsHashOf,
   formatActionRuleRemindersText,
   selectClaimRuleReminders,
   selectNativeClaimObligations,
@@ -269,7 +269,6 @@ describe("native claim-time obligations and action-reminder selection (#1029)", 
     expect(tiny.omissions.count).toBe(tiny.selectedIds.length);
 
     expect(RULE_REMINDERS_MAX_CODE_POINTS).toBe(2000);
-    expect(CLAIM_OBLIGATIONS.length).toBeGreaterThan(0);
   });
 
   it("preserves specific incomplete-evidence denial categories without guessing", () => {
@@ -436,6 +435,25 @@ describe("native claim-time obligations and action-reminder selection (#1029)", 
     // The shipped policy (no TS edit) still applies it to every role's claimed selection.
     const shipped = selectClaimRuleReminders({ role: "designer", outcome: "claimed" });
     expect(shipped.selectedIds).toContain("O-CLAIM-BLOCKERS");
+  });
+
+  it("derives the obligations identity from the native policy records (#1115)", () => {
+    // No TypeScript catalog carries claim obligations any more: the identity hashes the compiled
+    // obligations.edn records, so an authored applicability or purpose edit changes it.
+    const bundle = buildPolicy();
+    const base = obligationsHashOf(bundle);
+    expect(base).toBe(claimObligationsHash());
+    expect(base).toMatch(/^[a-f0-9]{64}$/);
+    expect(obligationsHashOf(structuredClone(bundle))).toBe(base);
+
+    const reworded = structuredClone(bundle);
+    reworded.obligations[0]!.purpose = `${reworded.obligations[0]!.purpose} (edited)`;
+    expect(obligationsHashOf(reworded)).not.toBe(base);
+
+    const narrowed = structuredClone(bundle);
+    const record = narrowed.obligations.find((o) => o.id === "O-CLAIM-PUBLISH-EARLY")!;
+    record.work = [...record.work, "observational"];
+    expect(obligationsHashOf(narrowed)).not.toBe(base);
   });
 
   it("is source-driven: editing an authored role restriction changes the designer matrix (#1113)", () => {

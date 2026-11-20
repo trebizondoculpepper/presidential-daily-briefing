@@ -13,7 +13,6 @@ import { evaluatePolicy } from "./engine.js";
 import type { Datom } from "datascript";
 import type { PolicyBundle } from "./bundle.js";
 import type { EnglishPolicy } from "./english-model.js";
-import { purposeText } from "./narration.js";
 
 const sanitizeText = (value: string): string =>
   Array.from(value.replace(/[\r\n\t]+/g, " "))
@@ -32,103 +31,27 @@ export type ClaimOutcome = "claimed" | "noop" | "denied" | "partial";
 export type RuleReminderCategory = "admission" | "obligation";
 export type RuleReminderSourceKind = "decision" | "denial" | "procedural-obligation";
 
-export interface ProceduralObligation {
-  readonly id: string;
-  readonly sourceFile: string;
-  readonly roles: readonly ("implementer" | "designer" | "human")[] | null;
-  readonly outcomes: readonly ClaimOutcome[];
-  readonly purpose: string;
-}
-
 /**
- * Structured procedural obligations authored in the rules component (#1029).
- * Kept distinct from formally validated Datalog decisions and denials.
+ * #1115: the obligations identity hashes the compiled native records (policy/obligations.edn via
+ * the policy bundle) and the selector that applies them, never a TypeScript catalog. A policy
+ * applicability edit therefore changes the identity the claim receipt reports.
  */
-export const CLAIM_OBLIGATIONS: readonly ProceduralObligation[] = [
-  {
-    id: "O-CLAIM-ACCEPTANCE",
-    sourceFile: "src/rules/datalog/action-reminders.ts",
-    roles: null,
-    outcomes: ["claimed", "noop"],
-    purpose:
-      "Follow the ticket acceptance criteria and applicable architecture contracts before considering the work complete.",
-  },
-  {
-    id: "O-CLAIM-OWNERSHIP",
-    sourceFile: "src/rules/datalog/action-reminders.ts",
-    roles: null,
-    outcomes: ["claimed", "noop", "denied", "partial"],
-    purpose:
-      "Respect human ownership and other agents' active claims; never overwrite or displace another owner's work.",
-  },
-  {
-    id: "O-CLAIM-BLOCKERS",
-    sourceFile: "src/rules/datalog/action-reminders.ts",
-    roles: null,
-    outcomes: ["claimed", "noop"],
-    purpose:
-      "Surface blockers, missing design decisions, or unresolved questions explicitly instead of guessing.",
-  },
-  {
-    id: "O-CLAIM-REMOVAL",
-    sourceFile: "src/rules/datalog/action-reminders.ts",
-    roles: null,
-    outcomes: ["claimed", "noop", "partial"],
-    purpose:
-      "Preserve useful unfinished work and share a truthful handoff if your claim is released or removed.",
-  },
-  {
-    id: "O-CLAIM-DELIVERABLE",
-    sourceFile: "src/rules/datalog/action-reminders.ts",
-    roles: ["implementer"],
-    outcomes: ["claimed", "noop"],
-    purpose:
-      "For an implementation deliverable, retain responsibility through review, CI checks, fixes, and merging.",
-  },
-  {
-    id: "O-CLAIM-NOOP-CONTINUE",
-    sourceFile: "src/rules/datalog/action-reminders.ts",
-    roles: null,
-    outcomes: ["noop"],
-    purpose:
-      "This ticket is already claimed by you (no-op); continue from the existing work rather than re-claiming.",
-  },
-  {
-    id: "O-CLAIM-PARTIAL-RECOVERY",
-    sourceFile: "src/rules/datalog/action-reminders.ts",
-    roles: null,
-    outcomes: ["partial"],
-    purpose:
-      "Claim writes were partial or unverified; inspect the live ticket state and retry only the missing steps.",
-  },
-  {
-    id: "O-CLAIM-DENIED-RECOVERY",
-    sourceFile: "src/rules/datalog/action-reminders.ts",
-    roles: null,
-    outcomes: ["denied"],
-    purpose:
-      "Claim was refused; do not start work until the reported prerequisite or ownership conflict is resolved.",
-  },
-];
-
-for (const obligation of CLAIM_OBLIGATIONS) {
-  purposeText(obligation.purpose, `action-reminders:${obligation.id}`);
+export function obligationsHashOf(policy: PolicyBundle = policyBundle()): string {
+  return createHash("sha256")
+    .update(
+      JSON.stringify({
+        obligations: policy.obligations,
+        refusalMapper: refusalErrorToRuleId.toString(),
+        ownClaimSelector: ownClaimDecisionId.toString(),
+        selector: selectNativeClaimObligations.toString(),
+      }),
+    )
+    .digest("hex");
 }
 
 let cachedObligationsHash: string | undefined;
 export function claimObligationsHash(): string {
-  if (!cachedObligationsHash) {
-    cachedObligationsHash = createHash("sha256")
-      .update(
-        JSON.stringify({
-          obligations: CLAIM_OBLIGATIONS,
-          refusalMapper: refusalErrorToRuleId.toString(),
-          ownClaimSelector: ownClaimDecisionId.toString(),
-          selector: selectClaimRuleReminders.toString(),
-        }),
-      )
-      .digest("hex");
-  }
+  if (!cachedObligationsHash) cachedObligationsHash = obligationsHashOf();
   return cachedObligationsHash;
 }
 
