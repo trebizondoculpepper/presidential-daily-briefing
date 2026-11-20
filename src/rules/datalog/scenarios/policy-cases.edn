@@ -17,7 +17,7 @@
               :facts {"impact" "L" "complexity" "S" "impactState" "current" "complexityState" "current" "head" "not-a-pr" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "readiness" "status:ready"}
               :overridden ["D-ORDINARY"] :unlocks 0 :unknown [] :other-claims []}
             {:subject 101 :rule "D-COMPLEXITY-BOOST" :kind "estimate-complexity" :band 5
-              :why "High impact L, but effort is unassessed; estimate it to test implementation value."
+              :why "High impact L, but effort is unassessed; estimate it to test implementation value. If its dependencies were done, could work begin? Yes: estimate with a rationale. No: pdb refine request with a question."
               :facts {"impact" "L" "complexity" "unknown" "impactState" "current" "complexityState" "unassessed" "head" "not-a-pr" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "readiness" "status:ready"}
               :overridden ["D-COMPLEXITY"] :unlocks 0 :unknown [] :other-claims []}
             {:subject 101 :rule "D-ORDINARY" :kind "implement" :band 6
@@ -64,7 +64,7 @@
           {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 1 "blocking-complete" true "impact-state" "unassessed" "impact-size" "unknown" "complexity-state" "unassessed" "complexity-size" "unknown" "head" "not-a-pr" "label" "status:ready" "blocker" 101}
           {:e 101 "state" "OPEN" "target" "https://github.com/o/r/issues/2"}]
   :expect {:actions [{:subject 100 :rule "D-COMPLEXITY" :kind "estimate-complexity" :band 5
-              :why "Effort is unassessed; sizing improves the evidence for choosing work."
+              :why "Effort is unassessed; sizing improves the evidence for choosing work. If its dependencies were done, could work begin? Yes: estimate with a rationale. No: pdb refine request with a question."
               :facts {"impact" "unknown" "complexity" "unknown" "impactState" "unassessed" "complexityState" "unassessed" "head" "not-a-pr" "labelsComplete" true "nativeComplete" true "openBlockers" 1 "readiness" "status:ready"}
               :overridden [] :unlocks 0 :unknown [] :other-claims []}
             {:subject 100 :rule "D-IMPACT" :kind "assess-impact" :band 5}]
@@ -214,11 +214,11 @@
               :facts {"impact" "unknown" "complexity" "unknown" "impactState" "unknown" "complexityState" "unknown" "head" "not-a-pr" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "decisionLabel" "design:decision-needed"}
               :overridden [] :unlocks 0 :unknown [] :other-claims []}
             {:subject 101 :rule "D-IMPACT-BOOST" :kind "assess-impact" :band 5
-              :why "Complexity S is small, but benefit is unassessed; assess impact to test for an easy win."
+              :why "Complexity S is small, but benefit is unassessed; assess impact to test for an easy win. If its dependencies were done, could work begin? Yes: estimate with a rationale. No: pdb refine request with a question."
               :facts {"impact" "unknown" "complexity" "S" "impactState" "unassessed" "complexityState" "current" "head" "not-a-pr" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "readiness" "status:ready"}
               :overridden ["D-IMPACT"] :unlocks 0 :unknown [] :other-claims []}
             {:subject 102 :rule "D-IMPACT" :kind "assess-impact" :band 5
-              :why "Benefit is unassessed; assess it before comparing implementation value."
+              :why "Benefit is unassessed; assess it before comparing implementation value. If its dependencies were done, could work begin? Yes: estimate with a rationale. No: pdb refine request with a question."
               :facts {"impact" "unknown" "complexity" "unknown" "impactState" "unassessed" "complexityState" "unassessed" "head" "not-a-pr" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "readiness" "status:ready"}
               :overridden [] :unlocks 0 :unknown [] :other-claims []}
             {:subject 102 :rule "D-COMPLEXITY" :kind "estimate-complexity" :band 5}
