@@ -1184,7 +1184,11 @@ export async function setIdentity(
       }
       agents[entry] = table;
     }
-    if (options.reuseExistingIdentity && field === "name") {
+    // Keeping an entry's own existing name (binding a new session to it) assigns no new name, so
+    // other entries sharing it (#1047: preserved session aliases of a migrated default) are not
+    // a new duplicate; only a name newly given to this entry is checked.
+    const keepsOwnName = before.entryExists && before.name === nextValue;
+    if (options.reuseExistingIdentity && field === "name" && !keepsOwnName) {
       if (namesInUse(document, entry).has(nextValue.toLowerCase()))
         throw new ConfigError(
           "conflict",
@@ -1250,6 +1254,8 @@ async function replaceIdentityFile(
   text: string,
   temporaryName: string,
   beforeRename: () => Promise<void>,
+  /** Called just before the rename: from here on the file may have changed. */
+  onWrite?: () => void,
 ): Promise<void> {
   const path = join(root, IDENTITY_FILE);
   // The file holds private names: keep it private. A new file is 0600; a replaced file keeps
@@ -1270,6 +1276,7 @@ async function replaceIdentityFile(
   try {
     if ((await fs.readText(path)) !== raw) throw conflict();
     await beforeRename();
+    onWrite?.();
     await fs.rename(temporary, path);
   } catch (error) {
     await fs.remove(temporary).catch(() => undefined);
@@ -1316,7 +1323,10 @@ export async function migrateSessionIdentity(
   target: IdentityTarget,
   harness: string,
   bindingPrefix: string,
-  options: Pick<IdentityWriteOptions, "fs" | "git" | "token" | "lockTiming"> = {},
+  options: Pick<IdentityWriteOptions, "fs" | "git" | "token" | "lockTiming"> & {
+    /** Called just before the identity file is replaced, so callers can report partial writes. */
+    readonly onWrite?: () => void;
+  } = {},
 ): Promise<SessionMigration> {
   validateEntryKey(harness);
   const fs = options.fs ?? nodeFileSystem;
@@ -1441,14 +1451,22 @@ export async function migrateSessionIdentity(
       }
       const text = serializeIdentityDocument(document);
       assertLosslessRewrite(raw, text);
-      await replaceIdentityFile(target.root, fs, raw, text, temporaryName, async () => {
-        if ((await fs.readText(join(target.root, LEGACY_IDENTITY_FILE))) !== legacyNames.raw)
-          throw new ConfigError(
-            "conflict",
-            `${LEGACY_IDENTITY_FILE} changed while the default identity was being created; nothing was written.`,
-            "Retry the command.",
-          );
-      });
+      await replaceIdentityFile(
+        target.root,
+        fs,
+        raw,
+        text,
+        temporaryName,
+        async () => {
+          if ((await fs.readText(join(target.root, LEGACY_IDENTITY_FILE))) !== legacyNames.raw)
+            throw new ConfigError(
+              "conflict",
+              `${LEGACY_IDENTITY_FILE} changed while the default identity was being created; nothing was written.`,
+              "Retry the command.",
+            );
+        },
+        options.onWrite,
+      );
       // Readback: the canonical entry must now hold exactly the agreed pair.
       const after = recordFor(parseIdentityDocument((await fs.readText(path)) ?? ""), harness);
       if (after.name !== decision.name || after.triageRole !== decision.role)

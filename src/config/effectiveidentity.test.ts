@@ -248,6 +248,52 @@ describe("effective identity preparation (#677)", () => {
       expect((await readIdentityBindings(f.root, f.fs)).get(b.key)).toBe("codex");
     }));
 
+  it("after migration, a brand-new thread binds to the default despite preserved aliases (#1189 review)", async () =>
+    fixture(async (f) => {
+      const b = f.binding(env.CODEX_THREAD_ID);
+      const sessionEntry = `codex.session_${"a".repeat(64)}`;
+      await f.fs.writeText(
+        f.file,
+        `schemaVersion = 1\n[agents."${sessionEntry}"]\nname = "earlier_agent"\ntriage_role = "designer"\n[agentBindings]\n"${b.key}" = "${sessionEntry}"\n`,
+      );
+      expect(await run(f, { role: undefined })).toMatchObject({ agent: "earlier_agent" });
+      // A thread that was never bound before: it must bind to codex, not collide with the alias.
+      const fresh = await run(
+        f,
+        { role: undefined },
+        { env: { ...env, CODEX_THREAD_ID: "brand-new-thread" } },
+      );
+      expect(fresh).toMatchObject({ state: "resolved", agent: "earlier_agent", entry: "codex" });
+      expect(
+        (await readIdentityBindings(f.root, f.fs)).get(f.binding("brand-new-thread").key),
+      ).toBe("codex");
+    }));
+
+  it("reports a migration that replaced the file but then failed as persisted with error (#1189 review)", async () =>
+    fixture(async (f) => {
+      const b = f.binding(env.CODEX_THREAD_ID);
+      const sessionEntry = `codex.session_${"b".repeat(64)}`;
+      await f.fs.writeText(
+        f.file,
+        `schemaVersion = 1\n[agents."${sessionEntry}"]\nname = "earlier_agent"\ntriage_role = "designer"\n[agentBindings]\n"${b.key}" = "${sessionEntry}"\n`,
+      );
+      const result = await run(
+        f,
+        { role: undefined },
+        {
+          fs: {
+            ...f.fs,
+            setFileMode: async () => {
+              throw new Error("chmod failed");
+            },
+          },
+        },
+      );
+      expect(result.state).toBe("failed");
+      expect(result.setup).toMatchObject({ state: "persisted-with-error", persisted: true });
+      expect(result.setup.notices.join(" ")).toContain("earlier_agent");
+    }));
+
   it("two sessions of one harness resolve to the same default identity (#1047)", async () =>
     fixture(async (f) => {
       const settled = await Promise.allSettled([

@@ -278,6 +278,10 @@ export async function prepareEffectiveIdentity(
           {
             fs,
             git,
+            // A migration that replaced the file then failed is a partial write, reported as such.
+            onWrite: () => {
+              attempted = true;
+            },
           },
         );
         if (migration.state === "migrated")
