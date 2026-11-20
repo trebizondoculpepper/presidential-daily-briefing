@@ -56,6 +56,7 @@ import {
   previewRefinementRequest,
   previewRefinementResolve,
   nativeRefinementGuidance,
+  projectedResolveFacts,
   readRefinementStatus,
   requestRefinement,
   resolveRefinement,
@@ -2155,9 +2156,17 @@ async function run(
       let native: RefinementGuidance | null = null;
       if (result.ok)
         try {
-          const facts = statusFacts(
-            await readRefinementStatus(repository, values.number, agent, query, permission),
+          const read = await readRefinementStatus(
+            repository,
+            values.number,
+            agent,
+            query,
+            permission,
           );
+          // A dry run writes nothing: evaluate the state the planned resolve would produce.
+          const facts = values.dryRun
+            ? projectedResolveFacts(read, values.request)
+            : statusFacts(read);
           native = facts ? nativeRefinementGuidance(facts) : null;
         } catch {
           native = null;

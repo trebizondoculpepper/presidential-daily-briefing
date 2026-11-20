@@ -313,4 +313,27 @@ describe("refine resolve (#1096)", () => {
     expect(code).toBe(2);
     expect(receipt.guidance).toMatchObject({ rule: null, nextActor: null });
   });
+
+  it("gives a dry run the next step after the planned resolve, not the current one (#1139 review)", async () => {
+    const w = world();
+    w.add(1);
+    const op = await request(w);
+    await w.answer(1, w.questionOf(1));
+    const dry = JSON.parse((await resolve(w, op, ["--dry-run", "--json"])).text);
+    expect(dry.guidance).toMatchObject({ rule: "D-REESTIMATE", nextActor: "estimator" });
+    expect(dry.guidance.pickup).toBe(denialText("D-DENY-REESTIMATE"));
+    expect(w.issues.get(1)!.comments).toHaveLength(2);
+  });
+
+  it("withholds re-estimation while the index label disagrees after a failed removal (#1139 review)", async () => {
+    const w = world();
+    w.add(1);
+    const op = await request(w);
+    await w.answer(1, w.questionOf(1));
+    w.failing.add("labels");
+    const partial = JSON.parse((await resolve(w, op, ["--json"])).text);
+    expect(partial.exitCode).toBe(2);
+    expect(partial.guidance.rule).not.toBe("D-REESTIMATE");
+    expect(partial.guidance.rule).toBe("D-REFINE-INCOMPLETE");
+  });
 });

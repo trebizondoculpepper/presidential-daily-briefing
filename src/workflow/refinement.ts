@@ -1091,3 +1091,23 @@ export function statusFacts(status: RefinementStatus): RefinementFacts | null {
     complete: !status.unknown.length && status.labelAgrees,
   };
 }
+
+/**
+ * The facts a planned resolve would produce (#1139 review), for dry-run guidance: the named
+ * request counted as resolved and the index label as reconciled (a real run reconciles it).
+ * Unverifiable records still make the facts incomplete.
+ */
+export function projectedResolveFacts(
+  status: RefinementStatus,
+  request: string,
+): RefinementFacts | null {
+  if (!status.ok) return null;
+  const facts = statusFacts({ ...status, labelAgrees: true });
+  if (!facts) return null;
+  return {
+    ...facts,
+    requests: facts.requests.map((q, i) =>
+      status.requests[i]!.request === request ? { ...q, state: "resolved", estimated: false } : q,
+    ),
+  };
+}
