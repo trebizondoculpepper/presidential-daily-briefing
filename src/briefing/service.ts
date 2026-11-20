@@ -307,6 +307,7 @@ async function presentBriefingFor(
         ...(retained?.claimActivity ? { claimActivity: retained.claimActivity } : {}),
         responsible: responsibility.responsible,
         responsibilityUnknown: responsibility.unknown.map((u) => u.issue),
+        releaseDirections: responsibility.releaseDirections,
         ...datalogReviewFacts(snapshot),
         checkRequiredness: datalogCheckFacts(snapshot),
         limit: Number.MAX_SAFE_INTEGER,

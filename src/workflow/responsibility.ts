@@ -8,6 +8,7 @@
  * responsibility and is reported, so unknown evidence is never read as "nobody is responsible".
  */
 import type { Snapshot } from "../github/types.js";
+import type { ReleaseDirectionFact } from "../rules/datalog/adapter.js";
 import {
   parseDeliveryComment,
   readDeliveryFold,
@@ -23,6 +24,12 @@ export interface ResponsibilityFacts {
   responsible: Map<string, string[]>;
   /** Issue URLs whose delivery records exist but could not be folded, with the reasons. */
   unknown: { issue: string; because: string[] }[];
+  /**
+   * Issue URL to the trusted, applied human-directed releases (#1019 `unassign` records): the
+   * released agent and the open member PRs now owned by nobody, which an eligible agent may adopt
+   * (#1018 D-ADOPT). Only known folds contribute; an issue absent here had no applied release.
+   */
+  releaseDirections: Map<string, ReleaseDirectionFact[]>;
 }
 
 const pullUrl = (repository: string, number: number): string =>
@@ -34,7 +41,14 @@ export async function readSnapshotResponsibility(
   trust: TrustDecision | undefined,
   signal?: AbortSignal,
 ): Promise<ResponsibilityFacts> {
-  const facts: ResponsibilityFacts = { responsible: new Map(), unknown: [] };
+  const facts: ResponsibilityFacts = {
+    responsible: new Map(),
+    unknown: [],
+    releaseDirections: new Map(),
+  };
+  const openPrs = new Set(
+    snapshot.pullRequests.filter((p) => p.state === "OPEN").map((p) => p.url.toLowerCase()),
+  );
   // Records name a repository as written; match it to the collected URL case-insensitively.
   const collected = new Map(snapshot.pullRequests.map((p) => [p.url.toLowerCase(), p.url]));
   for (const issue of snapshot.issues) {
@@ -48,7 +62,7 @@ export async function readSnapshotResponsibility(
       });
       continue;
     }
-    const { fold } = await readDeliveryFold(
+    const { records, fold } = await readDeliveryFold(
       comments as DeliveryComment[],
       !issue.comments.pageInfo.hasNextPage,
       { repository: snapshot.repository, issue: issue.number },
@@ -66,6 +80,26 @@ export async function readSnapshotResponsibility(
         if (!agents.includes(member.responsible)) agents.push(member.responsible);
         facts.responsible.set(key, agents);
       }
+    // #1019: each applied release names its agent; preserved PRs are open, unowned members.
+    const preserved = fold.members
+      .filter((m) => m.deliverable.kind === "pr" && m.responsible === null)
+      .map((m) => {
+        const d = m.deliverable as { repository: string; number: number };
+        const url = pullUrl(d.repository, d.number);
+        return collected.get(url.toLowerCase()) ?? url;
+      })
+      .filter((url) => openPrs.has(url.toLowerCase()));
+    const directions: ReleaseDirectionFact[] = [];
+    for (const applied of fold.applied) {
+      if (applied.op !== "unassign") continue;
+      const rec = records.find(
+        (r) => r.status === "trusted" && String(r.comment.databaseId) === applied.comment,
+      );
+      const from = rec?.status === "trusted" ? rec.record.from : undefined;
+      if (from && !directions.some((d) => d.from === from))
+        directions.push({ trust: "trusted", from, preservedPrs: preserved });
+    }
+    if (directions.length) facts.releaseDirections.set(issue.url, directions);
   }
   return facts;
 }
