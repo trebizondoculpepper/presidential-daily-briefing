@@ -120,7 +120,11 @@ function earliestPickupIso(t: InventoryTicket): string | null {
   return candidates[0] ?? null;
 }
 
-function createdIsoOf(t: InventoryTicket): string | null {
+/**
+ * When a ticket started waiting by the shared age definition (#883, #685): its creation time from
+ * the native facts, else the ledger's created event; null is unknown age.
+ */
+export function createdIsoOf(t: Pick<InventoryTicket, "ledger" | "inventory">): string | null {
   if (t.inventory?.createdAt) return t.inventory.createdAt;
   const created = t.ledger.events.find((e) => e.kind === "created");
   return created?.at ?? null;

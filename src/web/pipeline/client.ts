@@ -5,6 +5,7 @@
  * polling: a read happens on load, on a query change and on an explicit Refresh.
  */
 import type { InventoryResult, InventoryStage } from "../../metrics/inventory.js";
+import type { WaitingImpactResult } from "../../metrics/waitingimpact.js";
 
 /** The stages this section shows (#684): the canonical ready, blocked and agent-claimed states. */
 export const shownStages = [
@@ -25,11 +26,7 @@ export interface InventoryResponse {
   result: InventoryResult;
 }
 
-export type InventoryState =
-  | { status: "no-project" }
-  | { status: "loading" }
-  | { status: "ready"; response: InventoryResponse }
-  | { status: "error"; message: string; code: string | null };
+export type InventoryState = ViewState<InventoryResponse>;
 
 const isObject = (v: unknown): v is Record<string, unknown> =>
   typeof v === "object" && v !== null && !Array.isArray(v);
@@ -37,9 +34,7 @@ const isStrings = (v: unknown): v is string[] =>
   Array.isArray(v) && v.every((x) => typeof x === "string");
 const isNumberOrNull = (v: unknown) => v === null || typeof v === "number";
 
-function validStage(v: unknown): boolean {
-  if (!isObject(v) || typeof v.count !== "number" || !isStrings(v.members)) return false;
-  const age = v.age;
+function validAge(age: unknown): boolean {
   return (
     isObject(age) &&
     isNumberOrNull(age.medianMs) &&
@@ -48,6 +43,32 @@ function validStage(v: unknown): boolean {
     typeof age.unknownCount === "number" &&
     isStrings(age.unknownMembers)
   );
+}
+function validStage(v: unknown): boolean {
+  return isObject(v) && typeof v.count === "number" && isStrings(v.members) && validAge(v.age);
+}
+
+/** The envelope fields every metrics section shows: status, project, warnings and freshness. */
+function parseEnvelope(body: Record<string, unknown>): Omit<InventoryResponse, "result"> {
+  const selection = isObject(body.selection) ? body.selection : {};
+  const f = isObject(body.freshness) ? body.freshness : null;
+  const freshness =
+    f &&
+    typeof f.source === "string" &&
+    typeof f.observedAt === "string" &&
+    typeof f.ageSeconds === "number" &&
+    typeof f.stale === "boolean"
+      ? { source: f.source, observedAt: f.observedAt, ageSeconds: f.ageSeconds, stale: f.stale }
+      : null;
+  return {
+    status:
+      body.status === "complete" || body.status === "incomplete" || body.status === "error"
+        ? body.status
+        : "error",
+    repository: typeof selection.repository === "string" ? selection.repository : null,
+    warnings: isStrings(body.warnings) ? body.warnings : [],
+    freshness,
+  };
 }
 
 /** Every field the section reads, so a malformed result is a format error, never a broken render. */
@@ -69,26 +90,49 @@ export function parseInventoryResponse(body: unknown): InventoryResponse | null 
     return null;
   const stages = result.stages;
   if (!shownStages.every((s) => validStage(stages[s])) || !validStage(stages.unknown)) return null;
-  const selection = isObject(body.selection) ? body.selection : {};
-  const f = isObject(body.freshness) ? body.freshness : null;
-  const freshness =
-    f &&
-    typeof f.source === "string" &&
-    typeof f.observedAt === "string" &&
-    typeof f.ageSeconds === "number" &&
-    typeof f.stale === "boolean"
-      ? { source: f.source, observedAt: f.observedAt, ageSeconds: f.ageSeconds, stale: f.stale }
-      : null;
-  return {
-    status:
-      body.status === "complete" || body.status === "incomplete" || body.status === "error"
-        ? body.status
-        : "error",
-    repository: typeof selection.repository === "string" ? selection.repository : null,
-    warnings: isStrings(body.warnings) ? body.warnings : [],
-    freshness,
-    result: result as unknown as InventoryResult,
-  };
+  return { ...parseEnvelope(body), result: result as unknown as InventoryResult };
+}
+
+export interface WaitingResponse {
+  status: "complete" | "incomplete" | "error";
+  repository: string | null;
+  warnings: string[];
+  freshness: InventoryResponse["freshness"];
+  result: WaitingImpactResult;
+}
+export type WaitingState = ViewState<WaitingResponse>;
+
+const isBucket = (v: unknown): boolean =>
+  isObject(v) && typeof v.count === "number" && isStrings(v.members);
+function validWaitingGroup(v: unknown): boolean {
+  return (
+    isObject(v) &&
+    ["total", "ready", "blocked", "notReady", "unknown"].every((k) => isBucket(v[k])) &&
+    validAge(v.age)
+  );
+}
+
+/** Every field the backlog section reads (#685), or null. */
+export function parseWaitingResponse(body: unknown): WaitingResponse | null {
+  if (!isObject(body) || body.schemaVersion !== 1 || body.kind !== "serve-read") return null;
+  const result = body.result;
+  if (
+    !isObject(result) ||
+    result.kind !== "pipeline-metrics" ||
+    result.view !== "waiting-impact" ||
+    typeof result.observedAt !== "string" ||
+    typeof result.totalUnclaimed !== "number" ||
+    !validWaitingGroup(result.totals) ||
+    !isObject(result.groups) ||
+    !Object.values(result.groups).every(validWaitingGroup) ||
+    !isBucket(result.claimUnknown) ||
+    !isBucket(result.stateUnknown) ||
+    !isObject(result.coverage) ||
+    !(result.coverage.note === null || typeof result.coverage.note === "string")
+  )
+    return null;
+  const envelope = parseEnvelope(body);
+  return { ...envelope, result: result as unknown as WaitingImpactResult };
 }
 
 /** A duration for display: "3d 4h", "5h 12m", "42m", "<1m"; null is unknown. */
@@ -110,18 +154,27 @@ export function ticketLink(member: string): string | null {
   return m ? `/ticket?repo=${encodeURIComponent(m[1]!)}&n=${m[2]}` : null;
 }
 
-/** Read the inventory for one repository; never throws. */
-export async function fetchInventory(
+/** One section's state: the same lifecycle for every metrics view. */
+export type ViewState<R> =
+  | { status: "no-project" }
+  | { status: "loading" }
+  | { status: "ready"; response: R }
+  | { status: "error"; message: string; code: string | null };
+
+/** Read one metrics view for one repository; never throws. */
+export async function fetchView<R>(
   api: string,
+  view: string,
   repository: string,
+  parse: (body: unknown) => R | null,
   fetcher: typeof fetch,
   signal?: AbortSignal,
   /** An explicit Refresh: bypass the server's short-lived cache for fresh facts. */
   refresh = false,
-): Promise<InventoryState> {
+): Promise<ViewState<R>> {
   let response: Response;
   try {
-    const query = `view=inventory&repo=${encodeURIComponent(repository)}${refresh ? "&refresh=true" : ""}`;
+    const query = `view=${view}&repo=${encodeURIComponent(repository)}${refresh ? "&refresh=true" : ""}`;
     response = await fetcher(`${api}?${query}`, {
       headers: { accept: "application/json" },
       ...(signal ? { signal } : {}),
@@ -129,7 +182,7 @@ export async function fetchInventory(
   } catch {
     return {
       status: "error",
-      message: "The inventory could not be read from the server.",
+      message: "The figures could not be read from the server.",
       code: null,
     };
   }
@@ -146,29 +199,31 @@ export async function fetchInventory(
       message:
         error && typeof error.message === "string"
           ? error.message
-          : `The inventory could not be read (HTTP ${response.status}).`,
+          : `The figures could not be read (HTTP ${response.status}).`,
       code: error && typeof error.code === "string" ? error.code : null,
     };
   }
-  const parsed = parseInventoryResponse(body);
+  const parsed = parse(body);
   return parsed
     ? { status: "ready", response: parsed }
     : {
         status: "error",
-        message: "The server returned the inventory in a format this page does not read.",
+        message: "The server returned figures in a format this page does not read.",
         code: null,
       };
 }
 
 /**
- * A loader for one page: each read aborts the previous one and only the newest result is
- * reported, so a project change never shows another project's inventory. `load` skips an
- * unchanged project (fragment-only navigation); `refresh` always re-reads.
+ * A loader for one section: each read aborts the previous one and only the newest result is
+ * reported, so a project change never shows another project's figures. `load` skips an
+ * unchanged project (fragment-only navigation); `refresh` always re-reads, bypassing the cache.
  */
-export function inventoryLoader(
+export function viewLoader<R>(
   api: string,
+  view: string,
+  parse: (body: unknown) => R | null,
   fetcher: typeof fetch,
-  report: (state: InventoryState) => void,
+  report: (state: ViewState<R>) => void,
 ) {
   let current: AbortController | null = null;
   let sequence = 0;
@@ -185,7 +240,15 @@ export function inventoryLoader(
     const controller = new AbortController();
     current = controller;
     report({ status: "loading" });
-    const state = await fetchInventory(api, repository, fetcher, controller.signal, refresh);
+    const state = await fetchView(
+      api,
+      view,
+      repository,
+      parse,
+      fetcher,
+      controller.signal,
+      refresh,
+    );
     if (mine === sequence && !controller.signal.aborted) report(state);
   };
   return {
@@ -196,8 +259,47 @@ export function inventoryLoader(
   };
 }
 
+/** The inventory section's fetch (#684). */
+export const fetchInventory = (
+  api: string,
+  repository: string,
+  fetcher: typeof fetch,
+  signal?: AbortSignal,
+  refresh = false,
+): Promise<InventoryState> =>
+  fetchView(api, "inventory", repository, parseInventoryResponse, fetcher, signal, refresh);
+
+/** The inventory section's loader (#684). */
+export const inventoryLoader = (
+  api: string,
+  fetcher: typeof fetch,
+  report: (state: InventoryState) => void,
+) => viewLoader(api, "inventory", parseInventoryResponse, fetcher, report);
+
+/** The waiting backlog section's loader (#685). */
+export const waitingLoader = (
+  api: string,
+  fetcher: typeof fetch,
+  report: (state: WaitingState) => void,
+) => viewLoader(api, "waiting-impact", parseWaitingResponse, fetcher, report);
+
 /** The selected project from the page query (`repo`), or null. */
 export function selectedRepository(search: string): string | null {
   const repo = new URLSearchParams(search).get("repo");
   return repo && /^[\w.-]+\/[\w.-]+$/.test(repo) ? repo : null;
+}
+
+const impactOrder = ["XXL", "XL", "L", "M", "S", "XS"];
+const explicitGroups = ["unassessed", "stale", "conflict", "unknown"];
+
+/**
+ * The backlog's groups in display order (#685): valid impact sizes from largest to smallest, then
+ * the explicit unassessed, stale, conflict and unknown groups. Any other group the server names is
+ * kept (after the sizes), never dropped.
+ */
+export function waitingGroupOrder(groups: Record<string, unknown>): string[] {
+  const names = Object.keys(groups);
+  const sizes = impactOrder.filter((n) => names.includes(n));
+  const other = names.filter((n) => !impactOrder.includes(n) && !explicitGroups.includes(n)).sort();
+  return [...sizes, ...other, ...explicitGroups.filter((n) => names.includes(n))];
 }

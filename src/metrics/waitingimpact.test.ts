@@ -141,4 +141,51 @@ describe("waitingImpactView", () => {
     expect(res.claimUnknown.members).toEqual(["o/r#6", "o/r#11"]);
     expect(res.stateUnknown.members).toEqual(["o/r#10"]);
   });
+
+  it("reports each group's waiting age since creation, counting unknown ages (#685)", () => {
+    const at = (days: number) => new Date(Date.parse(now) - days * 86_400_000).toISOString();
+    const tickets: WaitingImpactTicket[] = [
+      ticket(
+        "o/r#1",
+        { state: "estimated", size: "L" },
+        { stage: "ready", createdAt: at(2), labelsComplete: true },
+      ),
+      ticket(
+        "o/r#2",
+        { state: "estimated", size: "L" },
+        { stage: "blocked", createdAt: at(8), labelsComplete: true },
+      ),
+      ticket(
+        "o/r#3",
+        { state: "estimated", size: "L" },
+        { stage: "ready", createdAt: null, labelsComplete: true },
+      ),
+      ticket(
+        "o/r#4",
+        { state: "unestimated" },
+        { stage: "unassessed", createdAt: at(1), labelsComplete: true },
+      ),
+    ];
+    const res = waitingImpactView(now, tickets, coverage);
+    const day = 86_400_000;
+    expect(res.groups.L!.age).toEqual({
+      medianMs: 5 * day,
+      oldestMs: 8 * day,
+      knownCount: 2,
+      unknownCount: 1,
+      unknownMembers: ["o/r#3"],
+    });
+    expect(res.groups.unassessed!.age).toMatchObject({
+      medianMs: day,
+      oldestMs: day,
+      knownCount: 1,
+    });
+    expect(res.totals.age).toMatchObject({ oldestMs: 8 * day, knownCount: 3, unknownCount: 1 });
+    // A group with no tickets has no age, not a zero age.
+    expect(res.groups.conflict!.age).toMatchObject({
+      medianMs: null,
+      oldestMs: null,
+      knownCount: 0,
+    });
+  });
 });
