@@ -289,6 +289,8 @@ export interface TicketDetail {
   complete: boolean;
   /** The envelope's freshness says the detail is a retained, stale read. */
   stale: boolean;
+  /** When the detail's facts were observed, from the envelope; null when not supplied. */
+  observedAt: string | null;
   warnings: string[];
 }
 
@@ -325,6 +327,7 @@ export function parseTicketDetail(body: unknown): TicketDetail | null {
     nextSteps,
     complete: completeness.complete === true && body.status === "complete",
     stale: isObject(body.freshness) && body.freshness.stale === true,
+    observedAt: isObject(body.freshness) ? str(body.freshness.observedAt) : null,
     warnings: [
       ...(isStrings(completeness.warnings) ? completeness.warnings : []),
       ...(isStrings(body.warnings) ? body.warnings : []),
@@ -368,13 +371,14 @@ export function detailLoader(api: string, fetcher: typeof fetch) {
     invalidate: drop,
     /** The generation a load starts in; pass it to `current` before accepting the result. */
     generation: () => generation,
-    load(c: WorkContext, number: number): Promise<DetailState> {
+    load(c: WorkContext, number: number, refresh = false): Promise<DetailState> {
       this.reset(c);
       const key = `${scope} ${number}`;
       const pending = cache.get(key);
       if (pending) return pending;
       const q = new URLSearchParams({ repo: c.repository });
       if (c.agent) q.set("agent", c.agent);
+      if (refresh) q.set("refresh", "true");
       const promise = readJson(`${api}/${number}?${q}`, fetcher, controller.signal).then(
         (read): DetailState => {
           if (!read.ok) {
@@ -421,14 +425,16 @@ export function expansionController(
   let open = new Set<string>();
   let loaded: Record<string, DetailState> = {};
   const emit = () => report({ open: new Set(open), details: { ...loaded } });
-  const load = async (row: WorkRow) => {
+  const load = async (row: WorkRow, refresh = false) => {
     if (!context || row.subjectKind !== "issue" || row.number === null) return;
     const c = context;
     const generation = details.generation();
     loaded = { ...loaded, [row.key]: { status: "loading" } };
     emit();
-    const result = await details.load(c, row.number);
-    if (!details.current(c, generation) || !open.has(row.key)) return;
+    const result = await details.load(c, row.number, refresh);
+    // Kept even if the row was collapsed meanwhile, so reopening shows it instead of a loading
+    // state nobody resolves; only an older context or refresh generation is discarded.
+    if (!details.current(c, generation)) return;
     loaded = { ...loaded, [row.key]: result };
     emit();
   };
@@ -458,7 +464,10 @@ export function expansionController(
       details.invalidate();
       loaded = {};
       emit();
-      return Promise.all(rows.filter((r) => open.has(r.key)).map(load)).then(() => {});
+      // The list was just refreshed, so its open details bypass the server's ticket cache too.
+      return Promise.all(rows.filter((r) => open.has(r.key)).map((r) => load(r, true))).then(
+        () => {},
+      );
     },
   };
 }

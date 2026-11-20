@@ -284,7 +284,7 @@ describe("work preview: expansion controller (#1164 review)", () => {
     expect(last.details[b!.key]).toMatchObject({ status: "ready", detail: { title: "T2" } });
   });
 
-  it("ignores a detail that arrives after its row was collapsed", async () => {
+  it("keeps a detail that arrives after its row was collapsed, so reopening shows it", async () => {
     const t = deferredFetch();
     const states: ExpansionState[] = [];
     const c = expansionController(
@@ -301,7 +301,13 @@ describe("work preview: expansion controller (#1164 review)", () => {
     });
     await pending;
     expect(states.at(-1)!.open.size).toBe(0);
-    expect(states.at(-1)!.details[a!.key]).not.toMatchObject({ status: "ready" });
+    // Reopening shows the loaded detail, never a loading state nobody resolves (#1164 review).
+    await c.toggle(a!);
+    expect(states.at(-1)!.details[a!.key]).toMatchObject({
+      status: "ready",
+      detail: { title: "T1" },
+    });
+    expect(t.pending).toHaveLength(1);
   });
 
   it("never reads a ticket detail for a pull-request row", async () => {
@@ -321,8 +327,10 @@ describe("work preview: expansion controller (#1164 review)", () => {
 
   it("keeps surviving open rows across a refresh and re-reads their details; a context change closes all", async () => {
     let requests = 0;
+    const urls: string[] = [];
     const fetcher = (async (u: RequestInfo | URL) => {
       requests++;
+      urls.push(String(u));
       return ticket(Number(/\/(\d+)\?/.exec(String(u))![1]));
     }) as typeof fetch;
     const states: ExpansionState[] = [];
@@ -336,6 +344,8 @@ describe("work preview: expansion controller (#1164 review)", () => {
     await c.toggle(b!);
     expect(requests).toBe(2);
     await c.refreshed(rowsOf(2, 3));
+    // After a list refresh, the detail re-read bypasses the server's ticket cache too.
+    expect(urls.at(-1)).toContain("refresh=true");
     expect([...states.at(-1)!.open]).toEqual([b!.key]);
     expect(requests).toBe(3);
     expect(states.at(-1)!.details[b!.key]).toMatchObject({ status: "ready" });

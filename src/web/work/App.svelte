@@ -150,6 +150,7 @@
               {#if d.detail.nextSteps.length}
                 <ul>{#each d.detail.nextSteps as step}<li>{step.why}{#if step.command}{" "}<code>{step.command}</code>{/if}</li>{/each}</ul>
               {/if}
+              {#if d.detail.observedAt}<p class="evidence">Detail observed {d.detail.observedAt}.</p>{/if}
               {#if d.detail.stale}<p class="warn">Stale detail: retained from an earlier read.</p>{/if}
               {#if !d.detail.complete}<p class="warn">Partial detail: {d.detail.warnings.join(" ")}</p>{/if}
               <p><a href={d.detail.url}>Open on GitHub</a> · <a href={`/ticket?repo=${encodeURIComponent(context?.repository ?? "")}&n=${row.number}`}>Full ticket view</a></p>
