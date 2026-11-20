@@ -64,19 +64,32 @@ function released(withRelease: boolean) {
   return snapshot([t], [pr()]);
 }
 
-const adopt = async (withRelease: boolean) => {
-  const snap = released(withRelease);
+/** The briefing's native evaluation over the read facts, merged as src/briefing/service.ts does. */
+const native = async (snap: ReturnType<typeof snapshot>, agent = "carol") => {
   const facts = await readSnapshotResponsibility(snap, trust);
   const result = evaluateDatalog(snap, new Map(), {
     role: "implementer",
-    agent: "bob",
-    responsible: facts.responsible,
-    responsibilityUnknown: facts.unknown.map((u) => u.issue),
+    agent,
+    responsible: new Map([
+      ...facts.responsible,
+      ...[...facts.ticketOwners].map(([u, a]) => [u, [a]] as [string, string[]]),
+    ]),
+    responsibilityUnknown: [...facts.unknown.map((u) => u.issue), ...facts.unknownPrs],
     releaseDirections: facts.releaseDirections,
     limit: 50,
   });
   return { facts, adopted: result.items.some((a) => a.ruleIds.includes("D-ADOPT")) };
 };
+const adopt = (withRelease: boolean) => native(released(withRelease), "bob");
+const withComments = (t: ReturnType<typeof issue>, nodes: DeliveryComment[], more = false) => {
+  t.comments = {
+    nodes: nodes as never,
+    pageInfo: { hasNextPage: more, endCursor: more ? "c" : null },
+  };
+  return t;
+};
+const pr5 = () => ({ ...pr(), number: 5, url: pr().url.replace(/4$/, "5"), headRefName: "f5" });
+const member5: Deliverable = { ...member, number: 5, nodeId: "PR_5" } as Deliverable;
 
 describe("human-directed release reaches native adoption (#1019)", () => {
   it("reports the release with its preserved open PR, and the policy offers adoption", async () => {
@@ -95,8 +108,7 @@ describe("human-directed release reaches native adoption (#1019)", () => {
     expect(adopted).toBe(false);
   });
 
-  it("offers nothing while another agent still owns the ticket (#1149 review)", async () => {
-    const t = issue(1, ["status:awaiting-review", "complexity:S", "impact:M"]);
+  it("withholds adoption natively while another agent still owns the ticket (#1149 review)", async () => {
     const submit = post({
       op: "submit",
       agent: "bob",
@@ -122,28 +134,76 @@ describe("human-directed release reaches native adoption (#1019)", () => {
         members: [{ deliverable: deliverableKey(member), record: String(handoff.databaseId) }],
       },
     });
-    t.comments = {
-      nodes: [submit, handoff, release] as never,
-      pageInfo: { hasNextPage: false, endCursor: null },
-    };
-    const facts = await readSnapshotResponsibility(snapshot([t], [pr()]), trust);
-    expect(facts.releaseDirections.size).toBe(0);
+    const t = withComments(issue(1, ["status:awaiting-review", "complexity:S", "impact:M"]), [
+      submit,
+      handoff,
+      release,
+    ]);
+    const { facts, adopted } = await native(snapshot([t], [pr()]));
+    expect(facts.ticketOwners.get(t.url)).toBe("bob");
+    expect(facts.releaseDirections.get(t.url)?.[0]?.from).toBe("alice");
+    expect(adopted).toBe(false);
   });
 
-  it("does not offer a shared PR whose other issue's ownership is unread (#1149 review)", async () => {
+  it("still offers the released PR when another member keeps its own owner (#1149 review)", async () => {
+    const submit = post({ op: "submit", deliverables: [member, member5], membership: "complete" });
+    const handoff = post({
+      op: "handoff",
+      to: "bob",
+      scope: "deliverable",
+      deliverables: [member5],
+      expectedResponsibilityRecord: String(submit.databaseId),
+      reason: "split",
+    });
+    const release = post({
+      op: "unassign",
+      agent: "maint",
+      from: "alice",
+      reason: "owner directed",
+      expected: {
+        ticket: String(submit.databaseId),
+        members: [{ deliverable: deliverableKey(member), record: String(submit.databaseId) }],
+      },
+    });
+    const t = withComments(issue(1, ["status:awaiting-review", "complexity:S", "impact:M"]), [
+      submit,
+      handoff,
+      release,
+    ]);
+    const { facts, adopted } = await native(snapshot([t], [pr(), pr5() as never]));
+    expect(facts.releaseDirections.get(t.url)).toEqual([
+      { trust: "trusted", from: "alice", preservedPrs: [pr().url] },
+    ]);
+    expect(adopted).toBe(true);
+  });
+
+  it("treats a released PR shared with an unread issue as unknown, by closing link or record (#1149 review)", async () => {
+    // By closing reference.
     const snap = released(true);
-    const other = issue(2, ["status:awaiting-review"]);
-    other.comments = {
-      nodes: [post({ op: "submit", deliverables: [member] })] as never,
-      pageInfo: { hasNextPage: true, endCursor: "c" },
-    };
+    const other = withComments(
+      issue(2, ["status:awaiting-review"]),
+      [post({ op: "submit", deliverables: [member] })],
+      true,
+    );
     snap.issues.push(other);
     snap.pullRequests[0]!.closingIssuesReferences.nodes.push({
       number: 2,
       url: other.url,
     } as never);
-    const facts = await readSnapshotResponsibility(snap, trust);
-    expect(facts.unknown.map((u) => u.issue)).toEqual([other.url]);
-    expect(facts.releaseDirections.size).toBe(0);
+    const linked = await native(snap, "bob");
+    expect(linked.facts.unknownPrs).toEqual([pr().url]);
+    expect(linked.adopted).toBe(false);
+    // By recorded membership only: no closing link to the unread issue.
+    const snap2 = released(true);
+    snap2.issues.push(
+      withComments(
+        issue(3, ["status:awaiting-review"]),
+        [post({ op: "submit", deliverables: [member] })],
+        true,
+      ),
+    );
+    const recorded = await native(snap2, "bob");
+    expect(recorded.facts.unknownPrs).toEqual([pr().url]);
+    expect(recorded.adopted).toBe(false);
   });
 });

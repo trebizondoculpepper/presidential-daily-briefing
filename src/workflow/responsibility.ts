@@ -30,6 +30,13 @@ export interface ResponsibilityFacts {
    * (#1018 D-ADOPT). Only known folds contribute; an issue absent here had no applied release.
    */
   releaseDirections: Map<string, ReleaseDirectionFact[]>;
+  /**
+   * PR URLs whose ownership may be recorded on an issue that could not be folded (they close it,
+   * or a parsable record there names them). Unknown, never unowned, for native admission.
+   */
+  unknownPrs: string[];
+  /** Issue URL to its trusted ticket-responsible agent, for native admission only. */
+  ticketOwners: Map<string, string>;
 }
 
 const pullUrl = (repository: string, number: number): string =>
@@ -45,6 +52,8 @@ export async function readSnapshotResponsibility(
     responsible: new Map(),
     unknown: [],
     releaseDirections: new Map(),
+    unknownPrs: [],
+    ticketOwners: new Map(),
   };
   const openPrs = new Set(
     snapshot.pullRequests.filter((p) => p.state === "OPEN").map((p) => p.url.toLowerCase()),
@@ -90,11 +99,10 @@ export async function readSnapshotResponsibility(
       })
       .filter((url) => openPrs.has(url.toLowerCase()));
     const directions: ReleaseDirectionFact[] = [];
-    // Released work is adoptable only when nobody still owns the ticket or any member: a release
-    // of one agent never implies a global release (#1149 review).
-    const stillOwned =
-      fold.ticketResponsible !== null || fold.members.some((m) => m.responsible !== null);
-    for (const applied of stillOwned ? [] : fold.applied) {
+    // The ticket's own owner is a fact for the native rules (#1149 review): an issue still held
+    // by another agent is not `released-unowned`, so the policy, not this reader, withholds it.
+    if (fold.ticketResponsible) facts.ticketOwners.set(issue.url, fold.ticketResponsible);
+    for (const applied of fold.applied) {
       if (applied.op !== "unassign") continue;
       const rec = records.find(
         (r) => r.status === "trusted" && String(r.comment.databaseId) === applied.comment,
@@ -105,25 +113,26 @@ export async function readSnapshotResponsibility(
     }
     if (directions.length) facts.releaseDirections.set(issue.url, directions);
   }
-  // A preserved PR that also closes an issue whose delivery history is unknown may be owned
-  // there: unread ownership is never offered for adoption (#1149 review).
+  // A PR whose ownership may be recorded on an issue we could not fold is unknown, never
+  // unowned (#1149 review): it closes that issue, or a parsable record there names it as a
+  // member (membership need not be a closing link). The native rules decide with that fact.
   const unknownIssues = new Set(facts.unknown.map((u) => u.issue.toLowerCase()));
-  const unread = new Set(
-    snapshot.pullRequests
-      .filter((p) =>
-        p.closingIssuesReferences.nodes.some((i) => unknownIssues.has(i.url.toLowerCase())),
-      )
-      .map((p) => p.url.toLowerCase()),
-  );
-  for (const [issueUrl, directions] of facts.releaseDirections) {
-    const kept = directions
-      .map((d) => ({
-        ...d,
-        preservedPrs: d.preservedPrs.filter((u) => !unread.has(u.toLowerCase())),
-      }))
-      .filter((d) => d.preservedPrs.length > 0);
-    if (kept.length) facts.releaseDirections.set(issueUrl, kept);
-    else facts.releaseDirections.delete(issueUrl);
+  const unknownPrs = new Set<string>();
+  for (const p of snapshot.pullRequests)
+    if (p.closingIssuesReferences.nodes.some((i) => unknownIssues.has(i.url.toLowerCase())))
+      unknownPrs.add(p.url);
+  for (const issue of snapshot.issues) {
+    if (!unknownIssues.has(issue.url.toLowerCase())) continue;
+    for (const c of issue.comments.nodes) {
+      const parsed = parseDeliveryComment(c.body);
+      if (parsed.kind !== "record") continue;
+      for (const d of parsed.record.deliverables)
+        if (d.kind === "pr") {
+          const url = pullUrl(d.repository, d.number);
+          unknownPrs.add(collected.get(url.toLowerCase()) ?? url);
+        }
+    }
   }
+  facts.unknownPrs = [...unknownPrs];
   return facts;
 }
