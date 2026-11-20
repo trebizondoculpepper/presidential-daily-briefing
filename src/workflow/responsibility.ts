@@ -90,7 +90,11 @@ export async function readSnapshotResponsibility(
       })
       .filter((url) => openPrs.has(url.toLowerCase()));
     const directions: ReleaseDirectionFact[] = [];
-    for (const applied of fold.applied) {
+    // Released work is adoptable only when nobody still owns the ticket or any member: a release
+    // of one agent never implies a global release (#1149 review).
+    const stillOwned =
+      fold.ticketResponsible !== null || fold.members.some((m) => m.responsible !== null);
+    for (const applied of stillOwned ? [] : fold.applied) {
       if (applied.op !== "unassign") continue;
       const rec = records.find(
         (r) => r.status === "trusted" && String(r.comment.databaseId) === applied.comment,
@@ -100,6 +104,26 @@ export async function readSnapshotResponsibility(
         directions.push({ trust: "trusted", from, preservedPrs: preserved });
     }
     if (directions.length) facts.releaseDirections.set(issue.url, directions);
+  }
+  // A preserved PR that also closes an issue whose delivery history is unknown may be owned
+  // there: unread ownership is never offered for adoption (#1149 review).
+  const unknownIssues = new Set(facts.unknown.map((u) => u.issue.toLowerCase()));
+  const unread = new Set(
+    snapshot.pullRequests
+      .filter((p) =>
+        p.closingIssuesReferences.nodes.some((i) => unknownIssues.has(i.url.toLowerCase())),
+      )
+      .map((p) => p.url.toLowerCase()),
+  );
+  for (const [issueUrl, directions] of facts.releaseDirections) {
+    const kept = directions
+      .map((d) => ({
+        ...d,
+        preservedPrs: d.preservedPrs.filter((u) => !unread.has(u.toLowerCase())),
+      }))
+      .filter((d) => d.preservedPrs.length > 0);
+    if (kept.length) facts.releaseDirections.set(issueUrl, kept);
+    else facts.releaseDirections.delete(issueUrl);
   }
   return facts;
 }

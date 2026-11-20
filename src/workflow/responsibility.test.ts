@@ -94,4 +94,56 @@ describe("human-directed release reaches native adoption (#1019)", () => {
     expect(facts.responsible.get(pr().url)).toEqual(["alice"]);
     expect(adopted).toBe(false);
   });
+
+  it("offers nothing while another agent still owns the ticket (#1149 review)", async () => {
+    const t = issue(1, ["status:awaiting-review", "complexity:S", "impact:M"]);
+    const submit = post({
+      op: "submit",
+      agent: "bob",
+      deliverables: [member],
+      membership: "complete",
+    });
+    const handoff = post({
+      op: "handoff",
+      agent: "bob",
+      to: "alice",
+      scope: "deliverable",
+      deliverables: [member],
+      expectedResponsibilityRecord: String(submit.databaseId),
+      reason: "split",
+    });
+    const release = post({
+      op: "unassign",
+      agent: "maint",
+      from: "alice",
+      reason: "owner directed",
+      expected: {
+        ticket: null,
+        members: [{ deliverable: deliverableKey(member), record: String(handoff.databaseId) }],
+      },
+    });
+    t.comments = {
+      nodes: [submit, handoff, release] as never,
+      pageInfo: { hasNextPage: false, endCursor: null },
+    };
+    const facts = await readSnapshotResponsibility(snapshot([t], [pr()]), trust);
+    expect(facts.releaseDirections.size).toBe(0);
+  });
+
+  it("does not offer a shared PR whose other issue's ownership is unread (#1149 review)", async () => {
+    const snap = released(true);
+    const other = issue(2, ["status:awaiting-review"]);
+    other.comments = {
+      nodes: [post({ op: "submit", deliverables: [member] })] as never,
+      pageInfo: { hasNextPage: true, endCursor: "c" },
+    };
+    snap.issues.push(other);
+    snap.pullRequests[0]!.closingIssuesReferences.nodes.push({
+      number: 2,
+      url: other.url,
+    } as never);
+    const facts = await readSnapshotResponsibility(snap, trust);
+    expect(facts.unknown.map((u) => u.issue)).toEqual([other.url]);
+    expect(facts.releaseDirections.size).toBe(0);
+  });
 });
