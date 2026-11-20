@@ -4,6 +4,7 @@
   import type { NewsHours, NewsState } from "./client.js";
   import CurrentWork from "./CurrentWork.svelte";
   import DailyCounts from "./DailyCounts.svelte";
+  import PrMerges from "./PrMerges.svelte";
   import { dailyLoader, dailyWindow } from "./daily.js";
   import type { DailyDays, DailyState } from "./daily.js";
   import { workLoader } from "./work.js";
@@ -149,3 +150,4 @@
 <CurrentWork state={work} {ticketHref} />
 
 <DailyCounts state={daily} days={dailyDays} choose={chooseDays} ticketHref={memberHref} />
+<PrMerges state={daily} />
