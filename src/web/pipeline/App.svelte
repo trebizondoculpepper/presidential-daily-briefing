@@ -1,32 +1,46 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { inventoryLoader, selectedRepository } from "./client.js";
-  import type { InventoryState } from "./client.js";
+  import { inventoryLoader, refreshSections, selectedRepository, waitingLoader } from "./client.js";
+  import type { InventoryState, WaitingState as Waiting } from "./client.js";
   import PipelineState from "./PipelineState.svelte";
+  import WaitingState from "./WaitingState.svelte";
 
   let { api }: { api: string } = $props();
-  let state: InventoryState = $state({ status: "loading" });
+  let inventory: InventoryState = $state({ status: "loading" });
+  let waiting: Waiting = $state({ status: "loading" });
   let refresh = $state(() => {});
 
   onMount(() => {
-    const loader = inventoryLoader(
-      api,
-      (input, init) => fetch(input, init),
-      (next) => {
-        state = next;
-      },
-    );
-    refresh = () => void loader.refresh();
-    void loader.load(selectedRepository(window.location.search));
-    const reload = () => void loader.load(selectedRepository(window.location.search));
-    window.addEventListener("popstate", reload);
-    return () => window.removeEventListener("popstate", reload);
+    const fetcher = (input: RequestInfo | URL, init?: RequestInit) => fetch(input, init);
+    // One loader per section: each fails, loads and refreshes on its own.
+    const sections = [
+      inventoryLoader(api, fetcher, (next) => {
+        inventory = next;
+      }),
+      waitingLoader(api, fetcher, (next) => {
+        waiting = next;
+      }),
+    ];
+    // One fresh collection shared by both sections (#1142 review).
+    refresh = () => void refreshSections(sections);
+    const load = () => {
+      const repository = selectedRepository(window.location.search);
+      sections.forEach((s) => void s.load(repository));
+    };
+    load();
+    window.addEventListener("popstate", load);
+    return () => window.removeEventListener("popstate", load);
   });
 </script>
 
 <div class="pipeline-actions">
-  <button type="button" onclick={() => refresh()} disabled={state.status === "loading"}>
+  <button
+    type="button"
+    onclick={() => refresh()}
+    disabled={inventory.status === "loading" || waiting.status === "loading"}
+  >
     Refresh
   </button>
 </div>
-<PipelineState {state} />
+<PipelineState state={inventory} />
+<WaitingState state={waiting} />

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { formatAge, shownStages, ticketLink } from "./client.js";
   import type { InventoryResponse } from "./client.js";
+  import Freshness from "./Freshness.svelte";
 
   let { response }: { response: InventoryResponse } = $props();
   /** Members listed per drill-down; the rest are counted, never silently dropped. */
@@ -92,13 +93,5 @@
       the open total.
     </p>
   {/if}
-  <p class="pipeline-note">
-    {#if response.freshness}
-      Facts collected at <time datetime={response.freshness.observedAt}>{response.freshness.observedAt}</time>
-      ({response.freshness.source === "live" ? "fresh read" : `${response.freshness.source}, ${formatAge(response.freshness.ageSeconds * 1000)} old`}{response.freshness.stale ? ", stale" : ""});
-    {:else}
-      Collection time not supplied;
-    {/if}
-    figures computed at <time datetime={result.observedAt}>{result.observedAt}</time>.
-  </p>
+  <Freshness freshness={response.freshness} computedAt={result.observedAt} />
 </section>

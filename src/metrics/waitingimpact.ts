@@ -8,7 +8,9 @@
  */
 
 import type { AssessmentGroups } from "./assessment.js";
-import type { InventoryFacts } from "./inventory.js";
+import { median } from "./aggregate.js";
+import { createdIsoOf } from "./inventory.js";
+import type { InventoryFacts, StageAgeStats } from "./inventory.js";
 import type { TicketLedger } from "./ledger.js";
 import type { DayCoverage } from "./windows.js";
 
@@ -19,6 +21,11 @@ export interface WaitingImpactBucket {
 
 export interface WaitingImpactGroup {
   total: WaitingImpactBucket;
+  /**
+   * Waiting age of the group's tickets (#685): time since creation, the inventory's definition
+   * for unclaimed work; unknown ages are counted and named, never dropped.
+   */
+  age: StageAgeStats;
   ready: WaitingImpactBucket;
   blocked: WaitingImpactBucket;
   notReady: WaitingImpactBucket;
@@ -54,6 +61,7 @@ export interface WaitingImpactTicket {
 function emptyGroup(): WaitingImpactGroup {
   return {
     total: { count: 0, members: [] },
+    age: { medianMs: null, oldestMs: null, knownCount: 0, unknownCount: 0, unknownMembers: [] },
     ready: { count: 0, members: [] },
     blocked: { count: 0, members: [] },
     notReady: { count: 0, members: [] },
@@ -98,11 +106,14 @@ export function waitingImpactView(
   const claimUnknown: WaitingImpactBucket = { count: 0, members: [] };
   const stateUnknown: WaitingImpactBucket = { count: 0, members: [] };
 
+  const ages = new Map<WaitingImpactGroup, number[]>([[totals, []]]);
+  for (const g of groups.values()) ages.set(g, []);
   const getGroup = (name: string): WaitingImpactGroup => {
     let g = groups.get(name);
     if (!g) {
       g = emptyGroup();
       groups.set(name, g);
+      ages.set(g, []);
     }
     return g;
   };
@@ -130,6 +141,15 @@ export function waitingImpactView(
 
     pushToBucket(totals.total, t.member);
     pushToBucket(group.total, t.member);
+    const createdMs = Date.parse(createdIsoOf(t) ?? "");
+    for (const g of [totals, group]) {
+      // As in the inventory, a missing or future creation time is an unknown age, not zero.
+      if (Number.isFinite(createdMs) && createdMs <= nowMs) ages.get(g)!.push(nowMs - createdMs);
+      else {
+        g.age.unknownCount += 1;
+        g.age.unknownMembers.push(t.member);
+      }
+    }
 
     if (stage === "ready") {
       pushToBucket(totals.ready, t.member);
@@ -146,6 +166,13 @@ export function waitingImpactView(
       pushToBucket(totals.unknown, t.member);
       pushToBucket(group.unknown, t.member);
     }
+  }
+
+  for (const [g, list] of ages) {
+    const sorted = list.sort((a, b) => a - b);
+    g.age.knownCount = sorted.length;
+    g.age.medianMs = median(sorted);
+    g.age.oldestMs = sorted.length ? sorted[sorted.length - 1]! : null;
   }
 
   return {
