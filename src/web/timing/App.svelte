@@ -3,15 +3,17 @@
   import {
     chartBars,
     formatDuration,
+    latencyLoader,
     selection,
     ticketLink,
     timingDays,
     timingLoader,
   } from "./client.js";
-  import type { TimingDays, TimingState } from "./client.js";
+  import type { LatencyState, TimingDays, TimingState } from "./client.js";
 
   let { api }: { api: string } = $props();
   let state: TimingState = $state({ status: "loading" });
+  let impact: LatencyState = $state({ status: "loading" });
   let days: TimingDays = $state(7);
   let refresh = $state(() => {});
   let choose = $state((_d: TimingDays) => {});
@@ -26,7 +28,11 @@
     const loader = timingLoader(api, fetcher, (next) => {
       state = next;
     });
-    refresh = () => void loader.refresh();
+    const impactLoader = latencyLoader(api, "impact", fetcher, (next) => {
+      impact = next;
+    });
+    // One fresh collection: the first section bypasses the cache, the other then re-reads it.
+    refresh = () => void loader.refresh().then(() => impactLoader.reload());
     choose = (d) => {
       const url = new URL(window.location.href);
       url.searchParams.set("days", String(d));
@@ -37,6 +43,7 @@
       const sel = selection(window.location.search);
       days = sel.days;
       void loader.load(sel);
+      void impactLoader.load(sel);
     };
     load();
     window.addEventListener("popstate", load);
@@ -152,4 +159,57 @@
       {/each}
     {/if}
   </section>
+{/if}
+
+{#if impact.status === "ready"}
+  {@const r = impact.response}
+  <section aria-labelledby="impact-latency">
+    <h2 id="impact-latency">Creation to first impact assessment</h2>
+    <p class="explain">
+      From the issue's creation to its earliest trusted impact assessment record, for tickets
+      first assessed in the window. Median first, with the mean and the number of completed
+      tickets; p75 and p90 only with at least 20. A ticket whose creation or first assessment is
+      missing, unread or out of order counts as unknown, never as zero. Only impact assessments
+      are measured here.
+    </p>
+    {#if r.coverageNote}<p class="warn">{r.coverageNote}</p>{/if}
+    {#each r.warnings as w}<p class="warn">{w}</p>{/each}
+    <table class="timing-table">
+      <caption>Creation to first impact assessment</caption>
+      <thead>
+        <tr>
+          <th scope="col">Median</th>
+          <th scope="col">Mean</th>
+          <th scope="col">Completed</th>
+          <th scope="col">p75</th>
+          <th scope="col">p90</th>
+          <th scope="col">Unknown</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>{formatDuration(r.stats.median)}</td>
+          <td>{formatDuration(r.stats.mean)}</td>
+          <td>{r.stats.completed}</td>
+          <td>{r.stats.p75 === null ? "n<20" : formatDuration(r.stats.p75)}</td>
+          <td>{r.stats.p90 === null ? "n<20" : formatDuration(r.stats.p90)}</td>
+          <td>{r.stats.unknown}</td>
+        </tr>
+      </tbody>
+    </table>
+    <details class="drill">
+      <summary>The tickets behind these figures</summary>
+      {#each [["Completed", r.stats.members.completed], ["Unknown", r.stats.members.unknown]] as [label, members]}
+        {#if (members as string[]).length}
+          <p>{label}:
+            {#each members as string[] as m, i}{i ? ", " : ""}{#if ticketLink(m, window.location.search)}<a href={ticketLink(m, window.location.search)}>{m}</a>{:else}{m}{/if}{/each}
+          </p>
+        {/if}
+      {/each}
+    </details>
+  </section>
+{:else if impact.status === "error"}
+  <p class="error" role="alert">Impact assessment latency could not be loaded: {impact.message}</p>
+{:else if impact.status === "loading" && state.status !== "loading"}
+  <p role="status">Loading impact assessment latency…</p>
 {/if}
