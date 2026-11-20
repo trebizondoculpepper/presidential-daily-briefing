@@ -147,15 +147,19 @@ const firstObligationId = 10_000;
  * applicable IDs with native witnesses. A policy applicability edit changes selection without
  * touching command policy text.
  */
+export type ClaimWorkKind = "repository-changing" | "observational";
+
 export function selectNativeClaimObligations(
   role: string | null | undefined,
   outcome: ClaimOutcome,
   policy: PolicyBundle = policyBundle(),
+  workKind: ClaimWorkKind = "repository-changing",
 ): { ids: string[]; coverage: "complete" | "partial"; rulesHash: string } {
   const resolvedRole =
     role === "implementer" || role === "designer" || role === "human" ? role : null;
   const datoms: Datom[] = [
     [1, "claim-outcome", outcome],
+    [1, "claim-work", workKind],
     // Subject facts only: claim-role is asserted only when the caller's role is known, so the
     // role-restricted rule can never match for an unresolved viewer. The engine's viewer [1 "role"]
     // is the fallback implementer (a required engine viewer value), but applicability reads the
@@ -167,6 +171,7 @@ export function selectNativeClaimObligations(
     datoms.push([entity, "obligation", obligation.id], [entity, "obligation-order", index]);
     for (const outcomeId of obligation.outcome)
       datoms.push([entity, "obligation-outcome", outcomeId]);
+    for (const workId of obligation.work) datoms.push([entity, "obligation-work", workId]);
     for (const roleId of obligation.role ?? []) datoms.push([entity, "obligation-role", roleId]);
   });
   const result = evaluatePolicy(
@@ -227,6 +232,8 @@ export interface SelectClaimRemindersInput {
   role?: string | null;
   outcome: ClaimOutcome;
   facts?: ClaimReminderFactInput;
+  /** The work kind the claim will do (#1114); defaults to repository-changing. */
+  workKind?: ClaimWorkKind;
   /** False when live claim/policy context could not be fully resolved. */
   contextResolved?: boolean;
   effectivePolicy?: {
@@ -521,6 +528,7 @@ export function selectClaimRuleReminders(input: SelectClaimRemindersInput): Acti
     normalizedRole,
     input.outcome,
     policyBundle(),
+    input.workKind,
   );
   const bundle = policyBundle();
   for (const id of nativeObligations.ids) {

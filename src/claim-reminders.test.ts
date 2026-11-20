@@ -188,4 +188,23 @@ describe("pdb claim action-rule reminders (#1030)", () => {
     expect(io.stdout()).toContain("Rules for this work (claimed):");
     expect(io.stdout()).not.toContain("O-CLAIM-DELIVERABLE");
   });
+
+  it("shows the #1114 early-publication duty within the bounded claim display", async () => {
+    const io = captureOutput();
+    let queries = 0;
+    const query = async () => {
+      queries++;
+      return ownedIssueResponse(queries === 1 ? [] : ["agent:jonas_kowalski"]);
+    };
+    const code = await main(
+      ["claim", "42", "--repo", "o/r", "--agent", "jonas_kowalski", "--role", "implementer"],
+      io.output,
+      baseRuntime(io, { query, ghRun: async () => "" } as unknown as Partial<Runtime>),
+    );
+    expect(code).toBe(0);
+    expect(io.stdout()).toContain("Rules for this work (claimed):");
+    // The early-publication duty leads the obligations and is present in the bounded display,
+    // not merely in an omitted catalog (doc/design/native-action-obligations.md).
+    expect(io.stdout()).toContain("- O-CLAIM-PUBLISH-EARLY [procedural-obligation]:");
+  });
 });

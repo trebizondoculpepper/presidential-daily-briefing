@@ -115,6 +115,8 @@ export interface CompiledObligation {
   purpose: string;
   /** The claim outcomes this obligation applies to (e.g. claimed, noop, denied, partial). */
   outcomes: string[];
+  /** Work kinds this obligation applies to (repository-changing, observational). */
+  work: string[];
   /** Role restriction from obligations.edn, or null when the obligation applies to every role. */
   roles: string[] | null;
   /** Applicability clauses (native witnesses) from the obligation-applies predicate. */

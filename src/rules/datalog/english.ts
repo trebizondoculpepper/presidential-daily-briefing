@@ -472,6 +472,7 @@ function compileObligations(
       id: o.id,
       purpose: o.purpose,
       outcomes: o.outcome,
+      work: o.work,
       roles: o.role ?? null,
       clauses,
       calls: callsOf(clauses),

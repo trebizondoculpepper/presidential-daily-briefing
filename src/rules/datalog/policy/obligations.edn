@@ -1,24 +1,29 @@
 ;; Native claim action obligations (#1113, doc/design/native-action-obligations.md).
-;; The five claim duties (and their no-op/partial/denied recovery counterparts) are authored here
-;; as native relation facts: each obligation record has an id, an expiry outcome, and an optional
-;; role restriction. The engine asserts the viewer role and a per-call claim-outcome fact on
-;; entity 1; the :claim-obligations query selects the applicable IDs, so a policy edit changes
-;; selection and generated guidance without touching command policy text.
+;; The claim duties (and their no-op/partial/denied recovery counterparts) are authored here
+;; as native relation facts: each obligation record has an id, an expiry outcome, and optional
+;; role/work applicability. The engine asserts the viewer role, a per-call claim-outcome fact and
+;; a claim-work fact on entity 1; the :claim-obligations query selects the applicable IDs, so a
+;; policy edit changes selection and generated guidance without touching command policy text.
 ;; A denied action confers no new-owner obligations; recovery guidance reflects the actual outcome.
+;; The early-publication duty (#1114) leads the source order so the bounded claim display always
+;; shows it on a repository-changing pickup. Every record states :work explicitly so the
+;; applicability rule is a plain join (a DataScript or-join cannot carry a `not` branch).
 {:obligations
- [{:id "O-CLAIM-ACCEPTANCE" :outcome ["claimed" "noop"]
+ [{:id "O-CLAIM-PUBLISH-EARLY" :outcome ["claimed" "noop" "partial"] :role ["implementer" "designer"] :work ["repository-changing"]
+   :purpose "Minimize unpublished work: once a coherent change passes the applicable local checks, commit and push it promptly, then open a draft PR as soon as there is useful work to inspect and keep it updated. Do not wait for the whole ticket to finish; the draft states what works, what remains and any known failures."}
+  {:id "O-CLAIM-ACCEPTANCE" :outcome ["claimed" "noop"] :work ["repository-changing" "observational"]
    :purpose "Follow the ticket acceptance criteria and applicable architecture contracts before considering the work complete."}
-  {:id "O-CLAIM-OWNERSHIP" :outcome ["claimed" "noop" "denied" "partial"]
+  {:id "O-CLAIM-OWNERSHIP" :outcome ["claimed" "noop" "denied" "partial"] :work ["repository-changing" "observational"]
    :purpose "Respect human ownership and other agents' active claims; never overwrite or displace another owner's work."}
-  {:id "O-CLAIM-BLOCKERS" :outcome ["claimed" "noop"]
+  {:id "O-CLAIM-BLOCKERS" :outcome ["claimed" "noop"] :work ["repository-changing" "observational"]
    :purpose "Surface blockers, missing design decisions, or unresolved questions explicitly instead of guessing."}
-  {:id "O-CLAIM-REMOVAL" :outcome ["claimed" "noop" "partial"]
+  {:id "O-CLAIM-REMOVAL" :outcome ["claimed" "noop" "partial"] :work ["repository-changing" "observational"]
    :purpose "Preserve useful unfinished work and share a truthful handoff if your claim is released or removed."}
-  {:id "O-CLAIM-DELIVERABLE" :outcome ["claimed" "noop"] :role ["implementer"]
+  {:id "O-CLAIM-DELIVERABLE" :outcome ["claimed" "noop"] :role ["implementer"] :work ["repository-changing" "observational"]
    :purpose "For an implementation deliverable, retain responsibility through review, CI checks, fixes, and merging."}
-  {:id "O-CLAIM-NOOP-CONTINUE" :outcome ["noop"]
+  {:id "O-CLAIM-NOOP-CONTINUE" :outcome ["noop"] :work ["repository-changing" "observational"]
    :purpose "This ticket is already claimed by you (no-op); continue from the existing work rather than re-claiming."}
-  {:id "O-CLAIM-PARTIAL-RECOVERY" :outcome ["partial"]
+  {:id "O-CLAIM-PARTIAL-RECOVERY" :outcome ["partial"] :work ["repository-changing" "observational"]
    :purpose "Claim writes were partial or unverified; inspect the live ticket state and retry only the missing steps."}
-  {:id "O-CLAIM-DENIED-RECOVERY" :outcome ["denied"]
+  {:id "O-CLAIM-DENIED-RECOVERY" :outcome ["denied"] :work ["repository-changing" "observational"]
    :purpose "Claim was refused; do not start work until the reported prerequisite or ownership conflict is resolved."}]}
