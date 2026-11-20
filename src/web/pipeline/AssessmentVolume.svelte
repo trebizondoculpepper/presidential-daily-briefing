@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { ticketLink } from "./client.js";
+  import { seriesMembers, ticketLink, volumeAverage, volumeCell } from "./client.js";
   import type { AssessmentResponse } from "./client.js";
 
   let { response }: { response: AssessmentResponse } = $props();
@@ -16,19 +16,6 @@
     { id: "complexity", label: "First complexity assessments", figure: complexity.volume.firstAssessed },
   ]);
   const days = $derived(incoming.series.days.map((d) => d.day));
-  const cell = (figure: (typeof columns)[number]["figure"], day: string) => {
-    const d = figure.series.days.find((x) => x.day === day);
-    if (!d) return "—";
-    return d.status === "known" ? String(d.count) : `unknown (${d.observed} seen)`;
-  };
-  const average = (figure: (typeof columns)[number]["figure"]) =>
-    figure.average.value === null ? "unknown" : figure.average.value.toFixed(1);
-  const membersOf = (figure: (typeof columns)[number]["figure"]) => [
-    ...new Set([
-      ...figure.series.days.flatMap((d) => d.members),
-      ...figure.series.partial.members,
-    ]),
-  ];
 </script>
 
 <section class="pipeline-volume" aria-labelledby="volume-heading">
@@ -68,12 +55,16 @@
         {#each days as day (day)}
           <tr>
             <th scope="row"><time datetime={day}>{day}</time></th>
-            {#each columns as c (c.id)}<td>{cell(c.figure, day)}</td>{/each}
+            {#each columns as c (c.id)}<td>{volumeCell(c.figure, day)}</td>{/each}
           </tr>
         {/each}
         <tr>
           <th scope="row">
             <time datetime={incoming.series.partial.day}>{incoming.series.partial.day}</time> so far
+            (through
+            <time datetime={incoming.series.partial.observedThrough}
+              >{incoming.series.partial.observedThrough}</time
+            >)
           </th>
           {#each columns as c (c.id)}<td>{c.figure.series.partial.observed}</td>{/each}
         </tr>
@@ -81,7 +72,7 @@
       <tfoot>
         <tr>
           <th scope="row">Average per known day</th>
-          {#each columns as c (c.id)}<td>{average(c.figure)}</td>{/each}
+          {#each columns as c (c.id)}<td>{volumeAverage(c.figure)}</td>{/each}
         </tr>
       </tfoot>
     </table>
@@ -93,7 +84,7 @@
   </p>
 
   {#each columns as c (c.id)}
-    {@const members = membersOf(c.figure)}
+    {@const members = seriesMembers(c.figure)}
     {#if members.length}
       <details class="pipeline-members">
         <summary>{c.label}: {members.length} ticket{members.length === 1 ? "" : "s"} in this window</summary>

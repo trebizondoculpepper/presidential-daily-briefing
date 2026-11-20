@@ -7,7 +7,7 @@ import { render } from "svelte/server";
 import { describe, expect, it } from "vite-plus/test";
 import { assessmentQueueView } from "../../metrics/assessmentqueue.js";
 import type { AssessmentQueueTicket } from "../../metrics/assessmentqueue.js";
-import { parseAssessmentResponse } from "./client.js";
+import { parseAssessmentResponse, seriesMembers, volumeAverage, volumeCell } from "./client.js";
 import AssessmentVolume from "./AssessmentVolume.svelte";
 
 const now = "2026-11-20T12:00:00.000Z";
@@ -130,7 +130,10 @@ describe("assessment pace (#687)", () => {
     // New tickets, first impact, first complexity.
     expect(row(out, "2026-11-18")).toEqual(["1", "0", "0"]);
     expect(row(out, "2026-11-19")).toEqual(["1", "1", "1"]);
-    expect(out).toMatch(/2026-11-20<\/time> so far<\/th><td>1<\/td><td>0<\/td><td>0<\/td>/);
+    // Today's partial row states its UTC cutoff (#1144 review).
+    expect(out).toMatch(
+      /2026-11-20<\/time> so far \(through <time datetime="2026-11-20T12:00:00\.000Z">2026-11-20T12:00:00\.000Z<\/time>\)<\/th><td>1<\/td><td>0<\/td><td>0<\/td>/,
+    );
     // Reassessments are events, reported apart from the ticket columns.
     expect(out).toContain("Reassessments in this window");
     expect(out).toMatch(/impact 0, complexity 1\./);
@@ -151,12 +154,28 @@ describe("assessment pace (#687)", () => {
     ]);
     expect(row(out, "2026-11-18")).toEqual(["1", "0", "0"]);
     expect(out).toContain("events before 2026-11-17T00:00:00.000Z may be missing");
-    expect(out).toMatch(/Average per known day<\/th><td>0\.7<\/td>/);
+    // The average states the days it rests on (#1144 review).
+    expect(out).toContain("Average per known day</th><td>0.7 (3 known, 4 unknown days)</td>");
   });
 
   it("refuses a result whose volume series is malformed", () => {
     const body = envelope(tickets, "2026-11-01T00:00:00.000Z");
     (body.result.metrics.impact.volume.incoming.series as { days: unknown }).days = [{ day: "x" }];
     expect(parseAssessmentResponse(body)).toBeNull();
+  });
+
+  it("keeps the figure logic in typed helpers and validates the window length (#1144 review)", () => {
+    const body = envelope(tickets, "2026-11-17T00:00:00.000Z");
+    const figure = body.result.metrics.complexity.volume.firstAssessed;
+    expect(volumeCell(figure, "2026-11-19")).toBe("1");
+    expect(volumeCell(figure, "2026-11-16")).toBe("unknown (0 seen)");
+    expect(volumeCell(figure, "1999-01-01")).toBe("—");
+    expect(volumeAverage(figure)).toMatch(/^0\.3 \(3 known, 4 unknown days\)$/);
+    expect(seriesMembers(figure)).toEqual(["o/r#1"]);
+    for (const days of [undefined, "7", 0, 2.5]) {
+      const bad = envelope(tickets, "2026-11-01T00:00:00.000Z");
+      (bad.result as { days: unknown }).days = days;
+      expect(parseAssessmentResponse(bad), String(days)).toBeNull();
+    }
   });
 });
