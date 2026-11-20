@@ -108,14 +108,41 @@ export async function runOnboard(
   let install: Awaited<ReturnType<typeof installCoordinationSection>> | null = null;
   if (root && repository) {
     const markdown = await generatedRulesMarkdown(repository, runtime);
-    if (dryRun) {
-      files.push(await previewRulesFile(root, markdown));
-      files.push(await previewCoordinationSection(root, doc.persistentSection));
+    // Preflight both files before either mutation (reviewed #1195 finding): a known refusal in
+    // one file must not leave the other half-installed, and AGENTS.md must never claim a rules
+    // snapshot that was not written.
+    const plannedRules = await previewRulesFile(root, markdown);
+    const plannedAgents = await previewCoordinationSection(root, doc.persistentSection);
+    const blocked = plannedRules.status === "not-written" || plannedAgents.status === "not-written";
+    if (dryRun || blocked) {
+      // Nothing is written when either preflight refuses. The file that refused keeps its reason;
+      // the other is reported as not attempted rather than as a preview, so a real run never
+      // looks like a plan.
+      const blocker = plannedRules.status === "not-written" ? plannedRules : plannedAgents;
+      for (const planned of [plannedRules, plannedAgents]) {
+        files.push(
+          blocked && planned !== blocker && planned.status === "would-write"
+            ? {
+                file: planned.file,
+                status: "not-written",
+                reason: `not attempted: ${blocker.file} was not written`,
+              }
+            : planned,
+        );
+      }
     } else {
       const rules = await installRulesFile(root, markdown);
       files.push(reportOf(rules));
-      install = await installCoordinationSection(root, doc.persistentSection);
-      files.push(reportOf(install));
+      if (rules.status === "written" || rules.status === "kept") {
+        install = await installCoordinationSection(root, doc.persistentSection);
+        files.push(reportOf(install));
+      } else {
+        files.push({
+          file: plannedAgents.file,
+          status: "not-written",
+          reason: `skipped because ${RULES_FILE_NAME} was not written`,
+        });
+      }
     }
   } else if (values.install) {
     return usage(
@@ -192,12 +219,15 @@ async function generatedRulesMarkdown(
     undefined,
     limits,
   );
-  return rules.rulesMarkdownFile(document);
+  const { sealRulesMarkdown } = await import("../config/rulesfile.js");
+  return sealRulesMarkdown(rules.rulesMarkdownFile(document));
 }
 
 /** What `installRulesFile` would do, without writing (#1027 `--dry-run`). */
 async function previewRulesFile(root: string, markdown: string): Promise<FileReport> {
-  const { withRulesFile } = await import("../config/rulesfile.js");
+  const { withRulesFile, rulesFileCaseCollision } = await import("../config/rulesfile.js");
+  const collision = await rulesFileCaseCollision(root);
+  if (collision) return { file: RULES_FILE_NAME, status: "not-written", reason: collision };
   const current = await readTextOrNull(join(root, RULES_FILE_NAME));
   if (current.state === "unreadable")
     return { file: RULES_FILE_NAME, status: "not-written", reason: current.why };
