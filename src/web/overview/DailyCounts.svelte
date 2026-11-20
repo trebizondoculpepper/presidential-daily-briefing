@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { averageText, cell, dailyDays, ticketSeries } from "./daily.js";
+  import { averageText, cell, complexityCell, dailyDays, ticketSeries } from "./daily.js";
   import type { DailyDays, DailyState } from "./daily.js";
 
   /** Daily ticket progress (#826): four separate series, never one productivity total. */
@@ -93,7 +93,7 @@
           {#each groups as g (g)}
             <tr>
               <th scope="row">{g}</th>
-{#each ticketSeries as [name]}<td>{response.series[name].byComplexity[g]?.count ?? 0}{response.series[name].lowerBound ? " (at least)" : ""}</td>{/each}
+{#each ticketSeries as [name]}<td>{complexityCell(response.series[name], g)}</td>{/each}
             </tr>
           {/each}
         </tbody>

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   averageText,
   cell,
+  complexityCell,
   dailyLoader,
   dailyWindow,
   parseDailyResponse,
@@ -39,6 +40,10 @@ const unknown = (day: string) => ({
   observed: 0,
   members: [],
 });
+const aligned = (f: ReturnType<typeof fig>) =>
+  (f.series.days as { day: string; status: string }[]).map((d) =>
+    d.status === "known" ? known(d.day, []) : unknown(d.day),
+  );
 const body = (
   deliveries = fig([
     unknown("2026-11-17"),
@@ -55,9 +60,10 @@ const body = (
     coverage: { note: null },
     figures: {
       deliveries,
-      attested: fig([]),
-      closedCompletedUnverified: fig([]),
-      closedNotPlanned: fig([]),
+      // The ticket series cover the same days; their counts are zero where known.
+      attested: fig(aligned(deliveries)),
+      closedCompletedUnverified: fig(aligned(deliveries)),
+      closedNotPlanned: fig(aligned(deliveries)),
       prMerges: fig([]),
     },
     deliveredDateUnknown: { count: 1, members: [`${repo}#5`] },
@@ -117,5 +123,28 @@ describe("overview daily: lower bounds (#1186 review)", () => {
     expect(cell({ day: "d", status: "known", count: 0, members: [] }, true)).toBe("at least 0");
     expect(cell({ day: "d", status: "known", count: 2, members: [] })).toBe("2");
     expect(cell({ day: "d", status: "unknown", observed: 0, members: [] }, true)).toBe("unknown");
+  });
+});
+
+describe("overview daily: unknown days make window totals lower bounds (#1186 review)", () => {
+  it("qualifies averages and complexity counts when days are unknown, and rejects misaligned series", () => {
+    const r = parseDailyResponse(body())!;
+    const d = r.series.deliveries;
+    d.lowerBound = false;
+    d.average = { value: 1, knownDays: 2, totalDays: 3 };
+    d.byComplexity = { S: { count: 1, members: [`${repo}#1`] } };
+    expect(averageText(d)).toMatch(/, at least$/);
+    expect(complexityCell(d, "S")).toBe("at least 1");
+    expect(complexityCell(d, "M")).toBe("at least 0");
+    const exact = {
+      ...d,
+      days: d.days.filter((x) => x.status === "known"),
+      average: { value: 1, knownDays: 2, totalDays: 2 },
+    };
+    expect(complexityCell(exact, "S")).toBe("1");
+    expect(averageText(exact)).not.toMatch(/at least/);
+    const bad = body();
+    (bad.result.figures.attested.series as { days: unknown[] }).days = [];
+    expect(parseDailyResponse(bad)).toBeNull();
   });
 });

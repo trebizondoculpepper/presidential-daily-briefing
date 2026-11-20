@@ -110,6 +110,9 @@ export function parseDailyResponse(body: unknown): DailyResponse | null {
     if (!s) return null;
     out[name] = s;
   }
+  // Every series must cover the same days in the same order: the table indexes them together.
+  const sequence = (n: SeriesName) => out[n].days.map((d) => d.day).join("|");
+  if (ticketSeries.some(([n]) => sequence(n) !== sequence(ticketSeries[0]![0]))) return null;
   const u = isObject(r.deliveredDateUnknown) ? r.deliveredDateUnknown : {};
   const f = isObject(body.freshness) ? body.freshness : {};
   return {
@@ -137,11 +140,27 @@ export function parseDailyResponse(body: unknown): DailyResponse | null {
 export const cell = (d: Day, lowerBound = false): string =>
   d.status === "unknown" ? "unknown" : lowerBound ? `at least ${d.count}` : String(d.count);
 
+/**
+ * Whether a window total is only an observed lower bound: some tickets' evidence is missing, or
+ * some days in the window were not read (#1186 review). Unknown is never shown as exact.
+ */
+export const windowLowerBound = (s: Series): boolean =>
+  s.lowerBound ||
+  s.days.some((d) => d.status === "unknown") ||
+  s.average.knownDays < s.average.totalDays;
+
 /** The complete-day average text, with how many days are known. */
 export function averageText(s: Series): string {
   const v = s.average.value === null ? "unknown" : s.average.value.toFixed(1);
-  return `${v}/day (${s.average.knownDays} of ${s.average.totalDays} days known)${s.lowerBound ? ", at least" : ""}`;
+  const qualify = s.average.value !== null && windowLowerBound(s);
+  return `${v}/day (${s.average.knownDays} of ${s.average.totalDays} days known)${qualify ? ", at least" : ""}`;
 }
+
+/** A complexity total for the window: "at least N" whenever the window is a lower bound. */
+export const complexityCell = (s: Series, group: string): string => {
+  const n = s.byComplexity[group]?.count ?? 0;
+  return windowLowerBound(s) ? `at least ${n}` : String(n);
+};
 
 export type DailyState =
   | { status: "no-project" }
