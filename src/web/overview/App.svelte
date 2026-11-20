@@ -53,13 +53,10 @@
       daily = next;
     });
     refresh = () => {
-      // The news read collects fresh metrics facts; the daily view then re-reads that cache only
-      // after a complete read, and otherwise reads fresh itself.
-      void loader.refresh().then((first) =>
-        first?.status === "ready" && first.response.status === "complete"
-          ? dailyRead.reload()
-          : dailyRead.refresh(),
-      );
+      // News and the daily view are cached under different windows, so a news refresh does not
+      // refresh the daily entry: each section bypasses its own cache.
+      void loader.refresh();
+      void dailyRead.refresh();
       void workRead.refresh();
     };
     const load = () => {
