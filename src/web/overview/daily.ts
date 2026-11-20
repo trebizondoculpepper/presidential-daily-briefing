@@ -152,7 +152,9 @@ export const windowLowerBound = (s: Series): boolean =>
 /** The complete-day average text, with how many days are known. */
 export function averageText(s: Series): string {
   const v = s.average.value === null ? "unknown" : s.average.value.toFixed(1);
-  const qualify = s.average.value !== null && windowLowerBound(s);
+  // The average is over known days only, so unknown days are disclosed by the known-day count,
+  // not by "at least"; only missing ticket evidence makes it a lower bound (#1186 review).
+  const qualify = s.average.value !== null && s.lowerBound;
   return `${v}/day (${s.average.knownDays} of ${s.average.totalDays} days known)${qualify ? ", at least" : ""}`;
 }
 

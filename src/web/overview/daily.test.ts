@@ -127,13 +127,15 @@ describe("overview daily: lower bounds (#1186 review)", () => {
 });
 
 describe("overview daily: unknown days make window totals lower bounds (#1186 review)", () => {
-  it("qualifies averages and complexity counts when days are unknown, and rejects misaligned series", () => {
+  it("qualifies complexity counts when days are unknown, and rejects misaligned series", () => {
     const r = parseDailyResponse(body())!;
     const d = r.series.deliveries;
     d.lowerBound = false;
     d.average = { value: 1, knownDays: 2, totalDays: 3 };
     d.byComplexity = { S: { count: 1, members: [`${repo}#1`] } };
-    expect(averageText(d)).toMatch(/, at least$/);
+    // Averaged over known days only: disclosed by the count, not qualified as a lower bound.
+    expect(averageText(d)).toBe("1.0/day (2 of 3 days known)");
+    expect(averageText({ ...d, lowerBound: true })).toMatch(/, at least$/);
     expect(complexityCell(d, "S")).toBe("at least 1");
     expect(complexityCell(d, "M")).toBe("at least 0");
     const exact = {
