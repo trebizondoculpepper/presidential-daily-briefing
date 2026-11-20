@@ -91,7 +91,14 @@ export interface PolicyBundle {
   schema: Schema;
   constants: Record<string, (string | number | boolean)[]>;
   /** obligations.edn :obligations, in source order (#1113). */
-  obligations: { id: string; outcome: string[]; role?: string[]; purpose: string }[];
+  obligations: {
+    id: string;
+    outcome: string[];
+    /** Applicable work kinds (#1114); every record states this explicitly. */
+    work: string[];
+    role?: string[];
+    purpose: string;
+  }[];
   /** rules.edn as one canonical EDN vector. */
   clauses: string;
   comparison: string[];

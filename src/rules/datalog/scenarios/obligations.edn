@@ -1,91 +1,131 @@
-;; Native claim action obligations (#1113, doc/design/native-action-obligations.md).
+;; Native claim action obligations (#1113, #1114, doc/design/native-action-obligations.md).
 ;; The native mechanism: policy/obligations.edn holds each obligation record (id, applicable
-;; outcome(s), optional role restriction and purpose); policy/rules.edn derives claim-obligation
-;; from the asserted claim-outcome fact on entity 1 and the viewer role; the :claim-obligations
-;; query selects the applicable IDs. These scenarios assert the same typed facts the adapter
-;; transacts, covering the outcome matrix and the implementer-only DELIVERABLE restriction.
+;; outcome(s), work kind(s), optional role restriction and purpose); policy/rules.edn derives
+;; claim-obligation from the asserted claim-outcome/claim-work facts on entity 1 and the caller
+;; role; the :claim-obligations query selects the applicable IDs in source order. These scenarios
+;; assert the same typed facts the adapter transacts, covering the outcome matrix, the
+;; implementer-only DELIVERABLE restriction and the #1114 early-publication duty for
+;; repository-changing work (implementation and documentation), excluding observational work.
 ;; The viewer role is asserted by the engine ([1 "role" viewer]); an unresolved-role exclusion
-;; is an adapter-side filter (DataScript cannot `not` an entity-1 literal fact), so scenarios
-;; cover resolved roles deterministically.
-{:suite "obligations (#1113)"
+;; is a native claim-role fact the adapter supplies only when the role is known.
+{:suite "obligations (#1113, #1114)"
  :scenarios
- [{:id "claimed-implementer-obligations"
-   :doc "A successful claim by an implementer confers the five owner duties, including the implementer-only DELIVERABLE."
+ [{:id "claimed-implementer-publication"
+   :doc "A successful implementation claim by an implementer leads with the early-publication duty and confers every owner duty."
    :viewer {:role "implementer"}
-   :facts [{:e 1 "claim-outcome" "claimed" "claim-role" "implementer"}
-           {:e 101 "obligation" "O-CLAIM-ACCEPTANCE" "obligation-order" 0 "obligation-outcome" ["claimed" "noop"]}
-           {:e 102 "obligation" "O-CLAIM-OWNERSHIP" "obligation-order" 1 "obligation-outcome" ["claimed" "noop" "denied" "partial"]}
-           {:e 103 "obligation" "O-CLAIM-BLOCKERS" "obligation-order" 2 "obligation-outcome" ["claimed" "noop"]}
-           {:e 104 "obligation" "O-CLAIM-REMOVAL" "obligation-order" 3 "obligation-outcome" ["claimed" "noop" "partial"]}
-           {:e 105 "obligation" "O-CLAIM-DELIVERABLE" "obligation-order" 4 "obligation-outcome" ["claimed" "noop"] "obligation-role" "implementer"}
-           {:e 106 "obligation" "O-CLAIM-NOOP-CONTINUE" "obligation-order" 5 "obligation-outcome" ["noop"]}
-           {:e 107 "obligation" "O-CLAIM-PARTIAL-RECOVERY" "obligation-order" 6 "obligation-outcome" ["partial"]}
-           {:e 108 "obligation" "O-CLAIM-DENIED-RECOVERY" "obligation-order" 7 "obligation-outcome" ["denied"]}]
+   :facts [{:e 1 "claim-outcome" "claimed" "claim-role" "implementer" "claim-work" "repository-changing"}
+           {:e 101 "obligation" "O-CLAIM-PUBLISH-EARLY" "obligation-order" 0 "obligation-outcome" ["claimed" "noop" "partial"] "obligation-role" ["implementer" "designer"] "obligation-work" "repository-changing"}
+           {:e 102 "obligation" "O-CLAIM-ACCEPTANCE" "obligation-order" 1 "obligation-outcome" ["claimed" "noop"] "obligation-work" ["repository-changing" "observational"]}
+           {:e 103 "obligation" "O-CLAIM-OWNERSHIP" "obligation-order" 2 "obligation-outcome" ["claimed" "noop" "denied" "partial"] "obligation-work" ["repository-changing" "observational"]}
+           {:e 104 "obligation" "O-CLAIM-BLOCKERS" "obligation-order" 3 "obligation-outcome" ["claimed" "noop"] "obligation-work" ["repository-changing" "observational"]}
+           {:e 105 "obligation" "O-CLAIM-REMOVAL" "obligation-order" 4 "obligation-outcome" ["claimed" "noop" "partial"] "obligation-work" ["repository-changing" "observational"]}
+           {:e 106 "obligation" "O-CLAIM-DELIVERABLE" "obligation-order" 5 "obligation-outcome" ["claimed" "noop"] "obligation-role" "implementer" "obligation-work" ["repository-changing" "observational"]}
+           {:e 107 "obligation" "O-CLAIM-NOOP-CONTINUE" "obligation-order" 6 "obligation-outcome" ["noop"] "obligation-work" ["repository-changing" "observational"]}
+           {:e 108 "obligation" "O-CLAIM-PARTIAL-RECOVERY" "obligation-order" 7 "obligation-outcome" ["partial"] "obligation-work" ["repository-changing" "observational"]}
+           {:e 109 "obligation" "O-CLAIM-DENIED-RECOVERY" "obligation-order" 8 "obligation-outcome" ["denied"] "obligation-work" ["repository-changing" "observational"]}]
+   :expect {:actions []
+            :denials #{}
+            :obligations ["O-CLAIM-ACCEPTANCE" "O-CLAIM-BLOCKERS" "O-CLAIM-DELIVERABLE" "O-CLAIM-OWNERSHIP" "O-CLAIM-PUBLISH-EARLY" "O-CLAIM-REMOVAL"]}}
+
+  {:id "claimed-documentation-publication"
+   :doc "A documentation change is repository-changing work: the early-publication duty still applies."
+   :viewer {:role "implementer"}
+   :facts [{:e 1 "claim-outcome" "claimed" "claim-role" "implementer" "claim-work" "repository-changing"}
+           {:e 101 "obligation" "O-CLAIM-PUBLISH-EARLY" "obligation-order" 0 "obligation-outcome" ["claimed" "noop" "partial"] "obligation-role" ["implementer" "designer"] "obligation-work" "repository-changing"}
+           {:e 102 "obligation" "O-CLAIM-ACCEPTANCE" "obligation-order" 1 "obligation-outcome" ["claimed" "noop"] "obligation-work" ["repository-changing" "observational"]}
+           {:e 103 "obligation" "O-CLAIM-OWNERSHIP" "obligation-order" 2 "obligation-outcome" ["claimed" "noop" "denied" "partial"] "obligation-work" ["repository-changing" "observational"]}
+           {:e 104 "obligation" "O-CLAIM-BLOCKERS" "obligation-order" 3 "obligation-outcome" ["claimed" "noop"] "obligation-work" ["repository-changing" "observational"]}
+           {:e 105 "obligation" "O-CLAIM-REMOVAL" "obligation-order" 4 "obligation-outcome" ["claimed" "noop" "partial"] "obligation-work" ["repository-changing" "observational"]}
+           {:e 106 "obligation" "O-CLAIM-DELIVERABLE" "obligation-order" 5 "obligation-outcome" ["claimed" "noop"] "obligation-role" "implementer" "obligation-work" ["repository-changing" "observational"]}
+           {:e 107 "obligation" "O-CLAIM-NOOP-CONTINUE" "obligation-order" 6 "obligation-outcome" ["noop"] "obligation-work" ["repository-changing" "observational"]}
+           {:e 108 "obligation" "O-CLAIM-PARTIAL-RECOVERY" "obligation-order" 7 "obligation-outcome" ["partial"] "obligation-work" ["repository-changing" "observational"]}
+           {:e 109 "obligation" "O-CLAIM-DENIED-RECOVERY" "obligation-order" 8 "obligation-outcome" ["denied"] "obligation-work" ["repository-changing" "observational"]}]
+   :expect {:actions []
+            :denials #{}
+            :obligations ["O-CLAIM-ACCEPTANCE" "O-CLAIM-BLOCKERS" "O-CLAIM-DELIVERABLE" "O-CLAIM-OWNERSHIP" "O-CLAIM-PUBLISH-EARLY" "O-CLAIM-REMOVAL"]}}
+
+  {:id "claimed-observational-no-publication"
+   :doc "Observational work with no repository changes does not imply a commit or draft PR: the early-publication duty is excluded."
+   :viewer {:role "implementer"}
+   :facts [{:e 1 "claim-outcome" "claimed" "claim-role" "implementer" "claim-work" "observational"}
+           {:e 101 "obligation" "O-CLAIM-PUBLISH-EARLY" "obligation-order" 0 "obligation-outcome" ["claimed" "noop" "partial"] "obligation-role" ["implementer" "designer"] "obligation-work" "repository-changing"}
+           {:e 102 "obligation" "O-CLAIM-ACCEPTANCE" "obligation-order" 1 "obligation-outcome" ["claimed" "noop"] "obligation-work" ["repository-changing" "observational"]}
+           {:e 103 "obligation" "O-CLAIM-OWNERSHIP" "obligation-order" 2 "obligation-outcome" ["claimed" "noop" "denied" "partial"] "obligation-work" ["repository-changing" "observational"]}
+           {:e 104 "obligation" "O-CLAIM-BLOCKERS" "obligation-order" 3 "obligation-outcome" ["claimed" "noop"] "obligation-work" ["repository-changing" "observational"]}
+           {:e 105 "obligation" "O-CLAIM-REMOVAL" "obligation-order" 4 "obligation-outcome" ["claimed" "noop" "partial"] "obligation-work" ["repository-changing" "observational"]}
+           {:e 106 "obligation" "O-CLAIM-DELIVERABLE" "obligation-order" 5 "obligation-outcome" ["claimed" "noop"] "obligation-role" "implementer" "obligation-work" ["repository-changing" "observational"]}
+           {:e 107 "obligation" "O-CLAIM-NOOP-CONTINUE" "obligation-order" 6 "obligation-outcome" ["noop"] "obligation-work" ["repository-changing" "observational"]}
+           {:e 108 "obligation" "O-CLAIM-PARTIAL-RECOVERY" "obligation-order" 7 "obligation-outcome" ["partial"] "obligation-work" ["repository-changing" "observational"]}
+           {:e 109 "obligation" "O-CLAIM-DENIED-RECOVERY" "obligation-order" 8 "obligation-outcome" ["denied"] "obligation-work" ["repository-changing" "observational"]}]
    :expect {:actions []
             :denials #{}
             :obligations ["O-CLAIM-ACCEPTANCE" "O-CLAIM-BLOCKERS" "O-CLAIM-DELIVERABLE" "O-CLAIM-OWNERSHIP" "O-CLAIM-REMOVAL"]}}
 
-  {:id "noop-implementer-obligations"
-   :doc "A no-op claim (already claimed by the viewer) adds the continuation obligation to the owner duties."
+  {:id "noop-implementer-publication"
+   :doc "A no-op claim (already claimed by the viewer) keeps the early-publication duty and adds the continuation obligation."
    :viewer {:role "implementer"}
-   :facts [{:e 1 "claim-outcome" "noop" "claim-role" "implementer"}
-           {:e 101 "obligation" "O-CLAIM-ACCEPTANCE" "obligation-order" 0 "obligation-outcome" ["claimed" "noop"]}
-           {:e 102 "obligation" "O-CLAIM-OWNERSHIP" "obligation-order" 1 "obligation-outcome" ["claimed" "noop" "denied" "partial"]}
-           {:e 103 "obligation" "O-CLAIM-BLOCKERS" "obligation-order" 2 "obligation-outcome" ["claimed" "noop"]}
-           {:e 104 "obligation" "O-CLAIM-REMOVAL" "obligation-order" 3 "obligation-outcome" ["claimed" "noop" "partial"]}
-           {:e 105 "obligation" "O-CLAIM-DELIVERABLE" "obligation-order" 4 "obligation-outcome" ["claimed" "noop"] "obligation-role" "implementer"}
-           {:e 106 "obligation" "O-CLAIM-NOOP-CONTINUE" "obligation-order" 5 "obligation-outcome" ["noop"]}
-           {:e 107 "obligation" "O-CLAIM-PARTIAL-RECOVERY" "obligation-order" 6 "obligation-outcome" ["partial"]}
-           {:e 108 "obligation" "O-CLAIM-DENIED-RECOVERY" "obligation-order" 7 "obligation-outcome" ["denied"]}]
+   :facts [{:e 1 "claim-outcome" "noop" "claim-role" "implementer" "claim-work" "repository-changing"}
+           {:e 101 "obligation" "O-CLAIM-PUBLISH-EARLY" "obligation-order" 0 "obligation-outcome" ["claimed" "noop" "partial"] "obligation-role" ["implementer" "designer"] "obligation-work" "repository-changing"}
+           {:e 102 "obligation" "O-CLAIM-ACCEPTANCE" "obligation-order" 1 "obligation-outcome" ["claimed" "noop"] "obligation-work" ["repository-changing" "observational"]}
+           {:e 103 "obligation" "O-CLAIM-OWNERSHIP" "obligation-order" 2 "obligation-outcome" ["claimed" "noop" "denied" "partial"] "obligation-work" ["repository-changing" "observational"]}
+           {:e 104 "obligation" "O-CLAIM-BLOCKERS" "obligation-order" 3 "obligation-outcome" ["claimed" "noop"] "obligation-work" ["repository-changing" "observational"]}
+           {:e 105 "obligation" "O-CLAIM-REMOVAL" "obligation-order" 4 "obligation-outcome" ["claimed" "noop" "partial"] "obligation-work" ["repository-changing" "observational"]}
+           {:e 106 "obligation" "O-CLAIM-DELIVERABLE" "obligation-order" 5 "obligation-outcome" ["claimed" "noop"] "obligation-role" "implementer" "obligation-work" ["repository-changing" "observational"]}
+           {:e 107 "obligation" "O-CLAIM-NOOP-CONTINUE" "obligation-order" 6 "obligation-outcome" ["noop"] "obligation-work" ["repository-changing" "observational"]}
+           {:e 108 "obligation" "O-CLAIM-PARTIAL-RECOVERY" "obligation-order" 7 "obligation-outcome" ["partial"] "obligation-work" ["repository-changing" "observational"]}
+           {:e 109 "obligation" "O-CLAIM-DENIED-RECOVERY" "obligation-order" 8 "obligation-outcome" ["denied"] "obligation-work" ["repository-changing" "observational"]}]
    :expect {:actions []
             :denials #{}
-            :obligations ["O-CLAIM-ACCEPTANCE" "O-CLAIM-BLOCKERS" "O-CLAIM-DELIVERABLE" "O-CLAIM-NOOP-CONTINUE" "O-CLAIM-OWNERSHIP" "O-CLAIM-REMOVAL"]}}
+            :obligations ["O-CLAIM-ACCEPTANCE" "O-CLAIM-BLOCKERS" "O-CLAIM-DELIVERABLE" "O-CLAIM-NOOP-CONTINUE" "O-CLAIM-OWNERSHIP" "O-CLAIM-PUBLISH-EARLY" "O-CLAIM-REMOVAL"]}}
 
   {:id "denied-implementer-obligations"
    :doc "A refused claim grants no owner duties; only ownership respect and denied-recovery guidance apply."
    :viewer {:role "implementer"}
-   :facts [{:e 1 "claim-outcome" "denied" "claim-role" "implementer"}
-           {:e 101 "obligation" "O-CLAIM-ACCEPTANCE" "obligation-order" 0 "obligation-outcome" ["claimed" "noop"]}
-           {:e 102 "obligation" "O-CLAIM-OWNERSHIP" "obligation-order" 1 "obligation-outcome" ["claimed" "noop" "denied" "partial"]}
-           {:e 103 "obligation" "O-CLAIM-BLOCKERS" "obligation-order" 2 "obligation-outcome" ["claimed" "noop"]}
-           {:e 104 "obligation" "O-CLAIM-REMOVAL" "obligation-order" 3 "obligation-outcome" ["claimed" "noop" "partial"]}
-           {:e 105 "obligation" "O-CLAIM-DELIVERABLE" "obligation-order" 4 "obligation-outcome" ["claimed" "noop"] "obligation-role" "implementer"}
-           {:e 106 "obligation" "O-CLAIM-NOOP-CONTINUE" "obligation-order" 5 "obligation-outcome" ["noop"]}
-           {:e 107 "obligation" "O-CLAIM-PARTIAL-RECOVERY" "obligation-order" 6 "obligation-outcome" ["partial"]}
-           {:e 108 "obligation" "O-CLAIM-DENIED-RECOVERY" "obligation-order" 7 "obligation-outcome" ["denied"]}]
+   :facts [{:e 1 "claim-outcome" "denied" "claim-role" "implementer" "claim-work" "repository-changing"}
+           {:e 101 "obligation" "O-CLAIM-PUBLISH-EARLY" "obligation-order" 0 "obligation-outcome" ["claimed" "noop" "partial"] "obligation-role" ["implementer" "designer"] "obligation-work" "repository-changing"}
+           {:e 102 "obligation" "O-CLAIM-ACCEPTANCE" "obligation-order" 1 "obligation-outcome" ["claimed" "noop"] "obligation-work" ["repository-changing" "observational"]}
+           {:e 103 "obligation" "O-CLAIM-OWNERSHIP" "obligation-order" 2 "obligation-outcome" ["claimed" "noop" "denied" "partial"] "obligation-work" ["repository-changing" "observational"]}
+           {:e 104 "obligation" "O-CLAIM-BLOCKERS" "obligation-order" 3 "obligation-outcome" ["claimed" "noop"] "obligation-work" ["repository-changing" "observational"]}
+           {:e 105 "obligation" "O-CLAIM-REMOVAL" "obligation-order" 4 "obligation-outcome" ["claimed" "noop" "partial"] "obligation-work" ["repository-changing" "observational"]}
+           {:e 106 "obligation" "O-CLAIM-DELIVERABLE" "obligation-order" 5 "obligation-outcome" ["claimed" "noop"] "obligation-role" "implementer" "obligation-work" ["repository-changing" "observational"]}
+           {:e 107 "obligation" "O-CLAIM-NOOP-CONTINUE" "obligation-order" 6 "obligation-outcome" ["noop"] "obligation-work" ["repository-changing" "observational"]}
+           {:e 108 "obligation" "O-CLAIM-PARTIAL-RECOVERY" "obligation-order" 7 "obligation-outcome" ["partial"] "obligation-work" ["repository-changing" "observational"]}
+           {:e 109 "obligation" "O-CLAIM-DENIED-RECOVERY" "obligation-order" 8 "obligation-outcome" ["denied"] "obligation-work" ["repository-changing" "observational"]}]
    :expect {:actions []
             :denials #{}
             :obligations ["O-CLAIM-DENIED-RECOVERY" "O-CLAIM-OWNERSHIP"]}}
 
-  {:id "partial-implementer-obligations"
-   :doc "A partial claim confers the general owner duties that remain meaningful plus the partial-recovery guidance."
+  {:id "partial-implementer-publication"
+   :doc "A partial claim keeps the early-publication duty plus the general owner duties that remain meaningful and the partial-recovery guidance."
    :viewer {:role "implementer"}
-   :facts [{:e 1 "claim-outcome" "partial" "claim-role" "implementer"}
-           {:e 101 "obligation" "O-CLAIM-ACCEPTANCE" "obligation-order" 0 "obligation-outcome" ["claimed" "noop"]}
-           {:e 102 "obligation" "O-CLAIM-OWNERSHIP" "obligation-order" 1 "obligation-outcome" ["claimed" "noop" "denied" "partial"]}
-           {:e 103 "obligation" "O-CLAIM-BLOCKERS" "obligation-order" 2 "obligation-outcome" ["claimed" "noop"]}
-           {:e 104 "obligation" "O-CLAIM-REMOVAL" "obligation-order" 3 "obligation-outcome" ["claimed" "noop" "partial"]}
-           {:e 105 "obligation" "O-CLAIM-DELIVERABLE" "obligation-order" 4 "obligation-outcome" ["claimed" "noop"] "obligation-role" "implementer"}
-           {:e 106 "obligation" "O-CLAIM-NOOP-CONTINUE" "obligation-order" 5 "obligation-outcome" ["noop"]}
-           {:e 107 "obligation" "O-CLAIM-PARTIAL-RECOVERY" "obligation-order" 6 "obligation-outcome" ["partial"]}
-           {:e 108 "obligation" "O-CLAIM-DENIED-RECOVERY" "obligation-order" 7 "obligation-outcome" ["denied"]}]
+   :facts [{:e 1 "claim-outcome" "partial" "claim-role" "implementer" "claim-work" "repository-changing"}
+           {:e 101 "obligation" "O-CLAIM-PUBLISH-EARLY" "obligation-order" 0 "obligation-outcome" ["claimed" "noop" "partial"] "obligation-role" ["implementer" "designer"] "obligation-work" "repository-changing"}
+           {:e 102 "obligation" "O-CLAIM-ACCEPTANCE" "obligation-order" 1 "obligation-outcome" ["claimed" "noop"] "obligation-work" ["repository-changing" "observational"]}
+           {:e 103 "obligation" "O-CLAIM-OWNERSHIP" "obligation-order" 2 "obligation-outcome" ["claimed" "noop" "denied" "partial"] "obligation-work" ["repository-changing" "observational"]}
+           {:e 104 "obligation" "O-CLAIM-BLOCKERS" "obligation-order" 3 "obligation-outcome" ["claimed" "noop"] "obligation-work" ["repository-changing" "observational"]}
+           {:e 105 "obligation" "O-CLAIM-REMOVAL" "obligation-order" 4 "obligation-outcome" ["claimed" "noop" "partial"] "obligation-work" ["repository-changing" "observational"]}
+           {:e 106 "obligation" "O-CLAIM-DELIVERABLE" "obligation-order" 5 "obligation-outcome" ["claimed" "noop"] "obligation-role" "implementer" "obligation-work" ["repository-changing" "observational"]}
+           {:e 107 "obligation" "O-CLAIM-NOOP-CONTINUE" "obligation-order" 6 "obligation-outcome" ["noop"] "obligation-work" ["repository-changing" "observational"]}
+           {:e 108 "obligation" "O-CLAIM-PARTIAL-RECOVERY" "obligation-order" 7 "obligation-outcome" ["partial"] "obligation-work" ["repository-changing" "observational"]}
+           {:e 109 "obligation" "O-CLAIM-DENIED-RECOVERY" "obligation-order" 8 "obligation-outcome" ["denied"] "obligation-work" ["repository-changing" "observational"]}]
    :expect {:actions []
             :denials #{}
-            :obligations ["O-CLAIM-OWNERSHIP" "O-CLAIM-PARTIAL-RECOVERY" "O-CLAIM-REMOVAL"]}}
+            :obligations ["O-CLAIM-OWNERSHIP" "O-CLAIM-PARTIAL-RECOVERY" "O-CLAIM-PUBLISH-EARLY" "O-CLAIM-REMOVAL"]}}
 
   {:id "claimed-designer-excludes-implementer-deliverable"
-   :doc "A designer's successful claim does not apply the implementer-only DELIVERABLE obligation."
+   :doc "A designer's successful claim keeps the early-publication duty but not the implementer-only DELIVERABLE obligation."
    :viewer {:role "designer"}
-   :facts [{:e 1 "claim-outcome" "claimed" "claim-role" "designer"}
-           {:e 101 "obligation" "O-CLAIM-ACCEPTANCE" "obligation-order" 0 "obligation-outcome" ["claimed" "noop"]}
-           {:e 102 "obligation" "O-CLAIM-OWNERSHIP" "obligation-order" 1 "obligation-outcome" ["claimed" "noop" "denied" "partial"]}
-           {:e 103 "obligation" "O-CLAIM-BLOCKERS" "obligation-order" 2 "obligation-outcome" ["claimed" "noop"]}
-           {:e 104 "obligation" "O-CLAIM-REMOVAL" "obligation-order" 3 "obligation-outcome" ["claimed" "noop" "partial"]}
-           {:e 105 "obligation" "O-CLAIM-DELIVERABLE" "obligation-order" 4 "obligation-outcome" ["claimed" "noop"] "obligation-role" "implementer"}
-           {:e 106 "obligation" "O-CLAIM-NOOP-CONTINUE" "obligation-order" 5 "obligation-outcome" ["noop"]}
-           {:e 107 "obligation" "O-CLAIM-PARTIAL-RECOVERY" "obligation-order" 6 "obligation-outcome" ["partial"]}
-           {:e 108 "obligation" "O-CLAIM-DENIED-RECOVERY" "obligation-order" 7 "obligation-outcome" ["denied"]}]
+   :facts [{:e 1 "claim-outcome" "claimed" "claim-role" "designer" "claim-work" "repository-changing"}
+           {:e 101 "obligation" "O-CLAIM-PUBLISH-EARLY" "obligation-order" 0 "obligation-outcome" ["claimed" "noop" "partial"] "obligation-role" ["implementer" "designer"] "obligation-work" "repository-changing"}
+           {:e 102 "obligation" "O-CLAIM-ACCEPTANCE" "obligation-order" 1 "obligation-outcome" ["claimed" "noop"] "obligation-work" ["repository-changing" "observational"]}
+           {:e 103 "obligation" "O-CLAIM-OWNERSHIP" "obligation-order" 2 "obligation-outcome" ["claimed" "noop" "denied" "partial"] "obligation-work" ["repository-changing" "observational"]}
+           {:e 104 "obligation" "O-CLAIM-BLOCKERS" "obligation-order" 3 "obligation-outcome" ["claimed" "noop"] "obligation-work" ["repository-changing" "observational"]}
+           {:e 105 "obligation" "O-CLAIM-REMOVAL" "obligation-order" 4 "obligation-outcome" ["claimed" "noop" "partial"] "obligation-work" ["repository-changing" "observational"]}
+           {:e 106 "obligation" "O-CLAIM-DELIVERABLE" "obligation-order" 5 "obligation-outcome" ["claimed" "noop"] "obligation-role" "implementer" "obligation-work" ["repository-changing" "observational"]}
+           {:e 107 "obligation" "O-CLAIM-NOOP-CONTINUE" "obligation-order" 6 "obligation-outcome" ["noop"] "obligation-work" ["repository-changing" "observational"]}
+           {:e 108 "obligation" "O-CLAIM-PARTIAL-RECOVERY" "obligation-order" 7 "obligation-outcome" ["partial"] "obligation-work" ["repository-changing" "observational"]}
+           {:e 109 "obligation" "O-CLAIM-DENIED-RECOVERY" "obligation-order" 8 "obligation-outcome" ["denied"] "obligation-work" ["repository-changing" "observational"]}]
    :expect {:actions []
             :denials #{}
-            :obligations ["O-CLAIM-ACCEPTANCE" "O-CLAIM-BLOCKERS" "O-CLAIM-OWNERSHIP" "O-CLAIM-REMOVAL"]}}
+            :obligations ["O-CLAIM-ACCEPTANCE" "O-CLAIM-BLOCKERS" "O-CLAIM-OWNERSHIP" "O-CLAIM-PUBLISH-EARLY" "O-CLAIM-REMOVAL"]}}
  ]}

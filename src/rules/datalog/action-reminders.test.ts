@@ -38,6 +38,7 @@ describe("native claim-time obligations and action-reminder selection (#1029)", 
     expect(res.admissionRationale.map((i) => i.id)).toEqual(["D-OWN", "D-PR-FAIL"]);
     expect(res.admissionRationale.every((i) => i.sourceKind === "decision")).toBe(true);
     expect(res.obligations.map((i) => i.id)).toEqual([
+      "O-CLAIM-PUBLISH-EARLY",
       "O-CLAIM-ACCEPTANCE",
       "O-CLAIM-OWNERSHIP",
       "O-CLAIM-BLOCKERS",
@@ -45,12 +46,14 @@ describe("native claim-time obligations and action-reminder selection (#1029)", 
       "O-CLAIM-DELIVERABLE",
     ]);
     expect(res.obligations.every((i) => i.sourceKind === "procedural-obligation")).toBe(true);
-    // 2 admission + 5 obligations = 7 selected, bounded to 6 in items
-    expect(res.selectedIds).toHaveLength(7);
+    // 2 admission + 6 obligations = 8 selected, bounded to 6 in items; PUBLISH-EARLY leads and is
+    // shown, while the tail duties are honestly omitted (reviewed #1114 bounded-display contract).
+    expect(res.selectedIds).toHaveLength(8);
     expect(res.items).toHaveLength(RULE_REMINDERS_MAX_ITEMS);
+    expect(res.items.some((i) => i.id === "O-CLAIM-PUBLISH-EARLY")).toBe(true);
     expect(res.omissions).toEqual({
-      count: 1,
-      omittedIds: ["O-CLAIM-DELIVERABLE"],
+      count: 2,
+      omittedIds: ["O-CLAIM-REMOVAL", "O-CLAIM-DELIVERABLE"],
       reason: "item-limit",
       reference: "pdb rules",
     });
@@ -174,6 +177,7 @@ describe("native claim-time obligations and action-reminder selection (#1029)", 
     expect(res.label).toBe("partial");
     expect(res.admissionRationale.map((i) => i.id)).toEqual(["D-OWNED-INCOMPLETE"]);
     expect(res.obligations.map((i) => i.id)).toEqual([
+      "O-CLAIM-PUBLISH-EARLY",
       "O-CLAIM-OWNERSHIP",
       "O-CLAIM-REMOVAL",
       "O-CLAIM-PARTIAL-RECOVERY",
@@ -396,9 +400,10 @@ describe("native claim-time obligations and action-reminder selection (#1029)", 
     expect(text).toContain("Admission rationale:");
     expect(text).toContain("- D-OWN [decision]:");
     expect(text).toContain("Obligations:");
-    expect(text).toContain("- O-CLAIM-ACCEPTANCE [procedural-obligation]:");
+    expect(text).toContain("- O-CLAIM-PUBLISH-EARLY [procedural-obligation]:");
+    // PUBLISH-EARLY leads the bounded display; the two tail duties are honestly omitted.
     expect(text).toContain(
-      "Omitted: 1 more rule(s); run pdb rules (e.g. pdb rules --rule O-CLAIM-DELIVERABLE).",
+      "Omitted: 2 more rule(s); run pdb rules (e.g. pdb rules --rule O-CLAIM-REMOVAL).",
     );
 
     const noop = selectClaimRuleReminders({ role: "implementer", outcome: "noop" });
@@ -446,5 +451,33 @@ describe("native claim-time obligations and action-reminder selection (#1029)", 
     const edited = validateBundle(readSources(editedReader));
     const designer = selectNativeClaimObligations("designer", "claimed", edited);
     expect(designer.ids).toContain("O-CLAIM-DELIVERABLE");
+  });
+
+  it("is source-driven: the #1114 work restriction comes from the authored record", () => {
+    // Observational work excludes the early-publication duty because obligations.edn restricts it
+    // to repository-changing; dropping that restriction makes observational work receive it too.
+    const editedReader = (name: string) =>
+      name === "obligations.edn"
+        ? readFileSync(join(policyDir, "obligations.edn"), "utf8").replace(
+            ':id "O-CLAIM-PUBLISH-EARLY" :outcome ["claimed" "noop" "partial"] :role ["implementer" "designer"] :work ["repository-changing"]',
+            ':id "O-CLAIM-PUBLISH-EARLY" :outcome ["claimed" "noop" "partial"] :role ["implementer" "designer"] :work ["repository-changing" "observational"]',
+          )
+        : readFileSync(join(policyDir, name), "utf8");
+    const edited = validateBundle(readSources(editedReader));
+    // Shipped policy excludes it for observational work...
+    const shipped = selectClaimRuleReminders({
+      role: "implementer",
+      outcome: "claimed",
+      workKind: "observational",
+    });
+    expect(shipped.selectedIds).not.toContain("O-CLAIM-PUBLISH-EARLY");
+    // ...but the edited record grants it.
+    const observational = selectNativeClaimObligations(
+      "implementer",
+      "claimed",
+      edited,
+      "observational",
+    );
+    expect(observational.ids).toContain("O-CLAIM-PUBLISH-EARLY");
   });
 });
