@@ -1486,6 +1486,12 @@ async function memberOwnershipElsewhere(
     if (seen.has(key)) continue;
     seen.add(key);
     if (sameRepo(i.repository, self.repository) && i.number === self.number) continue;
+    // Another repository's records need that repository's permission check, which this read
+    // does not have (#1149 review): its ownership is unknown, never unowned.
+    if (!sameRepo(i.repository, self.repository)) {
+      result = "unknown";
+      continue;
+    }
     try {
       const read = await readIssue(i.repository, i.number, rt.query);
       const item = read.item;
@@ -1551,6 +1557,7 @@ export async function adoptionFacts(
   const preserved: string[] = [];
   const unknown: string[] = [];
   const owned: string[] = [];
+  const targets: Record<string, string | null> = {};
   for (const m of fold.members) {
     if (m.deliverable.kind !== "pr" || m.responsible !== null) continue;
     const url = `https://github.com/${m.deliverable.repository}/pull/${m.deliverable.number}`;
@@ -1563,6 +1570,10 @@ export async function adoptionFacts(
     }
     if (pr.state !== "OPEN") continue;
     preserved.push(pr.url);
+    const t = m.deliverable.target;
+    const branch = t.branch ?? (sameRepo(t.repository, repository) ? null : pr.baseRefName);
+    targets[pr.url] =
+      sameRepo(t.repository, repository) && t.branch === null ? null : `${t.repository}:${branch}`;
     const elsewhere = await memberOwnershipElsewhere(pr, { repository, number }, rt);
     if (elsewhere === "owned") owned.push(pr.url);
     if (elsewhere === "unknown") unknown.push(pr.url);
@@ -1576,6 +1587,7 @@ export async function adoptionFacts(
       unknownPrUrls: unknown,
     },
     ticketResponsible: fold.ticketResponsible !== null,
+    targets,
   };
 }
 

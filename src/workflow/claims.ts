@@ -224,13 +224,53 @@ export type ReworkAuthority =
 export type ClaimAdoptionFacts = Pick<
   ClaimAdmissionInput,
   "release" | "ticketResponsible" | "responsibilityUnknown"
->;
+> & {
+  /**
+   * Host guidance only, never a native fact: each preserved PR's recorded target as
+   * `owner/name:branch`, or null for the ticket repository's default branch.
+   */
+  targets?: Record<string, string | null>;
+};
 
 /** Preserved PRs confirmed unowned: neither owned elsewhere nor of unknown ownership. */
 const adoptable = (release: NonNullable<ClaimAdoptionFacts["release"]>): readonly string[] =>
   release.preservedPrUrls.filter(
     (u) => !release.ownedPrUrls?.includes(u) && !release.unknownPrUrls?.includes(u),
   );
+
+/**
+ * How the adopter becomes responsible (#1149 review): submit applies one target to every --pr,
+ * so PRs are grouped by recorded target. All groups but the last are attached first (membership
+ * open) while the claim is held; the last group's submit completes membership and releases it.
+ */
+function adoptionNote(
+  release: NonNullable<ClaimAdoptionFacts["release"]>,
+  targets: Record<string, string | null>,
+  number: number,
+  agent: string,
+  repository: string,
+): string {
+  const urls = adoptable(release);
+  const groups = new Map<string | null, string[]>();
+  for (const u of urls) {
+    const t = targets[u] ?? null;
+    groups.set(t, [...(groups.get(t) ?? []), u]);
+  }
+  const args = (t: string | null, prs: string[]) =>
+    `${prs.map((u) => ` --pr ${u}`).join("")}${t ? ` --target ${t}` : ""}`;
+  const entries = [...groups.entries()];
+  const last = entries.pop();
+  const steps = [
+    ...entries.map(
+      ([t, prs]) =>
+        `pdb deliverables ${number} attach --agent ${agent}${args(t, prs)} --membership open --reason "adopt preserved work" --repo ${repository}`,
+    ),
+    ...(last
+      ? [`pdb submit ${number} --agent ${agent}${args(last[0], last[1])} --repo ${repository}`]
+      : []),
+  ];
+  return `Adopting preserved work released from ${release.from}: continue ${urls.join(", ")} rather than opening a duplicate PR, then become responsible with ${steps.join(", then ")}.`;
+}
 
 /**
  * The retained-claim admission guard (#412, doc/design/blocked-retained-claims.md), injected so
@@ -994,8 +1034,9 @@ async function planClaimFor(
       );
     }
   }
+  const { targets: adoptionTargets, ...adoptionFacts } = adopting ?? {};
   const denials = evaluateClaimAdmission({
-    ...adopting,
+    ...adoptionFacts,
     state: item.state,
     labels: facts.labels,
     labelsComplete: !item.labels.pageInfo?.hasNextPage,
@@ -1134,13 +1175,7 @@ async function planClaimFor(
           notes: [
             ...ignoredNote(ignored),
             ...(adopting?.release
-              ? [
-                  `Adopting preserved work released from ${adopting.release.from}: continue ${adoptable(adopting.release).join(", ")} rather than opening a duplicate PR, then become responsible with pdb submit ${number} --agent ${agent}${adoptable(
-                    adopting.release,
-                  )
-                    .map((u) => ` --pr ${u}`)
-                    .join("")} --repo ${repository}.`,
-                ]
+              ? [adoptionNote(adopting.release, adoptionTargets ?? {}, number, agent, repository)]
               : []),
             ...(deliveryPath
               ? [

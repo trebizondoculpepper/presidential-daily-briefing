@@ -123,7 +123,7 @@ function github(
         resource: {
           __typename: "PullRequest",
           closingIssuesReferences: {
-            nodes: [node(N)],
+            nodes: prs.get(String(v.url))?.closingIssuesReferences.nodes ?? [node(N)],
             pageInfo: { hasNextPage: false },
           },
           timelineItems: {
@@ -1989,6 +1989,24 @@ describe("deliverables unassign: human-directed responsibility release (#1019)",
         },
       });
       expect(admit(all)).toContain("CLAIM-NOT-READY");
+    });
+
+    it("treats a member record in another repository as unknown ownership (#1149 review)", async () => {
+      const foreign = fakePr(998, {
+        closingIssuesReferences: {
+          nodes: [
+            { number: N, repository: { nameWithOwner: repo } },
+            { number: 5, repository: { nameWithOwner: other } },
+          ],
+        },
+      });
+      const facts = await released({ prs: [foreign, fakePr(999)] });
+      expect(facts?.release?.unknownPrUrls).toEqual([prLink(998)]);
+    });
+
+    it("records each preserved PR's target for the adoption guidance", async () => {
+      const facts = await released({ prs: prs() });
+      expect(facts?.targets).toEqual({ [prLink(998)]: null, [prLink(999)]: null });
     });
 
     it("lets the released agent itself adopt and submit again: the release starts a new cycle", async () => {

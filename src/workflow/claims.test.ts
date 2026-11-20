@@ -571,6 +571,32 @@ describe("claim and needs-human (doc/design/workflow.md)", () => {
       expect(note).not.toContain(pr(14));
     });
 
+    it("groups the adoption steps by recorded target (#1149 review)", async () => {
+      const env = fake({ labels: ["status:awaiting-review"], openPrs: [12, 13] });
+      const plan = accepted(
+        await planClaim(
+          repo,
+          { number: 7, agent: "kavya" },
+          env.query,
+          env.permission,
+          undefined,
+          undefined,
+          async () =>
+            ({
+              release: { trust: "trusted", from: "alice", preservedPrUrls: [pr(12), pr(13)] },
+              targets: { [pr(12)]: null, [pr(13)]: "other/lib:release" },
+            }) as never,
+        ),
+      );
+      const note = plan.notes!.join(" ");
+      expect(note).toContain(
+        `pdb deliverables 7 attach --agent kavya --pr ${pr(12)} --membership open`,
+      );
+      expect(note).toContain(
+        `pdb submit 7 --agent kavya --pr ${pr(13)} --target other/lib:release`,
+      );
+    });
+
     it("lets the native rules refuse while the ticket is owned, the PR is owned or unknown, or the fold is unread", async () => {
       for (const facts of [
         { ...released(), ticketResponsible: true },
