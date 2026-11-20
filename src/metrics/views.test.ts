@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
-import { dailyView, newsView, timingView } from "./views.js";
+import { dailyView, newsView, pickupDelayView, timingView } from "./views.js";
 import type { MetricTicket } from "./views.js";
 import type { LedgerEvent, TicketLedger } from "./ledger.js";
 
@@ -370,5 +370,109 @@ describe("timing view (#573 slice 5a)", () => {
     ]);
     for (const [t, expected] of cases)
       expect([t.member, all.includes(t.member)]).toEqual([t.member, expected]);
+  });
+});
+
+describe("pickup-delay view: creation to first pickup (#821)", () => {
+  const created = (n: number, at: string): LedgerEvent => ({
+    kind: "created",
+    source: "issue",
+    at,
+    key: `c:${n}`,
+  });
+  const withImpact = (t: MetricTicket, group: string): MetricTicket => ({
+    ...t,
+    assessment: { impact: { group } } as never,
+  });
+
+  it("groups the creation cohort by current impact, with open, closed and unknown kept apart", () => {
+    const fast = withImpact(
+      ticket(1, "none", {
+        events: [created(1, "2026-11-15T00:00:00Z")],
+        firstPickup: picked("2026-11-15T02:00:00Z"),
+      }),
+      "L",
+    );
+    const slow = withImpact(
+      ticket(2, "none", {
+        events: [created(2, "2026-11-14T00:00:00Z")],
+        firstPickup: picked("2026-11-14T10:00:00Z"),
+      }),
+      "L",
+    );
+    const waiting = withImpact(
+      ticket(3, "none", { events: [created(3, "2026-11-16T09:00:00Z")] }),
+      "L",
+    );
+    const dropped = withImpact(
+      ticket(4, "none", {
+        events: [
+          created(4, "2026-11-15T00:00:00Z"),
+          closed(4, "2026-11-16T00:00:00Z", "NOT_PLANNED"),
+        ],
+        currentState: "closed",
+      }),
+      "M",
+    );
+    const unread = withImpact(
+      ticket(5, "none", {
+        events: [created(5, "2026-11-15T00:00:00Z")],
+        firstPickup: {
+          "claim-marker": { status: "unknown", reason: "comments cut off", observed: null },
+          label: { status: "none" },
+        },
+      }),
+      "M",
+    );
+    const olderThanWindow = withImpact(
+      ticket(6, "none", {
+        events: [created(6, "2026-10-01T00:00:00Z")],
+        firstPickup: picked("2026-11-15T00:00:00Z"),
+      }),
+      "L",
+    );
+    const v = pickupDelayView(
+      NOW,
+      7,
+      [fast, slow, waiting, dropped, unread, olderThanWindow],
+      covered,
+    );
+    expect(v.groupBasis).toBe("current-valid-impact");
+    expect(v.groups["L"]).toMatchObject({
+      completed: 2,
+      median: 6 * H,
+      open: { count: 1, longestElapsedMs: 24 * H },
+    });
+    // Drill-down membership is exactly the figures' tickets; the older ticket is outside the cohort.
+    expect(v.groups["L"]!.members.completed.sort()).toEqual([`${repo}#1`, `${repo}#2`]);
+    expect(v.groups["L"]!.members.open).toEqual([`${repo}#3`]);
+    expect(v.groups["M"]).toMatchObject({ completed: 0, closedUndelivered: 1, unknown: 1 });
+  });
+
+  it("never invents an endpoint: unread creation or a pickup before creation is unknown", () => {
+    const noCreation = withImpact(
+      ticket(7, "none", {
+        events: [merged(70, "2026-11-15T00:00:00Z")],
+        firstPickup: picked("2026-11-15T00:00:00Z"),
+      }),
+      "S",
+    );
+    const backwards = withImpact(
+      ticket(8, "none", {
+        events: [created(8, "2026-11-15T05:00:00Z")],
+        firstPickup: picked("2026-11-15T00:00:00Z"),
+      }),
+      "S",
+    );
+    const v = pickupDelayView(NOW, 7, [noCreation, backwards], covered);
+    expect(v.groups["S"]).toMatchObject({ completed: 0, unknown: 2 });
+  });
+
+  it("groups a ticket with no supplied assessment as unknown, never by an untrusted label", () => {
+    const t = ticket(9, "none", {
+      events: [created(9, "2026-11-15T00:00:00Z")],
+      firstPickup: picked("2026-11-15T01:00:00Z"),
+    });
+    expect(Object.keys(pickupDelayView(NOW, 7, [t], covered).groups)).toEqual(["unknown"]);
   });
 });

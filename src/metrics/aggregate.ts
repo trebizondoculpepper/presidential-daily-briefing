@@ -132,6 +132,34 @@ export function firstPickup(ledger: TicketLedger): FirstPickup {
     : { status: "none" };
 }
 
+/**
+ * Creation to the earliest proven pickup (#821; owner decision: a trusted claim record or a
+ * trusted agent-label event, whichever is earliest). A ticket never picked up is an open lower
+ * bound while it is open and `closed-undelivered` (closed without pickup) once closed; missing or
+ * bounded history, or a pickup before creation, is unknown, never zero.
+ */
+export function createdToPickup(member: string, ledger: TicketLedger, now: string): DurationSample {
+  const created = ledger.events.find((e) => e.kind === "created")?.at ?? null;
+  if (created === null) return { member, status: "unknown", reason: "creation instant not read" };
+  const pickup = firstPickup(ledger);
+  if (pickup.status === "unknown") return { member, status: "unknown", reason: pickup.reason };
+  if (pickup.status === "none") {
+    if (ledger.currentState === "closed")
+      return { member, status: "closed-undelivered", reason: "closed without a pickup" };
+    if (ledger.currentState === "unknown")
+      return { member, status: "unknown", reason: "current issue state unknown" };
+    return {
+      member,
+      status: "open",
+      elapsedMs: Math.max(0, Date.parse(now) - Date.parse(created)),
+    };
+  }
+  const ms = Date.parse(pickup.at) - Date.parse(created);
+  return ms < 0
+    ? { member, status: "unknown", reason: "first pickup precedes creation" }
+    : { member, status: "completed", ms };
+}
+
 /** The completion verdict for a ticket now, as the native rules and evaluator decide it. */
 export type CompletionVerdict = "delivered" | "attested" | "none" | "unknown";
 
