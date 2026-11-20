@@ -32,9 +32,9 @@
    :doc "returns noop when selected claim is absent and history is complete"
    :viewer {:role "human" :agent ""}
    :facts [{:e 1 "trusted-human-context" true "permission" "allow" "override-unknown-history" false}
-           {:e 100 "unassign-subject" true "kind" "unassign" "state" "OPEN" "number" 42 "target" "issue:42" "created" 0 "labels-complete" true "native-complete" true "reverse-complete" true "open-blockers" 0 "blocking-complete" true "impact-size" "unknown" "impact-state" "unknown" "complexity-size" "unknown" "complexity-state" "unknown" "head" "not-a-pr" "unassign-agent" "kavya" "claim-present" false "claim-history-complete" true "claim-start" ""}]
+           {:e 100 "unassign-subject" true "kind" "unassign" "state" "OPEN" "number" 42 "target" "issue:42" "created" 0 "labels-complete" true "native-complete" true "reverse-complete" true "open-blockers" 0 "blocking-complete" true "impact-size" "unknown" "impact-state" "unknown" "complexity-size" "unknown" "complexity-state" "unknown" "head" "not-a-pr" "unassign-agent" "kavya" "claim-present" false "responsibility-present" false "claim-history-complete" true "claim-start" ""}]
    :expect {:actions [{:subject 100 :rule "D-UNASSIGN-NOOP" :kind "unassign-noop" :band 1
-               :why "Agent kavya no longer holds an active claim; human owners and ticket state are preserved."
+               :why "Agent kavya no longer holds an active claim or continuing responsibility; human owners and ticket state are preserved."
                :overridden []}] :denials []}}
 
   {:id "unassign-refuse-evidence-incomplete"
@@ -71,4 +71,13 @@
            {:e 100 "unassign-subject" true "kind" "unassign" "state" "OPEN" "number" 42 "target" "issue:42" "created" 0 "labels-complete" true "native-complete" true "reverse-complete" true "open-blockers" 0 "blocking-complete" true "impact-size" "unknown" "impact-state" "unknown" "complexity-size" "unknown" "complexity-state" "unknown" "head" "not-a-pr" "unassign-agent" "kavya" "claim-present" true "claim-history-complete" false "claim-start" ""}]
    :expect {:actions [{:subject 100 :rule "D-UNASSIGN-ALLOW-OVERRIDE" :kind "unassign-allow" :band 1
                :why "Release only agent:kavya under explicit human override; preserve all human assignees, readiness labels, blockers, questions and other agents' claims."
+               :overridden []}] :denials []}}
+
+  {:id "unassign-allow-responsibility-only"
+   :doc "allows Unassign when the agent holds only continuing responsibility without a claim label (#1018)"
+   :viewer {:role "human" :agent ""}
+   :facts [{:e 1 "trusted-human-context" true "permission" "allow"}
+           {:e 100 "unassign-subject" true "kind" "unassign" "state" "OPEN" "number" 42 "target" "issue:42" "created" 0 "labels-complete" true "native-complete" true "reverse-complete" true "open-blockers" 0 "blocking-complete" true "impact-size" "unknown" "impact-state" "unknown" "complexity-size" "unknown" "complexity-state" "unknown" "head" "not-a-pr" "unassign-agent" "kavya" "claim-present" false "responsibility-present" true "claim-history-complete" true "claim-start" ""}]
+   :expect {:actions [{:subject 100 :rule "D-UNASSIGN-ALLOW-RESPONSIBILITY" :kind "unassign-allow" :band 1
+               :why "Release only agent:kavya's continuing responsibility (#1018): no claim label is present, but delivery responsibility remains; clear it while preserving all human assignees, readiness labels, blockers, questions and other agents' claims."
                :overridden []}] :denials []}}]}

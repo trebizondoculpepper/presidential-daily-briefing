@@ -2,7 +2,7 @@
 ;; Each witness is a vector of where-clauses binding ?value for subject ?t.
 {:policy-version 1
  :many
- ["required-evidence-gap" "missing-required" "label" "owner" "responsible" "platform" "attention" "blocker" "dependent" "closes" "closing" "check" "review" "receipt" "provider-review" "provider-finding" "thread" "matched" "overridden" "unlocks-dependent" "permit" "deny" "unknown" "unlock-unknown" "question-record"]
+ ["required-evidence-gap" "missing-required" "label" "owner" "responsible" "platform" "attention" "blocker" "dependent" "closes" "closing" "check" "review" "receipt" "provider-review" "provider-finding" "thread" "matched" "overridden" "unlocks-dependent" "permit" "deny" "unknown" "unlock-unknown" "question-record" "release" "responsibility-unknown" "responsibility-present"]
  :constants
  {"small" ["XS" "S"]
   "large" ["L" "XL" "XXL"]
@@ -45,6 +45,7 @@
    "unassign-subject" "human unassign evaluation subject"
    "unassign-agent" "agent claim targeted by human unassign"
    "claim-present" "whether the target agent claim label is currently present"
+   "responsibility-present" "whether the target agent still holds delivery responsibility"
    "claim-start" "recorded timestamp when the target agent claim began"
    "claim-history-complete" "completeness of claim label and timeline history"
    "trusted-human-context" "verified same-origin explicit human-mode request"
@@ -86,6 +87,7 @@
    "comment-count" "issue comment count"
    "comment-count-known" "whether the issue comment count was read"
    "required-evidence-gap" "unread target required-check evidence"
+   "responsibility-unknown" "delivery responsibility could not be read"
    "mergeable" "mergeability"
    "name" "name"
    "native-complete" "completeness of native dependency evidence"
@@ -115,6 +117,10 @@
    "refinement-estimated" "estimate recorded after resolution"
    "refinement-question" "blocking question"
    "refinement-state" "refinement state"
+   "release" "human-directed responsibility release direction"
+   "release-trust" "release direction trust level"
+   "release-from" "agent whose responsibility a release direction clears"
+   "release-pr" "preserved pull request of a release"
    "resolved" "resolved flag"
    "responsible" "responsible agent"
    "review-coverage" "declared review coverage"

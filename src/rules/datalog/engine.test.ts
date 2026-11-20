@@ -2,7 +2,14 @@ import { describe, it, expect } from "vite-plus/test";
 import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { evaluatePolicy, DatalogError, firstSubjectId, maxSubjects } from "./engine.js";
+import {
+  evaluatePolicy,
+  evaluateClaimAdmission,
+  DatalogError,
+  firstSubjectId,
+  maxSubjects,
+} from "./engine.js";
+import { evaluateUnassignDecision } from "./unassign.js";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -106,5 +113,89 @@ describe("engine boundary (#348)", () => {
       "experimental-scope-exceeded: at most 500 subjects are supported",
     );
     expect(() => evaluatePolicy({ viewer, datoms: subjects(maxSubjects) })).not.toThrow();
+  });
+});
+
+describe("native claim admission (#1086, #1018)", () => {
+  const base = {
+    labels: ["status:awaiting-review"],
+    labelsComplete: true,
+    nativeComplete: true,
+    openBlockers: 0,
+    openPrCount: 1,
+    platform: null,
+    platforms: [],
+    ownedClaimsComplete: true,
+    claimedByOther: false,
+  };
+
+  it("refuses ordinary awaiting-review pickup with CLAIM-NOT-READY", () => {
+    const denials = evaluateClaimAdmission({ state: "OPEN", ...base });
+    expect(denials).toContain("CLAIM-NOT-READY");
+    expect(denials).toContain("D-DENY-OPEN-PR");
+  });
+
+  it("honors the adoption exception: release facts admit preserved unowned awaiting-review work", () => {
+    const denials = evaluateClaimAdmission({
+      state: "OPEN",
+      ...base,
+      release: {
+        trust: "trusted",
+        from: "previous",
+        preservedPrUrls: ["https://github.com/o/r/pull/1"],
+      },
+    });
+    expect(denials).not.toContain("CLAIM-NOT-READY");
+    expect(denials).not.toContain("D-DENY-OPEN-PR");
+  });
+
+  it("keeps the inventory safeguard for adoptable work", () => {
+    const denials = evaluateClaimAdmission({
+      state: "OPEN",
+      ...base,
+      ownedClaimsComplete: false,
+      release: {
+        trust: "trusted",
+        from: "previous",
+        preservedPrUrls: ["https://github.com/o/r/pull/1"],
+      },
+    });
+    expect(denials).toContain("D-DENY-INVENTORY-UNKNOWN");
+    expect(denials).toContain("CLAIM-INVENTORY-UNKNOWN");
+    expect(denials).not.toContain("CLAIM-NOT-READY");
+  });
+});
+
+describe("native human-unassign decisions (#588, #1018)", () => {
+  const base = {
+    issueNumber: 1,
+    issueState: "OPEN" as const,
+    agent: "previous",
+    claimStart: "2026-11-19T00:00:00.000Z",
+    claimHistoryComplete: true,
+    trustedHumanContext: true,
+    permission: "allow" as const,
+    overrideUnknownHistory: false,
+  };
+
+  it("allows responsibility-only release without a claim label (#1018)", () => {
+    const allowed = evaluateUnassignDecision({
+      ...base,
+      claimPresent: false,
+      responsibilityPresent: true,
+    });
+    expect(allowed.verdict).toBe("allow");
+    expect(allowed.code).toBe("UNASSIGN_ALLOWED");
+    expect(allowed.witness.join(" ")).toContain("responsibilityPresent:true");
+  });
+
+  it("keeps a no-op when there is neither a claim nor continuing responsibility", () => {
+    const noop = evaluateUnassignDecision({
+      ...base,
+      claimPresent: false,
+      responsibilityPresent: false,
+    });
+    expect(noop.verdict).toBe("noop");
+    expect(noop.code).toBe("UNASSIGN_NOOP");
   });
 });

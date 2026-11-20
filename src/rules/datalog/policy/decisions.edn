@@ -229,6 +229,18 @@
    :why "Eligible implementation: impact {impact} ({impactState}), complexity {complexity} ({complexityState})."
    :codes ["ordinary"]}
 
+  {:id "D-ADOPT"
+   :purpose "Offer preserved unowned PR work after a human-directed responsibility release, so an otherwise eligible agent may continue it."
+   :kind "implement"
+   :band 6
+   :preference 1
+   :affinity "implementer"
+   :owned false
+   :when [[1 "role" ?role] [(not= ?role "human")] (adoptable ?t) (not (implementation-denied ?t))]
+   :why "Preserved unowned PR work: a human-directed release cleared {releaseFrom} from this ticket; an open PR continues it. Adopt it and become responsible. Impact {impact} ({impactState}), complexity {complexity} ({complexityState})."
+   :codes ["ordinary" "adopt-unowned"]
+   :witnesses {"releaseFrom" [[?t "release" ?r] (human-release ?t ?r) [?r "release-from" ?rfrom] [(str ?rfrom) ?value]]}}
+
   {:id "D-OWN"
    :purpose "Keep an agent's active implementation claim visible as continuation work."
    :kind "continue-implementation"
@@ -595,14 +607,14 @@
    :witnesses {"agent" [[?t "unassign-agent" ?value]]}}
 
   {:id "D-UNASSIGN-NOOP"
-   :purpose "Report an idempotent no-op when the selected agent claim is already absent and history is complete."
+   :purpose "Report an idempotent no-op when the selected agent claim is already absent (and no continuing responsibility remains) and history is complete."
    :kind "unassign-noop"
    :band 1
    :preference 1
    :affinity "human"
    :owned false
-   :when [[1 "role" "human"] [?t "unassign-subject" true] [1 "trusted-human-context" true] [1 "permission" "allow"] [?t "claim-present" false] [?t "claim-history-complete" true]]
-   :why "Agent {agent} no longer holds an active claim; human owners and ticket state are preserved."
+   :when [[1 "role" "human"] [?t "unassign-subject" true] [1 "trusted-human-context" true] [1 "permission" "allow"] [?t "claim-present" false] [?t "responsibility-present" false] [?t "claim-history-complete" true]]
+   :why "Agent {agent} no longer holds an active claim or continuing responsibility; human owners and ticket state are preserved."
    :codes ["unassign" "noop"]
    :witnesses {"agent" [[?t "unassign-agent" ?value]]}}
 
@@ -652,6 +664,18 @@
    :when [[1 "role" "human"] [?t "unassign-subject" true] [1 "trusted-human-context" true] [1 "permission" "allow"] [1 "override-unknown-history" true] [?t "claim-present" true]]
    :why "Release only agent:{agent} under explicit human override; preserve all human assignees, readiness labels, blockers, questions and other agents' claims."
    :codes ["unassign" "allow" "override"]
+   :witnesses {"agent" [[?t "unassign-agent" ?value]]}}
+
+  {:id "D-UNASSIGN-ALLOW-RESPONSIBILITY"
+   :purpose "Allow Human-view Unassign when the agent holds only continuing delivery responsibility without a claim label, clearing that responsibility while preserving the work."
+   :kind "unassign-allow"
+   :band 1
+   :preference 2
+   :affinity "human"
+   :owned false
+   :when [[1 "role" "human"] [?t "unassign-subject" true] [1 "trusted-human-context" true] [1 "permission" "allow"] [?t "claim-present" false] [?t "responsibility-present" true] [?t "claim-history-complete" true]]
+   :why "Release only agent:{agent}'s continuing responsibility (#1018): no claim label is present, but delivery responsibility remains; clear it while preserving all human assignees, readiness labels, blockers, questions and other agents' claims."
+   :codes ["unassign" "allow" "responsibility"]
    :witnesses {"agent" [[?t "unassign-agent" ?value]]}}]
  :denials
  {"D-DENY-CLAIM" "Someone already claims the ticket."

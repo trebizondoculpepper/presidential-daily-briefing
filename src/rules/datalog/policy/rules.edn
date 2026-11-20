@@ -12,6 +12,25 @@
 [(mine-linked ?t) [1 "agent" ?a] [?t "responsible" ?a]]
 [(mine-linked ?t) [?t "closes" ?i] (mine ?i)]
 [(addressed ?t) [1 "agent" ?a] [?t "attention" ?a]]
+;; #1018 (doc/design/human-responsibility-release.md): an explicit human-directed release of a
+;; selected agent's ticket responsibility. The host asserts one release record per direction with
+;; its trust level, the released agent, optional claim-start/responsibility revisions and the
+;; preserved open PRs; only a trusted record is a human direction. Facts represent explicit
+;; direction separately from agent/client strings; an arbitrary flag or shared login is never it.
+;; Absent or unknown trust is not a trusted direction: the ordinary open-PR deny stays in force.
+[(human-release ?t ?r) [?t "release" ?r] [?r "release-trust" "trusted"]]
+;; An unread delivery responsibility is never "nobody": confirmed-unknown responsibility keeps the
+;; work out of adoption until it is read (reviewed #1109 finding).
+[(released-unowned ?t) (human-release ?t ?r) (not (claimed ?t)) (not [?t "responsible" _]) (not [?t "responsibility-unknown" true])]
+;; The preserved PR itself must be unowned: a PR another agent still owns is not admissible work
+;; (reviewed #1109 finding); a genuinely unowned preserved PR still qualifies.
+[(preserved-pr ?t) (human-release ?t ?r) [?t "release" ?r] [?r "release-pr" ?p] [?p "state" "OPEN"] (not [?p "responsible" _]) (not [?p "responsibility-unknown" true])]
+;; An otherwise-eligible agent may continue existing unowned work with a preserved open PR after
+;; a human-directed release: ordinary new-implementation admission must not duplicate an open PR
+;; (D-DENY-OPEN-PR stays for ordinary work), but preserved unowned work is the explicit exception.
+;; Clearing ownership does not exclude the former owner (owner correction, #1130): release/removal
+;; alone creates no cooldown or fresh-direction requirement for the former owner to claim or adopt.
+[(adoptable ?t) (issue ?t) (open ?t) (released-unowned ?t) (preserved-pr ?t)]
 [(parked ?t) [?t "label" "status:parked"]]
 [(foreground ?t) (open ?t) (not (parked ?t))]
 ;; Repository-level recovery is context, never a fabricated owned issue.
@@ -46,9 +65,10 @@
 [(blocked ?t) [?t "open-blockers" ?n] [(> ?n 0)]]
 [(blocked ?t) [?t "blocker" ?i] [?i "state" "OPEN"]]
 [(implementation-permit ?t) (issue ?t) (open ?t) (available ?t)]
+[(implementation-permit ?t) (adoptable ?t)]
 [(implementation-deny ?t ?r) (issue ?t) (claimed ?t) [(str "D-DENY-CLAIM") ?r]]
 [(implementation-deny ?t ?r) (issue ?t) (prerequisite ?t) [(str "D-DENY-PREREQUISITE") ?r]]
-[(implementation-deny ?t ?r) (issue ?t) (has-closing ?t) [(str "D-DENY-OPEN-PR") ?r]]
+[(implementation-deny ?t ?r) (issue ?t) (has-closing ?t) (not (adoptable ?t)) [(str "D-DENY-OPEN-PR") ?r]]
 [(implementation-deny ?t ?r) (issue ?t) (blocked ?t) [(str "D-DENY-BLOCKER") ?r]]
 [(implementation-deny ?t ?r) (issue ?t) [?t "labels-complete" false] [(str "D-DENY-LABELS-UNKNOWN") ?r]]
 [(implementation-deny ?t ?r) (issue ?t) [?t "native-complete" false] [(str "D-DENY-NATIVE-UNKNOWN") ?r]]
@@ -56,7 +76,12 @@
 [(implementation-deny ?t ?r) (issue ?t) (not (platform-ok ?t)) [(str "D-DENY-PLATFORM") ?r]]
 ;; #413: an incomplete inventory cannot rule out omitted active claims, even if every
 ;; observed claim is waiting; new pickup is denied rather than inviting a claim that the guard may refuse.
+;; #1018: the inventory safeguard also covers adoptable existing work — an omitted active claim
+;; cannot be ruled out there either, so a preserved-PR adoption must not bypass it.
+;; The adoptable constituents are inlined (not the adoptable predicate) because a fluent predicate
+;; with a `not` inside its body fails DataScript's join check when called from another rule body.
 [(implementation-deny ?t ?r) (issue ?t) (open ?t) (available ?t) (not (claimed ?t)) [1 "owned-claims-complete" false] [(str "D-DENY-INVENTORY-UNKNOWN") ?r]]
+[(implementation-deny ?t ?r) (issue ?t) (open ?t) [?t "release" ?rel] [?rel "release-trust" "trusted"] [?rel "release-pr" ?p] [?p "state" "OPEN"] (not (claimed ?t)) (not [?t "responsible" _]) [1 "owned-claims-complete" false] [(str "D-DENY-INVENTORY-UNKNOWN") ?r]]
 ;; #1092 (doc/design/estimation-refinement-loop.md): needs refinement denies pickup whatever the
 ;; estimate or readiness label says; an unknown refinement state or incomplete refinement
 ;; evidence fails closed. Resolving it returns the item for estimation, never to readiness.
@@ -67,9 +92,12 @@
 [(held ?t) [?t "label" "status:parked"]]
 [(claim-deny ?t ?code) (implementation-deny ?t ?code)]
 [(claim-deny ?t ?code) (issue ?t) (open ?t) (not (claimed ?t)) [1 "owned-claims-complete" false] [(str "CLAIM-INVENTORY-UNKNOWN") ?code]]
-[(claim-deny ?t ?code) (issue ?t) (not (available ?t)) [(str "CLAIM-NOT-READY") ?code]]
+;; #1018: adoptable preserved unowned work may retain status:awaiting-review; the claim needed to
+;; become responsible must not be refused for missing status:ready/incomplete. Readiness still
+;; gates ordinary pickups; adoption is the documented exception.
+[(claim-deny ?t ?code) (issue ?t) (not (available ?t)) (not (adoptable ?t)) [(str "CLAIM-NOT-READY") ?code]]
 [(implementation-denied ?t) (implementation-deny ?t ?r)]
-[(eligible ?t) (implementation-permit ?t) (not (implementation-denied ?t))]
+[(eligible ?t) (implementation-permit ?t) (not (adoptable ?t)) (not (implementation-denied ?t))]
 [(design-eligible ?t) (issue ?t) (open ?t) [?t "label" "status:needs-design"] [?t "labels-complete" true] (platform-ok ?t) (closing-complete ?t) (not (claimed ?t)) (not (has-closing ?t)) (not [?t "label" "design:decision-needed"])]
 [(possible ?t) (available ?t) (not (claimed ?t)) (not (prerequisite ?t)) (not (blocked ?t)) (not (has-closing ?t))]
 [(possible ?t) [?t "label" "status:needs-design"] (not (claimed ?t)) (not (has-closing ?t))]

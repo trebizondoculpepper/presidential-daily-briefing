@@ -8,7 +8,8 @@
  [{:winner "D-EASY" :loser "D-ORDINARY"}
   {:winner "D-UNFAVORABLE" :loser "D-ORDINARY"}
   {:winner "D-OWN-EASY" :loser "D-OWN"}
-  {:winner "D-OWN-UNFAVORABLE" :loser "D-OWN"}]
+  {:winner "D-OWN-UNFAVORABLE" :loser "D-OWN"}
+  {:winner "D-ADOPT" :loser "D-ORDINARY"}]
  :comparison ["ownership" "attention" "affinity" "band" "group" "primary" "urgency" "unlocks" "own" "incomplete" "created" "number" "target" "kind"]
  :rules
  [
