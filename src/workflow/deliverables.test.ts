@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vite-plus/test";
+import { evaluateUnassignDecision } from "../rules/datalog/unassign.js";
 import {
   applyDeliverables,
   deliverablesArguments,
@@ -169,6 +170,8 @@ function github(
     rest,
     trust: markerTrust(permission),
     now: () => new Date(Date.UTC(2026, 10, 13, 12, 0, state.clock++)),
+    // The real native policy, as the CLI injects it.
+    unassignDecision: async (f) => evaluateUnassignDecision(f),
   };
   return { rt, state };
 }
@@ -1953,5 +1956,15 @@ describe("deliverables unassign: human-directed responsibility release (#1019)",
       /release 42 --agent alice --as ready/,
     );
     expect(!claimed.ok && claimed.prerequisite).toMatch(/agent:alice still holds an active claim/);
+  });
+
+  it("admits nothing when the caller supplies no native decision", async () => {
+    const { rt } = github({ comments: [both()] });
+    delete rt.unassignDecision;
+    const plan = refused(
+      await planDeliverables(repo, request("unassign", { agent: "maint", from: "alice" }), rt),
+      "EVIDENCE_INCOMPLETE",
+    );
+    expect(plan.prerequisite).toMatch(/native Unassign policy is not available/);
   });
 });

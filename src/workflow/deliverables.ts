@@ -39,6 +39,7 @@ import type {
   TrustDecision,
 } from "./delivery.js";
 import type { Rest } from "../github/github.js";
+import type { UnassignDecision, UnassignRuleFacts } from "../rules/datalog/unassign.js";
 
 export const deliverablesActions = [
   "attach",
@@ -82,6 +83,12 @@ export interface DeliverablesRequest {
 
 /** Injected boundaries: GraphQL reads, `gh` writes, REST reads, the authority rule and a clock. */
 export interface DeliverablesRuntime {
+  /**
+   * The native Unassign policy (#1019), injected by the caller from the lazily loaded evaluator so
+   * this module adds no import edge or bundle chunk. Absent, `unassign` refuses: no write is ever
+   * admitted without the native decision.
+   */
+  unassignDecision?: (facts: UnassignRuleFacts) => Promise<UnassignDecision>;
   query: GraphQuery;
   run: GhRun;
   rest: Rest;
@@ -1303,8 +1310,14 @@ export async function planDeliverables(
       const ticketHeld = fold.ticketResponsible === from;
       const held = fold.members.filter((m) => m.responsible === from);
       const claimPresent = claims.includes(from);
-      const { evaluateUnassignDecision } = await import("../rules/datalog/unassign.js");
-      const decision = evaluateUnassignDecision({
+      if (!rt.unassignDecision)
+        return refuse(
+          "EVIDENCE_INCOMPLETE",
+          facts,
+          "The native Unassign policy is not available to this caller, so no release is admitted; nothing is changed.",
+          [retry],
+        );
+      const decision = await rt.unassignDecision({
         issueNumber: number,
         issueState: item.state === "CLOSED" ? "CLOSED" : "OPEN",
         agent: from,

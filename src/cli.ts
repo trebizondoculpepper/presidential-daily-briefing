@@ -2026,6 +2026,8 @@ async function run(
       rest: executorsOf(runtime).rest,
       trust: markerTrust(permission),
       now: runtime.now ?? (() => new Date()),
+      unassignDecision: async (f: import("./rules/datalog/datalog.js").UnassignRuleFacts) =>
+        (await import("./rules/datalog/datalog.js")).evaluateUnassignDecision(f),
     };
     const plan = await planDeliverables(repository, request, rt);
     const result =
@@ -2061,6 +2063,8 @@ async function run(
       rest: executorsOf(runtime).rest,
       trust: markerTrust(permission),
       now: runtime.now ?? (() => new Date()),
+      unassignDecision: async (f: import("./rules/datalog/datalog.js").UnassignRuleFacts) =>
+        (await import("./rules/datalog/datalog.js")).evaluateUnassignDecision(f),
       completion: gh.completion,
     };
     const plan = await planComplete(repository, request, rt);
@@ -2259,6 +2263,8 @@ async function run(
       rest: executorsOf(runtime).rest,
       trust: markerTrust(permission),
       now: runtime.now ?? (() => new Date()),
+      unassignDecision: async (f: import("./rules/datalog/datalog.js").UnassignRuleFacts) =>
+        (await import("./rules/datalog/datalog.js")).evaluateUnassignDecision(f),
     };
     // Read live immediately before changing; never act on a cached snapshot.
     const plan =
