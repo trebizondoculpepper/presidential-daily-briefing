@@ -352,14 +352,42 @@ export async function collectShortlist(
         };
       });
   const discoveredComplete = () => issueInventory.complete && prInventory.complete;
+  /**
+   * #893: how conspicuous an unhydrated item is from discovery facts alone. The notice used to
+   * name whichever items discovery happened to reach first, so a ready, unblocked ticket could
+   * be omitted without ever being named. Ready and unblocked candidates come first, then ready
+   * ones, then unlabelled work, then work already known not to be startable.
+   */
+  const omissionRank = (item: ShortlistRecord["notHydrated"][number]): number => {
+    const stub = stubs.get(item.url);
+    if (!stub) return 3;
+    const labels = new Set(stub.labels.nodes.map((label) => label.name));
+    if (labels.has("status:parked") || labels.has("status:needs-design")) return 3;
+    if (labels.has("refinement:needed")) return 3;
+    if (!labels.has("status:ready")) return 2;
+    // An absent or incomplete native summary proves nothing: it keeps the item at "ready".
+    const summary = "issueDependenciesSummary" in stub ? stub.issueDependenciesSummary : null;
+    const open = summary && typeof summary.blockedBy === "number" ? summary.blockedBy : null;
+    return open === 0 ? 0 : 1;
+  };
+  /** Discovery-order-free ordering, so the named sample is the most consequential omissions. */
+  const omissionOrder = (items: ShortlistRecord["notHydrated"]) =>
+    [...items].sort((a, b) => omissionRank(a) - omissionRank(b) || a.number - b.number);
   /** The omission notice, or null when every item was hydrated. */
   const shortlistNotice = (items: ShortlistRecord["notHydrated"]): string | null => {
     if (!items.length) return null;
-    const sample = items
+    const ordered = omissionOrder(items);
+    const sample = ordered
       .slice(0, 5)
       .map((item) => `#${item.number}`)
       .join(", ");
-    return `Shortlist: ${items.length} of ${order.length - gone.size} open item(s) were discovered but not hydrated (${sample}${items.length > 5 ? ", ..." : ""}); their comments, reviews, checks and records are unknown, not empty, so this ordering is provisional${capped ? " (hydration bound reached)" : ""}. Inspect one with pdb --issue N, or read everything with --full.`;
+    const admitted = ordered.filter((item) => omissionRank(item) === 0);
+    // A ready, unblocked candidate was never read, so no rule has judged it: say that the read
+    // bound, not a rule, kept it out, and count them so the omission is auditable (#893).
+    const ready = admitted.length
+      ? ` ${admitted.length} of them carry status:ready and no discovered open blocker, so the read bound left them out rather than a rule.`
+      : "";
+    return `Shortlist: ${items.length} of ${order.length - gone.size} open item(s) were discovered but not hydrated (${sample}${items.length > 5 ? ", ..." : ""}); their comments, reviews, checks and records are unknown, not empty, so this ordering is provisional${capped ? " (hydration bound reached)" : ""}.${ready} Inspect one with pdb --issue N, or read everything with --full.`;
   };
   /**
    * The shortlist record for the current state. Selection passes and the final snapshot both

@@ -328,6 +328,40 @@ describe("routine briefing: discover all, rank, hydrate only the shortlist (#368
     expect(snapshot.warnings).toEqual([]);
   });
 
+  it("names ready, unblocked omissions instead of discovery order (#893)", async () => {
+    // Ten claims compete for four hydration slots. The only ready, unblocked ticket discovery
+    // reaches last; a notice sampled by discovery order would never name it.
+    const issues = [
+      ...[1, 2, 3, 4].map((n) => ready(n)),
+      ...[5, 6, 7, 8].map((n) => ready(n, ["status:parked"])),
+      {
+        ...ready(9),
+        issueDependenciesSummary: { ...issue(9).issueDependenciesSummary!, blockedBy: 1 },
+      },
+      ready(10),
+    ];
+    const fake = fakeGitHub(issues, []);
+    const snapshot = await collectShortlist(
+      repo,
+      {
+        select: async (candidates) => candidates.issues.map((i) => i.url),
+        bounds: { maxHydrated: 4 },
+      },
+      fake.query,
+      clock,
+    );
+    const shortlist = snapshot.shortlist!;
+    expect(shortlist.hydrated).toHaveLength(4);
+    expect(shortlist.notHydrated.map((i) => i.number).sort((a, b) => a - b)).toEqual([
+      5, 6, 7, 8, 9, 10,
+    ]);
+    // Ranked by discovered relevance: ready+unblocked, then ready+blocked, then parked.
+    expect(shortlist.notice).toContain("(#10, #9, #5, #6, #7, ...)");
+    expect(shortlist.notice).toContain(
+      "1 of them carry status:ready and no discovered open blocker, so the read bound left them out rather than a rule.",
+    );
+  });
+
   it("carries discovery completeness into selection passes, not only the final record", async () => {
     // Capped discovery: more open issues exist than the page bound reads. The retained-claim
     // inventory must not be silently complete during selection (#413): a capped inventory can
