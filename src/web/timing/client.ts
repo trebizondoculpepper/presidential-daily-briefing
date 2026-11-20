@@ -73,9 +73,21 @@ export function groupOrder(names: readonly string[]): string[] {
 
 /** Parse the timing envelope; null when it is not one. */
 export function parseTimingResponse(body: unknown): TimingResponse | null {
+  return parseGroupedDurations(body, "timing");
+}
+
+/**
+ * #821: the pickup-delay view (creation to first pickup, grouped by current valid impact) has
+ * the same grouped-duration shape as the timing view.
+ */
+export function parsePickupDelayResponse(body: unknown): TimingResponse | null {
+  return parseGroupedDurations(body, "pickup-delay");
+}
+
+function parseGroupedDurations(body: unknown, view: string): TimingResponse | null {
   if (!isObject(body) || !isObject(body.result)) return null;
   const r = body.result;
-  if (r.kind !== "pipeline-metrics" || r.view !== "timing") return null;
+  if (r.kind !== "pipeline-metrics" || r.view !== view) return null;
   if (
     !isObject(r.window) ||
     typeof r.window.from !== "string" ||
@@ -347,3 +359,10 @@ export const latencyLoader = (
   report: (state: LatencyState) => void,
 ) =>
   metricsLoader(api, "assessment-queue", (b) => parseLatencyResponse(b, metric), fetcher, report);
+
+/** The pickup-delay section's loader (#821). */
+export const pickupDelayLoader = (
+  api: string,
+  fetcher: typeof fetch,
+  report: (state: TimingState) => void,
+) => metricsLoader(api, "pickup-delay", parsePickupDelayResponse, fetcher, report);
