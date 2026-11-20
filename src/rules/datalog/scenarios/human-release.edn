@@ -67,6 +67,19 @@
   :expect {:actions []
            :denials #{[100 "D-DENY-CLAIM"]}}}
 
+ {:id "awaiting-review-adoption-is-not-claim-not-ready"
+  :doc "Adoptable preserved work may retain status:awaiting-review; the claim needed to become responsible is not refused for missing readiness (CLAIM-NOT-READY), and no implementation deny blocks adoption."
+  :viewer {:role "implementer" :agent "me"}
+  :facts [{:e 1 "forward-complete" true "owned-claims-complete" true}
+          {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1 "label" "status:awaiting-review" "labels-complete" true "native-complete" true "reverse-complete" true "blocking-complete" true "open-blockers" 0 "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "release" 200}
+          {:e 200 "release-trust" "trusted" "release-from" "previous" "release-pr" 210}
+          {:e 210 "state" "OPEN"}]
+  :expect {:actions [{:subject 100 :rule "D-ADOPT" :kind "implement" :band 6
+              :why "Preserved unowned PR work: a human-directed release cleared previous from this ticket; an open PR continues it. Adopt it and become responsible. Impact M (current), complexity M (current)."
+              :facts {"impact" "M" "complexity" "M" "impactState" "current" "complexityState" "current" "head" "not-a-pr" "labelsComplete" true "nativeComplete" true "openBlockers" 0 "releaseFrom" "previous"}
+              :overridden [] :unlocks 0 :unknown [] :other-claims []}]
+           :denials #{}}}
+
  {:id "adoption-denied-by-other-implementation-blockers"
   :doc "A preserved unowned PR ticket with an open native blocker is denied, not adopted: the implementation denies (blocker, prerequisite, platform, incomplete evidence) apply to adoptable work too."
   :viewer {:role "implementer" :agent "me"}

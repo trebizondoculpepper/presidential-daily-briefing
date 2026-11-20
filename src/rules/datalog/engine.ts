@@ -656,6 +656,14 @@ export interface ClaimAdmissionInput {
   platforms: readonly string[];
   ownedClaimsComplete: boolean;
   claimedByOther: boolean;
+  /** Human-directed responsibility release on this ticket (#1018), when the host read one. */
+  release?: {
+    trust: string;
+    /** The agent whose responsibility the release direction clears. */
+    from: string;
+    /** Open preserved PRs continuing the unowned work (their state is asserted OPEN). */
+    preservedPrUrls: readonly string[];
+  };
 }
 
 /** Pure claim-admission seam (#1086); all pickup denial rules live in native EDN. */
@@ -680,6 +688,21 @@ export function evaluateClaimAdmission(input: ClaimAdmissionInput): Set<string> 
   for (const p of input.platforms) if (p) facts.push([100, "platform", p]);
   for (let i = 0; i < input.openPrCount; i++) {
     facts.push([100, "closing", 200 + i]);
+  }
+  // #1018: a host-read release direction lets the native policy recognize adoptable preserved
+  // work (released-unowned + preserved-pr derive from these facts), so claim admission honors
+  // the adoption exception without waiting for a status:ready/incomplete label.
+  if (input.release) {
+    const releaseEntity = 300;
+    facts.push(
+      [100, "release", releaseEntity],
+      [releaseEntity, "release-trust", input.release.trust],
+      [releaseEntity, "release-from", input.release.from],
+    );
+    input.release.preservedPrUrls.forEach((url, i) => {
+      const pr = 400 + i;
+      facts.push([releaseEntity, "release-pr", pr], [pr, "state", "OPEN"], [pr, "target", url]);
+    });
   }
   const db = ds.init_db(facts, bundle.schema);
   const rows = ds.q(bundle.queries["claim-denials"], db, bundle.clauses) as [number, string][];

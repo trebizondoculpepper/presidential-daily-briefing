@@ -72,7 +72,12 @@
 [(implementation-deny ?t ?r) (issue ?t) (not (platform-ok ?t)) [(str "D-DENY-PLATFORM") ?r]]
 ;; #413: an incomplete inventory cannot rule out omitted active claims, even if every
 ;; observed claim is waiting; new pickup is denied rather than inviting a claim that the guard may refuse.
+;; #1018: the inventory safeguard also covers adoptable existing work — an omitted active claim
+;; cannot be ruled out there either, so a preserved-PR adoption must not bypass it.
+;; The adoptable constituents are inlined (not the adoptable predicate) because a fluent predicate
+;; with a `not` inside its body fails DataScript's join check when called from another rule body.
 [(implementation-deny ?t ?r) (issue ?t) (open ?t) (available ?t) (not (claimed ?t)) [1 "owned-claims-complete" false] [(str "D-DENY-INVENTORY-UNKNOWN") ?r]]
+[(implementation-deny ?t ?r) (issue ?t) (open ?t) [?t "release" ?rel] [?rel "release-trust" "trusted"] [?rel "release-pr" ?p] [?p "state" "OPEN"] (not (claimed ?t)) (not [?t "responsible" _]) [1 "owned-claims-complete" false] [(str "D-DENY-INVENTORY-UNKNOWN") ?r]]
 ;; #1092 (doc/design/estimation-refinement-loop.md): needs refinement denies pickup whatever the
 ;; estimate or readiness label says; an unknown refinement state or incomplete refinement
 ;; evidence fails closed. Resolving it returns the item for estimation, never to readiness.
@@ -83,7 +88,10 @@
 [(held ?t) [?t "label" "status:parked"]]
 [(claim-deny ?t ?code) (implementation-deny ?t ?code)]
 [(claim-deny ?t ?code) (issue ?t) (open ?t) (not (claimed ?t)) [1 "owned-claims-complete" false] [(str "CLAIM-INVENTORY-UNKNOWN") ?code]]
-[(claim-deny ?t ?code) (issue ?t) (not (available ?t)) [(str "CLAIM-NOT-READY") ?code]]
+;; #1018: adoptable preserved unowned work may retain status:awaiting-review; the claim needed to
+;; become responsible must not be refused for missing status:ready/incomplete. Readiness still
+;; gates ordinary pickups; adoption is the documented exception.
+[(claim-deny ?t ?code) (issue ?t) (not (available ?t)) (not (adoptable ?t)) [(str "CLAIM-NOT-READY") ?code]]
 [(implementation-denied ?t) (implementation-deny ?t ?r)]
 [(eligible ?t) (implementation-permit ?t) (not (adoptable ?t)) (not (implementation-denied ?t))]
 [(design-eligible ?t) (issue ?t) (open ?t) [?t "label" "status:needs-design"] [?t "labels-complete" true] (platform-ok ?t) (closing-complete ?t) (not (claimed ?t)) (not (has-closing ?t)) (not [?t "label" "design:decision-needed"])]

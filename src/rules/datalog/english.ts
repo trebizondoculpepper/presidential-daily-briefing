@@ -406,11 +406,16 @@ function compileDenials(predicates: CompiledPredicate[], ctx: Context): Compiled
       );
       for (const c of named) {
         if (c.type !== "bind" || !("lit" in c.args[0])) continue;
+        const denialId = String(c.args[0].lit);
+        // Several alternatives may bind the same denial ID (e.g. an inventory status reached by
+        // both ordinary and adoptable paths): enumerate the denial once, from the first matching
+        // alternative, so the document model lists distinct rules.
+        if (out.some((d) => d.id === denialId)) continue;
         const clauses = alt.clauses.filter((x) => x !== c);
         out.push({
-          id: String(c.args[0].lit),
-          ...(ctx.bundle.denialPurposes?.[String(c.args[0].lit)] !== undefined
-            ? { purpose: ctx.bundle.denialPurposes[String(c.args[0].lit)] }
+          id: denialId,
+          ...(ctx.bundle.denialPurposes?.[denialId] !== undefined
+            ? { purpose: ctx.bundle.denialPurposes[denialId] }
             : {}),
           predicate: p.name,
           clauses,
