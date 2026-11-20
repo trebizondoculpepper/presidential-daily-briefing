@@ -306,9 +306,12 @@
  (obligation-record ?o) [?o "obligation" ?id]
  [?o "obligation-outcome" ?oc] [1 "claim-outcome" ?oc]
  (not [?o "obligation-role" _])]
+;; Role-restricted obligations require a caller-supplied claim-role fact: the engine always asserts
+;; [1 "role"] from the viewer, but an unresolved caller role must not be fabricated as
+;; implementer/designer here, so the adapter asserts claim-role only when the role is known.
 [(obligation-applies ?o)
  (obligation-record ?o) [?o "obligation" ?id]
  [?o "obligation-outcome" ?oc] [1 "claim-outcome" ?oc]
- [?o "obligation-role" ?r] [1 "role" ?r]]
+ [?o "obligation-role" ?r] [1 "claim-role" ?r]]
 [(claim-obligation ?id) (obligation-applies ?o) [?o "obligation" ?id]]
 ]

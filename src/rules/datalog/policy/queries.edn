@@ -14,7 +14,11 @@
  :delivery-follow-up [:find ?t ?rank ?state ?reason :in $ % :where (delivery-follow-up ?t ?rank ?state ?reason)]
  :human-sections [:find ?t ?section ?code ?reason :in $ % :where (human-attention-section ?t ?section ?code ?reason)]
  :claim-obligations
- [:find ?id :in $ % :where (claim-obligation ?id)]
+ [:find ?id ?order ?role :in $ % :where
+  (claim-obligation ?id) [?o "obligation" ?id] [?o "obligation-order" ?order]
+  (or-join [?o ?role]
+    (and (not [?o "obligation-role" _]) [(str "none") ?role])
+    (and [?o "obligation-role" ?role] [1 "claim-role" ?role]))]
  :q0
  [:find ?t ?r :where [?t "matched" ?r] [?t "matched" ?o] [?r "kind" ?k] [?o "kind" ?k] (or-join [?r ?o] (and [?r "band" ?b] [?o "band" ?b] [?r "preference" ?p] [?o "preference" ?p] [(< ?o ?r)]) (and [?r "band" ?b] [?o "band" ?b] [?r "preference" ?p] [?o "preference" ?op] [(< ?op ?p)]))]
  :declared-overrides

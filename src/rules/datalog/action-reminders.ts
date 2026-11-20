@@ -156,11 +156,15 @@ export function selectNativeClaimObligations(
     role === "implementer" || role === "designer" || role === "human" ? role : null;
   const datoms: Datom[] = [
     [1, "claim-outcome", outcome],
-    ...(resolvedRole ? ([[1, "role", resolvedRole]] as Datom[]) : []),
+    // Subject facts only: claim-role is asserted only when the caller's role is known, so the
+    // role-restricted rule can never match for an unresolved viewer. The engine's viewer [1 "role"]
+    // is the fallback implementer (a required engine viewer value), but applicability reads the
+    // caller-supplied claim-role fact, not that fallback (reviewed #1140 finding).
+    ...(resolvedRole ? ([[1, "claim-role", resolvedRole]] as Datom[]) : []),
   ];
   policy.obligations.forEach((obligation, index) => {
     const entity = firstObligationId + index;
-    datoms.push([entity, "obligation", obligation.id]);
+    datoms.push([entity, "obligation", obligation.id], [entity, "obligation-order", index]);
     for (const outcomeId of obligation.outcome)
       datoms.push([entity, "obligation-outcome", outcomeId]);
     for (const roleId of obligation.role ?? []) datoms.push([entity, "obligation-role", roleId]);
@@ -182,20 +186,12 @@ export function selectNativeClaimObligations(
     },
     { policy },
   );
-  // An unresolved viewer role must never grant role-restricted (implementer-only) obligations.
-  // The policy selects by role/outcome; the adapter only drops role-restricted IDs the unresolved
-  // caller could not be eligible for, without owning any obligation list or applicability.
-  const allowed = new Set(
-    policy.obligations
-      .filter((o) => !o.role || (resolvedRole !== null && o.role.includes(resolvedRole)))
-      .map((o) => o.id),
-  );
   return {
-    ids: result.obligations.filter((id) => allowed.has(id)),
+    ids: result.obligations.map((o) => o.id),
     coverage:
       policy.obligations.length === 0
         ? "complete"
-        : result.obligations.filter((id) => allowed.has(id)).length > 0
+        : result.obligations.length > 0
           ? "complete"
           : "partial",
     rulesHash: result.rulesHash,

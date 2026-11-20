@@ -364,7 +364,8 @@ export function readSources(
                 ),
               }
             : {}),
-          purpose: text(need(m, "purpose", `${where} :purpose`), `${where} :purpose`),
+          // The shared narration contract: nonempty, single-line, at most 320 Unicode code points.
+          purpose: purposeText(need(m, "purpose", `${where} :purpose`), `${where} :purpose`),
         };
       }),
       clauses: printEdn(vector(file("rules.edn"), "policy/rules.edn"), "policy/rules.edn"),

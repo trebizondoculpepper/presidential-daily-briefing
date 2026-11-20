@@ -311,7 +311,10 @@ export function differences(scenario: Scenario, result: PolicyResult): string[] 
       `denials differ:\n  expected ${JSON.stringify(wantDenials)}\n  actual   ${JSON.stringify(gotDenials)}`,
     );
   const wantObligations = (scenario.expect.obligations ?? []).slice().sort();
-  const gotObligations = result.obligations.slice().sort();
+  const gotObligations = result.obligations
+    .map((o) => o.id)
+    .slice()
+    .sort();
   if (!isDeepStrictEqual(wantObligations, gotObligations))
     out.push(
       `obligations differ:\n  expected ${JSON.stringify(wantObligations)}\n  actual   ${JSON.stringify(gotObligations)}`,
