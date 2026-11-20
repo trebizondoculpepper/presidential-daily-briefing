@@ -35,6 +35,8 @@ const scenarios = readdirSync(scenarioDir)
   .filter((f) => f.endsWith(".edn"))
   .sort()
   .flatMap((f) => readScenarios(readFileSync(join(scenarioDir, f), "utf8"), f));
+// buildPolicy's own validation queries ran through the wrappers: measure evaluations only.
+stats.clear();
 const start = performance.now();
 for (const s of scenarios) evaluatePolicy({ viewer: s.viewer, datoms: s.datoms }, { policy });
 const total = performance.now() - start;

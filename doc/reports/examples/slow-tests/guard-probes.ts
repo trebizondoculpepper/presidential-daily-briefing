@@ -29,6 +29,18 @@ const probes: Record<string, { rule: string; from: string; to: string; what: str
     to: '[[1 "role" ?role] [(not= ?role "human")] [?t "kind" _] (needs-complexity ?t)]',
     what: "issue-only rule loses its issue kind guard",
   },
+  "role-agents-semantic": {
+    rule: "D-COMPLEXITY",
+    from: '[[1 "role" ?role] [(not= ?role "human")] (issue ?t) (needs-complexity ?t)]',
+    to: '[[1 "role" ?viewer] [?t "kind" ?role] [(not= ?role "human")] (issue ?t) (needs-complexity ?t)]',
+    what: "agent-only rule keeps its guard text but compares the subject kind, not the viewer's role",
+  },
+  "role-human-semantic": {
+    rule: "D-HUMAN-ASK-YOU",
+    from: '[[1 "role" "human"] (open-question ?t) (asks-viewer ?t)]',
+    to: '[(or [1 "role" "human"] [?t "kind" _]) (open-question ?t) (asks-viewer ?t)]',
+    what: "human-only rule keeps its guard text inside an or that any subject satisfies",
+  },
   "role-human": {
     rule: "D-HUMAN-ASK-YOU",
     from: '[[1 "role" "human"] (open-question ?t) (asks-viewer ?t)]',
@@ -78,6 +90,23 @@ const violates = (role: string, datoms: Datom[], viewer: Record<string, unknown>
   });
 };
 
+// The static guard check in rules.test.ts ("guards each role-specific rule with its role"),
+// textual, as that test applies it.
+const staticCaught = policy.definitions.some((d) => {
+  const role = audience[d.id]?.role;
+  if (!role || role === "any") return false;
+  const guarded =
+    role === "pr-action"
+      ? d.clauses.includes("(pr-action ?t)")
+      : role === "agents"
+        ? d.clauses.includes('[(not= ?role "human")]') || d.clauses.includes("(pr-action ?t)")
+        : d.clauses.includes(`[1 "role" "${role}"]`);
+  return !guarded;
+});
+console.log(
+  `${name}: static role-guard check ${staticCaught ? "fails (detects)" : "passes (misses)"}`,
+);
+
 let scenarioFailures = 0;
 for (const s of scenarios)
   try {
@@ -87,8 +116,10 @@ for (const s of scenarios)
   }
 console.log(`${name} (${probe.what}): scenarios fail ${scenarioFailures}/${scenarios.length}`);
 
+const detectedBy = new Map<string, string[]>();
 for (const shape of ["per-subject", "all-flipped-at-once", "own-role-only"] as const) {
   let caught = 0;
+  const ids: string[] = [];
   let evaluations = 0;
   const t = performance.now();
   for (const s of scenarios) {
@@ -106,9 +137,19 @@ for (const shape of ["per-subject", "all-flipped-at-once", "own-role-only"] as c
         evaluations++;
         if (violates(role, flip(s.datoms, v), s.viewer as Record<string, unknown>)) hit = true;
       }
-    if (hit) caught++;
+    if (hit) {
+      caught++;
+      ids.push(s.id);
+    }
   }
+  detectedBy.set(shape, ids);
   console.log(
     `  ${shape}: detected in ${caught}/${scenarios.length} scenarios (${evaluations} evaluations, ${((performance.now() - t) / 1000).toFixed(0)} s)`,
   );
 }
+const base = new Set(detectedBy.get("per-subject"));
+for (const [shape, ids] of detectedBy)
+  if (shape !== "per-subject")
+    console.log(
+      `  ${shape} vs per-subject: same scenarios ${ids.length === base.size && ids.every((i) => base.has(i))}; missing [${[...base].filter((i) => !ids.includes(i)).join(", ")}]`,
+    );

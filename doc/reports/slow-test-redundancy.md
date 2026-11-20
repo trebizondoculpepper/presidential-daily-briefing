@@ -9,11 +9,11 @@ The suite has slowed sharply since the ticket's baseline. On CI, `rules.test.ts`
 Recommendations, in priority order:
 
 1. **Make each policy evaluation cheaper (engine; largest lever, uncertain size).** One family of decision queries re-derives the `foreground` rule in every query; it accounts for 44% of evaluation time across the scenario set. Materializing shared derived relations once per evaluation could cut every engine-bound test at once. This changes product code and needs its own ticket, a profile-backed prototype and the parity goldens as its oracle.
-2. **Flip every subject's kind at once in the metamorphic matrix (test; −22% of the matrix, about −70 s locally).** Probes show identical detection to the current per-subject flip for all three injected guard faults.
+2. **Flip every subject's kind at once in the metamorphic matrix (test; −22% of the matrix, about −70 s locally).** Probes show detection in exactly the same scenarios as the current per-subject flip for all five injected guard faults.
 3. **Share the evaluation in the `--max-chars` sweep (test; about −35 s of a 43 s file locally).** 76 end-to-end CLI runs evaluate the same snapshot; only rendering varies with the budget.
-4. **Keep the role axis of the matrix and keep the matrix itself.** Scenario expectations alone detect almost none of the injected guard faults, and dropping the role axis loses role-guard detection.
+4. **Keep the role axis of the matrix and keep the matrix itself.** Scenario expectations and the static guard check miss guards that are present but ineffective; only the matrix's role axis detects those.
 
-Rejected shortcuts: running only the scenario's own role (loses role-guard detection, see probes); mocking the engine in parity, process or MCP tests (removes the real-engine path); raising timeouts; dropping Windows.
+Rejected shortcuts: running only the scenario's own role (misses ineffective role guards that the static check also misses, see probes); mocking the engine in parity, process or MCP tests (removes the real-engine path); raising timeouts; dropping Windows.
 
 ## Measured starting point
 
@@ -54,7 +54,7 @@ Locally, `rules.test.ts` divides as follows: matrix 329 s over 169 tests, scenar
 
 ## Experiment 1: cost of an evaluation
 
-[`query-profile.ts`](examples/slow-tests/query-profile.ts) wraps `datascript.q` and `init_db` in its own process and evaluates every scenario once with its own viewer: 167 evaluations in 50 s, about 300 ms each. Each evaluation runs about 33 queries from a family that begins `(foreground ?t) [1 "role" ?role] [(not= ?role ...`. That family takes 44% of the time, and a second human-role family takes another 11%. `init_db` takes 2%. Datascript does not share rule results between queries, so `foreground` and related rules are recomputed for every decision query. That matches the #1123 note in `process.test.ts` that the engine "runs one query per decision and denial", whose cost grows with the policy.
+[`query-profile.ts`](examples/slow-tests/query-profile.ts) wraps `datascript.q` and `init_db` in its own process and evaluates every scenario once with its own viewer: 167 evaluations in 55 s, about 330 ms each, excluding the policy build's own validation queries. Each evaluation runs about 33 queries from a family that begins `(foreground ?t) [1 "role" ?role] [(not= ?role ...`. That family takes 44% of the time, and a second human-role family takes another 11.3%. `init_db` takes 2%. Datascript does not share rule results between queries, so `foreground` and related rules are recomputed for every decision query. That matches the #1123 note in `process.test.ts` that the engine "runs one query per decision and denial", whose cost grows with the policy.
 
 Hypothesis, not measured: materializing `foreground` (and similar shared relations) once per evaluation, and transacting the result before the decision queries the way the engine already does for root relations, would cut evaluation time substantially. The size of the saving is uncertain until prototyped; the goldens and scenarios are the oracle.
 
@@ -70,21 +70,29 @@ Hypothesis, not measured: materializing `foreground` (and similar shared relatio
 
 ## Experiment 3: retained detection under injected faults
 
-[`guard-probes.ts`](examples/slow-tests/guard-probes.ts) removes one guard from a decision rule in memory (through `buildPolicy`'s injected reader; no file changes) and counts the scenarios in which each test shape fails, using the audience table pinned in `rules.test.ts` as the oracle:
+[`guard-probes.ts`](examples/slow-tests/guard-probes.ts) weakens one guard in a decision rule in memory (through `buildPolicy`'s injected reader; no file changes). For each probe it reports:
 
-| Injected fault                                | Scenario expectations | Per subject (current) | All kinds at once | Own role only |
-| --------------------------------------------- | --------------------- | --------------------- | ----------------- | ------------- |
-| `D-COMPLEXITY` loses its issue-kind guard     | 0                     | 15                    | 15                | 15            |
-| `D-COMPLEXITY` loses its not-human role guard | 0                     | 15                    | 15                | 0             |
-| `D-HUMAN-ASK-YOU` loses its human role guard  | 1                     | 4                     | 4                 | 1             |
+- the textual static guard check in `rules.test.ts` ("guards each role-specific rule with its role in the policy");
+- the scenario expectations;
+- the scenarios in which each matrix shape fails, using the audience table pinned in `rules.test.ts` as the oracle, compared by scenario identity, not only by count.
+
+Two probes delete a guard. Two keep the guard's text but make it ineffective (semantic faults): the role variable is bound to the subject kind instead of the viewer's role, or the human guard sits inside an `or` that any subject satisfies.
+
+| Injected fault                                                             | Static guard check | Scenario expectations | Per subject (current) | All kinds at once   | Own role only |
+| -------------------------------------------------------------------------- | ------------------ | --------------------- | --------------------- | ------------------- | ------------- |
+| `D-COMPLEXITY` loses its issue-kind guard                                  | misses             | 0                     | 15                    | 15 (same scenarios) | 15 (same)     |
+| `D-COMPLEXITY` loses its not-human role guard                              | detects            | 0                     | 15                    | 15 (same)           | 0             |
+| `D-COMPLEXITY` keeps the not-human text, but it no longer tests the viewer | misses             | 0                     | 15                    | 15 (same)           | 0             |
+| `D-HUMAN-ASK-YOU` loses its human role guard                               | detects            | 1                     | 4                     | 4 (same)            | 1             |
+| `D-HUMAN-ASK-YOU` keeps the human text inside an always-true `or`          | misses             | 1                     | 4                     | 4 (same)            | 1             |
 
 Findings:
 
-- The scenario expectations alone almost never notice a lost guard. The matrix is what detects these faults, so it stays.
-- Flipping all kinds at once detected every fault in exactly the same scenarios as the current per-subject flip.
-- Running only the scenario's own role lost the not-human guard entirely and most of the human guard detections. It is rejected.
+- The static check catches a deleted role guard but not a kind-guard loss or a role guard that is present yet ineffective. The scenario expectations alone almost never notice any of these faults. Only the matrix detects all five, so it stays.
+- Flipping all kinds at once detected every fault in exactly the same scenarios as the current per-subject flip, by scenario identity.
+- Running only the scenario's own role missed both semantic role faults, which the static check also misses. It is rejected: the role axis is the only detector of those faults.
 
-Limits: three probes, all guard deletions. A fault that appears only when exactly one of several subjects changes kind could in principle be missed by flipping all at once; none was found here. The follow-up ticket should add a probe for an interaction-sensitive rule before adopting the change.
+Limits: five probes on two rules. A fault that appears only when exactly one of several subjects changes kind could in principle be missed by flipping all at once; none was found here. The follow-up ticket should add a probe for an interaction-sensitive rule before adopting the change.
 
 ## Experiment 4: the `--max-chars` sweep
 
