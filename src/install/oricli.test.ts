@@ -263,6 +263,64 @@ describe("runOriInstall (#772)", () => {
     }
   });
 
+  it("a first install without --entry uses the installed server's own entry ori.pdb (#583)", async () => {
+    const dir = await initTempRepo("pdb-oricli-default-");
+    const run = async (extra: string[]) => {
+      const out: string[] = [];
+      const code = await runOriInstall(
+        oriInstallArgumentsFor(
+          ["ori", "--repo", "example/project", ...extra, "--yes", "--json"],
+          "install",
+        ),
+        { cwd: dir, env: {}, pdbMcpPath: PDBMCP },
+        async (text) => void out.push(text),
+      );
+      return {
+        code,
+        res: JSON.parse(out.join("")) as {
+          items: { kind: string; outcome: string; retry?: string | null }[];
+        },
+      };
+    };
+    try {
+      // Without a role nothing is created, and the retry is a runnable install, not a loop.
+      const bare = await run([]);
+      expect(bare.code).toBe(2);
+      expect(bare.res.items.find((i) => i.kind === "identity")?.retry).toBe(
+        "pdb install ori --entry ori.pdb --role implementer --repo example/project",
+      );
+      // With a role the entry is created and the install completes; a rerun reuses it.
+      expect((await run(["--role", "implementer"])).code).toBe(0);
+      expect(await readFile(join(dir, "pdb.toml"), "utf8")).toContain("ori.pdb");
+      expect((await run([])).code).toBe(0);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("never picks between other existing Ori entries; the retry names one (#583)", async () => {
+    const dir = await initTempRepo("pdb-oricli-other-");
+    try {
+      await writeFile(
+        join(dir, "pdb.toml"),
+        `schemaVersion = 1\n[agents."ori.triage"]\nname = "some_agent"\n`,
+      );
+      const out: string[] = [];
+      const code = await runOriInstall(
+        oriInstallArgumentsFor(["ori", "--repo", "example/project", "--yes", "--json"], "install"),
+        { cwd: dir, env: {}, pdbMcpPath: PDBMCP },
+        async (text) => void out.push(text),
+      );
+      expect(code).toBe(2);
+      const res = JSON.parse(out.join("")) as { items: { kind: string; retry?: string | null }[] };
+      expect(res.items.find((i) => i.kind === "identity")?.retry).toBe(
+        "pdb install ori --entry ori.triage --repo example/project",
+      );
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("initializes a missing identity entry when --role is supplied", async () => {
     const dir = await initTempRepo("pdb-oricli-role-");
     try {
