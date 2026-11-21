@@ -130,7 +130,14 @@
 ;; continuation derives it here and force cannot authorize resuming against unknown ownership.
 ;; An absent inventory fact is "not read", never complete (#1197 review): only an explicit true passes.
 [(force-inventory-read ?t) [?t "kind" _] [1 "owned-claims-complete" true]]
-[(force-denial ?t ?r) (force-own-continuation ?t) (not (force-inventory-read ?t)) [(str "CLAIM-INVENTORY-UNKNOWN") ?r]]
+;; Every forced operation needs an explicitly complete claim inventory (#1197 review).
+[(force-denial ?t ?r) [?t "force-request" true] (not (force-inventory-read ?t)) [(str "CLAIM-INVENTORY-UNKNOWN") ?r]]
+;; Normal admission refuses while the caller holds other active claims (claims.ts/retained.ts
+;; admissionFor, #1197 review): known active work is a workflow denial a human may override;
+;; another claim whose activity is unknown is missing evidence.
+[(force-denial ?t ?r) [?t "force-request" true] (own-issue ?o) [(not= ?t ?o)] (not [?o "claim-activity" _]) [(str "FORCE-OTHER-ACTIVE-CLAIM") ?r]]
+[(force-denial ?t ?r) [?t "force-request" true] (own-issue ?o) [(not= ?t ?o)] [?o "claim-activity" "active"] [(str "FORCE-OTHER-ACTIVE-CLAIM") ?r]]
+[(force-denial ?t ?r) [?t "force-request" true] (own-issue ?o) [(not= ?t ?o)] [?o "claim-activity" "unknown"] [(str "FORCE-OTHER-ACTIVITY-UNKNOWN") ?r]]
 ;; Unknown refinement evidence is technical, even where a known refinement hold is a workflow denial.
 [(force-denial ?t ?r) (issue ?t) (refinement-unknown ?t) [(str "D-DENY-REFINEMENT-UNKNOWN") ?r]]
 ;; Resume and rework continue only the caller's own retained claim; without it there is nothing to
@@ -149,6 +156,7 @@
 [(force-technical ?t) (force-denial ?t ?r) [(= ?r "FORCE-NOT-RETAINED")]]
 [(force-technical ?t) (force-denial ?t ?r) [(= ?r "FORCE-NOT-RESPONSIBLE")]]
 [(force-technical ?t) (force-denial ?t ?r) [(= ?r "FORCE-ACTIVITY-UNKNOWN")]]
+[(force-technical ?t) (force-denial ?t ?r) [(= ?r "FORCE-OTHER-ACTIVITY-UNKNOWN")]]
 [(force-denied ?t) (force-denial ?t ?r)]
 ;; Every precondition of an admissible request, in one place so each outcome is exclusive.
 [(force-ready ?t) [?t "force-request" true] (force-supported ?t) [?t "force-reason" "valid"] [?t "force-agent" "known"] [?t "force-revision" "current"]]

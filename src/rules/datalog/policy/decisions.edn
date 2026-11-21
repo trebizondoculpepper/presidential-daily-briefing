@@ -790,4 +790,6 @@
   "FORCE-NOT-RESPONSIBLE" "Rework was requested, but the caller neither owns the claim nor is responsible for the ticket."
   "FORCE-ACTIVITY-UNKNOWN" "The retained claim's activity could not be read, so whether it may resume is unknown."
   "CLAIM-NOT-READY" "The ticket is not ready to pick up (neither status:ready nor status:incomplete)."
-  "CLAIM-INVENTORY-UNKNOWN" "The caller's claim inventory is incomplete: unseen active claims cannot be ruled out."}}
+  "CLAIM-INVENTORY-UNKNOWN" "The caller's claim inventory is incomplete: unseen active claims cannot be ruled out."
+  "FORCE-OTHER-ACTIVE-CLAIM" "The caller already holds another active claim; normal admission takes one active claim at a time."
+  "FORCE-OTHER-ACTIVITY-UNKNOWN" "The caller holds another claim whose activity could not be read, so whether it is active is unknown."}}
