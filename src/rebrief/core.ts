@@ -141,6 +141,7 @@ const action = z.object({
     "review-owned-work",
     "inspect-ownership",
     "wait-claim",
+    "refine",
   ]),
   target: z.string().min(1),
   role: z.string(),

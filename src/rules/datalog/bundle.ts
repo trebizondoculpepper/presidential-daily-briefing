@@ -92,6 +92,8 @@ export interface PolicyBundle {
   constants: Record<string, (string | number | boolean)[]>;
   /** obligations.edn :obligations, in source order (#1113). */
   obligations: {
+    /** #1031: the workflow action the record applies to (claim or release). */
+    action: string;
     id: string;
     outcome: string[];
     /** Applicable work kinds (#1114); every record states this explicitly. */

@@ -351,9 +351,11 @@ export function readSources(
         "policy/obligations.edn :obligations",
       ).map((form) => {
         const where = "policy/obligations.edn :obligations";
-        const m = keyed(form, where, ["id", "outcome", "work", "role", "purpose"]);
+        const m = keyed(form, where, ["id", "action", "outcome", "work", "role", "purpose"]);
         return {
           id: text(need(m, "id", `${where} :id`), `${where} :id`),
+          // #1031: the workflow action (claim or release) each record applies to; explicit.
+          action: text(need(m, "action", `${where} :action`), `${where} :action`),
           outcome: vector(need(m, "outcome", `${where} :outcome`), `${where} :outcome`).map((x) =>
             text(x, `${where} :outcome`),
           ),

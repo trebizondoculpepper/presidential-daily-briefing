@@ -26,8 +26,14 @@ export const RULE_REMINDERS_SCHEMA_VERSION = 1;
 export const RULE_REMINDERS_MAX_ITEMS = 6;
 export const RULE_REMINDERS_MAX_CODE_POINTS = 2000;
 
-export type ReminderAction = "claim";
+export type ReminderAction = "claim" | "release";
 export type ClaimOutcome = "claimed" | "noop" | "denied" | "partial";
+/**
+ * #1031: release outcomes. `released`: the agent released its own claim; `removed`: a human
+ * removed this agent's claim; `absent`: nothing was held; `partial`/`failed`: the writes were
+ * incomplete or refused. Each has a distinct native selection.
+ */
+export type ReleaseOutcome = "released" | "removed" | "absent" | "partial" | "failed";
 export type RuleReminderCategory = "admission" | "obligation";
 export type RuleReminderSourceKind = "decision" | "denial" | "procedural-obligation";
 
@@ -44,6 +50,8 @@ export function obligationsHashOf(policy: PolicyBundle = policyBundle()): string
         refusalMapper: refusalErrorToRuleId.toString(),
         ownClaimSelector: ownClaimDecisionId.toString(),
         selector: selectNativeClaimObligations.toString(),
+        // #1031: the shared action selector carries the applicability logic both actions use.
+        actionSelector: selectNativeActionObligations.toString(),
       }),
     )
     .digest("hex");
@@ -78,9 +86,35 @@ export function selectNativeClaimObligations(
   policy: PolicyBundle = policyBundle(),
   workKind: ClaimWorkKind = "repository-changing",
 ): { ids: string[]; coverage: "complete" | "partial"; rulesHash: string } {
+  return selectNativeActionObligations("claim", role, outcome, policy, workKind);
+}
+
+/**
+ * #1031: release obligations through the same native action-context selector as claims. The
+ * caller supplies the actual release outcome; a reminder is guidance, not evidence of what was
+ * preserved.
+ */
+export function selectNativeReleaseObligations(
+  role: string | null | undefined,
+  outcome: ReleaseOutcome,
+  policy: PolicyBundle = policyBundle(),
+  workKind: ClaimWorkKind = "repository-changing",
+): { ids: string[]; coverage: "complete" | "partial"; rulesHash: string } {
+  return selectNativeActionObligations("release", role, outcome, policy, workKind);
+}
+
+/** The shared selector: one action, its outcome, work kind and (when known) the caller's role. */
+export function selectNativeActionObligations(
+  action: ReminderAction,
+  role: string | null | undefined,
+  outcome: ClaimOutcome | ReleaseOutcome,
+  policy: PolicyBundle = policyBundle(),
+  workKind: ClaimWorkKind = "repository-changing",
+): { ids: string[]; coverage: "complete" | "partial"; rulesHash: string } {
   const resolvedRole =
     role === "implementer" || role === "designer" || role === "human" ? role : null;
   const datoms: Datom[] = [
+    [1, "action", action],
     [1, "claim-outcome", outcome],
     [1, "claim-work", workKind],
     // Subject facts only: claim-role is asserted only when the caller's role is known, so the
@@ -91,7 +125,11 @@ export function selectNativeClaimObligations(
   ];
   policy.obligations.forEach((obligation, index) => {
     const entity = firstObligationId + index;
-    datoms.push([entity, "obligation", obligation.id], [entity, "obligation-order", index]);
+    datoms.push(
+      [entity, "obligation", obligation.id],
+      [entity, "obligation-order", index],
+      [entity, "obligation-action", obligation.action],
+    );
     for (const outcomeId of obligation.outcome)
       datoms.push([entity, "obligation-outcome", outcomeId]);
     for (const workId of obligation.work) datoms.push([entity, "obligation-work", workId]);
@@ -116,12 +154,11 @@ export function selectNativeClaimObligations(
   );
   return {
     ids: result.obligations.map((o) => o.id),
-    coverage:
-      policy.obligations.length === 0
+    coverage: !policy.obligations.some((o) => o.action === action)
+      ? "complete"
+      : result.obligations.length > 0
         ? "complete"
-        : result.obligations.length > 0
-          ? "complete"
-          : "partial",
+        : "partial",
     rulesHash: result.rulesHash,
   };
 }

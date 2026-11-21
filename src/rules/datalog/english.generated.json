@@ -1,8 +1,8 @@
 {
   "modelVersion": 3,
   "policyVersion": 1,
-  "rulesHash": "76c7b9855124520f9cb81c50b9cde0fb9b005c70a58aada0fcca6709925935b8",
-  "narrationHash": "26144dcaaf6d3345eab27a06eab4502594e09e452e7501c72937740f4897e0ff",
+  "rulesHash": "01f853c6ed0fd5ba4cbc2f29ba4e83577b1c1e6b7aa3343e94240b94987cdb82",
+  "narrationHash": "75f1003558856a11df984e235511344e6af349d3fc0aca46e9641c3cea56be09",
   "sources": [
     "policy/schema.edn",
     "policy/rules.edn",
@@ -91,7 +91,9 @@
       "obligation-outcome": "obligation action-outcome applicability",
       "obligation-order": "obligation source order",
       "obligation-work": "obligation work-kind applicability",
-      "claim-outcome": "claim action outcome",
+      "obligation-action": "workflow action an obligation applies to (claim or release)",
+      "action": "workflow action whose obligations are selected",
+      "claim-outcome": "outcome of the selected workflow action (claim or release)",
       "claim-role": "resolved claim viewer role",
       "claim-work": "claim work kind",
       "receipt": "review receipt",
@@ -19791,6 +19793,32 @@
               "entity": {
                 "var": "?o"
               },
+              "attribute": "obligation-action",
+              "value": {
+                "var": "?act"
+              },
+              "phrase": "workflow action an obligation applies to (claim or release)",
+              "many": true
+            },
+            {
+              "type": "fact",
+              "scope": "context",
+              "entity": {
+                "lit": 1
+              },
+              "attribute": "action",
+              "value": {
+                "var": "?act"
+              },
+              "phrase": "workflow action whose obligations are selected",
+              "many": true
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?o"
+              },
               "attribute": "obligation-outcome",
               "value": {
                 "var": "?oc"
@@ -19808,7 +19836,7 @@
               "value": {
                 "var": "?oc"
               },
-              "phrase": "claim action outcome",
+              "phrase": "outcome of the selected workflow action (claim or release)",
               "many": true
             },
             {
@@ -19893,6 +19921,32 @@
               "entity": {
                 "var": "?o"
               },
+              "attribute": "obligation-action",
+              "value": {
+                "var": "?act"
+              },
+              "phrase": "workflow action an obligation applies to (claim or release)",
+              "many": true
+            },
+            {
+              "type": "fact",
+              "scope": "context",
+              "entity": {
+                "lit": 1
+              },
+              "attribute": "action",
+              "value": {
+                "var": "?act"
+              },
+              "phrase": "workflow action whose obligations are selected",
+              "many": true
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?o"
+              },
               "attribute": "obligation-outcome",
               "value": {
                 "var": "?oc"
@@ -19910,7 +19964,7 @@
               "value": {
                 "var": "?oc"
               },
-              "phrase": "claim action outcome",
+              "phrase": "outcome of the selected workflow action (claim or release)",
               "many": true
             },
             {
@@ -23437,6 +23491,32 @@
           "entity": {
             "var": "?o"
           },
+          "attribute": "obligation-action",
+          "value": {
+            "var": "?act"
+          },
+          "phrase": "workflow action an obligation applies to (claim or release)",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "action",
+          "value": {
+            "var": "?act"
+          },
+          "phrase": "workflow action whose obligations are selected",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?o"
+          },
           "attribute": "obligation-outcome",
           "value": {
             "var": "?oc"
@@ -23454,7 +23534,7 @@
           "value": {
             "var": "?oc"
           },
-          "phrase": "claim action outcome",
+          "phrase": "outcome of the selected workflow action (claim or release)",
           "many": true
         },
         {
@@ -23551,6 +23631,32 @@
           "entity": {
             "var": "?o"
           },
+          "attribute": "obligation-action",
+          "value": {
+            "var": "?act"
+          },
+          "phrase": "workflow action an obligation applies to (claim or release)",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "action",
+          "value": {
+            "var": "?act"
+          },
+          "phrase": "workflow action whose obligations are selected",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?o"
+          },
           "attribute": "obligation-outcome",
           "value": {
             "var": "?oc"
@@ -23568,7 +23674,7 @@
           "value": {
             "var": "?oc"
           },
-          "phrase": "claim action outcome",
+          "phrase": "outcome of the selected workflow action (claim or release)",
           "many": true
         },
         {
@@ -23658,6 +23764,32 @@
           "entity": {
             "var": "?o"
           },
+          "attribute": "obligation-action",
+          "value": {
+            "var": "?act"
+          },
+          "phrase": "workflow action an obligation applies to (claim or release)",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "action",
+          "value": {
+            "var": "?act"
+          },
+          "phrase": "workflow action whose obligations are selected",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?o"
+          },
           "attribute": "obligation-outcome",
           "value": {
             "var": "?oc"
@@ -23675,7 +23807,7 @@
           "value": {
             "var": "?oc"
           },
-          "phrase": "claim action outcome",
+          "phrase": "outcome of the selected workflow action (claim or release)",
           "many": true
         },
         {
@@ -23765,6 +23897,32 @@
           "entity": {
             "var": "?o"
           },
+          "attribute": "obligation-action",
+          "value": {
+            "var": "?act"
+          },
+          "phrase": "workflow action an obligation applies to (claim or release)",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "action",
+          "value": {
+            "var": "?act"
+          },
+          "phrase": "workflow action whose obligations are selected",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?o"
+          },
           "attribute": "obligation-outcome",
           "value": {
             "var": "?oc"
@@ -23782,7 +23940,7 @@
           "value": {
             "var": "?oc"
           },
-          "phrase": "claim action outcome",
+          "phrase": "outcome of the selected workflow action (claim or release)",
           "many": true
         },
         {
@@ -23872,6 +24030,32 @@
           "entity": {
             "var": "?o"
           },
+          "attribute": "obligation-action",
+          "value": {
+            "var": "?act"
+          },
+          "phrase": "workflow action an obligation applies to (claim or release)",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "action",
+          "value": {
+            "var": "?act"
+          },
+          "phrase": "workflow action whose obligations are selected",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?o"
+          },
           "attribute": "obligation-outcome",
           "value": {
             "var": "?oc"
@@ -23889,7 +24073,7 @@
           "value": {
             "var": "?oc"
           },
-          "phrase": "claim action outcome",
+          "phrase": "outcome of the selected workflow action (claim or release)",
           "many": true
         },
         {
@@ -23979,6 +24163,32 @@
           "entity": {
             "var": "?o"
           },
+          "attribute": "obligation-action",
+          "value": {
+            "var": "?act"
+          },
+          "phrase": "workflow action an obligation applies to (claim or release)",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "action",
+          "value": {
+            "var": "?act"
+          },
+          "phrase": "workflow action whose obligations are selected",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?o"
+          },
           "attribute": "obligation-outcome",
           "value": {
             "var": "?oc"
@@ -23996,7 +24206,7 @@
           "value": {
             "var": "?oc"
           },
-          "phrase": "claim action outcome",
+          "phrase": "outcome of the selected workflow action (claim or release)",
           "many": true
         },
         {
@@ -24093,6 +24303,32 @@
           "entity": {
             "var": "?o"
           },
+          "attribute": "obligation-action",
+          "value": {
+            "var": "?act"
+          },
+          "phrase": "workflow action an obligation applies to (claim or release)",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "action",
+          "value": {
+            "var": "?act"
+          },
+          "phrase": "workflow action whose obligations are selected",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?o"
+          },
           "attribute": "obligation-outcome",
           "value": {
             "var": "?oc"
@@ -24110,7 +24346,7 @@
           "value": {
             "var": "?oc"
           },
-          "phrase": "claim action outcome",
+          "phrase": "outcome of the selected workflow action (claim or release)",
           "many": true
         },
         {
@@ -24200,6 +24436,32 @@
           "entity": {
             "var": "?o"
           },
+          "attribute": "obligation-action",
+          "value": {
+            "var": "?act"
+          },
+          "phrase": "workflow action an obligation applies to (claim or release)",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "action",
+          "value": {
+            "var": "?act"
+          },
+          "phrase": "workflow action whose obligations are selected",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?o"
+          },
           "attribute": "obligation-outcome",
           "value": {
             "var": "?oc"
@@ -24217,7 +24479,7 @@
           "value": {
             "var": "?oc"
           },
-          "phrase": "claim action outcome",
+          "phrase": "outcome of the selected workflow action (claim or release)",
           "many": true
         },
         {
@@ -24307,6 +24569,32 @@
           "entity": {
             "var": "?o"
           },
+          "attribute": "obligation-action",
+          "value": {
+            "var": "?act"
+          },
+          "phrase": "workflow action an obligation applies to (claim or release)",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "action",
+          "value": {
+            "var": "?act"
+          },
+          "phrase": "workflow action whose obligations are selected",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?o"
+          },
           "attribute": "obligation-outcome",
           "value": {
             "var": "?oc"
@@ -24324,7 +24612,7 @@
           "value": {
             "var": "?oc"
           },
-          "phrase": "claim action outcome",
+          "phrase": "outcome of the selected workflow action (claim or release)",
           "many": true
         },
         {
@@ -24377,6 +24665,1210 @@
       "source": {
         "file": "policy/obligations.edn",
         "index": 8
+      }
+    },
+    {
+      "id": "O-RELEASE-PRESERVE",
+      "purpose": "Before releasing your own claim, commit and push useful unfinished work to a branch or draft PR you control, so the next owner can continue it; never discard it silently.",
+      "outcomes": ["released", "partial"],
+      "work": ["repository-changing"],
+      "roles": null,
+      "clauses": [
+        {
+          "type": "call",
+          "predicate": "obligation-record",
+          "args": [
+            {
+              "var": "?o"
+            }
+          ]
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?o"
+          },
+          "attribute": "obligation",
+          "value": {
+            "var": "?id"
+          },
+          "phrase": "applicable action obligation",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?o"
+          },
+          "attribute": "obligation-action",
+          "value": {
+            "var": "?act"
+          },
+          "phrase": "workflow action an obligation applies to (claim or release)",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "action",
+          "value": {
+            "var": "?act"
+          },
+          "phrase": "workflow action whose obligations are selected",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?o"
+          },
+          "attribute": "obligation-outcome",
+          "value": {
+            "var": "?oc"
+          },
+          "phrase": "obligation action-outcome applicability",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "claim-outcome",
+          "value": {
+            "var": "?oc"
+          },
+          "phrase": "outcome of the selected workflow action (claim or release)",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?o"
+          },
+          "attribute": "obligation-work",
+          "value": {
+            "var": "?w"
+          },
+          "phrase": "obligation work-kind applicability",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "claim-work",
+          "value": {
+            "var": "?w"
+          },
+          "phrase": "claim work kind",
+          "many": true
+        },
+        {
+          "type": "not",
+          "join": null,
+          "body": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?o"
+              },
+              "attribute": "obligation-role",
+              "value": {
+                "wild": true
+              },
+              "phrase": "obligation role applicability",
+              "many": true
+            }
+          ]
+        }
+      ],
+      "calls": ["obligation-record"],
+      "source": {
+        "file": "policy/obligations.edn",
+        "index": 9
+      }
+    },
+    {
+      "id": "O-RELEASE-HANDOFF",
+      "purpose": "Leave a truthful handoff on the ticket: what is done, what remains, where any unfinished work is, and every blocker or open question.",
+      "outcomes": ["released", "partial"],
+      "work": ["repository-changing", "observational"],
+      "roles": null,
+      "clauses": [
+        {
+          "type": "call",
+          "predicate": "obligation-record",
+          "args": [
+            {
+              "var": "?o"
+            }
+          ]
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?o"
+          },
+          "attribute": "obligation",
+          "value": {
+            "var": "?id"
+          },
+          "phrase": "applicable action obligation",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?o"
+          },
+          "attribute": "obligation-action",
+          "value": {
+            "var": "?act"
+          },
+          "phrase": "workflow action an obligation applies to (claim or release)",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "action",
+          "value": {
+            "var": "?act"
+          },
+          "phrase": "workflow action whose obligations are selected",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?o"
+          },
+          "attribute": "obligation-outcome",
+          "value": {
+            "var": "?oc"
+          },
+          "phrase": "obligation action-outcome applicability",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "claim-outcome",
+          "value": {
+            "var": "?oc"
+          },
+          "phrase": "outcome of the selected workflow action (claim or release)",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?o"
+          },
+          "attribute": "obligation-work",
+          "value": {
+            "var": "?w"
+          },
+          "phrase": "obligation work-kind applicability",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "claim-work",
+          "value": {
+            "var": "?w"
+          },
+          "phrase": "claim work kind",
+          "many": true
+        },
+        {
+          "type": "not",
+          "join": null,
+          "body": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?o"
+              },
+              "attribute": "obligation-role",
+              "value": {
+                "wild": true
+              },
+              "phrase": "obligation role applicability",
+              "many": true
+            }
+          ]
+        }
+      ],
+      "calls": ["obligation-record"],
+      "source": {
+        "file": "policy/obligations.edn",
+        "index": 10
+      }
+    },
+    {
+      "id": "O-RELEASE-ASSIGNEES",
+      "purpose": "Releasing or removing an agent claim never changes GitHub human assignees, readiness labels or other agents' claims; leave them as they are.",
+      "outcomes": ["released", "removed", "partial"],
+      "work": ["repository-changing", "observational"],
+      "roles": null,
+      "clauses": [
+        {
+          "type": "call",
+          "predicate": "obligation-record",
+          "args": [
+            {
+              "var": "?o"
+            }
+          ]
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?o"
+          },
+          "attribute": "obligation",
+          "value": {
+            "var": "?id"
+          },
+          "phrase": "applicable action obligation",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?o"
+          },
+          "attribute": "obligation-action",
+          "value": {
+            "var": "?act"
+          },
+          "phrase": "workflow action an obligation applies to (claim or release)",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "action",
+          "value": {
+            "var": "?act"
+          },
+          "phrase": "workflow action whose obligations are selected",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?o"
+          },
+          "attribute": "obligation-outcome",
+          "value": {
+            "var": "?oc"
+          },
+          "phrase": "obligation action-outcome applicability",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "claim-outcome",
+          "value": {
+            "var": "?oc"
+          },
+          "phrase": "outcome of the selected workflow action (claim or release)",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?o"
+          },
+          "attribute": "obligation-work",
+          "value": {
+            "var": "?w"
+          },
+          "phrase": "obligation work-kind applicability",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "claim-work",
+          "value": {
+            "var": "?w"
+          },
+          "phrase": "claim work kind",
+          "many": true
+        },
+        {
+          "type": "not",
+          "join": null,
+          "body": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?o"
+              },
+              "attribute": "obligation-role",
+              "value": {
+                "wild": true
+              },
+              "phrase": "obligation role applicability",
+              "many": true
+            }
+          ]
+        }
+      ],
+      "calls": ["obligation-record"],
+      "source": {
+        "file": "policy/obligations.edn",
+        "index": 11
+      }
+    },
+    {
+      "id": "O-RELEASE-PR-RESPONSIBILITY",
+      "purpose": "Releasing the claim does not end responsibility for a submitted PR you still own: follow it through review, checks and merge, or hand it off explicitly.",
+      "outcomes": ["released", "partial"],
+      "work": ["repository-changing", "observational"],
+      "roles": ["implementer"],
+      "clauses": [
+        {
+          "type": "call",
+          "predicate": "obligation-record",
+          "args": [
+            {
+              "var": "?o"
+            }
+          ]
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?o"
+          },
+          "attribute": "obligation",
+          "value": {
+            "var": "?id"
+          },
+          "phrase": "applicable action obligation",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?o"
+          },
+          "attribute": "obligation-action",
+          "value": {
+            "var": "?act"
+          },
+          "phrase": "workflow action an obligation applies to (claim or release)",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "action",
+          "value": {
+            "var": "?act"
+          },
+          "phrase": "workflow action whose obligations are selected",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?o"
+          },
+          "attribute": "obligation-outcome",
+          "value": {
+            "var": "?oc"
+          },
+          "phrase": "obligation action-outcome applicability",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "claim-outcome",
+          "value": {
+            "var": "?oc"
+          },
+          "phrase": "outcome of the selected workflow action (claim or release)",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?o"
+          },
+          "attribute": "obligation-work",
+          "value": {
+            "var": "?w"
+          },
+          "phrase": "obligation work-kind applicability",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "claim-work",
+          "value": {
+            "var": "?w"
+          },
+          "phrase": "claim work kind",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?o"
+          },
+          "attribute": "obligation-role",
+          "value": {
+            "var": "?r"
+          },
+          "phrase": "obligation role applicability",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "claim-role",
+          "value": {
+            "var": "?r"
+          },
+          "phrase": "resolved claim viewer role",
+          "many": true
+        }
+      ],
+      "calls": ["obligation-record"],
+      "source": {
+        "file": "policy/obligations.edn",
+        "index": 12
+      }
+    },
+    {
+      "id": "O-RELEASE-REMOVED",
+      "purpose": "A human removed this agent's claim: report only what you observed, never that the displaced agent's files were committed or pushed, and do not reclaim it automatically.",
+      "outcomes": ["removed"],
+      "work": ["repository-changing", "observational"],
+      "roles": null,
+      "clauses": [
+        {
+          "type": "call",
+          "predicate": "obligation-record",
+          "args": [
+            {
+              "var": "?o"
+            }
+          ]
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?o"
+          },
+          "attribute": "obligation",
+          "value": {
+            "var": "?id"
+          },
+          "phrase": "applicable action obligation",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?o"
+          },
+          "attribute": "obligation-action",
+          "value": {
+            "var": "?act"
+          },
+          "phrase": "workflow action an obligation applies to (claim or release)",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "action",
+          "value": {
+            "var": "?act"
+          },
+          "phrase": "workflow action whose obligations are selected",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?o"
+          },
+          "attribute": "obligation-outcome",
+          "value": {
+            "var": "?oc"
+          },
+          "phrase": "obligation action-outcome applicability",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "claim-outcome",
+          "value": {
+            "var": "?oc"
+          },
+          "phrase": "outcome of the selected workflow action (claim or release)",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?o"
+          },
+          "attribute": "obligation-work",
+          "value": {
+            "var": "?w"
+          },
+          "phrase": "obligation work-kind applicability",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "claim-work",
+          "value": {
+            "var": "?w"
+          },
+          "phrase": "claim work kind",
+          "many": true
+        },
+        {
+          "type": "not",
+          "join": null,
+          "body": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?o"
+              },
+              "attribute": "obligation-role",
+              "value": {
+                "wild": true
+              },
+              "phrase": "obligation role applicability",
+              "many": true
+            }
+          ]
+        }
+      ],
+      "calls": ["obligation-record"],
+      "source": {
+        "file": "policy/obligations.edn",
+        "index": 13
+      }
+    },
+    {
+      "id": "O-RELEASE-NO-RECLAIM",
+      "purpose": "Do not reclaim the ticket automatically after releasing it; pick it up again only through a fresh, admitted claim.",
+      "outcomes": ["released"],
+      "work": ["repository-changing", "observational"],
+      "roles": null,
+      "clauses": [
+        {
+          "type": "call",
+          "predicate": "obligation-record",
+          "args": [
+            {
+              "var": "?o"
+            }
+          ]
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?o"
+          },
+          "attribute": "obligation",
+          "value": {
+            "var": "?id"
+          },
+          "phrase": "applicable action obligation",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?o"
+          },
+          "attribute": "obligation-action",
+          "value": {
+            "var": "?act"
+          },
+          "phrase": "workflow action an obligation applies to (claim or release)",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "action",
+          "value": {
+            "var": "?act"
+          },
+          "phrase": "workflow action whose obligations are selected",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?o"
+          },
+          "attribute": "obligation-outcome",
+          "value": {
+            "var": "?oc"
+          },
+          "phrase": "obligation action-outcome applicability",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "claim-outcome",
+          "value": {
+            "var": "?oc"
+          },
+          "phrase": "outcome of the selected workflow action (claim or release)",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?o"
+          },
+          "attribute": "obligation-work",
+          "value": {
+            "var": "?w"
+          },
+          "phrase": "obligation work-kind applicability",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "claim-work",
+          "value": {
+            "var": "?w"
+          },
+          "phrase": "claim work kind",
+          "many": true
+        },
+        {
+          "type": "not",
+          "join": null,
+          "body": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?o"
+              },
+              "attribute": "obligation-role",
+              "value": {
+                "wild": true
+              },
+              "phrase": "obligation role applicability",
+              "many": true
+            }
+          ]
+        }
+      ],
+      "calls": ["obligation-record"],
+      "source": {
+        "file": "policy/obligations.edn",
+        "index": 14
+      }
+    },
+    {
+      "id": "O-RELEASE-ABSENT",
+      "purpose": "The claim was already absent, so nothing was released: do not repeat the release or write a handoff for work you did not hold.",
+      "outcomes": ["absent"],
+      "work": ["repository-changing", "observational"],
+      "roles": null,
+      "clauses": [
+        {
+          "type": "call",
+          "predicate": "obligation-record",
+          "args": [
+            {
+              "var": "?o"
+            }
+          ]
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?o"
+          },
+          "attribute": "obligation",
+          "value": {
+            "var": "?id"
+          },
+          "phrase": "applicable action obligation",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?o"
+          },
+          "attribute": "obligation-action",
+          "value": {
+            "var": "?act"
+          },
+          "phrase": "workflow action an obligation applies to (claim or release)",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "action",
+          "value": {
+            "var": "?act"
+          },
+          "phrase": "workflow action whose obligations are selected",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?o"
+          },
+          "attribute": "obligation-outcome",
+          "value": {
+            "var": "?oc"
+          },
+          "phrase": "obligation action-outcome applicability",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "claim-outcome",
+          "value": {
+            "var": "?oc"
+          },
+          "phrase": "outcome of the selected workflow action (claim or release)",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?o"
+          },
+          "attribute": "obligation-work",
+          "value": {
+            "var": "?w"
+          },
+          "phrase": "obligation work-kind applicability",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "claim-work",
+          "value": {
+            "var": "?w"
+          },
+          "phrase": "claim work kind",
+          "many": true
+        },
+        {
+          "type": "not",
+          "join": null,
+          "body": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?o"
+              },
+              "attribute": "obligation-role",
+              "value": {
+                "wild": true
+              },
+              "phrase": "obligation role applicability",
+              "many": true
+            }
+          ]
+        }
+      ],
+      "calls": ["obligation-record"],
+      "source": {
+        "file": "policy/obligations.edn",
+        "index": 15
+      }
+    },
+    {
+      "id": "O-RELEASE-PARTIAL-RECOVERY",
+      "purpose": "Release writes were partial or unverified: inspect the live ticket labels and comments and retry only the missing steps.",
+      "outcomes": ["partial"],
+      "work": ["repository-changing", "observational"],
+      "roles": null,
+      "clauses": [
+        {
+          "type": "call",
+          "predicate": "obligation-record",
+          "args": [
+            {
+              "var": "?o"
+            }
+          ]
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?o"
+          },
+          "attribute": "obligation",
+          "value": {
+            "var": "?id"
+          },
+          "phrase": "applicable action obligation",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?o"
+          },
+          "attribute": "obligation-action",
+          "value": {
+            "var": "?act"
+          },
+          "phrase": "workflow action an obligation applies to (claim or release)",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "action",
+          "value": {
+            "var": "?act"
+          },
+          "phrase": "workflow action whose obligations are selected",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?o"
+          },
+          "attribute": "obligation-outcome",
+          "value": {
+            "var": "?oc"
+          },
+          "phrase": "obligation action-outcome applicability",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "claim-outcome",
+          "value": {
+            "var": "?oc"
+          },
+          "phrase": "outcome of the selected workflow action (claim or release)",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?o"
+          },
+          "attribute": "obligation-work",
+          "value": {
+            "var": "?w"
+          },
+          "phrase": "obligation work-kind applicability",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "claim-work",
+          "value": {
+            "var": "?w"
+          },
+          "phrase": "claim work kind",
+          "many": true
+        },
+        {
+          "type": "not",
+          "join": null,
+          "body": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?o"
+              },
+              "attribute": "obligation-role",
+              "value": {
+                "wild": true
+              },
+              "phrase": "obligation role applicability",
+              "many": true
+            }
+          ]
+        }
+      ],
+      "calls": ["obligation-record"],
+      "source": {
+        "file": "policy/obligations.edn",
+        "index": 16
+      }
+    },
+    {
+      "id": "O-RELEASE-FAILED-RECOVERY",
+      "purpose": "The release failed and you still hold the claim: keep its obligations until a release is confirmed.",
+      "outcomes": ["failed"],
+      "work": ["repository-changing", "observational"],
+      "roles": null,
+      "clauses": [
+        {
+          "type": "call",
+          "predicate": "obligation-record",
+          "args": [
+            {
+              "var": "?o"
+            }
+          ]
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?o"
+          },
+          "attribute": "obligation",
+          "value": {
+            "var": "?id"
+          },
+          "phrase": "applicable action obligation",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?o"
+          },
+          "attribute": "obligation-action",
+          "value": {
+            "var": "?act"
+          },
+          "phrase": "workflow action an obligation applies to (claim or release)",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "action",
+          "value": {
+            "var": "?act"
+          },
+          "phrase": "workflow action whose obligations are selected",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?o"
+          },
+          "attribute": "obligation-outcome",
+          "value": {
+            "var": "?oc"
+          },
+          "phrase": "obligation action-outcome applicability",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "claim-outcome",
+          "value": {
+            "var": "?oc"
+          },
+          "phrase": "outcome of the selected workflow action (claim or release)",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?o"
+          },
+          "attribute": "obligation-work",
+          "value": {
+            "var": "?w"
+          },
+          "phrase": "obligation work-kind applicability",
+          "many": true
+        },
+        {
+          "type": "fact",
+          "scope": "context",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "claim-work",
+          "value": {
+            "var": "?w"
+          },
+          "phrase": "claim work kind",
+          "many": true
+        },
+        {
+          "type": "not",
+          "join": null,
+          "body": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?o"
+              },
+              "attribute": "obligation-role",
+              "value": {
+                "wild": true
+              },
+              "phrase": "obligation role applicability",
+              "many": true
+            }
+          ]
+        }
+      ],
+      "calls": ["obligation-record"],
+      "source": {
+        "file": "policy/obligations.edn",
+        "index": 17
       }
     }
   ],
@@ -26274,13 +27766,13 @@
     "predicates": 127,
     "alternatives": 281,
     "denials": 12,
-    "obligations": 9,
+    "obligations": 18,
     "queries": 26,
     "keyQueries": 4,
     "evidence": 57,
     "overrides": 5,
     "constants": 14,
-    "attributes": 138,
-    "clauses": 1578
+    "attributes": 140,
+    "clauses": 1582
   }
 }

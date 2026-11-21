@@ -1,4 +1,4 @@
-;; Native claim action obligations (#1113, doc/design/native-action-obligations.md).
+;; Native claim and release action obligations (#1113, #1031, doc/design/native-action-obligations.md).
 ;; The claim duties (and their no-op/partial/denied recovery counterparts) are authored here
 ;; as native relation facts: each obligation record has an id, an expiry outcome, and optional
 ;; role/work applicability. The engine asserts the viewer role, a per-call claim-outcome fact and
@@ -9,21 +9,39 @@
 ;; shows it on a repository-changing pickup. Every record states :work explicitly so the
 ;; applicability rule is a plain join (a DataScript or-join cannot carry a `not` branch).
 {:obligations
- [{:id "O-CLAIM-PUBLISH-EARLY" :outcome ["claimed" "noop" "partial"] :role ["implementer" "designer"] :work ["repository-changing"]
+ [{:id "O-CLAIM-PUBLISH-EARLY" :action "claim" :outcome ["claimed" "noop" "partial"] :role ["implementer" "designer"] :work ["repository-changing"]
    :purpose "Minimize unpublished work: once a coherent change passes local checks, commit and push it promptly and open a draft PR as soon as there is useful work to inspect, keeping it updated. Do not wait for the whole ticket; the draft states what works, what remains and known failures, for recovery and review."}
-  {:id "O-CLAIM-ACCEPTANCE" :outcome ["claimed" "noop"] :work ["repository-changing" "observational"]
+  {:id "O-CLAIM-ACCEPTANCE" :action "claim" :outcome ["claimed" "noop"] :work ["repository-changing" "observational"]
    :purpose "Follow the ticket acceptance criteria and applicable architecture contracts before considering the work complete."}
-  {:id "O-CLAIM-OWNERSHIP" :outcome ["claimed" "noop" "denied" "partial"] :work ["repository-changing" "observational"]
+  {:id "O-CLAIM-OWNERSHIP" :action "claim" :outcome ["claimed" "noop" "denied" "partial"] :work ["repository-changing" "observational"]
    :purpose "Respect human ownership and other agents' active claims; never overwrite or displace another owner's work."}
-  {:id "O-CLAIM-BLOCKERS" :outcome ["claimed" "noop"] :work ["repository-changing" "observational"]
+  {:id "O-CLAIM-BLOCKERS" :action "claim" :outcome ["claimed" "noop"] :work ["repository-changing" "observational"]
    :purpose "Surface blockers, missing design decisions, or unresolved questions explicitly instead of guessing."}
-  {:id "O-CLAIM-REMOVAL" :outcome ["claimed" "noop" "partial"] :work ["repository-changing" "observational"]
+  {:id "O-CLAIM-REMOVAL" :action "claim" :outcome ["claimed" "noop" "partial"] :work ["repository-changing" "observational"]
    :purpose "Preserve useful unfinished work and share a truthful handoff if your claim is released or removed."}
-  {:id "O-CLAIM-DELIVERABLE" :outcome ["claimed" "noop"] :role ["implementer"] :work ["repository-changing" "observational"]
+  {:id "O-CLAIM-DELIVERABLE" :action "claim" :outcome ["claimed" "noop"] :role ["implementer"] :work ["repository-changing" "observational"]
    :purpose "For an implementation deliverable, retain responsibility through review, CI checks, fixes, and merging."}
-  {:id "O-CLAIM-NOOP-CONTINUE" :outcome ["noop"] :work ["repository-changing" "observational"]
+  {:id "O-CLAIM-NOOP-CONTINUE" :action "claim" :outcome ["noop"] :work ["repository-changing" "observational"]
    :purpose "This ticket is already claimed by you (no-op); continue from the existing work rather than re-claiming."}
-  {:id "O-CLAIM-PARTIAL-RECOVERY" :outcome ["partial"] :work ["repository-changing" "observational"]
+  {:id "O-CLAIM-PARTIAL-RECOVERY" :action "claim" :outcome ["partial"] :work ["repository-changing" "observational"]
    :purpose "Claim writes were partial or unverified; inspect the live ticket state and retry only the missing steps."}
-  {:id "O-CLAIM-DENIED-RECOVERY" :outcome ["denied"] :work ["repository-changing" "observational"]
-   :purpose "Claim was refused; do not start work until the reported prerequisite or ownership conflict is resolved."}]}
+  {:id "O-CLAIM-DENIED-RECOVERY" :action "claim" :outcome ["denied"] :work ["repository-changing" "observational"]
+   :purpose "Claim was refused; do not start work until the reported prerequisite or ownership conflict is resolved."}
+  {:id "O-RELEASE-PRESERVE" :action "release" :outcome ["released" "partial"] :work ["repository-changing"]
+   :purpose "Before releasing your own claim, commit and push useful unfinished work to a branch or draft PR you control, so the next owner can continue it; never discard it silently."}
+  {:id "O-RELEASE-HANDOFF" :action "release" :outcome ["released" "partial"] :work ["repository-changing" "observational"]
+   :purpose "Leave a truthful handoff on the ticket: what is done, what remains, where any unfinished work is, and every blocker or open question."}
+  {:id "O-RELEASE-ASSIGNEES" :action "release" :outcome ["released" "removed" "partial"] :work ["repository-changing" "observational"]
+   :purpose "Releasing or removing an agent claim never changes GitHub human assignees, readiness labels or other agents' claims; leave them as they are."}
+  {:id "O-RELEASE-PR-RESPONSIBILITY" :action "release" :outcome ["released" "partial"] :role ["implementer"] :work ["repository-changing" "observational"]
+   :purpose "Releasing the claim does not end responsibility for a submitted PR you still own: follow it through review, checks and merge, or hand it off explicitly."}
+  {:id "O-RELEASE-REMOVED" :action "release" :outcome ["removed"] :work ["repository-changing" "observational"]
+   :purpose "A human removed this agent's claim: report only what you observed, never that the displaced agent's files were committed or pushed, and do not reclaim it automatically."}
+  {:id "O-RELEASE-NO-RECLAIM" :action "release" :outcome ["released"] :work ["repository-changing" "observational"]
+   :purpose "Do not reclaim the ticket automatically after releasing it; pick it up again only through a fresh, admitted claim."}
+  {:id "O-RELEASE-ABSENT" :action "release" :outcome ["absent"] :work ["repository-changing" "observational"]
+   :purpose "The claim was already absent, so nothing was released: do not repeat the release or write a handoff for work you did not hold."}
+  {:id "O-RELEASE-PARTIAL-RECOVERY" :action "release" :outcome ["partial"] :work ["repository-changing" "observational"]
+   :purpose "Release writes were partial or unverified: inspect the live ticket labels and comments and retry only the missing steps."}
+  {:id "O-RELEASE-FAILED-RECOVERY" :action "release" :outcome ["failed"] :work ["repository-changing" "observational"]
+   :purpose "The release failed and you still hold the claim: keep its obligations until a release is confirmed."}]}

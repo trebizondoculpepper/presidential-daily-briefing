@@ -106,6 +106,8 @@ failed, partial and human-directed release have distinct expected selections.
 Engineering integrates existing release paths and #1019's responsibility operation
 when delivered; it does not own their writes/admission.
 
+Policy (#1031): release obligations are native records in `policy/obligations.edn` with `:action "release"`, selected by the same action-context selector as claims (`selectNativeActionObligations`; every record names its action and the caller asserts `[1 "action"]`). Outcomes are `released` (the agent's own release), `removed` (a human removed this agent), `absent`, `partial` and `failed`, and each has a distinct selection. Own release selects `O-RELEASE-PRESERVE` (repository-changing work only), `O-RELEASE-HANDOFF`, `O-RELEASE-ASSIGNEES`, `O-RELEASE-PR-RESPONSIBILITY` (implementers) and `O-RELEASE-NO-RECLAIM`. A human removal selects only `O-RELEASE-ASSIGNEES` and `O-RELEASE-REMOVED`, never preservation or handoff duties attributed to the displaced agent. `absent`, `partial` and `failed` select their own recovery duties. #1018 admission is reused, not duplicated; projection into release output is #1032.
+
 ## Submission policy and integration
 
 PDB `submit` and attaching a required PR are the triggers; creating a GitHub PR is

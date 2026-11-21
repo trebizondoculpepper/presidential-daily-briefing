@@ -10,7 +10,7 @@
           {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "S" "head" "not-a-pr" "label" "status:ready" "refinement" 200}
           {:e 200 "refinement-state" "open" "refinement-question" 300}
           {:e 300 "record-trust" "trusted" "record-version" 2 "record-outcome" "none"}]
-  :expect {:actions [{:subject 100 :rule "D-REFINE" :kind "refine" :band 4 :why "Needs refinement: answer its blocking questions from existing designs and decisions, and escalate only what needs a human decision through needs-human."}]
+  :expect {:actions [{:subject 100 :rule "D-REFINE" :kind "refine" :band 4 :why "Needs refinement: clarify enough to implement it assuming its dependencies were met. Answer its blocking questions from existing designs and decisions, and escalate only what needs a human decision through needs-human."}]
            :denials #{[100 "D-DENY-REFINEMENT"]}}}
 
  {:id "r2-designer-unanswered-ahead-of-design"
@@ -22,7 +22,7 @@
           {:e 300 "record-trust" "trusted" "record-version" 2 "record-outcome" "resolved"}
           {:e 301 "record-trust" "trusted" "record-version" 2 "record-outcome" "none"}
           {:e 101 "kind" "issue" "state" "OPEN" "number" 2 "target" "https://github.com/o/r/issues/2" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "status:needs-design"}]
-  :expect {:actions [{:subject 100 :rule "D-REFINE" :kind "refine" :band 4 :why "Needs refinement: answer its blocking questions from existing designs and decisions, and escalate only what needs a human decision through needs-human."}
+  :expect {:actions [{:subject 100 :rule "D-REFINE" :kind "refine" :band 4 :why "Needs refinement: clarify enough to implement it assuming its dependencies were met. Answer its blocking questions from existing designs and decisions, and escalate only what needs a human decision through needs-human."}
             {:subject 101 :rule "D-DESIGN" :kind "design" :band 6}]
            :denials #{}}}
 
@@ -36,7 +36,7 @@
           {:e 301 "record-trust" "trusted" "record-version" 2 "record-outcome" "withdrawn"}
           {:e 101 "kind" "issue" "state" "OPEN" "number" 2 "target" "https://github.com/o/r/issues/2" "created" 1767225600000 "labels-complete" true "reverse-complete" true "native-complete" true "open-blockers" 0 "blocking-complete" true "impact-state" "unknown" "impact-size" "unknown" "complexity-state" "current" "complexity-size" "S" "head" "not-a-pr" "refinement" 201}
           {:e 201 "refinement-state" "open"}]
-  :expect {:actions [{:subject 100 :rule "D-REFINE-RESOLVE" :kind "refine" :band 4 :why "Every blocking question is settled: resolve the refinement so the item returns for estimation. Resolving does not make it ready."}
+  :expect {:actions [{:subject 100 :rule "D-REFINE-RESOLVE" :kind "refine" :band 4 :why "Every blocking question is settled: resolve it with pdb refine resolve and the request ID from refine status, so the item returns for estimation. Resolving does not make it ready."}
             {:subject 101 :rule "D-REFINE-EMPTY" :kind "refine" :band 4 :why "A refinement request records no blocking question; inspect it and record the concrete question or withdraw the request."}]
            :denials #{}}}
 

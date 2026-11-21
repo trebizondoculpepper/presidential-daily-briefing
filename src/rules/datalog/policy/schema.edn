@@ -2,7 +2,7 @@
 ;; Each witness is a vector of where-clauses binding ?value for subject ?t.
 {:policy-version 1
  :many
-["required-evidence-gap" "missing-required" "label" "owner" "responsible" "platform" "attention" "blocker" "dependent" "closes" "closing" "check" "review" "receipt" "provider-review" "provider-finding" "thread" "matched" "overridden" "unlocks-dependent" "permit" "deny" "unknown" "unlock-unknown" "question-record" "release" "responsibility-unknown" "responsibility-present" "obligation" "obligation-role" "obligation-outcome" "obligation-order" "obligation-work" "claim-outcome" "claim-role" "claim-work"]
+["required-evidence-gap" "missing-required" "label" "owner" "responsible" "platform" "attention" "blocker" "dependent" "closes" "closing" "check" "review" "receipt" "provider-review" "provider-finding" "thread" "matched" "overridden" "unlocks-dependent" "permit" "deny" "unknown" "unlock-unknown" "question-record" "release" "responsibility-unknown" "responsibility-present" "obligation" "obligation-role" "obligation-outcome" "obligation-order" "obligation-work" "obligation-action" "action" "claim-outcome" "claim-role" "claim-work"]
  :constants
  {"small" ["XS" "S"]
   "large" ["L" "XL" "XXL"]
@@ -114,7 +114,9 @@
   "obligation-outcome" "obligation action-outcome applicability"
   "obligation-order" "obligation source order"
   "obligation-work" "obligation work-kind applicability"
-  "claim-outcome" "claim action outcome"
+  "obligation-action" "workflow action an obligation applies to (claim or release)"
+  "action" "workflow action whose obligations are selected"
+  "claim-outcome" "outcome of the selected workflow action (claim or release)"
   "claim-role" "resolved claim viewer role"
   "claim-work" "claim work kind"
   "receipt" "review receipt"

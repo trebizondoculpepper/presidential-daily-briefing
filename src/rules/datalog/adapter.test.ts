@@ -138,3 +138,57 @@ describe("Datalog host adapter", () => {
     expect(row.why.ruleIds).toEqual(["D-EASY"]);
   });
 });
+
+describe("refinement facts reach the native queue (#1098)", () => {
+  const open = {
+    state: "open" as const,
+    estimated: false,
+    question: { trust: "trusted" as const, version: 2 as const, outcome: "none" as const },
+  };
+  const settled = { ...open, question: { ...open.question, outcome: "resolved" as const } };
+  type Request = Omit<typeof open, "question"> & {
+    question: { trust: "trusted"; version: 2; outcome: "none" | "resolved" | "withdrawn" };
+  };
+  const facts = (requests: Request[], complete = true) => ({ requests, complete });
+  const url = (n: number) => issue(n).url;
+
+  it("gives the designer D-REFINE with the refine status command, ahead of ordinary design", () => {
+    const r = run(
+      [issue(1, ["status:ready", "refinement:needed"]), issue(2, ["status:needs-design"])],
+      new Map(),
+      {
+        role: "designer",
+        agent: "me",
+        refinements: new Map([[url(1), facts([open])]]),
+      },
+    );
+    const refine = r.items.find((x) => x.ruleIds.includes("D-REFINE"))!;
+    expect(refine.nextCommand).toBe("pdb refine status 1 --repo o/r");
+    expect(refine.why.text).toMatch(/assuming its dependencies were met/);
+    const design = r.items.findIndex((x) => x.ruleIds.includes("D-DESIGN"));
+    if (design >= 0) expect(r.items.indexOf(refine)).toBeLessThan(design);
+  });
+
+  it("denies implementation pickup while refinement is open, whatever the ready label says", () => {
+    const r = run([issue(1, ["status:ready", "refinement:needed"])], new Map(), {
+      agent: "me",
+      refinements: new Map([[url(1), facts([open])]]),
+    });
+    expect(implementations(r)).toHaveLength(0);
+    expect(JSON.stringify(r)).toContain("D-DENY-REFINEMENT");
+  });
+
+  it("offers resolve once every question is settled, and fails closed on incomplete facts", () => {
+    const resolve = run([issue(1, ["refinement:needed"])], new Map(), {
+      role: "designer",
+      agent: "me",
+      refinements: new Map([[url(1), facts([settled])]]),
+    });
+    expect(resolve.items.some((x) => x.ruleIds.includes("D-REFINE-RESOLVE"))).toBe(true);
+    const incomplete = run([issue(1, ["status:ready", "refinement:needed"])], new Map(), {
+      agent: "me",
+      refinements: new Map([[url(1), facts([settled], false)]]),
+    });
+    expect(implementations(incomplete)).toHaveLength(0);
+  });
+});

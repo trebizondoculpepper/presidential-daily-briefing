@@ -3,11 +3,29 @@
   import { itemLinks, kindLabel, newsHours, newsLoader, selection } from "./client.js";
   import type { NewsHours, NewsState } from "./client.js";
   import CurrentWork from "./CurrentWork.svelte";
+  import DailyCounts from "./DailyCounts.svelte";
+  import PrMerges from "./PrMerges.svelte";
+  import { dailyLoader, dailyWindow } from "./daily.js";
+  import type { DailyDays, DailyState } from "./daily.js";
   import { workLoader } from "./work.js";
   import type { WorkState } from "./work.js";
 
   let { api, teamApi }: { api: string; teamApi: string } = $props();
   let work: WorkState = $state({ status: "loading" });
+  let daily: DailyState = $state({ status: "loading" });
+  let dailyDays: DailyDays = $state(7);
+  let chooseDays = $state((_d: DailyDays) => {});
+  const memberHref = (member: string) => {
+    const m = /^([\w.-]+\/[\w.-]+)#([1-9]\d*)$/.exec(member);
+    if (!m) return null;
+    const q = new URLSearchParams({ repo: m[1]!, n: m[2]! });
+    const keep = new URLSearchParams(window.location.search);
+    for (const k of ["role", "agent"]) {
+      const v = keep.get(k);
+      if (v) q.set(k, v);
+    }
+    return `/ticket?${q}`;
+  };
   let repository: string | null = $state(null);
   const ticketHref = (n: number) => {
     const q = new URLSearchParams({ repo: repository ?? "", n: String(n) });
@@ -32,8 +50,14 @@
     const workRead = workLoader(teamApi, fetcher, (next) => {
       work = next;
     });
+    const dailyRead = dailyLoader(api, fetcher, (next) => {
+      daily = next;
+    });
     refresh = () => {
+      // News and the daily view are cached under different windows, so a news refresh does not
+      // refresh the daily entry: each section bypasses its own cache.
       void loader.refresh();
+      void dailyRead.refresh();
       void workRead.refresh();
     };
     const load = () => {
@@ -42,10 +66,18 @@
       repository = sel.repository;
       void loader.load(sel);
       void workRead.load(sel.repository);
+      dailyDays = dailyWindow(window.location.search);
+      void dailyRead.load({ repository: sel.repository, days: dailyDays });
     };
     choose = (h) => {
       const url = new URL(window.location.href);
       url.searchParams.set("news", `${h}h`);
+      window.history.pushState(null, "", url);
+      load();
+    };
+    chooseDays = (d) => {
+      const url = new URL(window.location.href);
+      url.searchParams.set("days", `${d}d`);
       window.history.pushState(null, "", url);
       load();
     };
@@ -116,3 +148,6 @@
 </section>
 
 <CurrentWork state={work} {ticketHref} />
+
+<DailyCounts state={daily} days={dailyDays} choose={chooseDays} ticketHref={memberHref} />
+<PrMerges state={daily} />
