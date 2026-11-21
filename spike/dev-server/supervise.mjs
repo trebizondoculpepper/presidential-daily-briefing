@@ -33,7 +33,20 @@ watch(watchPath, { recursive: true }, () => {
   clearTimeout(timer);
   timer = setTimeout(restart, 150);
 });
-process.on("SIGINT", () => {
-  child?.kill("SIGTERM");
-  process.exit(0);
-});
+// Both signals share one shutdown path and wait for the child: a task runner that stops the
+// supervisor with SIGTERM must not leave the backend holding its port (reviewed #1200 finding).
+let exiting = false;
+const shutdown = (signal) => {
+  if (exiting) return;
+  exiting = true;
+  if (!child || child.exitCode !== null) process.exit(0);
+  child.once("exit", () => process.exit(0));
+  child.kill(signal);
+  // Never hang forever if the child ignores the signal.
+  setTimeout(() => {
+    child.kill("SIGKILL");
+    process.exit(1);
+  }, 3000).unref();
+};
+process.on("SIGINT", () => shutdown("SIGINT"));
+process.on("SIGTERM", () => shutdown("SIGTERM"));

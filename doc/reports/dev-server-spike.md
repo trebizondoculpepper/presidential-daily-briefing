@@ -121,10 +121,12 @@ These are single observations on one machine, not a benchmark suite.
 - **Ports**: the prototype bound `127.0.0.1` only (5197 backend, 5198 spike backend, 5199 assets,
   5196 an earlier disposable check) and never touched 4372. The contract keeps loopback-only
   listeners and an explicit port choice.
-- **Cancellation/cleanup**: killing the supervisor sends `SIGTERM` to its child; the real backend
-  closed its listener and exited (three `listening` lines for three starts, no port reuse error).
-  Requests in flight are aborted by process exit — the same boundary `pdb serve` already has, so
-  the dev server does not add a second lifecycle owner.
+- **Cancellation/cleanup**: `SIGINT` and `SIGTERM` share one shutdown path that forwards the same
+  signal to the child and waits for it before exiting. Verified: with the spike backend listening on
+  5198 (`node 61054 ... TCP 127.0.0.1:5198 (LISTEN)`), `kill -TERM <supervisor>` left **no
+  supervisor process and no listener** (`0 process`, `0 line(s)` from `lsof`), so the next run can
+  bind the port again. Requests in flight are aborted by process exit — the same boundary `pdb
+  serve` already has, so the dev server does not add a second lifecycle owner.
 - **Failed edits**: a TypeScript error keeps the last good backend process only if the supervisor
   refuses to restart on a failed start; the prototype currently restarts on every write and logs
   `backend exited 1`. The contract requires "keep the last good process, report the error, retry on
