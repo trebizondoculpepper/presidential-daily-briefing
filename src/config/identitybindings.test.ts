@@ -26,26 +26,36 @@ describe("coherent identity and active binding persistence (#677)", () => {
       expect(await f.fs.readText(f.file)).not.toContain("same-thread");
     }));
 
-  it("separate sessions keep distinct names while preserving unrelated typed data", async () =>
+  it("separate sessions share the harness default while preserving unrelated typed data (#1047)", async () =>
     fixture(async (f) => {
       await f.fs.writeText(
         f.file,
         "schemaVersion = 1\n[future]\nkeep = true\nlarge = 9007199254740993\n",
       );
-      const results = await Promise.all([f.setup("thread-a"), f.setup("thread-b")]);
-      expect(new Set(results.map((r) => r.record.name)).size).toBe(2);
-      expect((await readIdentityBindings(f.root, f.fs)).size).toBe(2);
+      const first = await f.setup("thread-a");
+      const second = await f.setup("thread-b");
+      // One logical agent: the second session reuses the default name and role.
+      expect(second.record.name).toBe(first.record.name);
+      expect(second.generatedName).toBeNull();
+      const bindings = await readIdentityBindings(f.root, f.fs);
+      expect(bindings.size).toBe(2);
+      expect(new Set(bindings.values())).toEqual(new Set(["codex"]));
       const document = parseIdentityDocument((await f.fs.readText(f.file))!);
+      expect(Object.keys(document.agents as object)).toEqual(["codex"]);
       expect(document.future).toEqual({ keep: true, large: 9007199254740993n });
     }));
 
-  it("refuses an unbound generic entry without allocating or rewriting it", async () =>
+  it("a new session reuses an existing default entry's name and role without rewriting them (#1047)", async () =>
     fixture(async (f) => {
-      const raw =
-        'schemaVersion = 1\n[agents.codex]\nname = "existing_agent"\ntriage_role = "implementer"\n';
-      await f.fs.writeText(f.file, raw);
-      await expect(f.setup("new-thread")).rejects.toMatchObject({ code: "identity-unresolved" });
-      expect(await f.fs.readText(f.file)).toBe(raw);
+      await f.fs.writeText(
+        f.file,
+        'schemaVersion = 1\n[agents.codex]\nname = "existing_agent"\ntriage_role = "designer"\n',
+      );
+      const result = await f.setup("new-thread", "implementer");
+      expect(result.record).toMatchObject({ name: "existing_agent", triageRole: "designer" });
+      expect(result.generatedName).toBeNull();
+      const b = f.binding("new-thread");
+      expect((await readBoundIdentity(f.root, b.key, f.fs))?.entry).toBe("codex");
     }));
 
   it("does not recreate a dangling binding", async () =>

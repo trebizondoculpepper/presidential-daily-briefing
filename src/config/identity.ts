@@ -604,9 +604,19 @@ function legacyOnlyNames(legacy: Table | null, current: Table, except: string): 
   return taken;
 }
 
+/**
+ * #1047: a harness default (an entry key without a dot, such as `codex`) may share its name with
+ * that harness's own preserved automatic session aliases (`codex.session_<64 hex>`), which are the
+ * same logical agent; any other entry with the name is still a duplicate.
+ */
+const ownSessionAlias = (entry: string, key: string): boolean =>
+  !entry.includes(".") &&
+  new RegExp(`^${entry.replace(/[-]/g, "\\-")}\\.session_[0-9a-f]{64}$`).test(key);
+
 function namesInUse(document: Table | null, except: string, taken = new Set<string>()) {
   const agents = document !== null && isTable(document.agents) ? document.agents : {};
   for (const [key, table] of Object.entries(agents)) {
+    if (ownSessionAlias(except, key)) continue;
     if (key !== except && isTable(table) && typeof table.name === "string") {
       taken.add(table.name.toLowerCase());
     }
@@ -799,8 +809,6 @@ export interface IdentityWriteOptions {
     readonly key: string;
     readonly expectedEntry: string | null;
     readonly allowRebind?: boolean;
-    /** Implicit new-session setup must not borrow an unbound entry of this harness. */
-    readonly newSessionHarness?: string;
   };
 }
 
@@ -1018,25 +1026,7 @@ export async function setIdentity(
   if (options.binding) {
     validateIdentityBindingKey(options.binding.key);
     if (options.binding.expectedEntry !== null) validateEntryKey(options.binding.expectedEntry);
-    if (
-      options.binding.newSessionHarness &&
-      !/^[a-z][a-z0-9-]*$/.test(options.binding.newSessionHarness)
-    )
-      throw new ConfigError(
-        "invalid-value",
-        "Invalid identity binding harness.",
-        "Select the logical entry explicitly.",
-      );
   }
-  if (
-    options.binding?.newSessionHarness &&
-    !entry.startsWith(`${options.binding.newSessionHarness}.`)
-  )
-    throw new ConfigError(
-      "invalid-value",
-      "The generated entry does not match its binding harness.",
-      "Select the intended logical entry explicitly.",
-    );
   const field = identityKey(key).field;
   validateIdentityValue(key, value);
   const fs = options.fs ?? nodeFileSystem;
@@ -1151,29 +1141,6 @@ export async function setIdentity(
     let legacyIgnored: string | null = null;
     // Names of agents that exist only in the legacy file must not be duplicated (#528 review).
     const legacyNames = await readLegacyNames(target.root, fs);
-    if (options.binding?.newSessionHarness) {
-      if (before.entryExists && currentBinding !== entry) throw conflict();
-      if (legacyNames.unknown !== null)
-        throw new ConfigError(
-          "identity-unresolved",
-          "Legacy entries could not be checked for safe session selection.",
-          "Repair the legacy identity file or select the logical entry explicitly.",
-        );
-      const harness = options.binding.newSessionHarness;
-      const bound = new Set(bindings.values());
-      const unbound = [
-        ...new Set([...agentKeys(document), ...agentKeys(legacyNames.document)]),
-      ].filter(
-        (candidate) =>
-          (candidate === harness || candidate.startsWith(`${harness}.`)) && !bound.has(candidate),
-      );
-      if (unbound.length)
-        throw new ConfigError(
-          "identity-unresolved",
-          "Unbound entries make automatic session selection ambiguous.",
-          "Select the intended logical entry explicitly with --entry KEY.",
-        );
-    }
     const legacyTaken = (name: string) =>
       legacyOnlyNames(legacyNames.document, document, entry).has(name.toLowerCase());
     let legacyNamesUnchecked: string | null = null;
@@ -1227,7 +1194,11 @@ export async function setIdentity(
       }
       agents[entry] = table;
     }
-    if (options.reuseExistingIdentity && field === "name") {
+    // Keeping an entry's own existing name (binding a new session to it) assigns no new name, so
+    // other entries sharing it (#1047: preserved session aliases of a migrated default) are not
+    // a new duplicate; only a name newly given to this entry is checked.
+    const keepsOwnName = before.entryExists && before.name === nextValue;
+    if (options.reuseExistingIdentity && field === "name" && !keepsOwnName) {
       if (namesInUse(document, entry).has(nextValue.toLowerCase()))
         throw new ConfigError(
           "conflict",
@@ -1247,35 +1218,17 @@ export async function setIdentity(
     const text = serializeIdentityDocument(document);
     assertLosslessRewrite(raw, text);
 
-    // The file holds private names: keep it private. A new file is 0600; a replaced file keeps
-    // its original mode, and the temporary copy is never more permissive than either. Mode
-    // handling is a no-op where unsupported (Windows).
-    const originalMode = raw === null ? null : ((await fs.fileMode?.(path)) ?? null);
-    const finalMode = originalMode ?? PRIVATE_FILE_MODE;
-    const temporary = join(target.root, temporaryName);
-    try {
-      await fs.writeText(temporary, text, finalMode & PRIVATE_FILE_MODE);
-    } catch (error) {
-      // A failed or partial write must not leave a copy behind; an existing file is not ours.
-      if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
-        await fs.remove(temporary).catch(() => undefined);
-      }
-      throw error;
-    }
-    try {
-      if ((await fs.readText(path)) !== raw) throw conflict();
+    const legacyCheckNeeded =
+      imported !== null ||
+      (legacyNames.unknown === null && (generatedName !== null || field === "name"));
+    await replaceIdentityFile(target.root, fs, raw, text, temporaryName, async () => {
       // Collision checks and imports relied on the legacy bytes: they must be unchanged.
       // Unknown legacy names were never relied on, so there is nothing to recheck then.
-      const checkedLegacy =
-        imported !== null ||
-        (legacyNames.unknown === null && (generatedName !== null || field === "name"));
-      const legacyNow = checkedLegacy
-        ? await fs.readText(join(target.root, LEGACY_IDENTITY_FILE))
-        : null;
+      if (!legacyCheckNeeded) return;
+      const legacyNow = await fs.readText(join(target.root, LEGACY_IDENTITY_FILE));
       if (
-        checkedLegacy &&
-        ((legacyNames.unknown === null && legacyNow !== legacyNames.raw) ||
-          (imported !== null && legacyNow !== imported.raw))
+        (legacyNames.unknown === null && legacyNow !== legacyNames.raw) ||
+        (imported !== null && legacyNow !== imported.raw)
       ) {
         throw new ConfigError(
           "conflict",
@@ -1283,12 +1236,7 @@ export async function setIdentity(
           "Retry the command to import the current legacy identity.",
         );
       }
-      await fs.rename(temporary, path);
-    } catch (error) {
-      await fs.remove(temporary).catch(() => undefined);
-      throw error;
-    }
-    await fs.setFileMode?.(path, finalMode);
+    });
     return {
       changed: true,
       createdFile: raw === null,
@@ -1301,4 +1249,272 @@ export async function setIdentity(
       record: recordFor(parseIdentityDocument(text), entry),
     };
   }
+}
+
+/**
+ * Atomically replace the private identity file with `text` (shared by every identity writer):
+ * write a private temporary copy, verify the file is still `raw` and run `beforeRename` (further
+ * unchanged-input checks), rename it into place and restore the private mode. Any failure
+ * removes the temporary copy and leaves the original file untouched.
+ */
+async function replaceIdentityFile(
+  root: string,
+  fs: ConfigFileSystem,
+  raw: string | null,
+  text: string,
+  temporaryName: string,
+  beforeRename: () => Promise<void>,
+  /** Called just before the rename: from here on the file may have changed. */
+  onWrite?: () => void,
+): Promise<void> {
+  const path = join(root, IDENTITY_FILE);
+  // The file holds private names: keep it private. A new file is 0600; a replaced file keeps
+  // its original mode, and the temporary copy is never more permissive than either. Mode
+  // handling is a no-op where unsupported (Windows).
+  const originalMode = raw === null ? null : ((await fs.fileMode?.(path)) ?? null);
+  const finalMode = originalMode ?? PRIVATE_FILE_MODE;
+  const temporary = join(root, temporaryName);
+  try {
+    await fs.writeText(temporary, text, finalMode & PRIVATE_FILE_MODE);
+  } catch (error) {
+    // A failed or partial write must not leave a copy behind; an existing file is not ours.
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") {
+      await fs.remove(temporary).catch(() => undefined);
+    }
+    throw error;
+  }
+  try {
+    if ((await fs.readText(path)) !== raw) throw conflict();
+    await beforeRename();
+    onWrite?.();
+    await fs.rename(temporary, path);
+  } catch (error) {
+    await fs.remove(temporary).catch(() => undefined);
+    throw error;
+  }
+  await fs.setFileMode?.(path, finalMode);
+}
+
+/** The automatic session entry key format (#677): `<harness>.session_<sha256 hex>`. */
+const sessionEntry = (harness: string) => new RegExp(`^${harness}\\.session_[0-9a-f]{64}$`);
+
+export type SessionMigration =
+  /** A valid canonical entry exists: it is the default; nothing was written. */
+  | {
+      readonly state: "canonical";
+      readonly record: IdentityRecord;
+      /** Recognized automatic bindings that still name another entry; reported, not rewritten. */
+      readonly obsoleteBindings: number;
+    }
+  /** Recognized legacy session records agreed; the canonical entry was created from them. */
+  | {
+      readonly state: "migrated";
+      readonly record: IdentityRecord;
+      readonly retargeted: number;
+      readonly lockCleanup?: string;
+    }
+  /** Neither a canonical entry nor recognized legacy session records exist. */
+  | { readonly state: "none" };
+
+/**
+ * #1047 (doc/design/stable-harness-identity.md): establish the canonical default entry for a
+ * harness from its recognized automatic session records, under the identity lock. Recognized
+ * means a binding whose key is `<provider>_…` and whose value is a `<harness>.session_<hex>` entry
+ * present in the file; nothing is found by agent name or by flattening every `<harness>.*` key.
+ *
+ * - A valid canonical entry wins and nothing is written.
+ * - Otherwise, if the recognized records agree on one valid name and role, the canonical entry is
+ *   created with that pair and only the recognized bindings are retargeted to it, in one guarded
+ *   replacement. Legacy entries and every other setting are preserved.
+ * - Different names or roles, an invalid record, or a canonical entry without a valid name stop
+ *   with the candidate keys and the exact commands to resolve it; nothing is guessed or merged.
+ */
+export async function migrateSessionIdentity(
+  target: IdentityTarget,
+  harness: string,
+  bindingPrefix: string,
+  options: Pick<IdentityWriteOptions, "fs" | "git" | "token" | "lockTiming"> & {
+    /** Called just before the identity file is replaced, so callers can report partial writes. */
+    readonly onWrite?: () => void;
+  } = {},
+): Promise<SessionMigration> {
+  validateEntryKey(harness);
+  const fs = options.fs ?? nodeFileSystem;
+  const recognize = (document: Table | null) => {
+    const pattern = sessionEntry(harness);
+    const agents = document !== null && isTable(document.agents) ? document.agents : {};
+    const session = [...bindingsFor(document)].filter(
+      ([key, entry]) => key.startsWith(`${bindingPrefix}_`) && pattern.test(entry),
+    );
+    const bindings = session.filter(([, entry]) => entry in agents);
+    // A recognized binding whose session entry is missing is unresolved evidence, not first use.
+    const missing = [
+      ...new Set(session.filter(([, entry]) => !(entry in agents)).map(([, e]) => e)),
+    ];
+    return { bindings, entries: [...new Set(bindings.map(([, entry]) => entry))].sort(), missing };
+  };
+  const decide = (
+    document: Table | null,
+  ):
+    | SessionMigration
+    | { state: "write"; name: string; role: TriageRole | null; legacy: string[] } => {
+    const canonical = recordFor(document, harness);
+    const { bindings, entries } = recognize(document);
+    if (canonical.entryExists) {
+      if (!canonical.name || !isAgentName(canonical.name) || canonical.problems.length)
+        throw new ConfigError(
+          "identity-unresolved",
+          `The default entry [agents.${harness}] has no valid agent name; no replacement was allocated.`,
+          `Repair it with pdb config set identity.name NAME --entry ${harness}, then retry.`,
+        );
+      return {
+        state: "canonical",
+        record: canonical,
+        obsoleteBindings: bindings.filter(([, entry]) => entry !== harness).length,
+      };
+    }
+    const { missing } = recognize(document);
+    if (missing.length)
+      throw new ConfigError(
+        "identity-unresolved",
+        `Session binding(s) point at missing automatic identit${missing.length === 1 ? "y" : "ies"} (${missing.join(", ")}); no default was allocated in their place.`,
+        `Set the default explicitly: pdb config set identity.name NAME --entry ${harness} and pdb config set identity.triage_role ROLE --entry ${harness}, then retry.`,
+      );
+    if (!entries.length) return { state: "none" };
+    const records = entries.map((entry) => ({ entry, record: recordFor(document, entry) }));
+    const pairs = new Set(
+      records.map(({ record }) => JSON.stringify([record.name, record.triageRole])),
+    );
+    const invalid = records.some(
+      ({ record }) => !record.name || !isAgentName(record.name) || record.problems.length,
+    );
+    if (invalid || pairs.size !== 1) {
+      const first = records.find(({ record }) => record.name && isAgentName(record.name))?.record;
+      throw new ConfigError(
+        "identity-unresolved",
+        `Earlier sessions recorded ${entries.length} automatic identit${entries.length === 1 ? "y" : "ies"} (${entries.join(", ")}) that ${invalid ? "include an invalid record" : "disagree on name or role"}; the default [agents.${harness}] was not created and nothing was merged or renamed.`,
+        `Choose the default explicitly: pdb config set identity.name ${first?.name ?? "NAME"} --entry ${harness} and pdb config set identity.triage_role ${first?.triageRole ?? "ROLE"} --entry ${harness}, then retry.`,
+      );
+    }
+    return {
+      state: "write",
+      name: records[0]!.record.name!,
+      role: records[0]!.record.triageRole,
+      legacy: entries,
+    };
+  };
+
+  const path = join(target.root, IDENTITY_FILE);
+  // A read decides first; only a needed migration takes the lock and re-decides under it.
+  const firstRaw = await fs.readText(path);
+  const initial = decide(firstRaw === null ? null : parseIdentityDocument(firstRaw));
+  if (initial.state !== "write") return initial;
+
+  for (const candidate of [path, join(target.root, IDENTITY_LOCK_FILE)])
+    if ((await fs.isSymbolicLink?.(candidate)) === true)
+      throw new ConfigError(
+        "unsafe-path",
+        `${candidate === path ? IDENTITY_FILE : IDENTITY_LOCK_FILE} is a symbolic link; pdb does not write through links, so nothing was changed.`,
+        "Replace the link with a regular file (or remove it) at the repository root yourself, then retry.",
+      );
+  const git = gitServiceOf(options.git);
+  const token =
+    options.token ?? (() => `${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}`);
+  const temporaryName = temporaryIdentityName(token());
+  await ensureExcluded(target.root, git, fs, temporaryName);
+  const timing = options.lockTiming ?? IDENTITY_LOCK_TIMING;
+  const release = await acquireFileLock(
+    lockFs(fs),
+    join(target.root, IDENTITY_LOCK_FILE),
+    { ...timing, staleMs: Number.POSITIVE_INFINITY },
+    Date.now,
+    (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  );
+  if (release === null) throw busy();
+  let result: SessionMigration;
+  try {
+    const raw = await fs.readText(path);
+    const document: Table = raw === null ? Object.create(null) : parseIdentityDocument(raw);
+    // A concurrent initializer may have won: reconcile against what is actually there now.
+    const decision = decide(raw === null ? null : document);
+    if (decision.state !== "write") result = decision;
+    else {
+      const legacy = new Set(decision.legacy);
+      const agents = document.agents as Table;
+      const takenElsewhere = new Set<string>();
+      for (const [key, table] of Object.entries(agents))
+        if (key !== harness && !legacy.has(key) && isTable(table) && typeof table.name === "string")
+          takenElsewhere.add(table.name.toLowerCase());
+      const legacyNames = await readLegacyNames(target.root, fs);
+      if (legacyNames.unknown !== null)
+        throw new ConfigError(
+          "identity-unresolved",
+          "Legacy entries could not be checked before creating the default identity.",
+          "Repair the legacy identity file or set the default entry explicitly.",
+        );
+      // A legacy default for this harness is the established identity: migration may only
+      // confirm it, never shadow it with a different name or role (#1189 review).
+      const legacyDefault = recordFor(legacyNames.document, harness, LEGACY_IDENTITY_FILE);
+      if (
+        legacyDefault.entryExists &&
+        (legacyDefault.name?.toLowerCase() !== decision.name.toLowerCase() ||
+          (legacyDefault.triageRole ?? null) !== decision.role)
+      )
+        throw new ConfigError(
+          "identity-unresolved",
+          `${LEGACY_IDENTITY_FILE} already has a default [agents.${harness}] (${legacyDefault.name ?? "no name"}) that differs from the identity earlier sessions recorded (${decision.name}); the default was not created and nothing was renamed.`,
+          `Choose the default explicitly: pdb config set identity.name NAME --entry ${harness} and pdb config set identity.triage_role ROLE --entry ${harness}, then retry.`,
+        );
+      for (const name of legacyOnlyNames(legacyNames.document, document, harness))
+        takenElsewhere.add(name);
+      if (takenElsewhere.has(decision.name.toLowerCase()))
+        throw new ConfigError(
+          "conflict",
+          `The name ${JSON.stringify(decision.name)} recorded by earlier sessions is used by another entry; the default was not created.`,
+          `Choose the default explicitly: pdb config set identity.name NAME --entry ${harness}, then retry.`,
+        );
+      const table: Table = Object.create(null);
+      table.name = decision.name;
+      if (decision.role !== null) table.triage_role = decision.role;
+      agents[harness] = table;
+      const bindingTable = document.agentBindings as Table;
+      let retargeted = 0;
+      for (const [key] of recognize(document).bindings) {
+        bindingTable[key] = harness;
+        retargeted++;
+      }
+      const text = serializeIdentityDocument(document);
+      assertLosslessRewrite(raw, text);
+      await replaceIdentityFile(
+        target.root,
+        fs,
+        raw,
+        text,
+        temporaryName,
+        async () => {
+          if ((await fs.readText(join(target.root, LEGACY_IDENTITY_FILE))) !== legacyNames.raw)
+            throw new ConfigError(
+              "conflict",
+              `${LEGACY_IDENTITY_FILE} changed while the default identity was being created; nothing was written.`,
+              "Retry the command.",
+            );
+        },
+        options.onWrite,
+      );
+      // Readback: the canonical entry must now hold exactly the agreed pair.
+      const after = recordFor(parseIdentityDocument((await fs.readText(path)) ?? ""), harness);
+      if (after.name !== decision.name || after.triageRole !== decision.role)
+        throw new ConfigError(
+          "identity-unresolved",
+          "The default identity could not be verified after writing it.",
+          "Inspect pdb.toml and set the default entry explicitly if needed.",
+        );
+      result = { state: "migrated", record: after, retargeted };
+    }
+  } catch (error) {
+    await release();
+    throw error;
+  }
+  const cleanup = releaseProblem(IDENTITY_LOCK_FILE, await release());
+  return cleanup && result.state === "migrated" ? { ...result, lockCleanup: cleanup } : result;
 }

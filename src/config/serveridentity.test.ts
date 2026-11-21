@@ -97,6 +97,8 @@ describe("local server identity preparation (#677)", () => {
         expect(unknown.startup.result.agent).toBe(session.startup.agent);
         expect(await readdir(other.root)).toEqual([]);
         // An existing matching binding can be displayed, without changing startup authority.
+        // (Advance the other project's name generator so its default differs from startup's.)
+        for (let i = 0; i < 7; i++) other.random();
         await other.setup("separately-bound-agent", "implementer");
         const initialized = await other.setup("thread", "implementer");
         currentHuman = { ...human, login: "another_owner", observedAt: "2026-11-17T01:00:00.000Z" };
@@ -135,7 +137,7 @@ describe("local server identity preparation (#677)", () => {
 });
 
 describe("rebrief session identity reuse", () => {
-  it("reads a verified binding without setup writes and never initializes an absent binding", async () =>
+  it("reads the harness default without setup writes, for this and a new session (#1047)", async () =>
     fixture(async (f) => {
       await f.setup("rebrief-thread", "designer");
       const before = await f.fs.readText(f.file);
@@ -194,10 +196,16 @@ describe("rebrief session identity reuse", () => {
         },
       });
       expect(stateWrites).toBe(1);
+      // #1047: a new session of the same harness reuses the default identity, read-only.
       thread = "unbound-thread";
       expect(await invoke()).toBe(0);
-      expect(JSON.parse(result).reason).toBe("missing-identity");
-      expect(stateWrites).toBe(1);
+      expect(JSON.parse(result)).toMatchObject({
+        reason: "initialized",
+        effectiveIdentity: { source: "binding", triageRole: "designer" },
+      });
+      // The frontend's own session state is written for the initialized session; the identity
+      // file is never written by a read.
+      expect(stateWrites).toBe(2);
       expect(await f.fs.readText(f.file)).toBe(before);
     }));
 });

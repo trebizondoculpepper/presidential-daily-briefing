@@ -301,23 +301,34 @@ describe("effective identity in actual MCP responses (#677)", () => {
       }
     }));
 
-  it("does not let a generic Codex client name borrow an unbound existing agent", async () =>
+  it("reuses the default only from verified harness evidence, never from a generic client name (#1047)", async () =>
     fixture(async (f) => {
       await f.fs.writeText(
         f.file,
         'schemaVersion = 1\n[agents.codex]\nname = "another_agent"\ntriage_role = "designer"\n',
       );
       const raw = await f.fs.readText(f.file);
-      const { client } = await setup(f, {}, {}, "codex-mcp-client");
+      // A Codex-like client name with no verified harness environment selects nothing.
+      const unverified = await setup(f, { env: {} }, {}, "codex-mcp-client");
       try {
         const { document, effective } = identityOf(
-          await client.callTool({ name: "triage_briefing", arguments: {} }),
+          await unverified.client.callTool({ name: "triage_briefing", arguments: {} }),
         );
         expect(document.selection).toMatchObject({ agent: null, identitySource: "unresolved" });
         expect(effective).toMatchObject({ state: "unresolved", agent: null });
         expect(await f.fs.readText(f.file)).toBe(raw);
       } finally {
-        await client.close();
+        await unverified.client.close();
+      }
+      // A verified Codex execution reuses the harness default's name and role.
+      const verified = await setup(f, {}, {}, "codex-mcp-client");
+      try {
+        const { document } = identityOf(
+          await verified.client.callTool({ name: "triage_briefing", arguments: {} }),
+        );
+        expect(document.selection).toMatchObject({ agent: "another_agent" });
+      } finally {
+        await verified.client.close();
       }
     }));
   it("keeps real stdio framing valid when startup creates an identity, then reuses it", async () =>

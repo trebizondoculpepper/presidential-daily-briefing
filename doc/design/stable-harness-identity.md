@@ -73,3 +73,13 @@ explicit entry selection, read-only behavior, ambiguous harness signals, lock ra
 and partial/readback failure. Verify no new session-derived entries are persisted.
 Do not commit identity snapshots or change existing human ownership/claim decisions.
 The implementation remains #1047; this document does not fix the runtime by itself.
+
+## Implementation note (#1047)
+
+`activeBinding` (`src/config/activebinding.ts`) now returns the harness's canonical entry (`codex`) as `entry`; the session digest survives only as the binding `key`, so no new `codex.session_<hex>` entry is ever created. In `prepareEffectiveIdentity`, a normal mutating run first calls `migrateSessionIdentity` (`src/config/identity.ts`), which under the identity lock:
+
+- returns the valid canonical entry unchanged, counting recognized bindings that still name a session entry (reported in a notice, not rewritten);
+- otherwise creates `[agents.<harness>]` from recognized session records (bindings `<provider>_…` pointing at `<harness>.session_<64 hex>` entries present in the file) when they agree on one valid name and role, retargets only those bindings, and keeps the legacy entries and every unrelated setting;
+- refuses disagreeing or invalid records, an invalid canonical entry, or a name taken by another entry, naming the candidates and the exact `pdb config set … --entry <harness>` commands, and writes nothing.
+
+The write shares `setIdentity`'s atomic replacement (`replaceIdentityFile`: private temporary copy, unchanged-file and legacy-file checks, rename, mode) and is read back. Read-only and dry-run views never migrate: a session still held only by its legacy entry stays attributed with a notice explaining the correction. The former `newSessionHarness` allocation path is removed.

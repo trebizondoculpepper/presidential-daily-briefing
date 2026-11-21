@@ -14,6 +14,7 @@ import {
   isAgentName,
   readIdentityBindingSelection,
   readBoundIdentity,
+  migrateSessionIdentity,
   readIdentity,
   readIdentityBindings,
   setIdentity,
@@ -170,6 +171,10 @@ export async function prepareEffectiveIdentity(
   let role: TriageRole | undefined;
   let target: Awaited<ReturnType<typeof resolveRepositoryTarget>> | undefined;
   let attempted = false;
+  /** Setup notices gathered before the final result (migration, obsolete bindings). */
+  const setupNotices: string[] = [];
+  /** #1047: the default was established from earlier session records in this run. */
+  let migrated = false;
   const fs = runtime.fs ?? nodeFileSystem;
   // One typed Git service for this preparation (#907): shared if injected, else built once.
   const git = gitServiceOf(runtime.git);
@@ -199,7 +204,7 @@ export async function prepareEffectiveIdentity(
     triageRole: record.triageRole,
     role: role ?? record.triageRole,
     roleSource: role ? "explicit" : record.triageRole ? "stored" : "unknown",
-    setup,
+    setup: { ...setup, notices: [...setupNotices, ...setup.notices] },
   });
   try {
     if (options.entry !== undefined && options.harness !== undefined)
@@ -256,7 +261,6 @@ export async function prepareEffectiveIdentity(
     if (provider && options.harness !== undefined && provider.harness !== options.harness)
       provider = null;
     let bindings = await readIdentityBindings(target.root, fs);
-    let newSession = false;
     let record: IdentityRecord;
     if (options.entry !== undefined) {
       entry = options.entry;
@@ -264,32 +268,49 @@ export async function prepareEffectiveIdentity(
       record = await readIdentity(target.root, entry, fs);
     } else if (provider) {
       source = "binding";
-      const selection = await readIdentityBindingSelection(target.root, provider.key, fs);
-      bindings = selection.bindings;
-      const bound = selection.bound;
-      if (bound) {
-        entry = bound.entry;
-        record = bound.record;
-      } else {
-        const boundEntries = new Set(bindings.values());
-        const keys = selection.entries;
-        if (
-          keys.some(
-            (key) =>
-              (key === provider!.harness || key.startsWith(`${provider!.harness}.`)) &&
-              !boundEntries.has(key),
-          )
-        )
-          throw selectionError(
-            "An unbound existing entry makes this session's identity ambiguous.",
+      // #1047 (doc/design/stable-harness-identity.md): the harness's canonical default entry is
+      // the identity; a session binding only correlates with it. A normal mutating run first
+      // establishes the default from recognized earlier session records (guarded, lossless).
+      entry = provider.entry;
+      if (options.intent !== "readonly" && options.intent !== "dry-run") {
+        const migration = await migrateSessionIdentity(
+          target,
+          provider.harness,
+          provider.provider,
+          {
+            fs,
+            git,
+            // A migration that replaced the file then failed is a partial write, reported as such.
+            onWrite: () => {
+              attempted = true;
+            },
+          },
+        );
+        if (migration.state === "migrated") migrated = true;
+        if (migration.state === "migrated")
+          setupNotices.push(
+            `PDB made ${migration.record.name} the default ${provider.harness} identity from earlier sessions' records and pointed ${migration.retargeted} session binding(s) at it; the old entries are kept.`,
           );
-        entry = provider.entry;
-        if (keys.includes(entry))
-          throw selectionError(
-            "The session entry already exists without this active binding; it was not borrowed.",
+        if (migration.state === "canonical" && migration.obsoleteBindings > 0)
+          setupNotices.push(
+            `${migration.obsoleteBindings} earlier session binding(s) still name a session entry; the default ${provider.harness} identity is used and those bindings were left unchanged.`,
           );
-        newSession = true;
-        record = await readIdentity(target.root, entry, fs);
+        if (migration.state === "migrated" && migration.lockCleanup)
+          setupNotices.push(migration.lockCleanup);
+        bindings = await readIdentityBindings(target.root, fs);
+      }
+      record = await readIdentity(target.root, entry, fs);
+      // Read-only views never migrate: an identity still held only by this session's legacy
+      // entry stays attributed, with the correction explained.
+      if (!record.name && (options.intent === "readonly" || options.intent === "dry-run")) {
+        const selection = await readIdentityBindingSelection(target.root, provider.key, fs);
+        if (selection.bound) {
+          entry = selection.bound.entry;
+          record = selection.bound.record;
+          setupNotices.push(
+            `This identity is still stored as a session entry; the next normal command makes it the default ${provider.harness} identity.`,
+          );
+        }
       }
     } else
       throw selectionError(
@@ -308,7 +329,15 @@ export async function prepareEffectiveIdentity(
         "The selected identity entry has no valid agent name; no replacement was allocated.",
         `Repair it with pdb config set identity.name NAME --entry ${entry}, then retry.`,
       );
-    const bindingNeeded = provider !== null && bindings.get(provider.key) !== entry;
+    // A binding that already names another entry is reported, never quietly retargeted; a
+    // missing one is added so this session correlates with the default.
+    const boundElsewhere =
+      provider !== null && bindings.has(provider.key) && bindings.get(provider.key) !== entry;
+    const bindingNeeded =
+      provider !== null &&
+      (options.entry !== undefined
+        ? bindings.get(provider.key) !== entry
+        : !bindings.has(provider.key));
     const needsWrite = !record.name || record.source === "legacy-not-imported" || bindingNeeded;
     if (options.intent === "readonly") {
       if (!record.name)
@@ -355,7 +384,13 @@ export async function prepareEffectiveIdentity(
       };
     }
     if (!needsWrite)
-      return resolved(record, { state: "reused", changed: false, persisted: true, notices: [] });
+      return resolved(record, {
+        // A migration rewrote the store even when no further write was needed (#1189 review).
+        state: migrated ? "imported" : "reused",
+        changed: migrated,
+        persisted: true,
+        notices: [],
+      });
     if (!record.name && !role)
       throw selectionError("A new identity needs an explicit triage role; none was inferred.");
     attempted = true;
@@ -370,21 +405,21 @@ export async function prepareEffectiveIdentity(
         random: runtime.random,
         requireName: true,
         reuseExistingIdentity: true,
-        ...(provider
+        ...(provider && (!boundElsewhere || options.entry !== undefined)
           ? {
               binding: {
                 key: provider.key,
                 expectedEntry: bindings.get(provider.key) ?? null,
                 allowRebind: options.entry !== undefined,
-                ...(newSession ? { newSessionHarness: provider.harness } : {}),
               },
             }
           : {}),
       },
     );
-    const verified = provider
-      ? await readBoundIdentity(target.root, provider.key, fs)
-      : { entry, record: await readIdentity(target.root, entry, fs) };
+    const verified =
+      provider && (!boundElsewhere || options.entry !== undefined)
+        ? await readBoundIdentity(target.root, provider.key, fs)
+        : { entry, record: await readIdentity(target.root, entry, fs) };
     if (
       !verified ||
       verified.entry !== entry ||
@@ -396,7 +431,7 @@ export async function prepareEffectiveIdentity(
       );
     const state = write.generatedName
       ? "created"
-      : write.importedFrom
+      : write.importedFrom || migrated
         ? "imported"
         : write.changed
           ? "bound"
@@ -406,7 +441,7 @@ export async function prepareEffectiveIdentity(
         ? [
             `While preparing your requested command, PDB created agent identity ${verified.record.name} and saved it for this session/entry; continuing as ${verified.record.name}.`,
           ]
-        : state === "imported"
+        : state === "imported" && write.importedFrom
           ? [
               `PDB imported the existing identity ${verified.record.name} once into ${IDENTITY_FILE}; continuing with that name.`,
             ]
@@ -416,7 +451,12 @@ export async function prepareEffectiveIdentity(
               ]
             : [];
     if (write.lockCleanup) notices.push(write.lockCleanup);
-    return resolved(verified.record, { state, changed: write.changed, persisted: true, notices });
+    return resolved(verified.record, {
+      state,
+      changed: write.changed || migrated,
+      persisted: true,
+      notices,
+    });
   } catch (error) {
     // A failed post-rename chmod/readback may leave a real persisted identity. Report it;
     // never retry initialization blindly or claim the original operation continued.
