@@ -1,8 +1,8 @@
 {
   "modelVersion": 3,
   "policyVersion": 1,
-  "rulesHash": "7a1b9f30baee942c12d29e29b6fa2150852ca7756707036f9bc20cf9f084ab25",
-  "narrationHash": "2b5ef0feba1632724d87b17845e44d8dfe3778c12d8a45a36564ac14b2dae226",
+  "rulesHash": "0e55d4acd2770a22e678afec2413f46a87f2d4a6e65e59b16af4386de5d54d8d",
+  "narrationHash": "796b27dafa484285adc4f3bd95dcf0e0e0a3c4bfbada8d648ef6857f80c77d72",
   "sources": [
     "policy/schema.edn",
     "policy/rules.edn",
@@ -10636,6 +10636,19 @@
               "many": false
             },
             {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?q"
+              },
+              "attribute": "record-version",
+              "value": {
+                "lit": 2
+              },
+              "phrase": "question marker version",
+              "many": false
+            },
+            {
               "type": "bind",
               "fn": "str",
               "args": [
@@ -10691,6 +10704,19 @@
                 "lit": "trusted"
               },
               "phrase": "trust level",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?q"
+              },
+              "attribute": "record-version",
+              "value": {
+                "lit": 2
+              },
+              "phrase": "question marker version",
               "many": false
             },
             {
@@ -28704,6 +28730,6 @@
     "overrides": 5,
     "constants": 14,
     "attributes": 140,
-    "clauses": 1648
+    "clauses": 1650
   }
 }

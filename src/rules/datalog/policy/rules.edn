@@ -147,9 +147,10 @@
 [(force-denial ?t ?r) [?t "force-operation" "resume"] [?t "question-record" ?q] [?q "record-trust" "trusted"] [?q "record-version" 2] [?q "record-outcome" "none"] [(str "FORCE-QUESTION-OPEN") ?r]]
 ;; A closed ticket is never claimed or resumed (claims.ts TICKET_CLOSED); force cannot reopen it.
 [(force-denial ?t ?r) [?t "force-request" true] [?t "state" ?st] [(not= ?st "OPEN")] [(str "FORCE-TICKET-CLOSED") ?r]]
-;; Unverifiable question authority or resolution is missing evidence (retained.ts EVIDENCE_INCOMPLETE).
-[(force-denial ?t ?r) [?t "force-operation" "resume"] [?t "question-record" ?q] [?q "record-trust" "unverified"] [(str "FORCE-QUESTION-UNKNOWN") ?r]]
-[(force-denial ?t ?r) [?t "force-operation" "resume"] [?t "question-record" ?q] [?q "record-trust" "trusted"] [?q "record-outcome" "unknown"] [(str "FORCE-QUESTION-UNKNOWN") ?r]]
+;; Unverifiable v2 question authority or resolution is missing evidence (retained.ts EVIDENCE_INCOMPLETE);
+;; legacy v1 questions keep label-based resolution and are skipped, as resume skips them.
+[(force-denial ?t ?r) [?t "force-operation" "resume"] [?t "question-record" ?q] [?q "record-trust" "unverified"] [?q "record-version" 2] [(str "FORCE-QUESTION-UNKNOWN") ?r]]
+[(force-denial ?t ?r) [?t "force-operation" "resume"] [?t "question-record" ?q] [?q "record-trust" "trusted"] [?q "record-version" 2] [?q "record-outcome" "unknown"] [(str "FORCE-QUESTION-UNKNOWN") ?r]]
 [(force-denial ?t ?r) [?t "force-request" true] (own-issue ?o) [(not= ?t ?o)] [?o "claim-activity" "unknown"] [(str "FORCE-OTHER-ACTIVITY-UNKNOWN") ?r]]
 ;; Unknown refinement evidence is technical, even where a known refinement hold is a workflow denial.
 [(force-denial ?t ?r) (issue ?t) (refinement-unknown ?t) [(str "D-DENY-REFINEMENT-UNKNOWN") ?r]]
