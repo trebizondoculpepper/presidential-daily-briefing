@@ -1,8 +1,8 @@
 {
   "modelVersion": 3,
   "policyVersion": 1,
-  "rulesHash": "b84e5adc30820fb4c0882000fc7fd001ad038e48ce62e7ff11aa44e89ec91f69",
-  "narrationHash": "cc61a0667f3deec253a06c2ca9e4d7f96857690eca3710b10c8d46710c3c8294",
+  "rulesHash": "130ebd6ab94debad80682c63aa1045b71efa1a505743eae5f3cca0edfea66657",
+  "narrationHash": "67519e506e39cce21a5820d7a1d8a7e500272a89b20aae98e6361911d7497a95",
   "sources": [
     "policy/schema.edn",
     "policy/rules.edn",
@@ -10156,6 +10156,21 @@
               "many": false
             },
             {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "call",
+                  "predicate": "force-own-continuation",
+                  "args": [
+                    {
+                      "var": "?t"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
               "type": "call",
               "predicate": "claim-deny",
               "args": [
@@ -11066,6 +11081,31 @@
               ]
             },
             {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "force-operation",
+              "value": {
+                "var": "?op"
+              },
+              "phrase": "workflow operation a force request applies to",
+              "many": false
+            },
+            {
+              "type": "compare",
+              "op": "not=",
+              "args": [
+                {
+                  "var": "?op"
+                },
+                {
+                  "lit": "resume"
+                }
+              ]
+            },
+            {
               "type": "call",
               "predicate": "refinement-unknown",
               "args": [
@@ -11231,8 +11271,8 @@
         }
       ],
       "calls": [
-        "claim-deny",
         "force-own-continuation",
+        "claim-deny",
         "force-inventory-read",
         "own-issue",
         "issue",
@@ -24424,6 +24464,31 @@
                 ]
               },
               {
+                "type": "fact",
+                "scope": "entity",
+                "entity": {
+                  "var": "?t"
+                },
+                "attribute": "force-operation",
+                "value": {
+                  "var": "?op"
+                },
+                "phrase": "workflow operation a force request applies to",
+                "many": false
+              },
+              {
+                "type": "compare",
+                "op": "not=",
+                "args": [
+                  {
+                    "var": "?op"
+                  },
+                  {
+                    "lit": "resume"
+                  }
+                ]
+              },
+              {
                 "type": "call",
                 "predicate": "refinement-unknown",
                 "args": [
@@ -28968,6 +29033,6 @@
     "overrides": 5,
     "constants": 14,
     "attributes": 141,
-    "clauses": 1668
+    "clauses": 1672
   }
 }

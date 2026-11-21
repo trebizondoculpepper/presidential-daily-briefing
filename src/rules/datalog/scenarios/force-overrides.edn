@@ -249,4 +249,19 @@
    :viewer {:role "implementer" :agent "me"}
    :facts [{:e 1 "forward-complete" true "owned-claims-complete" true}
            {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "reverse-complete" true "native-complete" true "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "status:ready" "labels-complete" true "open-blockers" 0 "owner" "me" "force-request" true "force-operation" "claim" "force-reason" "valid" "force-agent" "known" "force-revision" "current"}]
-   :expect {:actions [{:subject 100 :rule "D-OWN" :kind "continue-implementation" :band 6} {:subject 100 :rule "D-FORCE-NO-DENIAL" :kind "force-allow" :band 1 :why "No rule denied claim, so nothing is overridden; proceed as a normal claim."}] :denials #{[100 "D-DENY-CLAIM"]}}}]}
+   :expect {:actions [{:subject 100 :rule "D-OWN" :kind "continue-implementation" :band 6} {:subject 100 :rule "D-FORCE-NO-DENIAL" :kind "force-allow" :band 1 :why "No rule denied claim, so nothing is overridden; proceed as a normal claim."}] :denials #{[100 "D-DENY-CLAIM"]}}}
+
+  {:id "f35-idempotent-claim-skips-acquisition-checks"
+   :doc "An already-held claim retry applies no readiness or blocker checks"
+   :viewer {:role "implementer" :agent "me"}
+   :facts [{:e 1 "forward-complete" true "owned-claims-complete" true}
+           {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "reverse-complete" true "native-complete" true "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "status:in-progress" "labels-complete" true "open-blockers" 1 "owner" "me" "force-request" true "force-operation" "claim" "force-reason" "valid" "force-agent" "known" "force-revision" "current"}]
+   :expect {:actions [{:subject 100 :rule "D-OWN-HELD-BACK" :kind "inspect" :band 3} {:subject 100 :rule "D-FORCE-NO-DENIAL" :kind "force-allow" :band 1 :why "No rule denied claim, so nothing is overridden; proceed as a normal claim."}] :denials #{}}}
+
+  {:id "f36-resume-ignores-unknown-refinement"
+   :doc "Resume does not inspect refinement records"
+   :viewer {:role "implementer" :agent "me"}
+   :facts [{:e 1 "forward-complete" true "owned-claims-complete" true}
+           {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "reverse-complete" true "native-complete" true "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "status:in-progress" "labels-complete" true "open-blockers" 0 "owner" "me" "claim-activity" "resume-required" "wait-reason" "cleared" "refinement" 200 "force-request" true "force-operation" "resume" "force-reason" "valid" "force-agent" "known" "force-revision" "current"}
+           {:e 200 "refinement-state" "unknown"}]
+   :expect {:actions [{:subject 100 :rule "D-OWN-RESUME" :kind "resume-claim" :band 3} {:subject 100 :rule "D-FORCE-NO-DENIAL" :kind "force-allow" :band 1 :why "No rule denied resume, so nothing is overridden; proceed as a normal resume."}] :denials #{}}}]}

@@ -131,7 +131,8 @@
 ;; Which pickup denials each operation actually applies (#1197 reviews), mirroring normal admission:
 ;; claim applies them all; rework (claims.ts) skips readiness and its own open PR; resume
 ;; (retained.ts planClaimResume) checks only native blockers and their evidence among them.
-[(force-denial ?t ?r) [?t "force-operation" "claim"] (claim-deny ?t ?r) [(not= ?r "D-DENY-CLAIM")]]
+;; An already-held exclusive claim returns planClaim's no-op/repair before any acquisition check.
+[(force-denial ?t ?r) [?t "force-operation" "claim"] (not (force-own-continuation ?t)) (claim-deny ?t ?r) [(not= ?r "D-DENY-CLAIM")]]
 [(force-denial ?t ?r) [?t "force-operation" "rework"] (claim-deny ?t ?r) [(not= ?r "D-DENY-CLAIM")] [(not= ?r "CLAIM-NOT-READY")] [(not= ?r "D-DENY-OPEN-PR")]]
 [(force-denial ?t ?r) [?t "force-operation" "resume"] (claim-deny ?t ?r) [(= ?r "D-DENY-BLOCKER")]]
 [(force-denial ?t ?r) [?t "force-operation" "resume"] (claim-deny ?t ?r) [(= ?r "D-DENY-NATIVE-UNKNOWN")]]
@@ -162,7 +163,7 @@
 [(force-denial ?t ?r) [?t "force-operation" "resume"] [?t "question-record" ?q] [?q "record-trust" "trusted"] [?q "record-version" 2] [?q "record-outcome" "unknown"] [(str "FORCE-QUESTION-UNKNOWN") ?r]]
 [(force-denial ?t ?r) [?t "force-request" true] (own-issue ?o) [(not= ?t ?o)] [?o "claim-activity" "unknown"] [(str "FORCE-OTHER-ACTIVITY-UNKNOWN") ?r]]
 ;; Unknown refinement evidence is technical, even where a known refinement hold is a workflow denial.
-[(force-denial ?t ?r) (issue ?t) (refinement-unknown ?t) [(str "D-DENY-REFINEMENT-UNKNOWN") ?r]]
+[(force-denial ?t ?r) (issue ?t) [?t "force-operation" ?op] [(not= ?op "resume")] (refinement-unknown ?t) [(str "D-DENY-REFINEMENT-UNKNOWN") ?r]]
 ;; Resume and rework continue only the caller's own retained claim; without it there is nothing to
 ;; continue, and force cannot make the caller the owner.
 [(force-denial ?t ?r) [?t "force-operation" "resume"] (not (force-own-continuation ?t)) [(str "FORCE-NOT-RETAINED") ?r]]
