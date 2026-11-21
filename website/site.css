@@ -374,6 +374,12 @@ footer {
 .quickstart > div {
   min-width: 0;
 }
+/* Long unbreakable tokens (the scoped npm package name) must wrap instead of widening the
+   page at phone width (#600 browser QA: Getting started measured 392 px at 390 px). */
+.chapter p,
+.chapter li {
+  overflow-wrap: anywhere;
+}
 
 summary.terminal-bar {
   cursor: pointer;
