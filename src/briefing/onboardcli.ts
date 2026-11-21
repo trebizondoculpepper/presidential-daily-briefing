@@ -193,8 +193,23 @@ export async function runOnboard(
 /** One file's outcome in the onboarding receipt, for a real or a previewed run. */
 export interface FileReport {
   file: string;
-  status: "written" | "would-write" | "kept" | "not-written";
+  /**
+   * `committed-with-error` is a real write whose cleanup failed: the file is in place, so it is
+   * never reported as `not-written` (reviewed #1195 finding).
+   */
+  status: "written" | "would-write" | "kept" | "committed-with-error" | "not-written";
   reason?: string;
+}
+
+/** Map a write outcome to the per-file receipt status; partial writes stay partial. */
+export function reportStatusFor(status: string): FileReport["status"] {
+  return status === "written"
+    ? "written"
+    : status === "kept"
+      ? "kept"
+      : status === "committed-with-error"
+        ? "committed-with-error"
+        : "not-written";
 }
 
 const reportOf = (outcome: {
@@ -203,8 +218,7 @@ const reportOf = (outcome: {
   reason?: string;
 }): FileReport => ({
   file: outcome.file ?? RULES_FILE_NAME,
-  status:
-    outcome.status === "written" ? "written" : outcome.status === "kept" ? "kept" : "not-written",
+  status: reportStatusFor(outcome.status),
   ...("reason" in outcome && outcome.reason ? { reason: outcome.reason } : {}),
 });
 

@@ -78,3 +78,14 @@ describe("generated rules file (#1027)", () => {
     }
   });
 });
+
+describe("committed-with-error is a real write (#1195 review)", () => {
+  it("keeps the committed state when only cleanup fails", async () => {
+    // The write outcome is rendered by the onboarding receipt; a committed write must never be
+    // reported as "not-written" because the caller has to know the file changed.
+    const { reportStatusFor } = await import("../briefing/onboardcli.js");
+    expect(reportStatusFor("committed-with-error")).toBe("committed-with-error");
+    expect(reportStatusFor("written")).toBe("written");
+    expect(reportStatusFor("not-written")).toBe("not-written");
+  });
+});
