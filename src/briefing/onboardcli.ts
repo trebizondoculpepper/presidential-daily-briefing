@@ -11,9 +11,18 @@ import { parseArgs } from "node:util";
 import { resolveRepositoryTarget } from "../config/config.js";
 import type { GitRunner } from "../config/config.js";
 import type { ConfigRuntime } from "../config/configcli.js";
-import { installCoordinationSection } from "../config/agentsguide.js";
-import { installRulesFile, RULES_FILE_NAME } from "../config/rulesfile.js";
-import { readFile } from "node:fs/promises";
+import { installCoordinationSection, withCoordinationSection } from "../config/agentsguide.js";
+import {
+  installRulesFile,
+  RULES_FILE_NAME,
+  rulesFileCaseCollision,
+  sealRulesMarkdown,
+  withRulesFile,
+} from "../config/rulesfile.js";
+import { rulesDocument, rulesMarkdownFile } from "../rules/datalog/rules-command.js";
+import { declaredRulesContext } from "../rules/declared-context.js";
+import { projectRulesContext } from "../rules/project-context.js";
+import { readFile, readdir } from "node:fs/promises";
 import { updateJsonFile, type SafeFs } from "../config/safejson.js";
 import { createGitService } from "../git/service.js";
 import type { GitService } from "../git/service.js";
@@ -204,28 +213,18 @@ async function generatedRulesMarkdown(
   repository: string,
   runtime: OnboardRuntime,
 ): Promise<string> {
-  const rules = await import("../rules/datalog/rules-command.js");
-  const { declaredRulesContext } = await import("../rules/declared-context.js");
-  const { projectRulesContext } = await import("../rules/project-context.js");
   const { project, limits } = await projectRulesContext({
     repository,
     runtime: runtime as Parameters<typeof projectRulesContext>[0] extends { runtime: infer R }
       ? R
       : never,
   });
-  const document = rules.rulesDocument(
-    { ...declaredRulesContext(), project },
-    {},
-    undefined,
-    limits,
-  );
-  const { sealRulesMarkdown } = await import("../config/rulesfile.js");
-  return sealRulesMarkdown(rules.rulesMarkdownFile(document));
+  const document = rulesDocument({ ...declaredRulesContext(), project }, {}, undefined, limits);
+  return sealRulesMarkdown(rulesMarkdownFile(document));
 }
 
 /** What `installRulesFile` would do, without writing (#1027 `--dry-run`). */
 async function previewRulesFile(root: string, markdown: string): Promise<FileReport> {
-  const { withRulesFile, rulesFileCaseCollision } = await import("../config/rulesfile.js");
   const collision = await rulesFileCaseCollision(root);
   if (collision) return { file: RULES_FILE_NAME, status: "not-written", reason: collision };
   const current = await readTextOrNull(join(root, RULES_FILE_NAME));
@@ -240,12 +239,9 @@ async function previewRulesFile(root: string, markdown: string): Promise<FileRep
 
 /** What the managed AGENTS.md install would do, without writing (#1027 `--dry-run`). */
 async function previewCoordinationSection(root: string, section: string): Promise<FileReport> {
-  const { withCoordinationSection } = await import("../config/agentsguide.js");
-  const names = (await import("node:fs/promises"))
-    .readdir(root)
+  const candidates = await readdir(root)
     .then((entries) => entries.filter((n) => n.toLowerCase() === "agents.md"))
     .catch(() => [] as string[]);
-  const candidates = await names;
   if (candidates.length > 1)
     return {
       file: "AGENTS.md",

@@ -30,6 +30,8 @@
     "dist/requiredchecks-*.mjs.map",
     "dist/english-render-*.mjs",
     "dist/english-render-*.mjs.map",
+    "dist/rules-command-*.mjs",
+    "dist/rules-command-*.mjs.map",
     "dist/web/rules.js",
     "dist/web/rules.css",
     "dist/web/discussion.css",
