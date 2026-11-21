@@ -107,25 +107,39 @@ expose, so an adapter must not claim it.
 
 ## Recommended adapter (smallest implementation)
 
-A thin OpenCode plugin, modelled on the mailbox one, with PDB policy kept out of it:
+A thin OpenCode plugin, modelled on the mailbox one, with PDB policy kept out of it. It follows
+[shared-rebrief-core.md](../design/shared-rebrief-core.md): only a verified natural end-of-turn
+event is eligible, and explicit stop, cancellation, failure or an unknown reason stops before
+contacting PDB.
 
-1. Subscribe to `session.idle`; ignore every other event.
-2. On idle, run one bounded PDB read (`pdb --json` or the MCP briefing) with a hard timeout and a
-   re-entry guard; never a background watcher and never a second concurrent waiter.
-3. If the read reports actionable work, call `session.prompt` with a short, sanitized summary
-   (counts and ticket numbers, no bodies, no credentials, no paths).
-4. If the read fails or times out, do nothing and re-arm on the next idle event. A failed read must
-   never produce a prompt that claims work exists.
-5. Never call `session.interrupt`, never approve a permission, never install a hook, and never
+1. Subscribe to `session.idle`, but **fail closed on provenance**. A bare idle event does not prove
+   a natural end of turn: the platform fires it after an interrupt too. The adapter may proceed
+   only when the harness supplies an explicit natural-stop signal (the same evidence the rebrief
+   adapters require); with unknown provenance it stops and waits for the next eligible turn. This
+   is why "do not call `session.interrupt`" is not enough by itself.
+2. On an eligible idle, run one bounded PDB read (`pdb --json` or the MCP briefing) with a hard
+   timeout and a re-entry guard; never a background watcher and never a second concurrent waiter.
+3. Deduplicate **delivered work**, not just concurrent callbacks. Store a fingerprint of the
+   actionable set (for example a hash of the ordered ticket numbers and their states) in plugin
+   storage and skip the prompt when the fingerprint is unchanged since the last delivered prompt.
+   The reference plugin's `holding` flag only excludes overlapping callbacks and keeps no such
+   memory.
+4. If the fingerprint changed and the read reports actionable work, call `session.prompt` with a
+   short, sanitized summary (counts and ticket numbers, no bodies, no credentials, no paths) and
+   record the new fingerprint.
+5. If the read fails or times out, do nothing, keep the old fingerprint and re-arm on the next
+   eligible turn. A failed read must never produce a prompt that claims work exists.
+6. Never call `session.interrupt`, never approve a permission, never install a hook, and never
    change configuration.
 
 This is a plugin, not a service: it lives only while the client runs, so "wake" means "the next
-time this session goes idle", not "at 03:00 while the laptop sleeps".
+time this session ends a turn naturally", not "at 03:00 while the laptop sleeps".
 
 ## Limitations to state in any acceptance
 
 - No wake while OpenCode is not running; no OS-level scheduler is involved.
-- The idle event does not distinguish natural completion from an interrupted turn.
+- The idle event does not distinguish natural completion from an interrupted turn, so an adapter
+  must fail closed unless the harness provides explicit natural-stop evidence.
 - The injected turn is user-shaped, so the model may act on it; the producer must keep it factual
   and bounded.
 - TUI notifications are unavailable in headless/remote sessions.
@@ -137,8 +151,11 @@ time this session goes idle", not "at 03:00 while the laptop sleeps".
 2. Let the session go idle with no actionable work: expect no prompt.
 3. Create or claim a ticket that makes the briefing actionable, then let the session go idle:
    expect one prompt naming the ticket, and no second prompt for the same state.
-4. Interrupt a running turn: expect no wake-up prompt from the interrupt itself.
-5. Stop OpenCode, change the repository, restart: expect the next idle event to reflect the new
+4. Interrupt a running turn with actionable work present: expect **no** wake-up prompt, because
+   the stop provenance is unknown.
+5. Let the same unchanged work cause two natural ends of turn: expect one prompt, not two
+   (delivered-work deduplication). Change the work, end a turn: expect exactly one new prompt.
+6. Stop OpenCode, change the repository, restart: expect the next eligible turn to reflect the new
    state, with no queued duplicate.
 
 ## Recommendation
