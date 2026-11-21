@@ -256,7 +256,13 @@ export function mdClauseLines(clauses: Clause[], indent = ""): string[] {
         lines.push(...mdClauseLines(alt, `${indent}  ${" ".repeat(marker.length)}`));
       });
     } else {
-      lines.push(`${indent}- ${mdEscape(clauseText(c))}`);
+      const text =
+        c.type === "call"
+          ? mdCode(clauseText(c))
+          : c.type === "dynamic-fact"
+            ? mdCode(clauseText(c))
+            : mdEscape(clauseText(c));
+      lines.push(`${indent}- ${text}`);
     }
   }
   return lines;
@@ -267,10 +273,17 @@ export function mdDecisionLines(d: FormalDecision): string[] {
     "",
     `#### ${mdCode(d.id)}`,
     "",
-    `- Action: ${mdCode(d.kind)} · Preference: ${mdCode(String(d.preference))} · Codes: ${d.codes.map(mdCode).join(", ")}`,
-    "- When all of:",
-    ...mdClauseLines(d.clauses, "  "),
+    `- Proposed action: ${mdCode(d.kind)}. Preference: ${mdCode(String(d.preference))}. Codes: ${d.codes.map(mdCode).join(", ")}.`,
   ];
+  if (d.purpose) lines.push(`- In plain English: ${mdEscape(d.purpose)}`);
+  else
+    lines.push(
+      "- In plain English: no purpose was supplied; the conditions below are the formal definition.",
+    );
+  lines.push(
+    "- This rule matches when every condition below is true:",
+    ...mdClauseLines(d.clauses, "  "),
+  );
   if (d.overriddenBy.length) {
     lines.push(
       `- Declared override: ${d.overriddenBy.map(mdCode).join(", ")} win(s) over ${mdCode(d.id)} when both match.`,
@@ -298,7 +311,8 @@ export function mdDenialLines(d: CompiledDenial): string[] {
     `### ${mdCode(d.id)}`,
     "",
     `- Predicate: ${mdCode(d.predicate)}`,
-    "- When all of:",
+    ...(d.purpose ? [`- Purpose: ${mdEscape(d.purpose)}`] : []),
+    "- This denial applies when every condition below is true:",
     ...mdClauseLines(d.clauses, "  "),
   ];
 }

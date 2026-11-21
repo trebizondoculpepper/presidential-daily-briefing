@@ -61,7 +61,9 @@ describe("pdb rules document (#416)", () => {
     );
     for (const d of doc.decisions) {
       expect(text).toContain(`#### \`${d.id}\``);
-      expect(text).toContain(`- Action: \`${d.kind}\` · Preference: \`${d.preference}\` ·`);
+      expect(text).toContain(
+        `- Proposed action: \`${d.kind}\`. Preference: \`${d.preference}\`. Codes:`,
+      );
       for (const line of mdClauseLines(d.clauses, "  ")) expect(text).toContain(line);
     }
     for (const d of doc.eligibility.denials) {

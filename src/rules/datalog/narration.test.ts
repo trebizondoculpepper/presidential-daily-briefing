@@ -5,7 +5,12 @@ import { buildPolicy, policyDir, readSources } from "./build.js";
 import { narrationHashOf, rulesHashOf } from "./hash.js";
 import { compileEnglish } from "./english.js";
 import { purposeLimit, purposeText } from "./narration.js";
-import { rulesDocument, rulesText, validateRulesArtifact } from "./rules-command.js";
+import {
+  rulesDocument,
+  rulesFormalText,
+  rulesText,
+  validateRulesArtifact,
+} from "./rules-command.js";
 import { declaredRulesContext } from "../declared-context.js";
 import { compileProjectPolicy } from "./project/compile.js";
 
@@ -28,7 +33,7 @@ describe("rule-attached literal purposes (#578)", () => {
     expect(doc.decisions.some((d) => d.id === "D-HUMAN-ASK-YOU")).toBe(true);
   });
 
-  it("keeps formal CLI conditions and shape versions unchanged when documentation is removed", () => {
+  it("shows purposes in Markdown while preserving the formal listing and schema", () => {
     const bundle = buildPolicy();
     const annotated = compileEnglish(bundle);
     const { denialPurposes: _, ...plain } = bundle;
@@ -62,10 +67,16 @@ describe("rule-attached literal purposes (#578)", () => {
     const before = rulesDocument(declaredRulesContext(), {}, older);
     const after = rulesDocument(declaredRulesContext(), {}, annotated);
     expect(before.schemaVersion).toBe(after.schemaVersion);
-    expect(rulesText(before)).toBe(rulesText(after));
     expect(before.narration).toMatchObject({ total: 76, supplied: 0 });
     expect(before.narration.missing).toHaveLength(76);
-    expect(rulesText(after)).not.toContain(bundle.definitions[0].purpose);
+    // #1121 changes this deliberately: the rendered listing now carries the authored purpose
+    // beside the formal conditions instead of omitting it.
+    expect(rulesText(before)).not.toBe(rulesText(after));
+    expect(rulesText(before)).toContain("no purpose was supplied");
+    expect(rulesText(after)).not.toContain("no purpose was supplied");
+    expect(rulesText(after)).toContain(`In plain English: ${bundle.definitions[0].purpose}`);
+    // The formal listing stays a formal listing: it does not become the narration surface.
+    expect(rulesFormalText(before)).toBe(rulesFormalText(after));
   });
 
   it.each([
