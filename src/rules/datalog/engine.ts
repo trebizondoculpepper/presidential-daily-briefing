@@ -105,6 +105,11 @@ export interface PolicyResult {
   decisions: PolicyDecision[];
   denials: { subject: number; ruleId: string }[];
   /**
+   * #1021: every force denial per subject (uncapped, sorted), so a host reports each overridden or
+   * refusing rule even when the decision's explanation text is bounded.
+   */
+  forceDenials: { subject: number; ruleId: string }[];
+  /**
    * Applicable native action obligations (#1113), in policy/obligations.edn source order, with
    * the fact that matched: the caller-supplied claim-role (or "none" for an unrestricted duty).
    */
@@ -228,6 +233,11 @@ export function evaluatePolicy(input: PolicyFacts, options: PolicyOptions = {}):
     subject: Number(id),
     ruleId: String(rule),
   }));
+  const forceDenials = query(db, queries["force-denials"])
+    .map(([id, rule]) => ({ subject: Number(id), ruleId: String(rule) }))
+    .sort(
+      (a, b) => a.subject - b.subject || (a.ruleId < b.ruleId ? -1 : a.ruleId > b.ruleId ? 1 : 0),
+    );
   // Each root query derives a relation; the host only transacts the returned tuples.
   for (const [i, r] of definitions.entries()) {
     const rows = query(db, r.query);
@@ -451,6 +461,7 @@ export function evaluatePolicy(input: PolicyFacts, options: PolicyOptions = {}):
     rulesHash: options.policy ? rulesHashOf(policy) : rulesHash,
     decisions,
     denials,
+    forceDenials,
     obligations,
     datoms: facts.length,
   };

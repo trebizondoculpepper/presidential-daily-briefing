@@ -119,7 +119,11 @@
 ;; and no other agent owns it. A caller still holding the claim reworks it too.
 [(force-own-continuation ?t) [?t "force-operation" "rework"] [1 "agent" ?a] [?t "responsible" ?a] (not (force-other-owner ?t))]
 [(force-own-continuation ?t) [?t "force-operation" "rework"] [1 "agent" ?a] [?t "owner" ?a] (not (force-other-owner ?t))]
-[(force-denial ?t ?r) (claim-deny ?t ?r) [(not= ?r "D-DENY-CLAIM")]]
+[(force-denial ?t ?r) (claim-deny ?t ?r) [(not= ?r "D-DENY-CLAIM")] [(not= ?r "CLAIM-NOT-READY")] [(not= ?r "D-DENY-OPEN-PR")]]
+;; Rework is explicitly admitted without readiness and with its own open PR (claims.ts rework
+;; checks, #1197 review): those are not denials of a rework, so nothing is reported as overridden.
+[(force-denial ?t ?r) (claim-deny ?t ?r) [(= ?r "CLAIM-NOT-READY")] (not [?t "force-operation" "rework"])]
+[(force-denial ?t ?r) (claim-deny ?t ?r) [(= ?r "D-DENY-OPEN-PR")] (not [?t "force-operation" "rework"])]
 [(force-denial ?t ?r) (claim-deny ?t ?r) [(= ?r "D-DENY-CLAIM")] (not (force-own-continuation ?t))]
 ;; A continuation of the caller's claim is still checked against an incomplete claim inventory
 ;; (#1197 review): the unclaimed-pickup inventory denials do not cover a claimed ticket, so the
