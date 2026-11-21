@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "sourceRevision": "16f1693fda5de967eaf48bdf2e3621c805186881",
-  "rulesHash": "0ff01fc7403c01e81c449ac40b575705fe49c7a3b9166a0943a9240040d7b4de",
+  "rulesHash": "edbbe47e9c0dad52a90b8aa3d4e3979537b39d4cb20bd666332bd04199c65d31",
   "scenarioHash": "a56533d7c7feaf9362c1c515e164bcd09a90ebdf446d24301a82f8ff0254106f",
   "source": "src/rules/datalog/scenarios/policy-cases.edn",
   "modelExecution": "unavailable",

@@ -180,6 +180,10 @@
 ;; before its no-op or repair); only an explicit complete history passes (#1197 review).
 [(force-history-read ?t) [?t "kind" _] [?t "claim-history-complete" true]]
 [(force-denial ?t ?r) (force-owned-retry ?t) (not (force-history-read ?t)) [(str "FORCE-HISTORY-UNKNOWN") ?r]]
+;; ...and a trusted matching claim marker: readable history alone does not establish authority
+;; (planClaimFor MARKER_UNVERIFIED, #1197 review). Only an explicit trusted marker passes.
+[(force-marker-trusted ?t) [?t "kind" _] [?t "claim-marker-trust" "trusted"]]
+[(force-denial ?t ?r) (force-owned-retry ?t) (not (force-marker-trusted ?t)) [(str "FORCE-MARKER-UNVERIFIED") ?r]]
 ;; Resume and rework continue only the caller's own retained claim; without it there is nothing to
 ;; continue, and force cannot make the caller the owner.
 [(force-denial ?t ?r) [?t "force-operation" "resume"] (not (force-own-continuation ?t)) [(str "FORCE-NOT-RETAINED") ?r]]
@@ -200,6 +204,7 @@
 [(force-technical ?t) (force-denial ?t ?r) [(= ?r "FORCE-TICKET-CLOSED")]]
 [(force-technical ?t) (force-denial ?t ?r) [(= ?r "FORCE-QUESTION-UNKNOWN")]]
 [(force-technical ?t) (force-denial ?t ?r) [(= ?r "FORCE-HISTORY-UNKNOWN")]]
+[(force-technical ?t) (force-denial ?t ?r) [(= ?r "FORCE-MARKER-UNVERIFIED")]]
 [(force-denied ?t) (force-denial ?t ?r)]
 ;; Every precondition of an admissible request, in one place so each outcome is exclusive.
 [(force-ready ?t) [?t "force-request" true] (force-supported ?t) [?t "force-reason" "valid"] [?t "force-agent" "known"] [?t "force-revision" "current"]]
