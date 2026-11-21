@@ -1,8 +1,8 @@
 {
   "modelVersion": 3,
   "policyVersion": 1,
-  "rulesHash": "0e55d4acd2770a22e678afec2413f46a87f2d4a6e65e59b16af4386de5d54d8d",
-  "narrationHash": "796b27dafa484285adc4f3bd95dcf0e0e0a3c4bfbada8d648ef6857f80c77d72",
+  "rulesHash": "4b00a4051fe1461415ebc8a9d14d0f8ef6d0ba4fcd20e125ec7db64efdaeb493",
+  "narrationHash": "a7e10aba40a1b7b0a615022aa67494d60865edebe5d7651411227fbed005e8b1",
   "sources": [
     "policy/schema.edn",
     "policy/rules.edn",
@@ -9814,6 +9814,25 @@
                   ]
                 }
               ]
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "fact",
+                  "scope": "entity",
+                  "entity": {
+                    "var": "?t"
+                  },
+                  "attribute": "claim-activity",
+                  "value": {
+                    "lit": "not-owned"
+                  },
+                  "phrase": "activity of your retained claim (active, waiting, resume-required or unknown)",
+                  "many": false
+                }
+              ]
             }
           ],
           "source": {
@@ -9938,6 +9957,25 @@
                       "var": "?t"
                     }
                   ]
+                }
+              ]
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "fact",
+                  "scope": "entity",
+                  "entity": {
+                    "var": "?t"
+                  },
+                  "attribute": "claim-activity",
+                  "value": {
+                    "lit": "not-owned"
+                  },
+                  "phrase": "activity of your retained claim (active, waiting, resume-required or unknown)",
+                  "many": false
                 }
               ]
             }
@@ -28730,6 +28768,6 @@
     "overrides": 5,
     "constants": 14,
     "attributes": 140,
-    "clauses": 1650
+    "clauses": 1654
   }
 }

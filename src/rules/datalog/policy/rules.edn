@@ -115,12 +115,13 @@
 [(force-continuation ?t) [?t "force-operation" "resume"]]
 [(force-continuation ?t) [?t "force-operation" "rework"]]
 [(force-other-owner ?t) [?t "owner" ?o] [1 "agent" ?a] [(not= ?o ?a)]]
-[(force-own-continuation ?t) [?t "force-operation" "resume"] [1 "agent" ?a] [?t "owner" ?a] (not (force-other-owner ?t))]
+;; A claim the live read found released since the snapshot is not retained (#413, #1197 review).
+[(force-own-continuation ?t) [?t "force-operation" "resume"] [1 "agent" ?a] [?t "owner" ?a] (not (force-other-owner ?t)) (not [?t "claim-activity" "not-owned"])]
 ;; Rework reacquires submitted work through ticket responsibility (doc/design/delivery-lifecycle.md
 ;; "Rework authority", #1197 review): the caller is responsible, the claim may already be released,
 ;; and no other agent owns it. A caller still holding the claim reworks it too.
 [(force-own-continuation ?t) [?t "force-operation" "rework"] [1 "agent" ?a] [?t "responsible" ?a] (not (force-other-owner ?t))]
-[(force-own-continuation ?t) [?t "force-operation" "rework"] [1 "agent" ?a] [?t "owner" ?a] (not (force-other-owner ?t))]
+[(force-own-continuation ?t) [?t "force-operation" "rework"] [1 "agent" ?a] [?t "owner" ?a] (not (force-other-owner ?t)) (not [?t "claim-activity" "not-owned"])]
 [(force-denial ?t ?r) (claim-deny ?t ?r) [(not= ?r "D-DENY-CLAIM")] [(not= ?r "CLAIM-NOT-READY")] [(not= ?r "D-DENY-OPEN-PR")]]
 ;; Resume and rework are explicitly admitted without readiness and with their own open PR (claims.ts rework
 ;; checks, #1197 review): those are not denials of a rework, so nothing is reported as overridden.
