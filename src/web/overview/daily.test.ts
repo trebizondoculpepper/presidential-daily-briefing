@@ -7,6 +7,7 @@ import {
   dailyLoader,
   dailyWindow,
   parseDailyResponse,
+  prHref,
   type DailyState,
 } from "./daily.js";
 
@@ -148,5 +149,26 @@ describe("overview daily: unknown days make window totals lower bounds (#1186 re
     const bad = body();
     (bad.result.figures.attested.series as { days: unknown[] }).days = [];
     expect(parseDailyResponse(bad)).toBeNull();
+  });
+});
+
+describe("overview merged pull requests (#827)", () => {
+  it("keeps PR merges as their own series with PR links, separate from ticket counts", () => {
+    const b = body();
+    (b.result.figures as Record<string, unknown>).prMerges = fig([
+      known("2026-11-19", ["example/project#40", "example/project#41", "example/project#42"]),
+    ]);
+    const r = parseDailyResponse(b)!;
+    expect(r.prMerges!.days.map((d) => cell(d))).toEqual(["3"]);
+    // Three merges are three PRs, while the delivery series counts tickets on its own.
+    expect(r.series.deliveries.days.map((d) => cell(d))).toEqual(["unknown", "0", "1"]);
+    expect(prHref("example/project#40")).toBe("https://github.com/example/project/pull/40");
+    expect(prHref("nope")).toBeNull();
+  });
+
+  it("reports missing merge counts as absent, not zero", () => {
+    const b = body();
+    delete (b.result.figures as Record<string, unknown>).prMerges;
+    expect(parseDailyResponse(b)!.prMerges).toBeNull();
   });
 });

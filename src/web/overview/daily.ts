@@ -40,6 +40,8 @@ export interface DailyResponse {
   coverageNote: string | null;
   days: number;
   series: Record<SeriesName, Series>;
+  /** PR merges (#827): PRs, a different unit from tickets; null when not supplied. */
+  prMerges: Series | null;
   deliveredDateUnknown: { count: number; members: string[] };
 }
 
@@ -126,6 +128,7 @@ export function parseDailyResponse(body: unknown): DailyResponse | null {
       isObject(r.coverage) && typeof r.coverage.note === "string" ? r.coverage.note : null,
     days: typeof r.days === "number" ? r.days : 7,
     series: out,
+    prMerges: series(r.figures.prMerges),
     deliveredDateUnknown: {
       count: typeof u.count === "number" ? u.count : 0,
       members: isStrings(u.members) ? u.members : [],
@@ -245,3 +248,9 @@ export function dailyLoader(api: string, fetcher: typeof fetch, report: (s: Dail
 /** The page's daily window from the URL (`days=7d|30d`), defaulting to 7. */
 export const dailyWindow = (search: string): DailyDays =>
   new URLSearchParams(search).get("days") === "30d" ? 30 : 7;
+
+/** The pull request link for a merge member such as `owner/name#12`; null when not one. */
+export function prHref(member: string): string | null {
+  const m = /^([\w.-]+\/[\w.-]+)#([1-9]\d*)$/.exec(member);
+  return m ? `https://github.com/${m[1]}/pull/${m[2]}` : null;
+}
