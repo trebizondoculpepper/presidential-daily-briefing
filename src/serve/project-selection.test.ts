@@ -85,6 +85,66 @@ describe("shared project selection", () => {
       "http://localhost/?repo=a%2Fb",
     ]);
   });
+  it("keeps the page's own scope when a page opts out of project selection (#818)", async () => {
+    // A page whose main element declares data-project-selection="none" (the Configuration page)
+    // is not auto-redirected to a sole or remembered project: it shows Global by default.
+    for (const saved of [null, "c/d"]) {
+      const redirects: string[] = [];
+      await runInNewContext(projectSelectionScript(), {
+        URL,
+        window: {
+          location: {
+            href: "http://localhost/configuration",
+            replace: (v: string) => redirects.push(v),
+          },
+          localStorage: { getItem: () => saved, setItem: () => undefined },
+        },
+        document: {
+          querySelector: (selector: string) =>
+            selector === "[data-project-selection='none']" ? ({} as Element) : null,
+        },
+        fetch: async () => ({
+          ok: true,
+          json: async () => ({
+            repositories:
+              saved === null
+                ? [{ repository: "a/b" }]
+                : [{ repository: "a/b" }, { repository: "c/d" }],
+          }),
+        }),
+      });
+      expect(redirects).toEqual([]);
+    }
+  });
+  it("still remembers an explicit selection on an opt-out page (#818)", async () => {
+    // The opt-out only stops automatic restoration; an explicit ?repo=B is still remembered so
+    // an unscoped project page later restores it.
+    const writes: string[] = [];
+    await runInNewContext(projectSelectionScript(), {
+      URL,
+      window: {
+        location: {
+          href: "http://localhost/configuration?repo=c/d",
+          replace: (v: string) => void v,
+        },
+        localStorage: {
+          getItem: () => "a/b",
+          setItem: (_k: string, v: string) => writes.push(v),
+        },
+      },
+      document: {
+        querySelector: (selector: string) =>
+          selector === "[data-project-selection='none']" ? ({} as Element) : null,
+      },
+      fetch: async () => ({
+        ok: true,
+        json: async () => ({
+          repositories: [{ repository: "a/b" }, { repository: "c/d" }],
+        }),
+      }),
+    });
+    expect(writes).toEqual(["c/d"]);
+  });
 });
 
 describe("Working for header (#669)", () => {

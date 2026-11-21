@@ -84,6 +84,15 @@ export async function restoreProjectSelection(): Promise<void> {
       }
       return;
     }
+    // A page can declare it does not auto-select a project (#818): it keeps its own default
+    // scope (for example the Configuration page shows Global), and automatic restoration is
+    // skipped here. Explicit selections above are still remembered, and the shared header is
+    // already filled.
+    if (
+      typeof document !== "undefined" &&
+      document.querySelector("[data-project-selection='none']")
+    )
+      return;
     const selected = canonical(remembered) ?? (projects.length === 1 ? projects[0] : undefined);
     if (!selected) return;
     url.searchParams.set("repo", selected);

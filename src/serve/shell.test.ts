@@ -105,6 +105,21 @@ describe("shared served-page shell (#605)", () => {
     // its account-wide labelling.
     expect(renderToolbar(context("quotas"))).toContain("Change project");
     expect(renderToolbar(context("quotas"))).toContain("Account-wide");
+    // #818: a global-or-project page's project menu offers Global, clearing a selected repository,
+    // so the Global settings stay reachable through the UI from any project-scoped page.
+    expect(renderToolbar(context("configuration", "repo=owner/project"))).toContain(
+      'href="/configuration">Global</a>',
+    );
+    // While a project is selected, the project entry is current; Global becomes current only when
+    // no repository is selected.
+    expect(renderToolbar(context("configuration", "repo=owner/project"))).not.toContain(
+      'href="/configuration" aria-current="true"',
+    );
+    expect(renderToolbar(context("configuration"))).toContain(
+      'href="/configuration" aria-current="true">Global</a>',
+    );
+    // Pages that cannot show Global (project-only scope) do not offer it.
+    expect(renderToolbar(context("work", "repo=owner/project"))).not.toContain(">Global</a>");
     // #669: every page's toolbar carries the accessible, text-only "Working for" slot.
     for (const page of ["work", "quotas", "rules"])
       expect(renderToolbar(context(page))).toContain(

@@ -11,6 +11,9 @@ export interface ServedPage {
   section?: string;
   /** An opt-in preview (#753): served, but never listed in the page navigation. */
   preview?: boolean;
+  /** The page preserves its default scope (e.g. Configuration shows Global) against the shared
+   * project-selection restore, so its project menu also offers the Global scope (#818). */
+  offersGlobal?: boolean;
 }
 export const servedPages: readonly ServedPage[] = [
   {
@@ -102,6 +105,18 @@ export const servedPages: readonly ServedPage[] = [
     parameters: ["repo", "state"],
     carries: [],
     shipped: true,
+  },
+  // Configuration (#818): API-first; reads /api/v1/configuration. Global by default; a served
+  // project's repository settings follow the shared selection. Read-only in this slice.
+  {
+    id: "configuration",
+    path: "/configuration",
+    label: "Configuration",
+    scope: "global-or-project",
+    parameters: ["repo"],
+    carries: [],
+    shipped: true,
+    offersGlobal: true,
   },
   {
     id: "rules",
@@ -279,6 +294,14 @@ export function renderToolbar(context: ShellContext): string {
     )
     .join(" ");
   const destination = page.id === "ticket" ? pageById("work") : page;
+  // A page that preserves its default global scope (e.g. Configuration) also offers the Global
+  // scope in its project menu, so a selected project can always be cleared through the UI, never
+  // only by editing the URL. Other global-or-project pages (Diagnostics) do not offer it, because
+  // they do not opt out of the shared project-selection restore.
+  const globalSupported = page.offersGlobal === true;
+  const globalLink = globalSupported
+    ? `<li><a href="${htmlEscape(pageHref(destination, { ...selection, repository: null }, page))}"${carryAttribute(destination)}${!selection.repository ? ' aria-current="true"' : ""}>Global</a></li>`
+    : "";
   const projects = context.served
     .map((s) => {
       const selected = { ...selection, repository: s.repository };
@@ -300,7 +323,7 @@ export function renderToolbar(context: ShellContext): string {
   // navigation on the row below, then page content. Controls sit above the content they affect.
   const projectMenu = `<details class="project-menu"><summary>${htmlEscape(
     selection.repository ? selection.repository : "Change project",
-  )}</summary><ul>${projects || "<li>No projects are served. Start pdb serve with --repo or --project.</li>"}</ul></details>`;
+  )}</summary><ul>${globalLink}${projects || "<li>No projects are served. Start pdb serve with --repo or --project.</li>"}</ul></details>`;
   return `<header class="shell-toolbar"><a class="skip-link" href="#content">Skip to content</a><div class="shell-context"><a class="product" href="${htmlEscape(pageHref(pageById("work"), selection, page))}"${carryAttribute(pageById("work"))}>Presidential Daily Briefing</a>${projectMenu}${indicator ? `<span>${htmlEscape(indicator)}</span>` : ""}<p class="working-for" data-working-for role="status" aria-live="polite">Working for: loading…</p></div><div class="shell-menus"><nav class="wide-pages" aria-label="Pages">${links}</nav><details class="narrow-pages"><summary>Pages: ${htmlEscape(pageById(active).label)}</summary><nav aria-label="Pages">${links}</nav></details></div></header>`;
 }
 export function shellStart(

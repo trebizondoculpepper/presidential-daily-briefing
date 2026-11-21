@@ -41,6 +41,10 @@ const pages = [
     ["/web/discussion.js", "discussion.js", "text/javascript; charset=utf-8"],
     ["/web/discussion.css", "discussion.css", "text/css; charset=utf-8"],
   ],
+  [
+    ["/web/configuration.js", "configuration.js", "text/javascript; charset=utf-8"],
+    ["/web/configuration.css", "configuration.css", "text/css; charset=utf-8"],
+  ],
 ] as const;
 
 /** The directories that may hold the built assets: the packaged dist, then a checkout's dist. */

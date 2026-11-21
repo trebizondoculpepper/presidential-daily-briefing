@@ -68,6 +68,8 @@ import type {
 } from "./serve/types.js";
 import { defaultRulesPageRuntime, readRules, rulesBootstrapHtml } from "./serve/rules-page.js";
 import { readWebAssets } from "./serve/webassets.js";
+import { configurationAssets, configurationBootstrapHtml } from "./serve/configuration-page.js";
+import { defaultConfigurationRuntime, readConfiguration } from "./serve/configuration.js";
 import { pipelineAssets, pipelineBootstrapHtml } from "./serve/pipeline-page.js";
 import { workPreviewAssets, workPreviewBootstrapHtml } from "./serve/work-preview-page.js";
 import { timingAssets, timingBootstrapHtml } from "./serve/timing-page.js";
@@ -563,6 +565,27 @@ export async function startServe(
         });
         return;
       }
+      if (path === "/api/v1/configuration") {
+        // #818: the shared configuration read as versioned data; local only, no GitHub request.
+        if (request.method !== "GET" && request.method !== "HEAD")
+          throw new HttpFailure(405, "METHOD_NOT_ALLOWED", "Use GET.", [], {
+            allow: "GET, HEAD",
+          });
+        const read = await readConfiguration(
+          context.url.searchParams,
+          served,
+          runtime.configuration ?? defaultConfigurationRuntime(runtime.globalConfig),
+          selectRepository,
+        );
+        if (!read.ok) throw new HttpFailure(read.status, read.code, read.message);
+        sendJson(response, 200, {
+          schemaVersion: 1,
+          kind: "configuration",
+          selected: read.selected,
+          view: read.view,
+        });
+        return;
+      }
       if (path === "/pipeline") {
         // Pipeline Health (#684): a static bootstrap after the shell's project selection check;
         // the component reads /api/v1/metrics?view=inventory. No GitHub read loading the page.
@@ -683,6 +706,34 @@ export async function startServe(
           served,
           context.url.searchParams,
           dashboard.has("/web/rules.js") && dashboard.has("/web/rules.css"),
+        );
+        response.writeHead(200, {
+          "content-type": "text/html; charset=utf-8",
+          "cache-control": "no-store",
+          "x-content-type-options": "nosniff",
+          "referrer-policy": "no-referrer",
+          "content-security-policy": dashboardSecurityPolicy,
+        });
+        response.end(
+          request.method === "HEAD"
+            ? undefined
+            : withProcessIdentity(html, processIdentity, selectedPage ?? undefined),
+        );
+        return;
+      }
+      if (path === "/configuration") {
+        // The Configuration page (#818): a static bootstrap; the component reads
+        // /api/v1/configuration. The page keeps Global by default (its main element opts out of
+        // the shared project-selection auto-redirect below).
+        if (request.method !== "GET" && request.method !== "HEAD")
+          throw new HttpFailure(405, "METHOD_NOT_ALLOWED", "Use GET.", [], {
+            allow: "GET, HEAD",
+          });
+        const html = configurationBootstrapHtml(
+          served,
+          context.url.searchParams,
+          dashboard.has(configurationAssets.script) &&
+            dashboard.has(configurationAssets.stylesheet),
         );
         response.writeHead(200, {
           "content-type": "text/html; charset=utf-8",

@@ -1,0 +1,43 @@
+/**
+ * Configuration page (#818): narrow layouts and keyboard focus; the shared shell styles
+ * everything else.
+ */
+.configuration-context {
+  margin: 0.75rem 0;
+  font-size: 0.9rem;
+  overflow-wrap: anywhere;
+}
+table.configuration {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0.75rem 0;
+  font-size: 0.9rem;
+}
+table.configuration th,
+table.configuration td {
+  border: 1px solid GrayText;
+  padding: 0.4rem 0.6rem;
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+table.configuration thead th {
+  font-weight: 600;
+}
+table.configuration th[scope="row"] code {
+  font-weight: 600;
+}
+.configuration-warnings {
+  margin: 0.5rem 0;
+  padding-left: 1.25rem;
+  font-size: 0.85rem;
+}
+@media (max-width: 40rem) {
+  table.configuration {
+    font-size: 0.8rem;
+  }
+  table.configuration th,
+  table.configuration td {
+    padding: 0.3rem 0.4rem;
+  }
+}
