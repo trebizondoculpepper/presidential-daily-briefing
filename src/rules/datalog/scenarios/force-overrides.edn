@@ -264,4 +264,11 @@
    :facts [{:e 1 "forward-complete" true "owned-claims-complete" true}
            {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "reverse-complete" true "native-complete" true "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "status:in-progress" "labels-complete" true "open-blockers" 0 "owner" "me" "claim-activity" "resume-required" "wait-reason" "cleared" "refinement" 200 "force-request" true "force-operation" "resume" "force-reason" "valid" "force-agent" "known" "force-revision" "current"}
            {:e 200 "refinement-state" "unknown"}]
-   :expect {:actions [{:subject 100 :rule "D-OWN-RESUME" :kind "resume-claim" :band 3} {:subject 100 :rule "D-FORCE-NO-DENIAL" :kind "force-allow" :band 1 :why "No rule denied resume, so nothing is overridden; proceed as a normal resume."}] :denials #{}}}]}
+   :expect {:actions [{:subject 100 :rule "D-OWN-RESUME" :kind "resume-claim" :band 3} {:subject 100 :rule "D-FORCE-NO-DENIAL" :kind "force-allow" :band 1 :why "No rule denied resume, so nothing is overridden; proceed as a normal resume."}] :denials #{}}}
+
+  {:id "f37-idempotent-claim-keeps-label-evidence"
+   :doc "An already-held claim retry with incomplete labels is refused: another owner cannot be ruled out"
+   :viewer {:role "implementer" :agent "me"}
+   :facts [{:e 1 "forward-complete" true "owned-claims-complete" true}
+           {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "reverse-complete" true "native-complete" true "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "status:ready" "labels-complete" false "open-blockers" 0 "owner" "me" "force-request" true "force-operation" "claim" "force-reason" "valid" "force-agent" "known" "force-revision" "current"}]
+   :expect {:actions [{:subject 100 :rule "D-OWN" :kind "continue-implementation" :band 6} {:subject 100 :rule "D-FORCE-REFUSE-TECHNICAL" :kind "force-refuse" :band 1 :why "Not overridable: D-DENY-LABELS-UNKNOWN. Force cannot supply missing evidence or displace another owner's claim; nothing was changed."}] :denials #{[100 "D-DENY-CLAIM"] [100 "D-DENY-LABELS-UNKNOWN"] [100 "D-DENY-PLATFORM"]}}}]}

@@ -133,6 +133,8 @@
 ;; (retained.ts planClaimResume) checks only native blockers and their evidence among them.
 ;; An already-held exclusive claim returns planClaim's no-op/repair before any acquisition check.
 [(force-denial ?t ?r) [?t "force-operation" "claim"] (not (force-own-continuation ?t)) (claim-deny ?t ?r) [(not= ?r "D-DENY-CLAIM")]]
+;; ...except incomplete labels, which planClaim refuses first: they cannot rule out another owner.
+[(force-denial ?t ?r) [?t "force-operation" "claim"] (force-own-continuation ?t) (claim-deny ?t ?r) [(= ?r "D-DENY-LABELS-UNKNOWN")]]
 [(force-denial ?t ?r) [?t "force-operation" "rework"] (claim-deny ?t ?r) [(not= ?r "D-DENY-CLAIM")] [(not= ?r "CLAIM-NOT-READY")] [(not= ?r "D-DENY-OPEN-PR")]]
 [(force-denial ?t ?r) [?t "force-operation" "resume"] (claim-deny ?t ?r) [(= ?r "D-DENY-BLOCKER")]]
 [(force-denial ?t ?r) [?t "force-operation" "resume"] (claim-deny ?t ?r) [(= ?r "D-DENY-NATIVE-UNKNOWN")]]
