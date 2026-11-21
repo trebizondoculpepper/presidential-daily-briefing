@@ -72,6 +72,12 @@ describe("shared rebrief decision", () => {
     for (const secret of [input.session, input.eventId, read().text, "pdb claim", "https://"])
       expect(stored).not.toContain(secret);
   });
+  it("accepts native refinement actions in the report (#1098)", async () => {
+    const r = read();
+    obj(r).rankedActions.items[0]!.kind = "refine";
+    const t = setup(r);
+    expect(await t.session.evaluate(input, t.runtime)).toMatchObject({ decision: "continue" });
+  });
   it("ignores fetch times, telemetry and text formatting but includes relevant head/policy/reason changes", async () => {
     const baseline = await setup().session.evaluate(input, setup().runtime);
     for (const change of ["timestamp", "format", "head", "policy", "reason"]) {
