@@ -734,7 +734,7 @@
    :when [[1 "role" ?role] [(not= ?role "human")] (issue ?t) (force-ready ?t) (force-technical ?t)]
    :why "Not overridable: {rules}. Force cannot supply missing evidence or displace another owner's claim; nothing was changed."
    :codes ["force" "refuse" "technical"]
-   :witnesses {"rules" [(claim-deny ?t ?value)]}}
+   :witnesses {"rules" [(force-denial ?t ?value)]}}
 
   {:id "D-FORCE-NO-DENIAL"
    :purpose "Record that a forced operation needed no override because native admission already allows it."
@@ -758,7 +758,7 @@
    :when [[1 "role" ?role] [(not= ?role "human")] (issue ?t) (force-ready ?t) (force-denied ?t) (not (force-technical ?t))]
    :why "Workflow override requested for {operation}, overriding: {rules}. Overrides may only be used under explicit human direction. Inform your human which rules were overridden and what happened."
    :codes ["force" "allow" "override"]
-   :witnesses {"operation" [[?t "force-operation" ?value]] "rules" [(claim-deny ?t ?value)]}}]
+   :witnesses {"operation" [[?t "force-operation" ?value]] "rules" [(force-denial ?t ?value)]}}]
  :denials
  {"D-DENY-CLAIM" "Someone already claims the ticket."
   "D-DENY-PREREQUISITE" "A prerequisite label (design, question, blocked or parked) is present."
