@@ -11,6 +11,9 @@ export interface ServedPage {
   section?: string;
   /** An opt-in preview (#753): served, but never listed in the page navigation. */
   preview?: boolean;
+  /** The page preserves its default scope (e.g. Configuration shows Global) against the shared
+   * project-selection restore, so its project menu also offers the Global scope (#818). */
+  offersGlobal?: boolean;
 }
 export const servedPages: readonly ServedPage[] = [
   {
@@ -113,6 +116,7 @@ export const servedPages: readonly ServedPage[] = [
     parameters: ["repo"],
     carries: [],
     shipped: true,
+    offersGlobal: true,
   },
   {
     id: "rules",
@@ -290,10 +294,11 @@ export function renderToolbar(context: ShellContext): string {
     )
     .join(" ");
   const destination = page.id === "ticket" ? pageById("work") : page;
-  // A global-or-project page (e.g. Configuration, Diagnostics) also offers the Global scope in
-  // its project menu, so a selected project can always be cleared through the UI, never only by
-  // editing the URL.
-  const globalSupported = page.scope === "global-or-project";
+  // A page that preserves its default global scope (e.g. Configuration) also offers the Global
+  // scope in its project menu, so a selected project can always be cleared through the UI, never
+  // only by editing the URL. Other global-or-project pages (Diagnostics) do not offer it, because
+  // they do not opt out of the shared project-selection restore.
+  const globalSupported = page.offersGlobal === true;
   const globalLink = globalSupported
     ? `<li><a href="${htmlEscape(pageHref(destination, { ...selection, repository: null }, page))}"${carryAttribute(destination)}${!selection.repository ? ' aria-current="true"' : ""}>Global</a></li>`
     : "";
