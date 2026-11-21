@@ -8,6 +8,7 @@ import {
   formatActionRuleRemindersText,
   selectClaimRuleReminders,
   selectNativeClaimObligations,
+  selectNativeReleaseObligations,
 } from "./action-reminders.js";
 import { rulesHash } from "./adapter.js";
 import { buildPolicy, readSources, validateBundle, policyDir } from "./build.js";
@@ -421,8 +422,8 @@ describe("native claim-time obligations and action-reminder selection (#1029)", 
     const editedReader = (name: string) =>
       name === "obligations.edn"
         ? readFileSync(join(policyDir, "obligations.edn"), "utf8").replace(
-            ':id "O-CLAIM-BLOCKERS" :outcome ["claimed" "noop"]',
-            ':id "O-CLAIM-BLOCKERS" :outcome ["claimed" "noop"] :role ["implementer"]',
+            ':id "O-CLAIM-BLOCKERS" :action "claim" :outcome ["claimed" "noop"]',
+            ':id "O-CLAIM-BLOCKERS" :action "claim" :outcome ["claimed" "noop"] :role ["implementer"]',
           )
         : readFileSync(join(policyDir, name), "utf8");
     const edited = readSources(editedReader);
@@ -462,8 +463,8 @@ describe("native claim-time obligations and action-reminder selection (#1029)", 
     const editedReader = (name: string) =>
       name === "obligations.edn"
         ? readFileSync(join(policyDir, "obligations.edn"), "utf8").replace(
-            ':id "O-CLAIM-DELIVERABLE" :outcome ["claimed" "noop"] :role ["implementer"]',
-            ':id "O-CLAIM-DELIVERABLE" :outcome ["claimed" "noop"]',
+            ':id "O-CLAIM-DELIVERABLE" :action "claim" :outcome ["claimed" "noop"] :role ["implementer"]',
+            ':id "O-CLAIM-DELIVERABLE" :action "claim" :outcome ["claimed" "noop"]',
           )
         : readFileSync(join(policyDir, name), "utf8");
     const edited = validateBundle(readSources(editedReader));
@@ -477,8 +478,8 @@ describe("native claim-time obligations and action-reminder selection (#1029)", 
     const editedReader = (name: string) =>
       name === "obligations.edn"
         ? readFileSync(join(policyDir, "obligations.edn"), "utf8").replace(
-            ':id "O-CLAIM-PUBLISH-EARLY" :outcome ["claimed" "noop" "partial"] :role ["implementer" "designer"] :work ["repository-changing"]',
-            ':id "O-CLAIM-PUBLISH-EARLY" :outcome ["claimed" "noop" "partial"] :role ["implementer" "designer"] :work ["repository-changing" "observational"]',
+            ':id "O-CLAIM-PUBLISH-EARLY" :action "claim" :outcome ["claimed" "noop" "partial"] :role ["implementer" "designer"] :work ["repository-changing"]',
+            ':id "O-CLAIM-PUBLISH-EARLY" :action "claim" :outcome ["claimed" "noop" "partial"] :role ["implementer" "designer"] :work ["repository-changing" "observational"]',
           )
         : readFileSync(join(policyDir, name), "utf8");
     const edited = validateBundle(readSources(editedReader));
@@ -497,5 +498,54 @@ describe("native claim-time obligations and action-reminder selection (#1029)", 
       "observational",
     );
     expect(observational.ids).toContain("O-CLAIM-PUBLISH-EARLY");
+  });
+});
+
+describe("native release obligations (#1031)", () => {
+  const ids = (...a: Parameters<typeof selectNativeReleaseObligations>) =>
+    selectNativeReleaseObligations(...a).ids;
+
+  it("an agent releasing its own repository-changing work preserves it and hands off truthfully", () => {
+    expect(ids("implementer", "released")).toEqual([
+      "O-RELEASE-PRESERVE",
+      "O-RELEASE-HANDOFF",
+      "O-RELEASE-ASSIGNEES",
+      "O-RELEASE-PR-RESPONSIBILITY",
+      "O-RELEASE-NO-RECLAIM",
+    ]);
+    // Observational work has nothing to push; a designer has no implementation PR duty.
+    expect(ids("designer", "released", undefined, "observational")).toEqual([
+      "O-RELEASE-HANDOFF",
+      "O-RELEASE-ASSIGNEES",
+      "O-RELEASE-NO-RECLAIM",
+    ]);
+    // An unresolved role never receives a role-restricted duty.
+    expect(ids(null, "released")).not.toContain("O-RELEASE-PR-RESPONSIBILITY");
+  });
+
+  it("a human removal never claims the displaced agent's work was preserved", () => {
+    const removed = ids("implementer", "removed");
+    expect(removed).toEqual(["O-RELEASE-ASSIGNEES", "O-RELEASE-REMOVED"]);
+    expect(removed).not.toContain("O-RELEASE-PRESERVE");
+    expect(removed).not.toContain("O-RELEASE-HANDOFF");
+  });
+
+  it("absent, partial and failed releases have distinct selections", () => {
+    expect(ids("implementer", "absent")).toEqual(["O-RELEASE-ABSENT"]);
+    expect(ids("implementer", "partial")).toEqual([
+      "O-RELEASE-PRESERVE",
+      "O-RELEASE-HANDOFF",
+      "O-RELEASE-ASSIGNEES",
+      "O-RELEASE-PR-RESPONSIBILITY",
+      "O-RELEASE-PARTIAL-RECOVERY",
+    ]);
+    expect(ids("implementer", "failed")).toEqual(["O-RELEASE-FAILED-RECOVERY"]);
+  });
+
+  it("claim and release obligations never leak into each other's selection", () => {
+    const claim = selectNativeClaimObligations("implementer", "claimed").ids;
+    expect(claim.every((id) => id.startsWith("O-CLAIM-"))).toBe(true);
+    expect(ids("implementer", "released").every((id) => id.startsWith("O-RELEASE-"))).toBe(true);
+    expect(selectNativeReleaseObligations("implementer", "released").coverage).toBe("complete");
   });
 });

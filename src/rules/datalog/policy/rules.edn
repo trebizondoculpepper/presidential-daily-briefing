@@ -303,9 +303,12 @@
 ;; <role>) as typed facts; the rules decide which obligations apply to the viewer's role, the
 ;; action outcome and the work kind, so a policy edit changes selection without touching command
 ;; text. Every record states :work explicitly so the work check is a plain join.
+;; #1031: one shared action-context selector for claim and release obligations. Each record names
+;; its action; the caller asserts [1 "action"] with the action's outcome, work kind and role.
 [(obligation-record ?o) [?o "obligation" _]]
 [(obligation-applies ?o)
  (obligation-record ?o) [?o "obligation" ?id]
+ [?o "obligation-action" ?act] [1 "action" ?act]
  [?o "obligation-outcome" ?oc] [1 "claim-outcome" ?oc]
  [?o "obligation-work" ?w] [1 "claim-work" ?w]
  (not [?o "obligation-role" _])]
@@ -314,6 +317,7 @@
 ;; implementer/designer here, so the adapter asserts claim-role only when the role is known.
 [(obligation-applies ?o)
  (obligation-record ?o) [?o "obligation" ?id]
+ [?o "obligation-action" ?act] [1 "action" ?act]
  [?o "obligation-outcome" ?oc] [1 "claim-outcome" ?oc]
  [?o "obligation-work" ?w] [1 "claim-work" ?w]
  [?o "obligation-role" ?r] [1 "claim-role" ?r]]
