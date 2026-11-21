@@ -125,7 +125,9 @@
 ;; asserted by the host as evidence; it admits rework without being delivery responsibility.
 [(force-own-continuation ?t) [?t "force-operation" "rework"] [1 "agent" ?a] [?t "legacy-rework-agent" ?a] (not (force-other-owner ?t))]
 [(force-own-continuation ?t) [?t "force-operation" "rework"] [1 "agent" ?a] [?t "owner" ?a] (not (force-other-owner ?t)) (not [?t "claim-activity" "not-owned"])]
-[(force-denial ?t ?r) (claim-deny ?t ?r) [(not= ?r "D-DENY-CLAIM")] [(not= ?r "CLAIM-NOT-READY")] [(not= ?r "D-DENY-OPEN-PR")]]
+[(force-denial ?t ?r) (claim-deny ?t ?r) [(not= ?r "D-DENY-CLAIM")] [(not= ?r "CLAIM-NOT-READY")] [(not= ?r "D-DENY-OPEN-PR")] [(not= ?r "D-DENY-PLATFORM")]]
+;; Platform is a new-acquisition check: resume never applies it (retained.ts), claim and rework do.
+[(force-denial ?t ?r) (claim-deny ?t ?r) [(= ?r "D-DENY-PLATFORM")] (not [?t "force-operation" "resume"])]
 ;; Resume and rework are explicitly admitted without readiness and with their own open PR (claims.ts rework
 ;; checks, #1197 review): those are not denials of a rework, so nothing is reported as overridden.
 [(force-denial ?t ?r) (claim-deny ?t ?r) [(= ?r "CLAIM-NOT-READY")] (not (force-continuation ?t))]

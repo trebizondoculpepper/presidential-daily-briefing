@@ -228,4 +228,11 @@
    :facts [{:e 1 "forward-complete" true "owned-claims-complete" true}
            {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "reverse-complete" true "native-complete" true "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "status:awaiting-review" "labels-complete" true "open-blockers" 0 "legacy-rework-agent" "me" "closing" 500 "force-request" true "force-operation" "rework" "force-reason" "valid" "force-agent" "known" "force-revision" "current"}
            {:e 500 "state" "OPEN"}]
-   :expect {:actions [{:subject 100 :rule "D-FORCE-NO-DENIAL" :kind "force-allow" :band 1 :why "No rule denied rework, so nothing is overridden; proceed as a normal rework."}] :denials #{}}}]}
+   :expect {:actions [{:subject 100 :rule "D-FORCE-NO-DENIAL" :kind "force-allow" :band 1 :why "No rule denied rework, so nothing is overridden; proceed as a normal rework."}] :denials #{}}}
+
+  {:id "f32-resume-ignores-platform-restriction"
+   :doc "Resume never checks platform, so a platform-restricted retained claim needs no override"
+   :viewer {:role "implementer" :agent "me" :platform ""}
+   :facts [{:e 1 "forward-complete" true "owned-claims-complete" true}
+           {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "reverse-complete" true "native-complete" true "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "status:ready" "labels-complete" true "open-blockers" 0 "owner" "me" "platform" "kilo" "force-request" true "force-operation" "resume" "force-reason" "valid" "force-agent" "known" "force-revision" "current"}]
+   :expect {:actions [{:subject 100 :rule "D-OWN" :kind "continue-implementation" :band 6} {:subject 100 :rule "D-FORCE-NO-DENIAL" :kind "force-allow" :band 1 :why "No rule denied resume, so nothing is overridden; proceed as a normal resume."}] :denials #{[100 "D-DENY-CLAIM"] [100 "D-DENY-PLATFORM"]}}}]}
