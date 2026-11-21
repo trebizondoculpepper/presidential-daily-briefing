@@ -98,4 +98,46 @@ describe("force denials (#1021 review)", () => {
     ]);
     for (const d of texts) expect(d.text).toMatch(/\w/);
   });
+
+  it("explains denials from the evaluated policy, not the shipped bundle (#1197 review)", async () => {
+    const shipped = (await import("./policy.generated.json", { with: { type: "json" } }))
+      .default as {
+      forceDenialTexts: Record<string, string>;
+    };
+    const policy = {
+      ...(shipped as object),
+      forceDenialTexts: { ...shipped.forceDenialTexts, "FORCE-NOT-RETAINED": "edited text" },
+    };
+    const denials = evaluatePolicy(
+      {
+        viewer: { role: "implementer", agent: "me", platform: "", order: "impact" },
+        datoms: [
+          [1, "owned-claims-complete", true],
+          [100, "kind", "issue"],
+          [100, "state", "OPEN"],
+          [100, "number", 1],
+          [100, "target", "https://github.com/o/r/issues/1"],
+          [100, "created", 0],
+          [100, "labels-complete", true],
+          [100, "native-complete", true],
+          [100, "reverse-complete", true],
+          [100, "open-blockers", 0],
+          [100, "blocking-complete", true],
+          [100, "head", "not-a-pr"],
+          [100, "label", "status:ready"],
+          [100, "impact-state", "current"],
+          [100, "impact-size", "M"],
+          [100, "complexity-state", "current"],
+          [100, "complexity-size", "M"],
+          [100, "force-request", true],
+          [100, "force-operation", "resume"],
+          [100, "force-reason", "valid"],
+          [100, "force-agent", "known"],
+          [100, "force-revision", "current"],
+        ],
+      },
+      { policy: policy as never },
+    ).forceDenials;
+    expect(denials.find((d) => d.ruleId === "FORCE-NOT-RETAINED")?.text).toBe("edited text");
+  });
 });

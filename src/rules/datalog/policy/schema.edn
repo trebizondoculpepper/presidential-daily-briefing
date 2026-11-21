@@ -56,6 +56,7 @@
    "force-reason" "validity of the supplied force reason (valid, empty or oversized)"
    "force-revision" "whether the subject and ownership revision the request was made against is current or stale"
    "force-agent" "whether the acting agent identity is known or unknown"
+   "legacy-rework-agent" "agent with verified legacy (v1 done handoff) rework authority on the ticket"
    "active-count" "number of active dependents"
    "active-dependent" "active dependent"
    "assessment-kind" "assessment action kind"

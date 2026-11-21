@@ -121,6 +121,9 @@
 ;; "Rework authority", #1197 review): the caller is responsible, the claim may already be released,
 ;; and no other agent owns it. A caller still holding the claim reworks it too.
 [(force-own-continuation ?t) [?t "force-operation" "rework"] [1 "agent" ?a] [?t "responsible" ?a] (not (force-other-owner ?t))]
+;; Legacy rework authority (deliverables.ts reworkAuthority: the caller's trusted v1 done handoff),
+;; asserted by the host as evidence; it admits rework without being delivery responsibility.
+[(force-own-continuation ?t) [?t "force-operation" "rework"] [1 "agent" ?a] [?t "legacy-rework-agent" ?a] (not (force-other-owner ?t))]
 [(force-own-continuation ?t) [?t "force-operation" "rework"] [1 "agent" ?a] [?t "owner" ?a] (not (force-other-owner ?t)) (not [?t "claim-activity" "not-owned"])]
 [(force-denial ?t ?r) (claim-deny ?t ?r) [(not= ?r "D-DENY-CLAIM")] [(not= ?r "CLAIM-NOT-READY")] [(not= ?r "D-DENY-OPEN-PR")]]
 ;; Resume and rework are explicitly admitted without readiness and with their own open PR (claims.ts rework

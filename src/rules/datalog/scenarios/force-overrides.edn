@@ -220,4 +220,12 @@
    :viewer {:role "implementer" :agent "me"}
    :facts [{:e 1 "forward-complete" true "owned-claims-complete" true}
            {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "reverse-complete" true "native-complete" true "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "status:ready" "labels-complete" true "open-blockers" 0 "owner" "me" "claim-activity" "not-owned" "force-request" true "force-operation" "resume" "force-reason" "valid" "force-agent" "known" "force-revision" "current"}]
-   :expect {:actions [{:subject 100 :rule "D-FORCE-REFUSE-TECHNICAL" :kind "force-refuse" :band 1 :why "Not overridable: D-DENY-CLAIM; FORCE-NOT-RETAINED. Force cannot supply missing evidence or displace another owner's claim; nothing was changed."}] :denials #{[100 "D-DENY-CLAIM"]}}}]}
+   :expect {:actions [{:subject 100 :rule "D-FORCE-REFUSE-TECHNICAL" :kind "force-refuse" :band 1 :why "Not overridable: D-DENY-CLAIM; FORCE-NOT-RETAINED. Force cannot supply missing evidence or displace another owner's claim; nothing was changed."}] :denials #{[100 "D-DENY-CLAIM"]}}}
+
+  {:id "f31-rework-by-legacy-handoff-authority"
+   :doc "Verified legacy (v1 done handoff) rework authority admits rework without delivery responsibility"
+   :viewer {:role "implementer" :agent "me"}
+   :facts [{:e 1 "forward-complete" true "owned-claims-complete" true}
+           {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "reverse-complete" true "native-complete" true "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "status:awaiting-review" "labels-complete" true "open-blockers" 0 "legacy-rework-agent" "me" "closing" 500 "force-request" true "force-operation" "rework" "force-reason" "valid" "force-agent" "known" "force-revision" "current"}
+           {:e 500 "state" "OPEN"}]
+   :expect {:actions [{:subject 100 :rule "D-FORCE-NO-DENIAL" :kind "force-allow" :band 1 :why "No rule denied rework, so nothing is overridden; proceed as a normal rework."}] :denials #{}}}]}

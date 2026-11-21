@@ -238,8 +238,8 @@ export function evaluatePolicy(input: PolicyFacts, options: PolicyOptions = {}):
       subject: Number(id),
       ruleId: String(rule),
       text:
-        (bundle.denials as Record<string, string>)[String(rule)] ??
-        (bundle.forceDenialTexts as Record<string, string> | undefined)?.[String(rule)] ??
+        (policy.denials as Record<string, string>)[String(rule)] ??
+        (policy.forceDenialTexts as Record<string, string> | undefined)?.[String(rule)] ??
         null,
     }))
     .sort(
