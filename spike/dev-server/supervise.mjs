@@ -15,17 +15,40 @@ if (!entry || !watchPath) {
 }
 let child = null;
 let restarts = 0;
+let restarting = false;
 const start = () => {
   child = spawn(process.execPath, ["--import", "tsx", entry], { stdio: "inherit" });
-  child.on("exit", (code) => {
-    if (code && code !== 0) console.error(`backend exited ${code}; waiting for the next edit`);
+  const spawned = child;
+  spawned.on("exit", (code) => {
+    if (code && code !== 0 && !restarting)
+      console.error(`backend exited ${code}; waiting for the next edit`);
   });
 };
+/**
+ * Restart only after the old child has exited: SIGTERM is asynchronous, and spawning the
+ * replacement first races it for the listening port (EADDRINUSE), leaving nothing serving
+ * (reviewed #1200 finding).
+ */
 const restart = () => {
+  if (restarting) return;
+  restarting = true;
   restarts += 1;
   console.log(`[supervise] restart ${restarts} (pid ${child?.pid ?? "none"} -> new)`);
-  child?.kill("SIGTERM");
-  start();
+  const old = child;
+  const spawnNext = () => {
+    start();
+    restarting = false;
+  };
+  if (!old || old.exitCode !== null) return spawnNext();
+  const guard = setTimeout(() => {
+    console.error("[supervise] old backend ignored SIGTERM; killing it");
+    old.kill("SIGKILL");
+  }, 3000);
+  old.once("exit", () => {
+    clearTimeout(guard);
+    spawnNext();
+  });
+  old.kill("SIGTERM");
 };
 start();
 let timer = null;

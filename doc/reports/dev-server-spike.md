@@ -127,6 +127,10 @@ These are single observations on one machine, not a benchmark suite.
   supervisor process and no listener** (`0 process`, `0 line(s)` from `lsof`), so the next run can
   bind the port again. Requests in flight are aborted by process exit — the same boundary `pdb
   serve` already has, so the dev server does not add a second lifecycle owner.
+- **Restart serialisation**: the replacement is spawned only after the old child's `exit`, because
+  `SIGTERM` is asynchronous and a fast replacement would race the old process for the port. Verified
+  with a child that delays exit by 700 ms: one `restart` line, one new `slow child on 5195`, no
+  `EADDRINUSE`. A 3 s SIGKILL guard bounds a child that ignores the signal.
 - **Failed edits**: a TypeScript error keeps the last good backend process only if the supervisor
   refuses to restart on a failed start; the prototype currently restarts on every write and logs
   `backend exited 1`. The contract requires "keep the last good process, report the error, retry on
