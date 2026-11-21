@@ -116,6 +116,10 @@
 [(force-own-continuation ?t) (force-continuation ?t) [1 "agent" ?a] [?t "owner" ?a] (not (force-other-owner ?t))]
 [(force-denial ?t ?r) (claim-deny ?t ?r) [(not= ?r "D-DENY-CLAIM")]]
 [(force-denial ?t ?r) (claim-deny ?t ?r) [(= ?r "D-DENY-CLAIM")] (not (force-own-continuation ?t))]
+;; A continuation of the caller's claim is still checked against an incomplete claim inventory
+;; (#1197 review): the unclaimed-pickup inventory denials do not cover a claimed ticket, so the
+;; continuation derives it here and force cannot authorize resuming against unknown ownership.
+[(force-denial ?t ?r) (force-own-continuation ?t) [1 "owned-claims-complete" false] [(str "CLAIM-INVENTORY-UNKNOWN") ?r]]
 [(force-technical ?t) (force-denial ?t ?r) [(= ?r "D-DENY-CLAIM")]]
 [(force-technical ?t) (force-denial ?t ?r) [(= ?r "D-DENY-LABELS-UNKNOWN")]]
 [(force-technical ?t) (force-denial ?t ?r) [(= ?r "D-DENY-NATIVE-UNKNOWN")]]
