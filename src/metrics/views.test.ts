@@ -476,3 +476,37 @@ describe("pickup-delay view: creation to first pickup (#821)", () => {
     expect(Object.keys(pickupDelayView(NOW, 7, [t], covered).groups)).toEqual(["unknown"]);
   });
 });
+
+describe("daily view: complexity breakdown (#826)", () => {
+  it("breaks each ticket figure down by latest valid complexity, from exactly its members", () => {
+    const at = "2026-11-15T10:00:00Z";
+    const delivered = (n: number, group: string) =>
+      ticket(
+        n,
+        "delivered",
+        {
+          requiredPullRequests: [{ repository: repo, number: 100 + n }],
+          events: [merged(100 + n, at)],
+        },
+        group,
+      );
+    const v = dailyView(
+      NOW,
+      7,
+      [delivered(1, "S"), delivered(2, "S"), delivered(3, "unassessed")],
+      covered,
+    );
+    expect(v.figures.deliveries.byComplexity).toEqual({
+      S: { count: 2, members: [`${repo}#1`, `${repo}#2`] },
+      unassessed: { count: 1, members: [`${repo}#3`] },
+    });
+    const total = Object.values(v.figures.deliveries.byComplexity!).reduce(
+      (n, g) => n + g.count,
+      0,
+    );
+    const inSeries = v.figures.deliveries.series.days.reduce((n, d) => n + d.members.length, 0);
+    expect(total).toBe(inSeries);
+    // PR merges are a different unit and carry no ticket breakdown.
+    expect(v.figures.prMerges.byComplexity).toBeUndefined();
+  });
+});
