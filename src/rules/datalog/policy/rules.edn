@@ -119,7 +119,14 @@
 ;; A continuation of the caller's claim is still checked against an incomplete claim inventory
 ;; (#1197 review): the unclaimed-pickup inventory denials do not cover a claimed ticket, so the
 ;; continuation derives it here and force cannot authorize resuming against unknown ownership.
-[(force-denial ?t ?r) (force-own-continuation ?t) [1 "owned-claims-complete" false] [(str "CLAIM-INVENTORY-UNKNOWN") ?r]]
+;; An absent inventory fact is "not read", never complete (#1197 review): only an explicit true passes.
+[(force-inventory-read ?t) [?t "kind" _] [1 "owned-claims-complete" true]]
+[(force-denial ?t ?r) (force-own-continuation ?t) (not (force-inventory-read ?t)) [(str "CLAIM-INVENTORY-UNKNOWN") ?r]]
+;; Unknown refinement evidence is technical, even where a known refinement hold is a workflow denial.
+[(force-denial ?t ?r) (issue ?t) (refinement-unknown ?t) [(str "D-DENY-REFINEMENT-UNKNOWN") ?r]]
+;; Resume and rework continue only the caller's own retained claim; without it there is nothing to
+;; continue, and force cannot make the caller the owner.
+[(force-denial ?t ?r) (force-continuation ?t) (not (force-own-continuation ?t)) [(str "FORCE-NOT-RETAINED") ?r]]
 [(force-technical ?t) (force-denial ?t ?r) [(= ?r "D-DENY-CLAIM")]]
 [(force-technical ?t) (force-denial ?t ?r) [(= ?r "D-DENY-LABELS-UNKNOWN")]]
 [(force-technical ?t) (force-denial ?t ?r) [(= ?r "D-DENY-NATIVE-UNKNOWN")]]
@@ -127,6 +134,7 @@
 [(force-technical ?t) (force-denial ?t ?r) [(= ?r "D-DENY-INVENTORY-UNKNOWN")]]
 [(force-technical ?t) (force-denial ?t ?r) [(= ?r "D-DENY-REFINEMENT-UNKNOWN")]]
 [(force-technical ?t) (force-denial ?t ?r) [(= ?r "CLAIM-INVENTORY-UNKNOWN")]]
+[(force-technical ?t) (force-denial ?t ?r) [(= ?r "FORCE-NOT-RETAINED")]]
 [(force-denied ?t) (force-denial ?t ?r)]
 ;; Every precondition of an admissible request, in one place so each outcome is exclusive.
 [(force-ready ?t) [?t "force-request" true] (force-supported ?t) [?t "force-reason" "valid"] [?t "force-agent" "known"] [?t "force-revision" "current"]]
