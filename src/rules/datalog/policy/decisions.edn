@@ -676,7 +676,89 @@
    :when [[1 "role" "human"] [?t "unassign-subject" true] [1 "trusted-human-context" true] [1 "permission" "allow"] [?t "claim-present" false] [?t "responsibility-present" true] [?t "claim-history-complete" true]]
    :why "Release only agent:{agent}'s continuing responsibility (#1018): no claim label is present, but delivery responsibility remains; clear it while preserving all human assignees, readiness labels, blockers, questions and other agents' claims."
    :codes ["unassign" "allow" "responsibility"]
-   :witnesses {"agent" [[?t "unassign-agent" ?value]]}}]
+   :witnesses {"agent" [[?t "unassign-agent" ?value]]}}
+
+  {:id "D-FORCE-REFUSE-UNSUPPORTED"
+   :purpose "Refuse a workflow override for an operation without a native override decision and execution path."
+   :kind "force-refuse"
+   :band 1
+   :preference 1
+   :affinity "shared"
+   :owned false
+   :when [[1 "role" ?role] [(not= ?role "human")] (issue ?t) [?t "force-request" true] [?t "force-operation" ?op] (not (force-supported ?t))]
+   :why "Workflow override is not supported for {operation}; nothing was changed. Supported: claim, resume and rework."
+   :codes ["force" "refuse" "unsupported"]
+   :witnesses {"operation" [[?t "force-operation" ?value]]}}
+
+  {:id "D-FORCE-REFUSE-REASON"
+   :purpose "Refuse a workflow override whose reason is empty, whitespace-only or over the size bound, before any mutation."
+   :kind "force-refuse"
+   :band 1
+   :preference 1
+   :affinity "shared"
+   :owned false
+   :when [[1 "role" ?role] [(not= ?role "human")] (issue ?t) [?t "force-request" true] (force-supported ?t) [?t "force-reason" ?r] [(not= ?r "valid")]]
+   :why "A workflow override needs a non-empty reason of at most 4,096 bytes ({reason}); nothing was changed."
+   :codes ["force" "refuse" "reason"]
+   :witnesses {"reason" [[?t "force-reason" ?value]]}}
+
+  {:id "D-FORCE-REFUSE-AGENT"
+   :purpose "Refuse a workflow override when the acting agent is unknown; force never invents or borrows an identity."
+   :kind "force-refuse"
+   :band 1
+   :preference 1
+   :affinity "shared"
+   :owned false
+   :when [[1 "role" ?role] [(not= ?role "human")] (issue ?t) [?t "force-request" true] (force-supported ?t) [?t "force-reason" "valid"] [?t "force-agent" "unknown"]]
+   :why "The acting agent is unknown, so no claim can be recorded; force does not invent or borrow an identity. Nothing was changed."
+   :codes ["force" "refuse" "agent"]}
+
+  {:id "D-FORCE-REFUSE-STALE"
+   :purpose "Refuse a workflow override made against a stale subject or ownership revision; a new decision is needed."
+   :kind "force-refuse"
+   :band 1
+   :preference 1
+   :affinity "shared"
+   :owned false
+   :when [[1 "role" ?role] [(not= ?role "human")] (issue ?t) [?t "force-request" true] (force-supported ?t) [?t "force-reason" "valid"] [?t "force-agent" "known"] [?t "force-revision" "stale"]]
+   :why "The ticket or its ownership changed since this override was decided; read it again and make a new decision. Nothing was changed."
+   :codes ["force" "refuse" "stale"]}
+
+  {:id "D-FORCE-REFUSE-TECHNICAL"
+   :purpose "Refuse a workflow override when a denial is missing evidence, another owner's claim or an incomplete inventory, which force cannot override."
+   :kind "force-refuse"
+   :band 1
+   :preference 1
+   :affinity "shared"
+   :owned false
+   :when [[1 "role" ?role] [(not= ?role "human")] (issue ?t) (force-ready ?t) (force-technical ?t)]
+   :why "Not overridable: {rules}. Force cannot supply missing evidence or displace another owner's claim; nothing was changed."
+   :codes ["force" "refuse" "technical"]
+   :witnesses {"rules" [(force-denial ?t ?value)]}}
+
+  {:id "D-FORCE-NO-DENIAL"
+   :purpose "Record that a forced operation needed no override because native admission already allows it."
+   :kind "force-allow"
+   :band 1
+   :preference 1
+   :affinity "shared"
+   :owned false
+   :when [[1 "role" ?role] [(not= ?role "human")] (issue ?t) (force-ready ?t) (not (force-denied ?t))]
+   :why "No rule denied {operation}, so nothing is overridden; proceed as a normal {operation}."
+   :codes ["force" "allow" "no-denial"]
+   :witnesses {"operation" [[?t "force-operation" ?value]]}}
+
+  {:id "D-FORCE-OVERRIDE"
+   :purpose "Admit a human-directed override of workflow-policy denials, listing every overridden rule for the audit and the human."
+   :kind "force-allow"
+   :band 1
+   :preference 1
+   :affinity "shared"
+   :owned false
+   :when [[1 "role" ?role] [(not= ?role "human")] (issue ?t) (force-ready ?t) (force-denied ?t) (not (force-technical ?t))]
+   :why "Workflow override requested for {operation}, overriding: {rules}. Overrides may only be used under explicit human direction. Inform your human which rules were overridden and what happened."
+   :codes ["force" "allow" "override"]
+   :witnesses {"operation" [[?t "force-operation" ?value]] "rules" [(force-denial ?t ?value)]}}]
  :denials
  {"D-DENY-CLAIM" "Someone already claims the ticket."
   "D-DENY-PREREQUISITE" "A prerequisite label (design, question, blocked or parked) is present."
@@ -702,4 +784,18 @@
   "D-DENY-REFINEMENT" "Keep work that needs refinement out of pickup, whatever its estimate or readiness label says."
   "D-DENY-REESTIMATE" "Return resolved refinement to estimation instead of admitting it straight to implementation."
   "D-DENY-REFINEMENT-UNKNOWN" "Fail closed when refinement evidence could not be read completely."
-  "D-DENY-INVENTORY-UNKNOWN" "Withhold new implementation pickup while the viewer's claim inventory is incomplete."}}
+  "D-DENY-INVENTORY-UNKNOWN" "Withhold new implementation pickup while the viewer's claim inventory is incomplete."}
+ :force-denial-texts
+ {"FORCE-NOT-RETAINED" "Resume was requested, but the caller holds no retained claim on the ticket."
+  "FORCE-NOT-RESPONSIBLE" "Rework was requested, but the caller neither owns the claim nor is responsible for the ticket."
+  "FORCE-ACTIVITY-UNKNOWN" "The retained claim's activity could not be read, so whether it may resume is unknown."
+  "CLAIM-NOT-READY" "The ticket is not ready to pick up (neither status:ready nor status:incomplete)."
+  "CLAIM-INVENTORY-UNKNOWN" "The caller's claim inventory is incomplete: unseen active claims cannot be ruled out."
+  "FORCE-OTHER-ACTIVE-CLAIM" "The caller already holds another active claim; normal admission takes one active claim at a time."
+  "FORCE-WAIT-OPEN" "The retained claim still waits on an open blocker or question, so normal resume would refuse it."
+  "FORCE-QUESTION-OPEN" "A trusted question recorded on the claim is still unresolved, so normal resume would refuse it."
+  "FORCE-QUESTION-UNKNOWN" "A question recorded on the claim could not be verified or its resolution is unknown, so whether it is still open is unknown."
+  "FORCE-HISTORY-UNKNOWN" "The caller's claim history on the ticket could not be read completely, so a retry cannot verify or repair it."
+  "FORCE-MARKER-UNVERIFIED" "The author of the caller's matching claim marker could not be verified, so the retry cannot rely on it."
+  "FORCE-TICKET-CLOSED" "The ticket is closed; it is never claimed or resumed, and force cannot reopen it."
+  "FORCE-OTHER-ACTIVITY-UNKNOWN" "The caller holds another claim whose activity could not be read, so whether it is active is unknown."}}

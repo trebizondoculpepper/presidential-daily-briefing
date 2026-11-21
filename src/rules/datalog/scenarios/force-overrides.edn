@@ -1,0 +1,332 @@
+;; Explicit human-directed workflow overrides (#1021, doc/design/human-force-overrides.md).
+;; The host asserts force-request/operation/reason/agent/revision; native admission lists the denials.
+{:suite "force-overrides"
+ :scenarios
+ [
+  {:id "f1-normal-allowed"
+   :doc "Normal admission without force: no force decision is made"
+   :viewer {:role "implementer" :agent "me"}
+   :facts [{:e 1 "forward-complete" true "owned-claims-complete" true}
+           {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "reverse-complete" true "native-complete" true "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "status:ready" "labels-complete" true "open-blockers" 0}]
+   :expect {:actions [{:subject 100 :rule "D-ORDINARY" :kind "implement" :band 6}] :denials #{}}}
+
+  {:id "f2-denied-without-force"
+   :doc "A native blocker denies pickup; without force nothing is overridden"
+   :viewer {:role "implementer" :agent "me"}
+   :facts [{:e 1 "forward-complete" true "owned-claims-complete" true}
+           {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "reverse-complete" true "native-complete" true "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "status:ready" "labels-complete" true "open-blockers" 1}]
+   :expect {:actions [] :denials #{[100 "D-DENY-BLOCKER"]}}}
+
+  {:id "f3-force-overrides-workflow-denial"
+   :doc "Explicit human-directed force lists the actual overridden rule"
+   :viewer {:role "implementer" :agent "me"}
+   :facts [{:e 1 "forward-complete" true "owned-claims-complete" true}
+           {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "reverse-complete" true "native-complete" true "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "status:ready" "labels-complete" true "open-blockers" 1 "force-request" true "force-operation" "claim" "force-reason" "valid" "force-agent" "known" "force-revision" "current"}]
+   :expect {:actions [{:subject 100 :rule "D-FORCE-OVERRIDE" :kind "force-allow" :band 1 :why "Workflow override requested for claim, overriding: D-DENY-BLOCKER. Overrides may only be used under explicit human direction. Inform your human which rules were overridden and what happened."}] :denials #{[100 "D-DENY-BLOCKER"]}}}
+
+  {:id "f4-empty-reason-refused"
+   :doc "An empty or whitespace-only reason is refused before any mutation"
+   :viewer {:role "implementer" :agent "me"}
+   :facts [{:e 1 "forward-complete" true "owned-claims-complete" true}
+           {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "reverse-complete" true "native-complete" true "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "status:ready" "labels-complete" true "open-blockers" 1 "force-request" true "force-operation" "claim" "force-reason" "empty" "force-agent" "known" "force-revision" "current"}]
+   :expect {:actions [{:subject 100 :rule "D-FORCE-REFUSE-REASON" :kind "force-refuse" :band 1 :why "A workflow override needs a non-empty reason of at most 4,096 bytes (empty); nothing was changed."}] :denials #{[100 "D-DENY-BLOCKER"]}}}
+
+  {:id "f5-oversized-reason-refused"
+   :doc "An oversized reason is refused, never truncated"
+   :viewer {:role "implementer" :agent "me"}
+   :facts [{:e 1 "forward-complete" true "owned-claims-complete" true}
+           {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "reverse-complete" true "native-complete" true "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "status:ready" "labels-complete" true "open-blockers" 1 "force-request" true "force-operation" "claim" "force-reason" "oversized" "force-agent" "known" "force-revision" "current"}]
+   :expect {:actions [{:subject 100 :rule "D-FORCE-REFUSE-REASON" :kind "force-refuse" :band 1 :why "A workflow override needs a non-empty reason of at most 4,096 bytes (oversized); nothing was changed."}] :denials #{[100 "D-DENY-BLOCKER"]}}}
+
+  {:id "f6-unknown-agent-refused"
+   :doc "Force never invents an identity for an unknown agent"
+   :viewer {:role "implementer" :agent "me"}
+   :facts [{:e 1 "forward-complete" true "owned-claims-complete" true}
+           {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "reverse-complete" true "native-complete" true "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "status:ready" "labels-complete" true "open-blockers" 1 "force-request" true "force-operation" "claim" "force-reason" "valid" "force-agent" "unknown" "force-revision" "current"}]
+   :expect {:actions [{:subject 100 :rule "D-FORCE-REFUSE-AGENT" :kind "force-refuse" :band 1}] :denials #{[100 "D-DENY-BLOCKER"]}}}
+
+  {:id "f7-stale-revision-refused"
+   :doc "A stale subject or ownership revision needs a new decision"
+   :viewer {:role "implementer" :agent "me"}
+   :facts [{:e 1 "forward-complete" true "owned-claims-complete" true}
+           {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "reverse-complete" true "native-complete" true "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "status:ready" "labels-complete" true "open-blockers" 1 "force-request" true "force-operation" "claim" "force-reason" "valid" "force-agent" "known" "force-revision" "stale"}]
+   :expect {:actions [{:subject 100 :rule "D-FORCE-REFUSE-STALE" :kind "force-refuse" :band 1}] :denials #{[100 "D-DENY-BLOCKER"]}}}
+
+  {:id "f8-no-denial-recorded"
+   :doc "Force with no actual denial records that nothing was overridden"
+   :viewer {:role "implementer" :agent "me"}
+   :facts [{:e 1 "forward-complete" true "owned-claims-complete" true}
+           {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "reverse-complete" true "native-complete" true "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "status:ready" "labels-complete" true "open-blockers" 0 "force-request" true "force-operation" "claim" "force-reason" "valid" "force-agent" "known" "force-revision" "current"}]
+   :expect {:actions [{:subject 100 :rule "D-FORCE-NO-DENIAL" :kind "force-allow" :band 1 :why "No rule denied claim, so nothing is overridden; proceed as a normal claim."}
+                       {:subject 100 :rule "D-ORDINARY" :kind "implement" :band 6}] :denials #{}}}
+
+  {:id "f9-missing-evidence-not-overridable"
+   :doc "Missing evidence is technical: force refuses and lists every denial"
+   :viewer {:role "implementer" :agent "me"}
+   :facts [{:e 1 "forward-complete" true "owned-claims-complete" true}
+           {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "reverse-complete" true "native-complete" true "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "status:ready" "labels-complete" false "open-blockers" 1 "force-request" true "force-operation" "claim" "force-reason" "valid" "force-agent" "known" "force-revision" "current"}]
+   :expect {:actions [{:subject 100 :rule "D-FORCE-REFUSE-TECHNICAL" :kind "force-refuse" :band 1 :why "Not overridable: D-DENY-BLOCKER; D-DENY-LABELS-UNKNOWN; D-DENY-PLATFORM. Force cannot supply missing evidence or displace another owner's claim; nothing was changed."}] :denials #{[100 "D-DENY-BLOCKER"] [100 "D-DENY-LABELS-UNKNOWN"] [100 "D-DENY-PLATFORM"]}}}
+
+  {:id "f10-other-owner-not-overridable"
+   :doc "Another owner's claim is never displaced by force"
+   :viewer {:role "implementer" :agent "me"}
+   :facts [{:e 1 "forward-complete" true "owned-claims-complete" true}
+           {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "reverse-complete" true "native-complete" true "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "status:ready" "labels-complete" true "open-blockers" 0 "owner" "someone_else" "force-request" true "force-operation" "claim" "force-reason" "valid" "force-agent" "known" "force-revision" "current"}]
+   :expect {:actions [{:subject 100 :rule "D-FORCE-REFUSE-TECHNICAL" :kind "force-refuse" :band 1 :why "Not overridable: D-DENY-CLAIM. Force cannot supply missing evidence or displace another owner's claim; nothing was changed."}] :denials #{[100 "D-DENY-CLAIM"]}}}
+
+  {:id "f11-unsupported-operation-refused"
+   :doc "Operations without a native override path are refused"
+   :viewer {:role "implementer" :agent "me"}
+   :facts [{:e 1 "forward-complete" true "owned-claims-complete" true}
+           {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "reverse-complete" true "native-complete" true "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "status:ready" "labels-complete" true "open-blockers" 1 "force-request" true "force-operation" "merge" "force-reason" "valid" "force-agent" "known" "force-revision" "current"}]
+   :expect {:actions [{:subject 100 :rule "D-FORCE-REFUSE-UNSUPPORTED" :kind "force-refuse" :band 1 :why "Workflow override is not supported for merge; nothing was changed. Supported: claim, resume and rework."}] :denials #{[100 "D-DENY-BLOCKER"]}}}
+
+  {:id "f12-resume-without-retained-claim-refused"
+   :doc "Resume and rework continue only the caller's own retained claim; force cannot make the caller the owner"
+   :viewer {:role "implementer" :agent "me"}
+   :facts [{:e 1 "forward-complete" true "owned-claims-complete" true}
+           {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "reverse-complete" true "native-complete" true "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "status:ready" "labels-complete" true "open-blockers" 1 "force-request" true "force-operation" "resume" "force-reason" "valid" "force-agent" "known" "force-revision" "current"}]
+   :expect {:actions [{:subject 100 :rule "D-FORCE-REFUSE-TECHNICAL" :kind "force-refuse" :band 1 :why "Not overridable: D-DENY-BLOCKER; FORCE-NOT-RETAINED. Force cannot supply missing evidence or displace another owner's claim; nothing was changed."}] :denials #{[100 "D-DENY-BLOCKER"]}}}
+
+  {:id "f13-resume-own-retained-claim"
+   :doc "Resuming the caller's own retained claim is not blocked by that claim; only the workflow denial is overridden"
+   :viewer {:role "implementer" :agent "me"}
+   :facts [{:e 1 "forward-complete" true "owned-claims-complete" true}
+           {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "reverse-complete" true "native-complete" true "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "status:ready" "labels-complete" true "open-blockers" 1 "owner" "me" "claim-activity" "resume-required" "wait-reason" "cleared" "force-request" true "force-operation" "resume" "force-reason" "valid" "force-agent" "known" "force-revision" "current"}]
+   :expect {:actions [{:subject 100 :rule "D-OWN-RESUME" :kind "resume-claim" :band 3} {:subject 100 :rule "D-FORCE-OVERRIDE" :kind "force-allow" :band 1 :why "Workflow override requested for resume, overriding: D-DENY-BLOCKER. Overrides may only be used under explicit human direction. Inform your human which rules were overridden and what happened."}] :denials #{[100 "D-DENY-BLOCKER"] [100 "D-DENY-CLAIM"]}}}
+
+  {:id "f14-resume-other-owner-not-overridable"
+   :doc "Resume never continues another agent's claim"
+   :viewer {:role "implementer" :agent "me"}
+   :facts [{:e 1 "forward-complete" true "owned-claims-complete" true}
+           {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "reverse-complete" true "native-complete" true "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "status:ready" "labels-complete" true "open-blockers" 0 "owner" "someone_else" "force-request" true "force-operation" "resume" "force-reason" "valid" "force-agent" "known" "force-revision" "current"}]
+   :expect {:actions [{:subject 100 :rule "D-FORCE-REFUSE-TECHNICAL" :kind "force-refuse" :band 1 :why "Not overridable: D-DENY-CLAIM; FORCE-NOT-RETAINED. Force cannot supply missing evidence or displace another owner's claim; nothing was changed."}] :denials #{[100 "D-DENY-CLAIM"]}}}
+
+  {:id "f15-resume-incomplete-inventory-refused"
+   :doc "An incomplete claim inventory is never overridden, even when resuming the caller's own claim"
+   :viewer {:role "implementer" :agent "me"}
+   :facts [{:e 1 "forward-complete" true "owned-claims-complete" false}
+           {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "reverse-complete" true "native-complete" true "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "status:ready" "labels-complete" true "open-blockers" 1 "owner" "me" "claim-activity" "resume-required" "wait-reason" "cleared" "force-request" true "force-operation" "resume" "force-reason" "valid" "force-agent" "known" "force-revision" "current"}]
+   :expect {:actions [{:subject 100 :rule "D-OWN-RESUME" :kind "resume-claim" :band 3} {:subject 100 :rule "D-FORCE-REFUSE-TECHNICAL" :kind "force-refuse" :band 1 :why "Not overridable: CLAIM-INVENTORY-UNKNOWN; D-DENY-BLOCKER. Force cannot supply missing evidence or displace another owner's claim; nothing was changed."}] :denials #{[100 "D-DENY-BLOCKER"] [100 "D-DENY-CLAIM"]}}}
+
+  {:id "f16-resume-absent-inventory-refused"
+   :doc "An absent claim-inventory fact is unread, never complete: a forced resume is refused"
+   :viewer {:role "implementer" :agent "me"}
+   :facts [{:e 1 "forward-complete" true}
+           {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "reverse-complete" true "native-complete" true "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "status:ready" "labels-complete" true "open-blockers" 0 "owner" "me" "claim-activity" "resume-required" "wait-reason" "cleared" "force-request" true "force-operation" "resume" "force-reason" "valid" "force-agent" "known" "force-revision" "current"}]
+   :expect {:actions [{:subject 100 :rule "D-OWN-RESUME" :kind "resume-claim" :band 3} {:subject 100 :rule "D-FORCE-REFUSE-TECHNICAL" :kind "force-refuse" :band 1 :why "Not overridable: CLAIM-INVENTORY-UNKNOWN. Force cannot supply missing evidence or displace another owner's claim; nothing was changed."}] :denials #{[100 "D-DENY-CLAIM"]}}}
+
+  {:id "f17-unknown-refinement-not-overridable"
+   :doc "Unknown refinement evidence is technical, while a known refinement hold would be a workflow denial"
+   :viewer {:role "implementer" :agent "me"}
+   :facts [{:e 1 "forward-complete" true "owned-claims-complete" true}
+           {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "reverse-complete" true "native-complete" true "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "status:ready" "labels-complete" true "open-blockers" 0 "refinement" 200 "force-request" true "force-operation" "claim" "force-reason" "valid" "force-agent" "known" "force-revision" "current"}
+           {:e 200 "refinement-state" "unknown"}]
+   :expect {:actions [{:subject 100 :rule "D-FORCE-REFUSE-TECHNICAL" :kind "force-refuse" :band 1 :why "Not overridable: D-DENY-REFINEMENT; D-DENY-REFINEMENT-UNKNOWN. Force cannot supply missing evidence or displace another owner's claim; nothing was changed."} {:subject 100 :rule "D-REFINE-INCOMPLETE" :kind "refine" :band 4}] :denials #{[100 "D-DENY-REFINEMENT"]}}}
+
+  {:id "f18-rework-by-responsible-agent"
+   :doc "Rework reacquires submitted work through ticket responsibility; no retained claim is needed"
+   :viewer {:role "implementer" :agent "me"}
+   :facts [{:e 1 "forward-complete" true "owned-claims-complete" true}
+           {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "reverse-complete" true "native-complete" true "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "status:ready" "labels-complete" true "open-blockers" 1 "responsible" "me" "force-request" true "force-operation" "rework" "force-reason" "valid" "force-agent" "known" "force-revision" "current"}]
+   :expect {:actions [{:subject 100 :rule "D-FORCE-OVERRIDE" :kind "force-allow" :band 1 :why "Workflow override requested for rework, overriding: D-DENY-BLOCKER. Overrides may only be used under explicit human direction. Inform your human which rules were overridden and what happened."}] :denials #{[100 "D-DENY-BLOCKER"]}}}
+
+  {:id "f19-rework-without-responsibility-refused"
+   :doc "Rework needs the caller's ticket responsibility or claim; force cannot grant it"
+   :viewer {:role "implementer" :agent "me"}
+   :facts [{:e 1 "forward-complete" true "owned-claims-complete" true}
+           {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "reverse-complete" true "native-complete" true "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "status:ready" "labels-complete" true "open-blockers" 0 "force-request" true "force-operation" "rework" "force-reason" "valid" "force-agent" "known" "force-revision" "current"}]
+   :expect {:actions [{:subject 100 :rule "D-FORCE-REFUSE-TECHNICAL" :kind "force-refuse" :band 1 :why "Not overridable: FORCE-NOT-RESPONSIBLE. Force cannot supply missing evidence or displace another owner's claim; nothing was changed."} {:subject 100 :rule "D-ORDINARY" :kind "implement" :band 6}] :denials #{}}}
+
+  {:id "f20-rework-needs-no-override-for-readiness-or-own-pr"
+   :doc "Rework is admitted without readiness and with its own open PR, so nothing is reported as overridden"
+   :viewer {:role "implementer" :agent "me"}
+   :facts [{:e 1 "forward-complete" true "owned-claims-complete" true}
+           {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "reverse-complete" true "native-complete" true "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "status:awaiting-review" "labels-complete" true "open-blockers" 0 "responsible" "me" "closing" 500 "force-request" true "force-operation" "rework" "force-reason" "valid" "force-agent" "known" "force-revision" "current"}
+           {:e 500 "state" "OPEN"}]
+   :expect {:actions [{:subject 100 :rule "D-FORCE-NO-DENIAL" :kind "force-allow" :band 1 :why "No rule denied rework, so nothing is overridden; proceed as a normal rework."}] :denials #{}}}
+
+  {:id "f21-claim-absent-inventory-refused"
+   :doc "A forced claim with no inventory fact is refused: unread is never complete"
+   :viewer {:role "implementer" :agent "me"}
+   :facts [{:e 1 "forward-complete" true}
+           {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "reverse-complete" true "native-complete" true "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "status:ready" "labels-complete" true "open-blockers" 0 "force-request" true "force-operation" "claim" "force-reason" "valid" "force-agent" "known" "force-revision" "current"}]
+   :expect {:actions [{:subject 100 :rule "D-FORCE-REFUSE-TECHNICAL" :kind "force-refuse" :band 1 :why "Not overridable: CLAIM-INVENTORY-UNKNOWN. Force cannot supply missing evidence or displace another owner's claim; nothing was changed."} {:subject 100 :rule "D-ORDINARY" :kind "implement" :band 6}] :denials #{}}}
+
+  {:id "f22-other-active-claim-overridable"
+   :doc "Holding another active claim is a workflow denial a human may override"
+   :viewer {:role "implementer" :agent "me"}
+   :facts [{:e 1 "forward-complete" true "owned-claims-complete" true}
+           {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "reverse-complete" true "native-complete" true "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "status:ready" "labels-complete" true "open-blockers" 0 "force-request" true "force-operation" "claim" "force-reason" "valid" "force-agent" "known" "force-revision" "current"}
+           {:e 101 "kind" "issue" "state" "OPEN" "number" 2 "target" "https://github.com/o/r/issues/2" "created" 1767225600000 "reverse-complete" true "native-complete" true "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "status:ready" "labels-complete" true "open-blockers" 0 "owner" "me"}]
+   :expect {:actions [{:subject 101 :rule "D-OWN" :kind "continue-implementation" :band 6} {:subject 100 :rule "D-FORCE-OVERRIDE" :kind "force-allow" :band 1 :why "Workflow override requested for claim, overriding: FORCE-OTHER-ACTIVE-CLAIM. Overrides may only be used under explicit human direction. Inform your human which rules were overridden and what happened."} {:subject 100 :rule "D-ORDINARY" :kind "implement" :band 6}] :denials #{[101 "D-DENY-CLAIM"]}}}
+
+  {:id "f23-other-claim-activity-unknown-refused"
+   :doc "Another claim with unknown activity is missing evidence, never overridden"
+   :viewer {:role "implementer" :agent "me"}
+   :facts [{:e 1 "forward-complete" true "owned-claims-complete" true}
+           {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "reverse-complete" true "native-complete" true "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "status:ready" "labels-complete" true "open-blockers" 0 "force-request" true "force-operation" "claim" "force-reason" "valid" "force-agent" "known" "force-revision" "current"}
+           {:e 101 "kind" "issue" "state" "OPEN" "number" 2 "target" "https://github.com/o/r/issues/2" "created" 1767225600000 "reverse-complete" true "native-complete" true "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "status:ready" "labels-complete" true "open-blockers" 0 "owner" "me" "claim-activity" "unknown" "wait-reason" "unreadable"}]
+   :expect {:actions [{:subject 101 :rule "D-OWN-UNKNOWN" :kind "inspect" :band 3} {:subject 100 :rule "D-FORCE-REFUSE-TECHNICAL" :kind "force-refuse" :band 1 :why "Not overridable: FORCE-OTHER-ACTIVITY-UNKNOWN. Force cannot supply missing evidence or displace another owner's claim; nothing was changed."} {:subject 100 :rule "D-ORDINARY" :kind "implement" :band 6}] :denials #{[101 "D-DENY-CLAIM"]}}}
+
+  {:id "f24-other-resume-required-claim"
+   :doc "Another claim awaiting resume counts against admission like an active one"
+   :viewer {:role "implementer" :agent "me"}
+   :facts [{:e 1 "forward-complete" true "owned-claims-complete" true}
+           {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "reverse-complete" true "native-complete" true "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "status:ready" "labels-complete" true "open-blockers" 0 "force-request" true "force-operation" "claim" "force-reason" "valid" "force-agent" "known" "force-revision" "current"}
+           {:e 101 "kind" "issue" "state" "OPEN" "number" 2 "target" "https://github.com/o/r/issues/2" "created" 1767225600000 "reverse-complete" true "native-complete" true "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "status:ready" "labels-complete" true "open-blockers" 0 "owner" "me" "claim-activity" "resume-required" "wait-reason" "cleared"}]
+   :expect {:actions [{:subject 101 :rule "D-OWN-RESUME" :kind "resume-claim" :band 3} {:subject 100 :rule "D-FORCE-OVERRIDE" :kind "force-allow" :band 1 :why "Workflow override requested for claim, overriding: FORCE-OTHER-ACTIVE-CLAIM. Overrides may only be used under explicit human direction. Inform your human which rules were overridden and what happened."} {:subject 100 :rule "D-ORDINARY" :kind "implement" :band 6}] :denials #{[101 "D-DENY-CLAIM"]}}}
+
+  {:id "f25-resume-past-open-wait"
+   :doc "Forcing a resume past an open wait records the wait as overridden"
+   :viewer {:role "implementer" :agent "me"}
+   :facts [{:e 1 "forward-complete" true "owned-claims-complete" true}
+           {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "reverse-complete" true "native-complete" true "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "status:in-progress" "labels-complete" true "open-blockers" 0 "owner" "me" "claim-activity" "waiting" "wait-reason" "question" "force-request" true "force-operation" "resume" "force-reason" "valid" "force-agent" "known" "force-revision" "current"}]
+   :expect {:actions [{:subject 100 :rule "D-OWN-WAIT" :kind "wait-claim" :band 8} {:subject 100 :rule "D-FORCE-OVERRIDE" :kind "force-allow" :band 1 :why "Workflow override requested for resume, overriding: FORCE-WAIT-OPEN. Overrides may only be used under explicit human direction. Inform your human which rules were overridden and what happened."}] :denials #{}}}
+
+  {:id "f26-closed-ticket-refused"
+   :doc "A closed ticket is never claimed; force cannot reopen it"
+   :viewer {:role "implementer" :agent "me"}
+   :facts [{:e 1 "forward-complete" true "owned-claims-complete" true}
+           {:e 100 "kind" "issue" "state" "CLOSED" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "reverse-complete" true "native-complete" true "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "status:ready" "labels-complete" true "open-blockers" 0 "force-request" true "force-operation" "claim" "force-reason" "valid" "force-agent" "known" "force-revision" "current"}]
+   :expect {:actions [{:subject 100 :rule "D-FORCE-REFUSE-TECHNICAL" :kind "force-refuse" :band 1 :why "Not overridable: FORCE-TICKET-CLOSED. Force cannot supply missing evidence or displace another owner's claim; nothing was changed."}] :denials #{}}}
+
+  {:id "f27-resume-with-unresolved-question"
+   :doc "An unresolved trusted question blocks resume even without routing labels or a bound wait"
+   :viewer {:role "implementer" :agent "me"}
+   :facts [{:e 1 "forward-complete" true "owned-claims-complete" true}
+           {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "reverse-complete" true "native-complete" true "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "status:in-progress" "labels-complete" true "open-blockers" 0 "owner" "me" "claim-activity" "resume-required" "wait-reason" "cleared" "question-record" 300 "force-request" true "force-operation" "resume" "force-reason" "valid" "force-agent" "known" "force-revision" "current"}
+           {:e 300 "record-trust" "trusted" "record-version" 2 "record-outcome" "none" "record-to" "human"}]
+   :expect {:actions [{:subject 100 :rule "D-OWN-RESUME" :kind "resume-claim" :band 3} {:subject 100 :rule "D-FORCE-OVERRIDE" :kind "force-allow" :band 1 :why "Workflow override requested for resume, overriding: FORCE-QUESTION-OPEN. Overrides may only be used under explicit human direction. Inform your human which rules were overridden and what happened."}] :denials #{}}}
+
+  {:id "f28-resume-with-unknown-question"
+   :doc "An unverifiable question is missing evidence: force refuses rather than overriding it"
+   :viewer {:role "implementer" :agent "me"}
+   :facts [{:e 1 "forward-complete" true "owned-claims-complete" true}
+           {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "reverse-complete" true "native-complete" true "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "status:in-progress" "labels-complete" true "open-blockers" 0 "owner" "me" "claim-activity" "resume-required" "wait-reason" "cleared" "question-record" 300 "force-request" true "force-operation" "resume" "force-reason" "valid" "force-agent" "known" "force-revision" "current"}
+           {:e 300 "record-trust" "unverified" "record-version" 2 "record-outcome" "none" "record-to" "human"}]
+   :expect {:actions [{:subject 100 :rule "D-OWN-RESUME" :kind "resume-claim" :band 3} {:subject 100 :rule "D-FORCE-REFUSE-TECHNICAL" :kind "force-refuse" :band 1 :why "Not overridable: FORCE-QUESTION-UNKNOWN. Force cannot supply missing evidence or displace another owner's claim; nothing was changed."}] :denials #{}}}
+
+  {:id "f29-legacy-v1-question-skipped"
+   :doc "A legacy v1 question keeps label-based resolution: resume skips it, so it is no force denial"
+   :viewer {:role "implementer" :agent "me"}
+   :facts [{:e 1 "forward-complete" true "owned-claims-complete" true}
+           {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "reverse-complete" true "native-complete" true "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "status:in-progress" "labels-complete" true "open-blockers" 0 "owner" "me" "claim-activity" "resume-required" "wait-reason" "cleared" "question-record" 300 "force-request" true "force-operation" "resume" "force-reason" "valid" "force-agent" "known" "force-revision" "current"}
+           {:e 300 "record-trust" "unverified" "record-version" 1 "record-outcome" "none" "record-to" "human"}]
+   :expect {:actions [{:subject 100 :rule "D-OWN-RESUME" :kind "resume-claim" :band 3} {:subject 100 :rule "D-FORCE-NO-DENIAL" :kind "force-allow" :band 1 :why "No rule denied resume, so nothing is overridden; proceed as a normal resume."}] :denials #{}}}
+
+  {:id "f30-resume-released-since-snapshot"
+   :doc "A claim the live read found released is not retained: force cannot resume it"
+   :viewer {:role "implementer" :agent "me"}
+   :facts [{:e 1 "forward-complete" true "owned-claims-complete" true}
+           {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "reverse-complete" true "native-complete" true "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "status:ready" "labels-complete" true "open-blockers" 0 "owner" "me" "claim-activity" "not-owned" "force-request" true "force-operation" "resume" "force-reason" "valid" "force-agent" "known" "force-revision" "current"}]
+   :expect {:actions [{:subject 100 :rule "D-FORCE-REFUSE-TECHNICAL" :kind "force-refuse" :band 1 :why "Not overridable: D-DENY-CLAIM; FORCE-NOT-RETAINED. Force cannot supply missing evidence or displace another owner's claim; nothing was changed."}] :denials #{[100 "D-DENY-CLAIM"]}}}
+
+  {:id "f31-rework-by-legacy-handoff-authority"
+   :doc "Verified legacy (v1 done handoff) rework authority admits rework without delivery responsibility"
+   :viewer {:role "implementer" :agent "me"}
+   :facts [{:e 1 "forward-complete" true "owned-claims-complete" true}
+           {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "reverse-complete" true "native-complete" true "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "status:awaiting-review" "labels-complete" true "open-blockers" 0 "legacy-rework-agent" "me" "closing" 500 "force-request" true "force-operation" "rework" "force-reason" "valid" "force-agent" "known" "force-revision" "current"}
+           {:e 500 "state" "OPEN"}]
+   :expect {:actions [{:subject 100 :rule "D-FORCE-NO-DENIAL" :kind "force-allow" :band 1 :why "No rule denied rework, so nothing is overridden; proceed as a normal rework."}] :denials #{}}}
+
+  {:id "f32-resume-ignores-platform-restriction"
+   :doc "Resume never checks platform, so a platform-restricted retained claim needs no override"
+   :viewer {:role "implementer" :agent "me" :platform ""}
+   :facts [{:e 1 "forward-complete" true "owned-claims-complete" true}
+           {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "reverse-complete" true "native-complete" true "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "status:ready" "labels-complete" true "open-blockers" 0 "owner" "me" "platform" "kilo" "force-request" true "force-operation" "resume" "force-reason" "valid" "force-agent" "known" "force-revision" "current"}]
+   :expect {:actions [{:subject 100 :rule "D-OWN" :kind "continue-implementation" :band 6} {:subject 100 :rule "D-FORCE-NO-DENIAL" :kind "force-allow" :band 1 :why "No rule denied resume, so nothing is overridden; proceed as a normal resume."}] :denials #{[100 "D-DENY-CLAIM"] [100 "D-DENY-PLATFORM"]}}}
+
+  {:id "f33-resume-ignores-closing-completeness"
+   :doc "Resume never needs closing-PR evidence, so its absence is no force denial"
+   :viewer {:role "implementer" :agent "me"}
+   :facts [{:e 1 "owned-claims-complete" true}
+           {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "native-complete" true "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "status:ready" "labels-complete" true "open-blockers" 0 "owner" "me" "claim-activity" "resume-required" "wait-reason" "cleared" "force-request" true "force-operation" "resume" "force-reason" "valid" "force-agent" "known" "force-revision" "current"}]
+   :expect {:actions [{:subject 100 :rule "D-OWN-RESUME" :kind "resume-claim" :band 3} {:subject 100 :rule "D-FORCE-NO-DENIAL" :kind "force-allow" :band 1 :why "No rule denied resume, so nothing is overridden; proceed as a normal resume."}] :denials #{[100 "D-DENY-CLAIM"] [100 "D-DENY-CLOSING-UNKNOWN"]}}}
+
+  {:id "f34-idempotent-claim-of-own-ticket"
+   :doc "Claiming a ticket the caller already holds exclusively is the normal no-op, not a denial"
+   :viewer {:role "implementer" :agent "me"}
+   :facts [{:e 1 "forward-complete" true "owned-claims-complete" true}
+           {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "reverse-complete" true "native-complete" true "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "status:ready" "labels-complete" true "open-blockers" 0 "owner" "me" "claim-history-complete" true "claim-marker-trust" "trusted" "force-request" true "force-operation" "claim" "force-reason" "valid" "force-agent" "known" "force-revision" "current"}]
+   :expect {:actions [{:subject 100 :rule "D-OWN" :kind "continue-implementation" :band 6} {:subject 100 :rule "D-FORCE-NO-DENIAL" :kind "force-allow" :band 1 :why "No rule denied claim, so nothing is overridden; proceed as a normal claim."}] :denials #{[100 "D-DENY-CLAIM"]}}}
+
+  {:id "f35-idempotent-claim-skips-acquisition-checks"
+   :doc "An already-held claim retry applies no readiness or blocker checks"
+   :viewer {:role "implementer" :agent "me"}
+   :facts [{:e 1 "forward-complete" true "owned-claims-complete" true}
+           {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "reverse-complete" true "native-complete" true "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "status:in-progress" "labels-complete" true "open-blockers" 1 "owner" "me" "claim-history-complete" true "claim-marker-trust" "trusted" "force-request" true "force-operation" "claim" "force-reason" "valid" "force-agent" "known" "force-revision" "current"}]
+   :expect {:actions [{:subject 100 :rule "D-OWN-HELD-BACK" :kind "inspect" :band 3} {:subject 100 :rule "D-FORCE-NO-DENIAL" :kind "force-allow" :band 1 :why "No rule denied claim, so nothing is overridden; proceed as a normal claim."}] :denials #{}}}
+
+  {:id "f36-resume-ignores-unknown-refinement"
+   :doc "Resume does not inspect refinement records"
+   :viewer {:role "implementer" :agent "me"}
+   :facts [{:e 1 "forward-complete" true "owned-claims-complete" true}
+           {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "reverse-complete" true "native-complete" true "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "status:in-progress" "labels-complete" true "open-blockers" 0 "owner" "me" "claim-activity" "resume-required" "wait-reason" "cleared" "refinement" 200 "force-request" true "force-operation" "resume" "force-reason" "valid" "force-agent" "known" "force-revision" "current"}
+           {:e 200 "refinement-state" "unknown"}]
+   :expect {:actions [{:subject 100 :rule "D-OWN-RESUME" :kind "resume-claim" :band 3} {:subject 100 :rule "D-FORCE-NO-DENIAL" :kind "force-allow" :band 1 :why "No rule denied resume, so nothing is overridden; proceed as a normal resume."}] :denials #{}}}
+
+  {:id "f37-idempotent-claim-keeps-label-evidence"
+   :doc "An already-held claim retry with incomplete labels is refused: another owner cannot be ruled out"
+   :viewer {:role "implementer" :agent "me"}
+   :facts [{:e 1 "forward-complete" true "owned-claims-complete" true}
+           {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "reverse-complete" true "native-complete" true "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "status:ready" "labels-complete" false "open-blockers" 0 "owner" "me" "claim-history-complete" true "claim-marker-trust" "trusted" "force-request" true "force-operation" "claim" "force-reason" "valid" "force-agent" "known" "force-revision" "current"}]
+   :expect {:actions [{:subject 100 :rule "D-OWN" :kind "continue-implementation" :band 6} {:subject 100 :rule "D-FORCE-REFUSE-TECHNICAL" :kind "force-refuse" :band 1 :why "Not overridable: D-DENY-LABELS-UNKNOWN. Force cannot supply missing evidence or displace another owner's claim; nothing was changed."}] :denials #{[100 "D-DENY-CLAIM"] [100 "D-DENY-LABELS-UNKNOWN"] [100 "D-DENY-PLATFORM"]}}}
+
+  {:id "f38-resume-already-active-is-noop"
+   :doc "Resuming an already-active claim is the normal no-op: blockers and native evidence are never reached"
+   :viewer {:role "implementer" :agent "me"}
+   :facts [{:e 1 "forward-complete" true "owned-claims-complete" true}
+           {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "reverse-complete" true "native-complete" true "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "status:ready" "labels-complete" true "native-complete" false "open-blockers" 1 "owner" "me" "claim-activity" "active" "force-request" true "force-operation" "resume" "force-reason" "valid" "force-agent" "known" "force-revision" "current"}]
+   :expect {:actions [{:subject 100 :rule "D-OWN-HELD-BACK" :kind "inspect" :band 3} {:subject 100 :rule "D-FORCE-NO-DENIAL" :kind "force-allow" :band 1 :why "No rule denied resume, so nothing is overridden; proceed as a normal resume."}] :denials #{[100 "D-DENY-BLOCKER"] [100 "D-DENY-CLAIM"] [100 "D-DENY-NATIVE-UNKNOWN"]}}}
+
+  {:id "f39-rework-retry-of-owned-ticket"
+   :doc "A rework retry of a ticket the caller already holds takes the no-op path before acquisition checks"
+   :viewer {:role "implementer" :agent "me"}
+   :facts [{:e 1 "forward-complete" true "owned-claims-complete" true}
+           {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "reverse-complete" true "native-complete" true "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "status:ready" "labels-complete" true "native-complete" false "open-blockers" 0 "owner" "me" "claim-history-complete" true "claim-marker-trust" "trusted" "force-request" true "force-operation" "rework" "force-reason" "valid" "force-agent" "known" "force-revision" "current"}]
+   :expect {:actions [{:subject 100 :rule "D-OWN" :kind "continue-implementation" :band 6} {:subject 100 :rule "D-FORCE-NO-DENIAL" :kind "force-allow" :band 1 :why "No rule denied rework, so nothing is overridden; proceed as a normal rework."}] :denials #{[100 "D-DENY-CLAIM"] [100 "D-DENY-NATIVE-UNKNOWN"]}}}
+
+  {:id "f40-owned-retry-needs-claim-history"
+   :doc "An owned claim retry with unreadable claim history is refused: it cannot be verified or repaired"
+   :viewer {:role "implementer" :agent "me"}
+   :facts [{:e 1 "forward-complete" true "owned-claims-complete" true}
+           {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "reverse-complete" true "native-complete" true "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "status:ready" "labels-complete" true "open-blockers" 0 "owner" "me" "claim-history-complete" false "claim-marker-trust" "trusted" "force-request" true "force-operation" "claim" "force-reason" "valid" "force-agent" "known" "force-revision" "current"}]
+   :expect {:actions [{:subject 100 :rule "D-OWN" :kind "continue-implementation" :band 6} {:subject 100 :rule "D-FORCE-REFUSE-TECHNICAL" :kind "force-refuse" :band 1 :why "Not overridable: FORCE-HISTORY-UNKNOWN. Force cannot supply missing evidence or displace another owner's claim; nothing was changed."}] :denials #{[100 "D-DENY-CLAIM"]}}}
+
+  {:id "f41-owned-retry-ignores-unknown-refinement"
+   :doc "An owned rework retry does not inspect refinement evidence"
+   :viewer {:role "implementer" :agent "me"}
+   :facts [{:e 1 "forward-complete" true "owned-claims-complete" true}
+           {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "reverse-complete" true "native-complete" true "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "status:ready" "labels-complete" true "open-blockers" 0 "owner" "me" "claim-history-complete" true "claim-marker-trust" "trusted" "refinement" 200 "force-request" true "force-operation" "rework" "force-reason" "valid" "force-agent" "known" "force-revision" "current"}
+           {:e 200 "refinement-state" "unknown"}]
+   :expect {:actions [{:subject 100 :rule "D-OWN-HELD-BACK" :kind "inspect" :band 3} {:subject 100 :rule "D-FORCE-NO-DENIAL" :kind "force-allow" :band 1 :why "No rule denied rework, so nothing is overridden; proceed as a normal rework."}] :denials #{[100 "D-DENY-CLAIM"] [100 "D-DENY-REFINEMENT"]}}}
+
+  {:id "f42-owned-retry-without-complete-inventory"
+   :doc "An owned retry with no observed other claims does not need a complete inventory (planClaimFor)"
+   :viewer {:role "implementer" :agent "me"}
+   :facts [{:e 1 "forward-complete" true "owned-claims-complete" false}
+           {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "reverse-complete" true "native-complete" true "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "status:ready" "labels-complete" true "open-blockers" 0 "owner" "me" "claim-history-complete" true "claim-marker-trust" "trusted" "force-request" true "force-operation" "claim" "force-reason" "valid" "force-agent" "known" "force-revision" "current"}]
+   :expect {:actions [{:subject 100 :rule "D-OWN" :kind "continue-implementation" :band 6} {:subject 100 :rule "D-FORCE-NO-DENIAL" :kind "force-allow" :band 1 :why "No rule denied claim, so nothing is overridden; proceed as a normal claim."}] :denials #{[100 "D-DENY-CLAIM"]}}}
+
+  {:id "f43-owned-retry-with-other-claim-needs-inventory"
+   :doc "An owned retry with another observed own claim still needs a complete inventory"
+   :viewer {:role "implementer" :agent "me"}
+   :facts [{:e 1 "forward-complete" true "owned-claims-complete" false}
+           {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "reverse-complete" true "native-complete" true "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "status:ready" "labels-complete" true "open-blockers" 0 "owner" "me" "claim-history-complete" true "claim-marker-trust" "trusted" "force-request" true "force-operation" "claim" "force-reason" "valid" "force-agent" "known" "force-revision" "current"}
+           {:e 101 "kind" "issue" "state" "OPEN" "number" 2 "target" "https://github.com/o/r/issues/2" "created" 1767225600000 "reverse-complete" true "native-complete" true "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "status:ready" "labels-complete" true "open-blockers" 0 "owner" "me" "claim-activity" "waiting" "wait-reason" "question"}]
+   :expect {:actions [{:subject 100 :rule "D-OWN" :kind "continue-implementation" :band 6} {:subject 101 :rule "D-OWN-WAIT" :kind "wait-claim" :band 8} {:subject 100 :rule "D-FORCE-REFUSE-TECHNICAL" :kind "force-refuse" :band 1 :why "Not overridable: CLAIM-INVENTORY-UNKNOWN. Force cannot supply missing evidence or displace another owner's claim; nothing was changed."}] :denials #{[100 "D-DENY-CLAIM"] [101 "D-DENY-CLAIM"]}}}
+
+  {:id "f44-owned-retry-needs-trusted-marker"
+   :doc "Readable history does not establish authority: an unverified claim marker refuses the retry"
+   :viewer {:role "implementer" :agent "me"}
+   :facts [{:e 1 "forward-complete" true "owned-claims-complete" true}
+           {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "reverse-complete" true "native-complete" true "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "status:ready" "labels-complete" true "open-blockers" 0 "owner" "me" "claim-history-complete" true "claim-marker-trust" "unknown" "force-request" true "force-operation" "claim" "force-reason" "valid" "force-agent" "known" "force-revision" "current"}]
+   :expect {:actions [{:subject 100 :rule "D-OWN" :kind "continue-implementation" :band 6} {:subject 100 :rule "D-FORCE-REFUSE-TECHNICAL" :kind "force-refuse" :band 1 :why "Not overridable: FORCE-MARKER-UNVERIFIED. Force cannot supply missing evidence or displace another owner's claim; nothing was changed."}] :denials #{[100 "D-DENY-CLAIM"]}}}
+
+  {:id "f45-owned-retry-repairs-absent-marker"
+   :doc "A marker verified absent after a complete history read is the comment-repair path, not missing authority"
+   :viewer {:role "implementer" :agent "me"}
+   :facts [{:e 1 "forward-complete" true "owned-claims-complete" true}
+           {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "reverse-complete" true "native-complete" true "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "status:ready" "labels-complete" true "open-blockers" 0 "owner" "me" "claim-history-complete" true "claim-marker-trust" "absent" "force-request" true "force-operation" "claim" "force-reason" "valid" "force-agent" "known" "force-revision" "current"}]
+   :expect {:actions [{:subject 100 :rule "D-OWN" :kind "continue-implementation" :band 6} {:subject 100 :rule "D-FORCE-NO-DENIAL" :kind "force-allow" :band 1 :why "No rule denied claim, so nothing is overridden; proceed as a normal claim."}] :denials #{[100 "D-DENY-CLAIM"]}}}]}

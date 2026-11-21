@@ -1,8 +1,8 @@
 {
   "modelVersion": 3,
   "policyVersion": 1,
-  "rulesHash": "9c45327936d5e24fc52c7c7b7731b20c9d43e704d8bbb1dd02633934e109b7cc",
-  "narrationHash": "e4bc70c110f84ff411cbb86bccccfb76d445968e111122b304cecc0b5f8adcc9",
+  "rulesHash": "8b6fa1741f05623b8a895d9d5d27bbce73580f4718bf32d226a9a0135d1bdd35",
+  "narrationHash": "4e8d14c3b3ee3de705cbd5c3c77081fa1930f1970e003b65a01b098cbce3b5fb",
   "sources": [
     "policy/schema.edn",
     "policy/rules.edn",
@@ -28,6 +28,13 @@
       "trusted-human-context": "verified same-origin explicit human-mode request",
       "permission": "verified repository write permission for the serving user",
       "override-unknown-history": "explicit human override when claim history is incomplete",
+      "force-request": "explicit human-directed workflow override requested for this subject",
+      "force-operation": "workflow operation a force request applies to",
+      "force-reason": "validity of the supplied force reason (valid, empty or oversized)",
+      "force-revision": "whether the subject and ownership revision the request was made against is current or stale",
+      "force-agent": "whether the acting agent identity is known or unknown",
+      "claim-marker-trust": "trust of the caller's matching claim marker (trusted, absent after a complete history read, or unknown)",
+      "legacy-rework-agent": "agent with verified legacy (v1 done handoff) rework authority on the ticket",
       "active-count": "number of active dependents",
       "active-dependent": "active dependent",
       "assessment-kind": "assessment action kind",
@@ -6122,6 +6129,822 @@
         "file": "policy/decisions.edn",
         "index": 56
       }
+    },
+    {
+      "id": "D-FORCE-REFUSE-UNSUPPORTED",
+      "purpose": "Refuse a workflow override for an operation without a native override decision and execution path.",
+      "kind": "force-refuse",
+      "band": 1,
+      "preference": 1,
+      "codes": ["force", "refuse", "unsupported"],
+      "roles": null,
+      "clauses": [
+        {
+          "type": "call",
+          "predicate": "foreground",
+          "args": [
+            {
+              "var": "?t"
+            }
+          ]
+        },
+        {
+          "type": "fact",
+          "scope": "viewer",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "role",
+          "value": {
+            "var": "?role"
+          },
+          "phrase": "role",
+          "many": false
+        },
+        {
+          "type": "compare",
+          "op": "not=",
+          "args": [
+            {
+              "var": "?role"
+            },
+            {
+              "lit": "human"
+            }
+          ]
+        },
+        {
+          "type": "call",
+          "predicate": "issue",
+          "args": [
+            {
+              "var": "?t"
+            }
+          ]
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?t"
+          },
+          "attribute": "force-request",
+          "value": {
+            "lit": true
+          },
+          "phrase": "explicit human-directed workflow override requested for this subject",
+          "many": false
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?t"
+          },
+          "attribute": "force-operation",
+          "value": {
+            "var": "?op"
+          },
+          "phrase": "workflow operation a force request applies to",
+          "many": false
+        },
+        {
+          "type": "not",
+          "join": null,
+          "body": [
+            {
+              "type": "call",
+              "predicate": "force-supported",
+              "args": [
+                {
+                  "var": "?t"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "templateClauses": 1,
+      "calls": ["foreground", "issue", "force-supported"],
+      "evidence": [
+        {
+          "name": "operation",
+          "scope": "rule",
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "force-operation",
+              "value": {
+                "var": "?value"
+              },
+              "phrase": "workflow operation a force request applies to",
+              "many": false
+            }
+          ]
+        }
+      ],
+      "source": {
+        "file": "policy/decisions.edn",
+        "index": 57
+      }
+    },
+    {
+      "id": "D-FORCE-REFUSE-REASON",
+      "purpose": "Refuse a workflow override whose reason is empty, whitespace-only or over the size bound, before any mutation.",
+      "kind": "force-refuse",
+      "band": 1,
+      "preference": 1,
+      "codes": ["force", "refuse", "reason"],
+      "roles": null,
+      "clauses": [
+        {
+          "type": "call",
+          "predicate": "foreground",
+          "args": [
+            {
+              "var": "?t"
+            }
+          ]
+        },
+        {
+          "type": "fact",
+          "scope": "viewer",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "role",
+          "value": {
+            "var": "?role"
+          },
+          "phrase": "role",
+          "many": false
+        },
+        {
+          "type": "compare",
+          "op": "not=",
+          "args": [
+            {
+              "var": "?role"
+            },
+            {
+              "lit": "human"
+            }
+          ]
+        },
+        {
+          "type": "call",
+          "predicate": "issue",
+          "args": [
+            {
+              "var": "?t"
+            }
+          ]
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?t"
+          },
+          "attribute": "force-request",
+          "value": {
+            "lit": true
+          },
+          "phrase": "explicit human-directed workflow override requested for this subject",
+          "many": false
+        },
+        {
+          "type": "call",
+          "predicate": "force-supported",
+          "args": [
+            {
+              "var": "?t"
+            }
+          ]
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?t"
+          },
+          "attribute": "force-reason",
+          "value": {
+            "var": "?r"
+          },
+          "phrase": "validity of the supplied force reason (valid, empty or oversized)",
+          "many": false
+        },
+        {
+          "type": "compare",
+          "op": "not=",
+          "args": [
+            {
+              "var": "?r"
+            },
+            {
+              "lit": "valid"
+            }
+          ]
+        }
+      ],
+      "templateClauses": 1,
+      "calls": ["foreground", "issue", "force-supported"],
+      "evidence": [
+        {
+          "name": "reason",
+          "scope": "rule",
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "force-reason",
+              "value": {
+                "var": "?value"
+              },
+              "phrase": "validity of the supplied force reason (valid, empty or oversized)",
+              "many": false
+            }
+          ]
+        }
+      ],
+      "source": {
+        "file": "policy/decisions.edn",
+        "index": 58
+      }
+    },
+    {
+      "id": "D-FORCE-REFUSE-AGENT",
+      "purpose": "Refuse a workflow override when the acting agent is unknown; force never invents or borrows an identity.",
+      "kind": "force-refuse",
+      "band": 1,
+      "preference": 1,
+      "codes": ["force", "refuse", "agent"],
+      "roles": null,
+      "clauses": [
+        {
+          "type": "call",
+          "predicate": "foreground",
+          "args": [
+            {
+              "var": "?t"
+            }
+          ]
+        },
+        {
+          "type": "fact",
+          "scope": "viewer",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "role",
+          "value": {
+            "var": "?role"
+          },
+          "phrase": "role",
+          "many": false
+        },
+        {
+          "type": "compare",
+          "op": "not=",
+          "args": [
+            {
+              "var": "?role"
+            },
+            {
+              "lit": "human"
+            }
+          ]
+        },
+        {
+          "type": "call",
+          "predicate": "issue",
+          "args": [
+            {
+              "var": "?t"
+            }
+          ]
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?t"
+          },
+          "attribute": "force-request",
+          "value": {
+            "lit": true
+          },
+          "phrase": "explicit human-directed workflow override requested for this subject",
+          "many": false
+        },
+        {
+          "type": "call",
+          "predicate": "force-supported",
+          "args": [
+            {
+              "var": "?t"
+            }
+          ]
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?t"
+          },
+          "attribute": "force-reason",
+          "value": {
+            "lit": "valid"
+          },
+          "phrase": "validity of the supplied force reason (valid, empty or oversized)",
+          "many": false
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?t"
+          },
+          "attribute": "force-agent",
+          "value": {
+            "lit": "unknown"
+          },
+          "phrase": "whether the acting agent identity is known or unknown",
+          "many": false
+        }
+      ],
+      "templateClauses": 1,
+      "calls": ["foreground", "issue", "force-supported"],
+      "evidence": [],
+      "source": {
+        "file": "policy/decisions.edn",
+        "index": 59
+      }
+    },
+    {
+      "id": "D-FORCE-REFUSE-STALE",
+      "purpose": "Refuse a workflow override made against a stale subject or ownership revision; a new decision is needed.",
+      "kind": "force-refuse",
+      "band": 1,
+      "preference": 1,
+      "codes": ["force", "refuse", "stale"],
+      "roles": null,
+      "clauses": [
+        {
+          "type": "call",
+          "predicate": "foreground",
+          "args": [
+            {
+              "var": "?t"
+            }
+          ]
+        },
+        {
+          "type": "fact",
+          "scope": "viewer",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "role",
+          "value": {
+            "var": "?role"
+          },
+          "phrase": "role",
+          "many": false
+        },
+        {
+          "type": "compare",
+          "op": "not=",
+          "args": [
+            {
+              "var": "?role"
+            },
+            {
+              "lit": "human"
+            }
+          ]
+        },
+        {
+          "type": "call",
+          "predicate": "issue",
+          "args": [
+            {
+              "var": "?t"
+            }
+          ]
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?t"
+          },
+          "attribute": "force-request",
+          "value": {
+            "lit": true
+          },
+          "phrase": "explicit human-directed workflow override requested for this subject",
+          "many": false
+        },
+        {
+          "type": "call",
+          "predicate": "force-supported",
+          "args": [
+            {
+              "var": "?t"
+            }
+          ]
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?t"
+          },
+          "attribute": "force-reason",
+          "value": {
+            "lit": "valid"
+          },
+          "phrase": "validity of the supplied force reason (valid, empty or oversized)",
+          "many": false
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?t"
+          },
+          "attribute": "force-agent",
+          "value": {
+            "lit": "known"
+          },
+          "phrase": "whether the acting agent identity is known or unknown",
+          "many": false
+        },
+        {
+          "type": "fact",
+          "scope": "entity",
+          "entity": {
+            "var": "?t"
+          },
+          "attribute": "force-revision",
+          "value": {
+            "lit": "stale"
+          },
+          "phrase": "whether the subject and ownership revision the request was made against is current or stale",
+          "many": false
+        }
+      ],
+      "templateClauses": 1,
+      "calls": ["foreground", "issue", "force-supported"],
+      "evidence": [],
+      "source": {
+        "file": "policy/decisions.edn",
+        "index": 60
+      }
+    },
+    {
+      "id": "D-FORCE-REFUSE-TECHNICAL",
+      "purpose": "Refuse a workflow override when a denial is missing evidence, another owner's claim or an incomplete inventory, which force cannot override.",
+      "kind": "force-refuse",
+      "band": 1,
+      "preference": 1,
+      "codes": ["force", "refuse", "technical"],
+      "roles": null,
+      "clauses": [
+        {
+          "type": "call",
+          "predicate": "foreground",
+          "args": [
+            {
+              "var": "?t"
+            }
+          ]
+        },
+        {
+          "type": "fact",
+          "scope": "viewer",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "role",
+          "value": {
+            "var": "?role"
+          },
+          "phrase": "role",
+          "many": false
+        },
+        {
+          "type": "compare",
+          "op": "not=",
+          "args": [
+            {
+              "var": "?role"
+            },
+            {
+              "lit": "human"
+            }
+          ]
+        },
+        {
+          "type": "call",
+          "predicate": "issue",
+          "args": [
+            {
+              "var": "?t"
+            }
+          ]
+        },
+        {
+          "type": "call",
+          "predicate": "force-ready",
+          "args": [
+            {
+              "var": "?t"
+            }
+          ]
+        },
+        {
+          "type": "call",
+          "predicate": "force-technical",
+          "args": [
+            {
+              "var": "?t"
+            }
+          ]
+        }
+      ],
+      "templateClauses": 1,
+      "calls": ["foreground", "issue", "force-ready", "force-technical"],
+      "evidence": [
+        {
+          "name": "rules",
+          "scope": "rule",
+          "clauses": [
+            {
+              "type": "call",
+              "predicate": "force-denial",
+              "args": [
+                {
+                  "var": "?t"
+                },
+                {
+                  "var": "?value"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "source": {
+        "file": "policy/decisions.edn",
+        "index": 61
+      }
+    },
+    {
+      "id": "D-FORCE-NO-DENIAL",
+      "purpose": "Record that a forced operation needed no override because native admission already allows it.",
+      "kind": "force-allow",
+      "band": 1,
+      "preference": 1,
+      "codes": ["force", "allow", "no-denial"],
+      "roles": null,
+      "clauses": [
+        {
+          "type": "call",
+          "predicate": "foreground",
+          "args": [
+            {
+              "var": "?t"
+            }
+          ]
+        },
+        {
+          "type": "fact",
+          "scope": "viewer",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "role",
+          "value": {
+            "var": "?role"
+          },
+          "phrase": "role",
+          "many": false
+        },
+        {
+          "type": "compare",
+          "op": "not=",
+          "args": [
+            {
+              "var": "?role"
+            },
+            {
+              "lit": "human"
+            }
+          ]
+        },
+        {
+          "type": "call",
+          "predicate": "issue",
+          "args": [
+            {
+              "var": "?t"
+            }
+          ]
+        },
+        {
+          "type": "call",
+          "predicate": "force-ready",
+          "args": [
+            {
+              "var": "?t"
+            }
+          ]
+        },
+        {
+          "type": "not",
+          "join": null,
+          "body": [
+            {
+              "type": "call",
+              "predicate": "force-denied",
+              "args": [
+                {
+                  "var": "?t"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "templateClauses": 1,
+      "calls": ["foreground", "issue", "force-ready", "force-denied"],
+      "evidence": [
+        {
+          "name": "operation",
+          "scope": "rule",
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "force-operation",
+              "value": {
+                "var": "?value"
+              },
+              "phrase": "workflow operation a force request applies to",
+              "many": false
+            }
+          ]
+        }
+      ],
+      "source": {
+        "file": "policy/decisions.edn",
+        "index": 62
+      }
+    },
+    {
+      "id": "D-FORCE-OVERRIDE",
+      "purpose": "Admit a human-directed override of workflow-policy denials, listing every overridden rule for the audit and the human.",
+      "kind": "force-allow",
+      "band": 1,
+      "preference": 1,
+      "codes": ["force", "allow", "override"],
+      "roles": null,
+      "clauses": [
+        {
+          "type": "call",
+          "predicate": "foreground",
+          "args": [
+            {
+              "var": "?t"
+            }
+          ]
+        },
+        {
+          "type": "fact",
+          "scope": "viewer",
+          "entity": {
+            "lit": 1
+          },
+          "attribute": "role",
+          "value": {
+            "var": "?role"
+          },
+          "phrase": "role",
+          "many": false
+        },
+        {
+          "type": "compare",
+          "op": "not=",
+          "args": [
+            {
+              "var": "?role"
+            },
+            {
+              "lit": "human"
+            }
+          ]
+        },
+        {
+          "type": "call",
+          "predicate": "issue",
+          "args": [
+            {
+              "var": "?t"
+            }
+          ]
+        },
+        {
+          "type": "call",
+          "predicate": "force-ready",
+          "args": [
+            {
+              "var": "?t"
+            }
+          ]
+        },
+        {
+          "type": "call",
+          "predicate": "force-denied",
+          "args": [
+            {
+              "var": "?t"
+            }
+          ]
+        },
+        {
+          "type": "not",
+          "join": null,
+          "body": [
+            {
+              "type": "call",
+              "predicate": "force-technical",
+              "args": [
+                {
+                  "var": "?t"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "templateClauses": 1,
+      "calls": ["foreground", "issue", "force-ready", "force-denied", "force-technical"],
+      "evidence": [
+        {
+          "name": "operation",
+          "scope": "rule",
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "force-operation",
+              "value": {
+                "var": "?value"
+              },
+              "phrase": "workflow operation a force request applies to",
+              "many": false
+            }
+          ]
+        },
+        {
+          "name": "rules",
+          "scope": "rule",
+          "clauses": [
+            {
+              "type": "call",
+              "predicate": "force-denial",
+              "args": [
+                {
+                  "var": "?t"
+                },
+                {
+                  "var": "?value"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "source": {
+        "file": "policy/decisions.edn",
+        "index": 63
+      }
     }
   ],
   "predicates": [
@@ -6827,6 +7650,28 @@
           "params": ["?t"],
           "clauses": [
             {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "force-request",
+              "value": {
+                "lit": true
+              },
+              "phrase": "explicit human-directed workflow override requested for this subject",
+              "many": false
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 17
+          }
+        },
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
               "type": "call",
               "predicate": "open",
               "args": [
@@ -6851,7 +7696,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 17
+            "index": 18
           }
         },
         {
@@ -6882,7 +7727,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 24
+            "index": 25
           }
         }
       ],
@@ -6945,7 +7790,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 18
+            "index": 19
           }
         }
       ],
@@ -6990,7 +7835,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 19
+            "index": 20
           }
         },
         {
@@ -7021,7 +7866,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 20
+            "index": 21
           }
         }
       ],
@@ -7056,7 +7901,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 21
+            "index": 22
           }
         },
         {
@@ -7083,7 +7928,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 22
+            "index": 23
           }
         },
         {
@@ -7110,7 +7955,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 217
+            "index": 277
           }
         }
       ],
@@ -7181,7 +8026,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 23
+            "index": 24
           }
         }
       ],
@@ -7230,7 +8075,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 25
+            "index": 26
           }
         },
         {
@@ -7265,7 +8110,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 26
+            "index": 27
           }
         }
       ],
@@ -7308,7 +8153,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 27
+            "index": 28
           }
         }
       ],
@@ -7338,7 +8183,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 28
+            "index": 29
           }
         },
         {
@@ -7360,7 +8205,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 29
+            "index": 30
           }
         }
       ],
@@ -7403,7 +8248,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 30
+            "index": 31
           }
         }
       ],
@@ -7433,7 +8278,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 31
+            "index": 32
           }
         },
         {
@@ -7464,7 +8309,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 32
+            "index": 33
           }
         }
       ],
@@ -7494,7 +8339,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 33
+            "index": 34
           }
         },
         {
@@ -7529,7 +8374,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 34
+            "index": 35
           }
         }
       ],
@@ -7664,7 +8509,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 35
+            "index": 36
           }
         }
       ],
@@ -7716,7 +8561,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 36
+            "index": 37
           }
         },
         {
@@ -7751,7 +8596,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 37
+            "index": 38
           }
         }
       ],
@@ -7795,7 +8640,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 38
+            "index": 39
           }
         },
         {
@@ -7813,7 +8658,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 39
+            "index": 40
           }
         }
       ],
@@ -7858,7 +8703,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 40
+            "index": 41
           }
         },
         {
@@ -7895,7 +8740,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 41
+            "index": 42
           }
         },
         {
@@ -7947,7 +8792,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 42
+            "index": 43
           }
         },
         {
@@ -7984,7 +8829,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 43
+            "index": 44
           }
         },
         {
@@ -8025,7 +8870,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 44
+            "index": 45
           }
         },
         {
@@ -8066,7 +8911,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 45
+            "index": 46
           }
         },
         {
@@ -8109,7 +8954,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 46
+            "index": 47
           }
         },
         {
@@ -8152,7 +8997,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 47
+            "index": 48
           }
         },
         {
@@ -8226,7 +9071,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 48
+            "index": 49
           }
         },
         {
@@ -8362,7 +9207,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 49
+            "index": 50
           }
         },
         {
@@ -8399,7 +9244,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 50
+            "index": 51
           }
         },
         {
@@ -8436,7 +9281,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 51
+            "index": 52
           }
         },
         {
@@ -8477,7 +9322,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 52
+            "index": 53
           }
         }
       ],
@@ -8520,7 +9365,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 53
+            "index": 54
           }
         },
         {
@@ -8542,7 +9387,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 54
+            "index": 55
           }
         }
       ],
@@ -8571,7 +9416,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 55
+            "index": 56
           }
         },
         {
@@ -8636,7 +9481,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 56
+            "index": 57
           }
         },
         {
@@ -8694,7 +9539,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 57
+            "index": 58
           }
         }
       ],
@@ -8723,11 +9568,3165 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 58
+            "index": 59
           }
         }
       ],
       "calls": ["implementation-deny"],
+      "set": "rules"
+    },
+    {
+      "name": "force-supported",
+      "params": ["?t"],
+      "alternatives": [
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "force-operation",
+              "value": {
+                "lit": "claim"
+              },
+              "phrase": "workflow operation a force request applies to",
+              "many": false
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 60
+          }
+        },
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "force-operation",
+              "value": {
+                "lit": "resume"
+              },
+              "phrase": "workflow operation a force request applies to",
+              "many": false
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 61
+          }
+        },
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "force-operation",
+              "value": {
+                "lit": "rework"
+              },
+              "phrase": "workflow operation a force request applies to",
+              "many": false
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 62
+          }
+        }
+      ],
+      "calls": [],
+      "set": "rules"
+    },
+    {
+      "name": "force-continuation",
+      "params": ["?t"],
+      "alternatives": [
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "force-operation",
+              "value": {
+                "lit": "resume"
+              },
+              "phrase": "workflow operation a force request applies to",
+              "many": false
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 63
+          }
+        },
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "force-operation",
+              "value": {
+                "lit": "rework"
+              },
+              "phrase": "workflow operation a force request applies to",
+              "many": false
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 64
+          }
+        }
+      ],
+      "calls": [],
+      "set": "rules"
+    },
+    {
+      "name": "force-other-owner",
+      "params": ["?t"],
+      "alternatives": [
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "owner",
+              "value": {
+                "var": "?o"
+              },
+              "phrase": "claiming agent",
+              "many": true
+            },
+            {
+              "type": "fact",
+              "scope": "viewer",
+              "entity": {
+                "lit": 1
+              },
+              "attribute": "agent",
+              "value": {
+                "var": "?a"
+              },
+              "phrase": "agent name",
+              "many": false
+            },
+            {
+              "type": "compare",
+              "op": "not=",
+              "args": [
+                {
+                  "var": "?o"
+                },
+                {
+                  "var": "?a"
+                }
+              ]
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 65
+          }
+        }
+      ],
+      "calls": [],
+      "set": "rules"
+    },
+    {
+      "name": "force-own-continuation",
+      "params": ["?t"],
+      "alternatives": [
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "force-operation",
+              "value": {
+                "lit": "claim"
+              },
+              "phrase": "workflow operation a force request applies to",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "viewer",
+              "entity": {
+                "lit": 1
+              },
+              "attribute": "agent",
+              "value": {
+                "var": "?a"
+              },
+              "phrase": "agent name",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "owner",
+              "value": {
+                "var": "?a"
+              },
+              "phrase": "claiming agent",
+              "many": true
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "call",
+                  "predicate": "force-other-owner",
+                  "args": [
+                    {
+                      "var": "?t"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "fact",
+                  "scope": "entity",
+                  "entity": {
+                    "var": "?t"
+                  },
+                  "attribute": "claim-activity",
+                  "value": {
+                    "lit": "not-owned"
+                  },
+                  "phrase": "activity of your retained claim (active, waiting, resume-required or unknown)",
+                  "many": false
+                }
+              ]
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 66
+          }
+        },
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "force-operation",
+              "value": {
+                "lit": "resume"
+              },
+              "phrase": "workflow operation a force request applies to",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "viewer",
+              "entity": {
+                "lit": 1
+              },
+              "attribute": "agent",
+              "value": {
+                "var": "?a"
+              },
+              "phrase": "agent name",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "owner",
+              "value": {
+                "var": "?a"
+              },
+              "phrase": "claiming agent",
+              "many": true
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "call",
+                  "predicate": "force-other-owner",
+                  "args": [
+                    {
+                      "var": "?t"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "fact",
+                  "scope": "entity",
+                  "entity": {
+                    "var": "?t"
+                  },
+                  "attribute": "claim-activity",
+                  "value": {
+                    "lit": "not-owned"
+                  },
+                  "phrase": "activity of your retained claim (active, waiting, resume-required or unknown)",
+                  "many": false
+                }
+              ]
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 67
+          }
+        },
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "force-operation",
+              "value": {
+                "lit": "rework"
+              },
+              "phrase": "workflow operation a force request applies to",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "viewer",
+              "entity": {
+                "lit": 1
+              },
+              "attribute": "agent",
+              "value": {
+                "var": "?a"
+              },
+              "phrase": "agent name",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "responsible",
+              "value": {
+                "var": "?a"
+              },
+              "phrase": "responsible agent",
+              "many": true
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "call",
+                  "predicate": "force-other-owner",
+                  "args": [
+                    {
+                      "var": "?t"
+                    }
+                  ]
+                }
+              ]
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 68
+          }
+        },
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "force-operation",
+              "value": {
+                "lit": "rework"
+              },
+              "phrase": "workflow operation a force request applies to",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "viewer",
+              "entity": {
+                "lit": 1
+              },
+              "attribute": "agent",
+              "value": {
+                "var": "?a"
+              },
+              "phrase": "agent name",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "legacy-rework-agent",
+              "value": {
+                "var": "?a"
+              },
+              "phrase": "agent with verified legacy (v1 done handoff) rework authority on the ticket",
+              "many": false
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "call",
+                  "predicate": "force-other-owner",
+                  "args": [
+                    {
+                      "var": "?t"
+                    }
+                  ]
+                }
+              ]
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 69
+          }
+        },
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "force-operation",
+              "value": {
+                "lit": "rework"
+              },
+              "phrase": "workflow operation a force request applies to",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "viewer",
+              "entity": {
+                "lit": 1
+              },
+              "attribute": "agent",
+              "value": {
+                "var": "?a"
+              },
+              "phrase": "agent name",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "owner",
+              "value": {
+                "var": "?a"
+              },
+              "phrase": "claiming agent",
+              "many": true
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "call",
+                  "predicate": "force-other-owner",
+                  "args": [
+                    {
+                      "var": "?t"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "fact",
+                  "scope": "entity",
+                  "entity": {
+                    "var": "?t"
+                  },
+                  "attribute": "claim-activity",
+                  "value": {
+                    "lit": "not-owned"
+                  },
+                  "phrase": "activity of your retained claim (active, waiting, resume-required or unknown)",
+                  "many": false
+                }
+              ]
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 70
+          }
+        }
+      ],
+      "calls": ["force-other-owner"],
+      "set": "rules"
+    },
+    {
+      "name": "force-owned-retry",
+      "params": ["?t"],
+      "alternatives": [
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "force-operation",
+              "value": {
+                "lit": "claim"
+              },
+              "phrase": "workflow operation a force request applies to",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "viewer",
+              "entity": {
+                "lit": 1
+              },
+              "attribute": "agent",
+              "value": {
+                "var": "?a"
+              },
+              "phrase": "agent name",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "owner",
+              "value": {
+                "var": "?a"
+              },
+              "phrase": "claiming agent",
+              "many": true
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "call",
+                  "predicate": "force-other-owner",
+                  "args": [
+                    {
+                      "var": "?t"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "fact",
+                  "scope": "entity",
+                  "entity": {
+                    "var": "?t"
+                  },
+                  "attribute": "claim-activity",
+                  "value": {
+                    "lit": "not-owned"
+                  },
+                  "phrase": "activity of your retained claim (active, waiting, resume-required or unknown)",
+                  "many": false
+                }
+              ]
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 71
+          }
+        },
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "force-operation",
+              "value": {
+                "lit": "rework"
+              },
+              "phrase": "workflow operation a force request applies to",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "viewer",
+              "entity": {
+                "lit": 1
+              },
+              "attribute": "agent",
+              "value": {
+                "var": "?a"
+              },
+              "phrase": "agent name",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "owner",
+              "value": {
+                "var": "?a"
+              },
+              "phrase": "claiming agent",
+              "many": true
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "call",
+                  "predicate": "force-other-owner",
+                  "args": [
+                    {
+                      "var": "?t"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "fact",
+                  "scope": "entity",
+                  "entity": {
+                    "var": "?t"
+                  },
+                  "attribute": "claim-activity",
+                  "value": {
+                    "lit": "not-owned"
+                  },
+                  "phrase": "activity of your retained claim (active, waiting, resume-required or unknown)",
+                  "many": false
+                }
+              ]
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 72
+          }
+        }
+      ],
+      "calls": ["force-other-owner"],
+      "set": "rules"
+    },
+    {
+      "name": "force-already-active",
+      "params": ["?t"],
+      "alternatives": [
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "force-operation",
+              "value": {
+                "lit": "resume"
+              },
+              "phrase": "workflow operation a force request applies to",
+              "many": false
+            },
+            {
+              "type": "call",
+              "predicate": "force-own-continuation",
+              "args": [
+                {
+                  "var": "?t"
+                }
+              ]
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "fact",
+                  "scope": "entity",
+                  "entity": {
+                    "var": "?t"
+                  },
+                  "attribute": "claim-activity",
+                  "value": {
+                    "wild": true
+                  },
+                  "phrase": "activity of your retained claim (active, waiting, resume-required or unknown)",
+                  "many": false
+                }
+              ]
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 73
+          }
+        },
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "force-operation",
+              "value": {
+                "lit": "resume"
+              },
+              "phrase": "workflow operation a force request applies to",
+              "many": false
+            },
+            {
+              "type": "call",
+              "predicate": "force-own-continuation",
+              "args": [
+                {
+                  "var": "?t"
+                }
+              ]
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "claim-activity",
+              "value": {
+                "lit": "active"
+              },
+              "phrase": "activity of your retained claim (active, waiting, resume-required or unknown)",
+              "many": false
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 74
+          }
+        }
+      ],
+      "calls": ["force-own-continuation"],
+      "set": "rules"
+    },
+    {
+      "name": "force-denial",
+      "params": ["?t", "?r"],
+      "alternatives": [
+        {
+          "params": ["?t", "?r"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "force-operation",
+              "value": {
+                "lit": "claim"
+              },
+              "phrase": "workflow operation a force request applies to",
+              "many": false
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "call",
+                  "predicate": "force-owned-retry",
+                  "args": [
+                    {
+                      "var": "?t"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "call",
+              "predicate": "claim-deny",
+              "args": [
+                {
+                  "var": "?t"
+                },
+                {
+                  "var": "?r"
+                }
+              ]
+            },
+            {
+              "type": "compare",
+              "op": "not=",
+              "args": [
+                {
+                  "var": "?r"
+                },
+                {
+                  "lit": "D-DENY-CLAIM"
+                }
+              ]
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 75
+          }
+        },
+        {
+          "params": ["?t", "?r"],
+          "clauses": [
+            {
+              "type": "call",
+              "predicate": "force-owned-retry",
+              "args": [
+                {
+                  "var": "?t"
+                }
+              ]
+            },
+            {
+              "type": "call",
+              "predicate": "claim-deny",
+              "args": [
+                {
+                  "var": "?t"
+                },
+                {
+                  "var": "?r"
+                }
+              ]
+            },
+            {
+              "type": "compare",
+              "op": "=",
+              "args": [
+                {
+                  "var": "?r"
+                },
+                {
+                  "lit": "D-DENY-LABELS-UNKNOWN"
+                }
+              ]
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 76
+          }
+        },
+        {
+          "params": ["?t", "?r"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "force-operation",
+              "value": {
+                "lit": "rework"
+              },
+              "phrase": "workflow operation a force request applies to",
+              "many": false
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "call",
+                  "predicate": "force-owned-retry",
+                  "args": [
+                    {
+                      "var": "?t"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "call",
+              "predicate": "claim-deny",
+              "args": [
+                {
+                  "var": "?t"
+                },
+                {
+                  "var": "?r"
+                }
+              ]
+            },
+            {
+              "type": "compare",
+              "op": "not=",
+              "args": [
+                {
+                  "var": "?r"
+                },
+                {
+                  "lit": "D-DENY-CLAIM"
+                }
+              ]
+            },
+            {
+              "type": "compare",
+              "op": "not=",
+              "args": [
+                {
+                  "var": "?r"
+                },
+                {
+                  "lit": "CLAIM-NOT-READY"
+                }
+              ]
+            },
+            {
+              "type": "compare",
+              "op": "not=",
+              "args": [
+                {
+                  "var": "?r"
+                },
+                {
+                  "lit": "D-DENY-OPEN-PR"
+                }
+              ]
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 77
+          }
+        },
+        {
+          "params": ["?t", "?r"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "force-operation",
+              "value": {
+                "lit": "resume"
+              },
+              "phrase": "workflow operation a force request applies to",
+              "many": false
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "call",
+                  "predicate": "force-already-active",
+                  "args": [
+                    {
+                      "var": "?t"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "call",
+              "predicate": "claim-deny",
+              "args": [
+                {
+                  "var": "?t"
+                },
+                {
+                  "var": "?r"
+                }
+              ]
+            },
+            {
+              "type": "compare",
+              "op": "=",
+              "args": [
+                {
+                  "var": "?r"
+                },
+                {
+                  "lit": "D-DENY-BLOCKER"
+                }
+              ]
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 78
+          }
+        },
+        {
+          "params": ["?t", "?r"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "force-operation",
+              "value": {
+                "lit": "resume"
+              },
+              "phrase": "workflow operation a force request applies to",
+              "many": false
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "call",
+                  "predicate": "force-already-active",
+                  "args": [
+                    {
+                      "var": "?t"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "call",
+              "predicate": "claim-deny",
+              "args": [
+                {
+                  "var": "?t"
+                },
+                {
+                  "var": "?r"
+                }
+              ]
+            },
+            {
+              "type": "compare",
+              "op": "=",
+              "args": [
+                {
+                  "var": "?r"
+                },
+                {
+                  "lit": "D-DENY-NATIVE-UNKNOWN"
+                }
+              ]
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 79
+          }
+        },
+        {
+          "params": ["?t", "?r"],
+          "clauses": [
+            {
+              "type": "call",
+              "predicate": "claim-deny",
+              "args": [
+                {
+                  "var": "?t"
+                },
+                {
+                  "var": "?r"
+                }
+              ]
+            },
+            {
+              "type": "compare",
+              "op": "=",
+              "args": [
+                {
+                  "var": "?r"
+                },
+                {
+                  "lit": "D-DENY-CLAIM"
+                }
+              ]
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "call",
+                  "predicate": "force-own-continuation",
+                  "args": [
+                    {
+                      "var": "?t"
+                    }
+                  ]
+                }
+              ]
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 80
+          }
+        },
+        {
+          "params": ["?t", "?r"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "force-request",
+              "value": {
+                "lit": true
+              },
+              "phrase": "explicit human-directed workflow override requested for this subject",
+              "many": false
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "call",
+                  "predicate": "force-already-active",
+                  "args": [
+                    {
+                      "var": "?t"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "call",
+                  "predicate": "force-owned-retry",
+                  "args": [
+                    {
+                      "var": "?t"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "call",
+                  "predicate": "force-inventory-read",
+                  "args": [
+                    {
+                      "var": "?t"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "CLAIM-INVENTORY-UNKNOWN"
+                }
+              ],
+              "result": "?r"
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 82
+          }
+        },
+        {
+          "params": ["?t", "?r"],
+          "clauses": [
+            {
+              "type": "call",
+              "predicate": "force-owned-retry",
+              "args": [
+                {
+                  "var": "?t"
+                }
+              ]
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "call",
+                  "predicate": "force-inventory-read",
+                  "args": [
+                    {
+                      "var": "?t"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "call",
+              "predicate": "own-issue",
+              "args": [
+                {
+                  "var": "?o"
+                }
+              ]
+            },
+            {
+              "type": "compare",
+              "op": "not=",
+              "args": [
+                {
+                  "var": "?t"
+                },
+                {
+                  "var": "?o"
+                }
+              ]
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "CLAIM-INVENTORY-UNKNOWN"
+                }
+              ],
+              "result": "?r"
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 83
+          }
+        },
+        {
+          "params": ["?t", "?r"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "force-request",
+              "value": {
+                "lit": true
+              },
+              "phrase": "explicit human-directed workflow override requested for this subject",
+              "many": false
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "call",
+                  "predicate": "force-already-active",
+                  "args": [
+                    {
+                      "var": "?t"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "call",
+              "predicate": "own-issue",
+              "args": [
+                {
+                  "var": "?o"
+                }
+              ]
+            },
+            {
+              "type": "compare",
+              "op": "not=",
+              "args": [
+                {
+                  "var": "?t"
+                },
+                {
+                  "var": "?o"
+                }
+              ]
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "fact",
+                  "scope": "entity",
+                  "entity": {
+                    "var": "?o"
+                  },
+                  "attribute": "claim-activity",
+                  "value": {
+                    "wild": true
+                  },
+                  "phrase": "activity of your retained claim (active, waiting, resume-required or unknown)",
+                  "many": false
+                }
+              ]
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "FORCE-OTHER-ACTIVE-CLAIM"
+                }
+              ],
+              "result": "?r"
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 84
+          }
+        },
+        {
+          "params": ["?t", "?r"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "force-request",
+              "value": {
+                "lit": true
+              },
+              "phrase": "explicit human-directed workflow override requested for this subject",
+              "many": false
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "call",
+                  "predicate": "force-already-active",
+                  "args": [
+                    {
+                      "var": "?t"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "call",
+              "predicate": "own-issue",
+              "args": [
+                {
+                  "var": "?o"
+                }
+              ]
+            },
+            {
+              "type": "compare",
+              "op": "not=",
+              "args": [
+                {
+                  "var": "?t"
+                },
+                {
+                  "var": "?o"
+                }
+              ]
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?o"
+              },
+              "attribute": "claim-activity",
+              "value": {
+                "lit": "active"
+              },
+              "phrase": "activity of your retained claim (active, waiting, resume-required or unknown)",
+              "many": false
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "FORCE-OTHER-ACTIVE-CLAIM"
+                }
+              ],
+              "result": "?r"
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 85
+          }
+        },
+        {
+          "params": ["?t", "?r"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "force-request",
+              "value": {
+                "lit": true
+              },
+              "phrase": "explicit human-directed workflow override requested for this subject",
+              "many": false
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "call",
+                  "predicate": "force-already-active",
+                  "args": [
+                    {
+                      "var": "?t"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "call",
+              "predicate": "own-issue",
+              "args": [
+                {
+                  "var": "?o"
+                }
+              ]
+            },
+            {
+              "type": "compare",
+              "op": "not=",
+              "args": [
+                {
+                  "var": "?t"
+                },
+                {
+                  "var": "?o"
+                }
+              ]
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?o"
+              },
+              "attribute": "claim-activity",
+              "value": {
+                "lit": "resume-required"
+              },
+              "phrase": "activity of your retained claim (active, waiting, resume-required or unknown)",
+              "many": false
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "FORCE-OTHER-ACTIVE-CLAIM"
+                }
+              ],
+              "result": "?r"
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 86
+          }
+        },
+        {
+          "params": ["?t", "?r"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "force-operation",
+              "value": {
+                "lit": "resume"
+              },
+              "phrase": "workflow operation a force request applies to",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "claim-activity",
+              "value": {
+                "lit": "waiting"
+              },
+              "phrase": "activity of your retained claim (active, waiting, resume-required or unknown)",
+              "many": false
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "FORCE-WAIT-OPEN"
+                }
+              ],
+              "result": "?r"
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 87
+          }
+        },
+        {
+          "params": ["?t", "?r"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "force-operation",
+              "value": {
+                "lit": "resume"
+              },
+              "phrase": "workflow operation a force request applies to",
+              "many": false
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "call",
+                  "predicate": "force-already-active",
+                  "args": [
+                    {
+                      "var": "?t"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "question-record",
+              "value": {
+                "var": "?q"
+              },
+              "phrase": "question record",
+              "many": true
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?q"
+              },
+              "attribute": "record-trust",
+              "value": {
+                "lit": "trusted"
+              },
+              "phrase": "trust level",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?q"
+              },
+              "attribute": "record-version",
+              "value": {
+                "lit": 2
+              },
+              "phrase": "question marker version",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?q"
+              },
+              "attribute": "record-outcome",
+              "value": {
+                "lit": "none"
+              },
+              "phrase": "explicit resolution outcome",
+              "many": false
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "FORCE-QUESTION-OPEN"
+                }
+              ],
+              "result": "?r"
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 88
+          }
+        },
+        {
+          "params": ["?t", "?r"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "force-request",
+              "value": {
+                "lit": true
+              },
+              "phrase": "explicit human-directed workflow override requested for this subject",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "state",
+              "value": {
+                "var": "?st"
+              },
+              "phrase": "state",
+              "many": false
+            },
+            {
+              "type": "compare",
+              "op": "not=",
+              "args": [
+                {
+                  "var": "?st"
+                },
+                {
+                  "lit": "OPEN"
+                }
+              ]
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "FORCE-TICKET-CLOSED"
+                }
+              ],
+              "result": "?r"
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 89
+          }
+        },
+        {
+          "params": ["?t", "?r"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "force-operation",
+              "value": {
+                "lit": "resume"
+              },
+              "phrase": "workflow operation a force request applies to",
+              "many": false
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "call",
+                  "predicate": "force-already-active",
+                  "args": [
+                    {
+                      "var": "?t"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "question-record",
+              "value": {
+                "var": "?q"
+              },
+              "phrase": "question record",
+              "many": true
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?q"
+              },
+              "attribute": "record-trust",
+              "value": {
+                "lit": "unverified"
+              },
+              "phrase": "trust level",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?q"
+              },
+              "attribute": "record-version",
+              "value": {
+                "lit": 2
+              },
+              "phrase": "question marker version",
+              "many": false
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "FORCE-QUESTION-UNKNOWN"
+                }
+              ],
+              "result": "?r"
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 90
+          }
+        },
+        {
+          "params": ["?t", "?r"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "force-operation",
+              "value": {
+                "lit": "resume"
+              },
+              "phrase": "workflow operation a force request applies to",
+              "many": false
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "call",
+                  "predicate": "force-already-active",
+                  "args": [
+                    {
+                      "var": "?t"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "question-record",
+              "value": {
+                "var": "?q"
+              },
+              "phrase": "question record",
+              "many": true
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?q"
+              },
+              "attribute": "record-trust",
+              "value": {
+                "lit": "trusted"
+              },
+              "phrase": "trust level",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?q"
+              },
+              "attribute": "record-version",
+              "value": {
+                "lit": 2
+              },
+              "phrase": "question marker version",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?q"
+              },
+              "attribute": "record-outcome",
+              "value": {
+                "lit": "unknown"
+              },
+              "phrase": "explicit resolution outcome",
+              "many": false
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "FORCE-QUESTION-UNKNOWN"
+                }
+              ],
+              "result": "?r"
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 91
+          }
+        },
+        {
+          "params": ["?t", "?r"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "force-request",
+              "value": {
+                "lit": true
+              },
+              "phrase": "explicit human-directed workflow override requested for this subject",
+              "many": false
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "call",
+                  "predicate": "force-already-active",
+                  "args": [
+                    {
+                      "var": "?t"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "call",
+              "predicate": "own-issue",
+              "args": [
+                {
+                  "var": "?o"
+                }
+              ]
+            },
+            {
+              "type": "compare",
+              "op": "not=",
+              "args": [
+                {
+                  "var": "?t"
+                },
+                {
+                  "var": "?o"
+                }
+              ]
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?o"
+              },
+              "attribute": "claim-activity",
+              "value": {
+                "lit": "unknown"
+              },
+              "phrase": "activity of your retained claim (active, waiting, resume-required or unknown)",
+              "many": false
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "FORCE-OTHER-ACTIVITY-UNKNOWN"
+                }
+              ],
+              "result": "?r"
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 92
+          }
+        },
+        {
+          "params": ["?t", "?r"],
+          "clauses": [
+            {
+              "type": "call",
+              "predicate": "issue",
+              "args": [
+                {
+                  "var": "?t"
+                }
+              ]
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "force-operation",
+              "value": {
+                "var": "?op"
+              },
+              "phrase": "workflow operation a force request applies to",
+              "many": false
+            },
+            {
+              "type": "compare",
+              "op": "not=",
+              "args": [
+                {
+                  "var": "?op"
+                },
+                {
+                  "lit": "resume"
+                }
+              ]
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "call",
+                  "predicate": "force-owned-retry",
+                  "args": [
+                    {
+                      "var": "?t"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "call",
+              "predicate": "refinement-unknown",
+              "args": [
+                {
+                  "var": "?t"
+                }
+              ]
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "D-DENY-REFINEMENT-UNKNOWN"
+                }
+              ],
+              "result": "?r"
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 93
+          }
+        },
+        {
+          "params": ["?t", "?r"],
+          "clauses": [
+            {
+              "type": "call",
+              "predicate": "force-owned-retry",
+              "args": [
+                {
+                  "var": "?t"
+                }
+              ]
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "call",
+                  "predicate": "force-history-read",
+                  "args": [
+                    {
+                      "var": "?t"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "FORCE-HISTORY-UNKNOWN"
+                }
+              ],
+              "result": "?r"
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 95
+          }
+        },
+        {
+          "params": ["?t", "?r"],
+          "clauses": [
+            {
+              "type": "call",
+              "predicate": "force-owned-retry",
+              "args": [
+                {
+                  "var": "?t"
+                }
+              ]
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "call",
+                  "predicate": "force-marker-trusted",
+                  "args": [
+                    {
+                      "var": "?t"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "FORCE-MARKER-UNVERIFIED"
+                }
+              ],
+              "result": "?r"
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 98
+          }
+        },
+        {
+          "params": ["?t", "?r"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "force-operation",
+              "value": {
+                "lit": "resume"
+              },
+              "phrase": "workflow operation a force request applies to",
+              "many": false
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "call",
+                  "predicate": "force-own-continuation",
+                  "args": [
+                    {
+                      "var": "?t"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "FORCE-NOT-RETAINED"
+                }
+              ],
+              "result": "?r"
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 99
+          }
+        },
+        {
+          "params": ["?t", "?r"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "force-operation",
+              "value": {
+                "lit": "resume"
+              },
+              "phrase": "workflow operation a force request applies to",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "claim-activity",
+              "value": {
+                "lit": "unknown"
+              },
+              "phrase": "activity of your retained claim (active, waiting, resume-required or unknown)",
+              "many": false
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "FORCE-ACTIVITY-UNKNOWN"
+                }
+              ],
+              "result": "?r"
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 100
+          }
+        },
+        {
+          "params": ["?t", "?r"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "force-operation",
+              "value": {
+                "lit": "rework"
+              },
+              "phrase": "workflow operation a force request applies to",
+              "many": false
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "call",
+                  "predicate": "force-own-continuation",
+                  "args": [
+                    {
+                      "var": "?t"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "bind",
+              "fn": "str",
+              "args": [
+                {
+                  "lit": "FORCE-NOT-RESPONSIBLE"
+                }
+              ],
+              "result": "?r"
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 101
+          }
+        }
+      ],
+      "calls": [
+        "force-owned-retry",
+        "claim-deny",
+        "force-already-active",
+        "force-own-continuation",
+        "force-inventory-read",
+        "own-issue",
+        "issue",
+        "refinement-unknown",
+        "force-history-read",
+        "force-marker-trusted"
+      ],
+      "set": "rules"
+    },
+    {
+      "name": "force-inventory-read",
+      "params": ["?t"],
+      "alternatives": [
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "kind",
+              "value": {
+                "wild": true
+              },
+              "phrase": "kind",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "context",
+              "entity": {
+                "lit": 1
+              },
+              "attribute": "owned-claims-complete",
+              "value": {
+                "lit": true
+              },
+              "phrase": "completeness of your claim inventory",
+              "many": false
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 81
+          }
+        }
+      ],
+      "calls": [],
+      "set": "rules"
+    },
+    {
+      "name": "force-history-read",
+      "params": ["?t"],
+      "alternatives": [
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "kind",
+              "value": {
+                "wild": true
+              },
+              "phrase": "kind",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "claim-history-complete",
+              "value": {
+                "lit": true
+              },
+              "phrase": "completeness of claim label and timeline history",
+              "many": false
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 94
+          }
+        }
+      ],
+      "calls": [],
+      "set": "rules"
+    },
+    {
+      "name": "force-marker-trusted",
+      "params": ["?t"],
+      "alternatives": [
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "kind",
+              "value": {
+                "wild": true
+              },
+              "phrase": "kind",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "claim-marker-trust",
+              "value": {
+                "lit": "trusted"
+              },
+              "phrase": "trust of the caller's matching claim marker (trusted, absent after a complete history read, or unknown)",
+              "many": false
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 96
+          }
+        },
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "kind",
+              "value": {
+                "wild": true
+              },
+              "phrase": "kind",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "claim-marker-trust",
+              "value": {
+                "lit": "absent"
+              },
+              "phrase": "trust of the caller's matching claim marker (trusted, absent after a complete history read, or unknown)",
+              "many": false
+            },
+            {
+              "type": "call",
+              "predicate": "force-history-read",
+              "args": [
+                {
+                  "var": "?t"
+                }
+              ]
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 97
+          }
+        }
+      ],
+      "calls": ["force-history-read"],
+      "set": "rules"
+    },
+    {
+      "name": "force-technical",
+      "params": ["?t"],
+      "alternatives": [
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
+              "type": "call",
+              "predicate": "force-denial",
+              "args": [
+                {
+                  "var": "?t"
+                },
+                {
+                  "var": "?r"
+                }
+              ]
+            },
+            {
+              "type": "compare",
+              "op": "=",
+              "args": [
+                {
+                  "var": "?r"
+                },
+                {
+                  "lit": "D-DENY-CLAIM"
+                }
+              ]
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 102
+          }
+        },
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
+              "type": "call",
+              "predicate": "force-denial",
+              "args": [
+                {
+                  "var": "?t"
+                },
+                {
+                  "var": "?r"
+                }
+              ]
+            },
+            {
+              "type": "compare",
+              "op": "=",
+              "args": [
+                {
+                  "var": "?r"
+                },
+                {
+                  "lit": "D-DENY-LABELS-UNKNOWN"
+                }
+              ]
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 103
+          }
+        },
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
+              "type": "call",
+              "predicate": "force-denial",
+              "args": [
+                {
+                  "var": "?t"
+                },
+                {
+                  "var": "?r"
+                }
+              ]
+            },
+            {
+              "type": "compare",
+              "op": "=",
+              "args": [
+                {
+                  "var": "?r"
+                },
+                {
+                  "lit": "D-DENY-NATIVE-UNKNOWN"
+                }
+              ]
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 104
+          }
+        },
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
+              "type": "call",
+              "predicate": "force-denial",
+              "args": [
+                {
+                  "var": "?t"
+                },
+                {
+                  "var": "?r"
+                }
+              ]
+            },
+            {
+              "type": "compare",
+              "op": "=",
+              "args": [
+                {
+                  "var": "?r"
+                },
+                {
+                  "lit": "D-DENY-CLOSING-UNKNOWN"
+                }
+              ]
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 105
+          }
+        },
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
+              "type": "call",
+              "predicate": "force-denial",
+              "args": [
+                {
+                  "var": "?t"
+                },
+                {
+                  "var": "?r"
+                }
+              ]
+            },
+            {
+              "type": "compare",
+              "op": "=",
+              "args": [
+                {
+                  "var": "?r"
+                },
+                {
+                  "lit": "D-DENY-INVENTORY-UNKNOWN"
+                }
+              ]
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 106
+          }
+        },
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
+              "type": "call",
+              "predicate": "force-denial",
+              "args": [
+                {
+                  "var": "?t"
+                },
+                {
+                  "var": "?r"
+                }
+              ]
+            },
+            {
+              "type": "compare",
+              "op": "=",
+              "args": [
+                {
+                  "var": "?r"
+                },
+                {
+                  "lit": "D-DENY-REFINEMENT-UNKNOWN"
+                }
+              ]
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 107
+          }
+        },
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
+              "type": "call",
+              "predicate": "force-denial",
+              "args": [
+                {
+                  "var": "?t"
+                },
+                {
+                  "var": "?r"
+                }
+              ]
+            },
+            {
+              "type": "compare",
+              "op": "=",
+              "args": [
+                {
+                  "var": "?r"
+                },
+                {
+                  "lit": "CLAIM-INVENTORY-UNKNOWN"
+                }
+              ]
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 108
+          }
+        },
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
+              "type": "call",
+              "predicate": "force-denial",
+              "args": [
+                {
+                  "var": "?t"
+                },
+                {
+                  "var": "?r"
+                }
+              ]
+            },
+            {
+              "type": "compare",
+              "op": "=",
+              "args": [
+                {
+                  "var": "?r"
+                },
+                {
+                  "lit": "FORCE-NOT-RETAINED"
+                }
+              ]
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 109
+          }
+        },
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
+              "type": "call",
+              "predicate": "force-denial",
+              "args": [
+                {
+                  "var": "?t"
+                },
+                {
+                  "var": "?r"
+                }
+              ]
+            },
+            {
+              "type": "compare",
+              "op": "=",
+              "args": [
+                {
+                  "var": "?r"
+                },
+                {
+                  "lit": "FORCE-NOT-RESPONSIBLE"
+                }
+              ]
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 110
+          }
+        },
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
+              "type": "call",
+              "predicate": "force-denial",
+              "args": [
+                {
+                  "var": "?t"
+                },
+                {
+                  "var": "?r"
+                }
+              ]
+            },
+            {
+              "type": "compare",
+              "op": "=",
+              "args": [
+                {
+                  "var": "?r"
+                },
+                {
+                  "lit": "FORCE-ACTIVITY-UNKNOWN"
+                }
+              ]
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 111
+          }
+        },
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
+              "type": "call",
+              "predicate": "force-denial",
+              "args": [
+                {
+                  "var": "?t"
+                },
+                {
+                  "var": "?r"
+                }
+              ]
+            },
+            {
+              "type": "compare",
+              "op": "=",
+              "args": [
+                {
+                  "var": "?r"
+                },
+                {
+                  "lit": "FORCE-OTHER-ACTIVITY-UNKNOWN"
+                }
+              ]
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 112
+          }
+        },
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
+              "type": "call",
+              "predicate": "force-denial",
+              "args": [
+                {
+                  "var": "?t"
+                },
+                {
+                  "var": "?r"
+                }
+              ]
+            },
+            {
+              "type": "compare",
+              "op": "=",
+              "args": [
+                {
+                  "var": "?r"
+                },
+                {
+                  "lit": "FORCE-TICKET-CLOSED"
+                }
+              ]
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 113
+          }
+        },
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
+              "type": "call",
+              "predicate": "force-denial",
+              "args": [
+                {
+                  "var": "?t"
+                },
+                {
+                  "var": "?r"
+                }
+              ]
+            },
+            {
+              "type": "compare",
+              "op": "=",
+              "args": [
+                {
+                  "var": "?r"
+                },
+                {
+                  "lit": "FORCE-QUESTION-UNKNOWN"
+                }
+              ]
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 114
+          }
+        },
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
+              "type": "call",
+              "predicate": "force-denial",
+              "args": [
+                {
+                  "var": "?t"
+                },
+                {
+                  "var": "?r"
+                }
+              ]
+            },
+            {
+              "type": "compare",
+              "op": "=",
+              "args": [
+                {
+                  "var": "?r"
+                },
+                {
+                  "lit": "FORCE-HISTORY-UNKNOWN"
+                }
+              ]
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 115
+          }
+        },
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
+              "type": "call",
+              "predicate": "force-denial",
+              "args": [
+                {
+                  "var": "?t"
+                },
+                {
+                  "var": "?r"
+                }
+              ]
+            },
+            {
+              "type": "compare",
+              "op": "=",
+              "args": [
+                {
+                  "var": "?r"
+                },
+                {
+                  "lit": "FORCE-MARKER-UNVERIFIED"
+                }
+              ]
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 116
+          }
+        }
+      ],
+      "calls": ["force-denial"],
+      "set": "rules"
+    },
+    {
+      "name": "force-denied",
+      "params": ["?t"],
+      "alternatives": [
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
+              "type": "call",
+              "predicate": "force-denial",
+              "args": [
+                {
+                  "var": "?t"
+                },
+                {
+                  "var": "?r"
+                }
+              ]
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 117
+          }
+        }
+      ],
+      "calls": ["force-denial"],
+      "set": "rules"
+    },
+    {
+      "name": "force-ready",
+      "params": ["?t"],
+      "alternatives": [
+        {
+          "params": ["?t"],
+          "clauses": [
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "force-request",
+              "value": {
+                "lit": true
+              },
+              "phrase": "explicit human-directed workflow override requested for this subject",
+              "many": false
+            },
+            {
+              "type": "call",
+              "predicate": "force-supported",
+              "args": [
+                {
+                  "var": "?t"
+                }
+              ]
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "force-reason",
+              "value": {
+                "lit": "valid"
+              },
+              "phrase": "validity of the supplied force reason (valid, empty or oversized)",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "force-agent",
+              "value": {
+                "lit": "known"
+              },
+              "phrase": "whether the acting agent identity is known or unknown",
+              "many": false
+            },
+            {
+              "type": "fact",
+              "scope": "entity",
+              "entity": {
+                "var": "?t"
+              },
+              "attribute": "force-revision",
+              "value": {
+                "lit": "current"
+              },
+              "phrase": "whether the subject and ownership revision the request was made against is current or stale",
+              "many": false
+            }
+          ],
+          "source": {
+            "file": "policy/rules.edn",
+            "index": 118
+          }
+        }
+      ],
+      "calls": ["force-supported"],
       "set": "rules"
     },
     {
@@ -8779,7 +12778,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 59
+            "index": 119
           }
         }
       ],
@@ -8907,7 +12906,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 60
+            "index": 120
           }
         }
       ],
@@ -8993,7 +12992,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 61
+            "index": 121
           }
         },
         {
@@ -9045,7 +13044,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 62
+            "index": 122
           }
         }
       ],
@@ -9075,7 +13074,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 63
+            "index": 123
           }
         },
         {
@@ -9097,7 +13096,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 64
+            "index": 124
           }
         },
         {
@@ -9134,7 +13133,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 65
+            "index": 125
           }
         },
         {
@@ -9152,7 +13151,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 66
+            "index": 126
           }
         }
       ],
@@ -9208,7 +13207,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 67
+            "index": 127
           }
         }
       ],
@@ -9264,7 +13263,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 68
+            "index": 128
           }
         }
       ],
@@ -9299,7 +13298,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 69
+            "index": 129
           }
         }
       ],
@@ -9394,7 +13393,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 70
+            "index": 130
           }
         }
       ],
@@ -9452,7 +13451,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 71
+            "index": 131
           }
         }
       ],
@@ -9495,7 +13494,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 72
+            "index": 132
           }
         }
       ],
@@ -9538,7 +13537,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 73
+            "index": 133
           }
         }
       ],
@@ -9581,7 +13580,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 74
+            "index": 134
           }
         }
       ],
@@ -9633,7 +13632,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 75
+            "index": 135
           }
         },
         {
@@ -9690,7 +13689,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 76
+            "index": 136
           }
         }
       ],
@@ -9746,7 +13745,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 77
+            "index": 137
           }
         }
       ],
@@ -9821,7 +13820,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 78
+            "index": 138
           }
         },
         {
@@ -9843,7 +13842,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 79
+            "index": 139
           }
         }
       ],
@@ -9905,7 +13904,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 80
+            "index": 140
           }
         }
       ],
@@ -9935,7 +13934,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 81
+            "index": 141
           }
         },
         {
@@ -9970,7 +13969,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 82
+            "index": 142
           }
         },
         {
@@ -9988,7 +13987,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 83
+            "index": 143
           }
         }
       ],
@@ -10056,7 +14055,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 84
+            "index": 144
           }
         }
       ],
@@ -10099,7 +14098,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 85
+            "index": 145
           }
         }
       ],
@@ -10178,7 +14177,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 86
+            "index": 146
           }
         }
       ],
@@ -10208,7 +14207,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 87
+            "index": 147
           }
         }
       ],
@@ -10277,7 +14276,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 88
+            "index": 148
           }
         },
         {
@@ -10348,7 +14347,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 89
+            "index": 149
           }
         },
         {
@@ -10393,7 +14392,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 90
+            "index": 150
           }
         },
         {
@@ -10438,7 +14437,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 91
+            "index": 151
           }
         },
         {
@@ -10540,7 +14539,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 92
+            "index": 152
           }
         }
       ],
@@ -10700,7 +14699,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 93
+            "index": 153
           }
         }
       ],
@@ -10768,7 +14767,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 94
+            "index": 154
           }
         }
       ],
@@ -10846,7 +14845,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 95
+            "index": 155
           }
         },
         {
@@ -10929,7 +14928,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 96
+            "index": 156
           }
         },
         {
@@ -11003,7 +15002,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 97
+            "index": 157
           }
         }
       ],
@@ -11081,7 +15080,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 98
+            "index": 158
           }
         },
         {
@@ -11142,7 +15141,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 99
+            "index": 159
           }
         }
       ],
@@ -11196,7 +15195,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 100
+            "index": 160
           }
         },
         {
@@ -11255,7 +15254,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 101
+            "index": 161
           }
         }
       ],
@@ -11410,7 +15409,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 102
+            "index": 162
           }
         }
       ],
@@ -11461,7 +15460,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 103
+            "index": 163
           }
         },
         {
@@ -11496,7 +15495,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 104
+            "index": 164
           }
         }
       ],
@@ -11531,7 +15530,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 105
+            "index": 165
           }
         }
       ],
@@ -11557,7 +15556,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 106
+            "index": 166
           }
         },
         {
@@ -11575,7 +15574,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 107
+            "index": 167
           }
         },
         {
@@ -11606,7 +15605,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 108
+            "index": 168
           }
         },
         {
@@ -11624,7 +15623,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 109
+            "index": 169
           }
         },
         {
@@ -11642,7 +15641,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 110
+            "index": 170
           }
         }
       ],
@@ -11705,7 +15704,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 111
+            "index": 171
           }
         },
         {
@@ -11786,7 +15785,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 112
+            "index": 172
           }
         },
         {
@@ -11867,7 +15866,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 113
+            "index": 173
           }
         },
         {
@@ -11948,7 +15947,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 114
+            "index": 174
           }
         },
         {
@@ -12029,7 +16028,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 115
+            "index": 175
           }
         },
         {
@@ -12110,7 +16109,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 116
+            "index": 176
           }
         },
         {
@@ -12191,7 +16190,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 117
+            "index": 177
           }
         },
         {
@@ -12272,7 +16271,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 118
+            "index": 178
           }
         },
         {
@@ -12353,7 +16352,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 119
+            "index": 179
           }
         },
         {
@@ -12434,7 +16433,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 120
+            "index": 180
           }
         },
         {
@@ -12515,7 +16514,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 121
+            "index": 181
           }
         },
         {
@@ -12609,7 +16608,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 122
+            "index": 182
           }
         },
         {
@@ -12703,7 +16702,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 123
+            "index": 183
           }
         },
         {
@@ -12810,7 +16809,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 124
+            "index": 184
           }
         },
         {
@@ -12929,7 +16928,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 125
+            "index": 185
           }
         },
         {
@@ -13036,7 +17035,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 126
+            "index": 186
           }
         },
         {
@@ -13174,7 +17173,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 127
+            "index": 187
           }
         },
         {
@@ -13294,7 +17293,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 128
+            "index": 188
           }
         },
         {
@@ -13362,7 +17361,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 129
+            "index": 189
           }
         }
       ],
@@ -13397,7 +17396,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 130
+            "index": 190
           }
         }
       ],
@@ -13491,7 +17490,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 131
+            "index": 191
           }
         }
       ],
@@ -13563,7 +17562,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 132
+            "index": 192
           }
         },
         {
@@ -13627,7 +17626,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 133
+            "index": 193
           }
         }
       ],
@@ -13678,7 +17677,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 134
+            "index": 194
           }
         }
       ],
@@ -13721,7 +17720,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 135
+            "index": 195
           }
         }
       ],
@@ -13764,7 +17763,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 136
+            "index": 196
           }
         }
       ],
@@ -13807,7 +17806,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 137
+            "index": 197
           }
         }
       ],
@@ -13837,7 +17836,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 138
+            "index": 198
           }
         },
         {
@@ -13868,7 +17867,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 139
+            "index": 199
           }
         },
         {
@@ -13918,7 +17917,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 140
+            "index": 200
           }
         }
       ],
@@ -13974,7 +17973,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 141
+            "index": 201
           }
         }
       ],
@@ -14003,7 +18002,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 142
+            "index": 202
           }
         }
       ],
@@ -14047,7 +18046,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 143
+            "index": 203
           }
         }
       ],
@@ -14106,7 +18105,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 144
+            "index": 204
           }
         }
       ],
@@ -14161,7 +18160,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 145
+            "index": 205
           }
         }
       ],
@@ -14191,7 +18190,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 146
+            "index": 206
           }
         }
       ],
@@ -14221,7 +18220,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 147
+            "index": 207
           }
         },
         {
@@ -14243,7 +18242,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 148
+            "index": 208
           }
         }
       ],
@@ -14315,7 +18314,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 149
+            "index": 209
           }
         }
       ],
@@ -14387,7 +18386,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 150
+            "index": 210
           }
         },
         {
@@ -14482,7 +18481,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 151
+            "index": 211
           }
         }
       ],
@@ -14518,7 +18517,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 152
+            "index": 212
           }
         }
       ],
@@ -14547,7 +18546,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 153
+            "index": 213
           }
         }
       ],
@@ -14573,7 +18572,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 154
+            "index": 214
           }
         },
         {
@@ -14591,7 +18590,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 155
+            "index": 215
           }
         }
       ],
@@ -14646,7 +18645,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 156
+            "index": 216
           }
         }
       ],
@@ -14685,7 +18684,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 157
+            "index": 217
           }
         }
       ],
@@ -14741,7 +18740,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 158
+            "index": 218
           }
         },
         {
@@ -14821,7 +18820,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 159
+            "index": 219
           }
         }
       ],
@@ -14851,7 +18850,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 160
+            "index": 220
           }
         },
         {
@@ -14873,7 +18872,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 161
+            "index": 221
           }
         }
       ],
@@ -14912,7 +18911,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 162
+            "index": 222
           }
         }
       ],
@@ -14962,7 +18961,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 163
+            "index": 223
           }
         },
         {
@@ -14986,7 +18985,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 164
+            "index": 224
           }
         },
         {
@@ -15085,7 +19084,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 165
+            "index": 225
           }
         },
         {
@@ -15172,7 +19171,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 166
+            "index": 226
           }
         },
         {
@@ -15259,7 +19258,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 167
+            "index": 227
           }
         },
         {
@@ -15316,7 +19315,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 168
+            "index": 228
           }
         },
         {
@@ -15358,7 +19357,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 169
+            "index": 229
           }
         },
         {
@@ -15400,7 +19399,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 170
+            "index": 230
           }
         },
         {
@@ -15461,7 +19460,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 171
+            "index": 231
           }
         },
         {
@@ -15567,7 +19566,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 175
+            "index": 235
           }
         },
         {
@@ -15609,7 +19608,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 176
+            "index": 236
           }
         },
         {
@@ -15651,7 +19650,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 177
+            "index": 237
           }
         },
         {
@@ -15708,7 +19707,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 178
+            "index": 238
           }
         },
         {
@@ -15784,7 +19783,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 179
+            "index": 239
           }
         },
         {
@@ -15841,7 +19840,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 180
+            "index": 240
           }
         },
         {
@@ -15924,7 +19923,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 181
+            "index": 241
           }
         },
         {
@@ -16011,7 +20010,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 182
+            "index": 242
           }
         },
         {
@@ -16113,7 +20112,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 183
+            "index": 243
           }
         },
         {
@@ -16174,7 +20173,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 184
+            "index": 244
           }
         },
         {
@@ -16231,7 +20230,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 185
+            "index": 245
           }
         },
         {
@@ -16318,7 +20317,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 186
+            "index": 246
           }
         },
         {
@@ -16400,7 +20399,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 187
+            "index": 247
           }
         }
       ],
@@ -16448,7 +20447,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 172
+            "index": 232
           }
         },
         {
@@ -16483,7 +20482,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 173
+            "index": 233
           }
         },
         {
@@ -16518,7 +20517,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 174
+            "index": 234
           }
         }
       ],
@@ -16550,7 +20549,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 188
+            "index": 248
           }
         }
       ],
@@ -16622,7 +20621,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 189
+            "index": 249
           }
         },
         {
@@ -16659,7 +20658,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 190
+            "index": 250
           }
         },
         {
@@ -16729,7 +20728,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 191
+            "index": 251
           }
         }
       ],
@@ -16772,7 +20771,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 192
+            "index": 252
           }
         },
         {
@@ -16820,7 +20819,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 193
+            "index": 253
           }
         },
         {
@@ -16868,7 +20867,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 194
+            "index": 254
           }
         }
       ],
@@ -16971,7 +20970,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 195
+            "index": 255
           }
         }
       ],
@@ -17023,7 +21022,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 196
+            "index": 256
           }
         }
       ],
@@ -17066,7 +21065,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 197
+            "index": 257
           }
         }
       ],
@@ -17095,7 +21094,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 198
+            "index": 258
           }
         },
         {
@@ -17113,7 +21112,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 199
+            "index": 259
           }
         },
         {
@@ -17135,7 +21134,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 200
+            "index": 260
           }
         }
       ],
@@ -17180,7 +21179,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 201
+            "index": 261
           }
         },
         {
@@ -17221,7 +21220,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 202
+            "index": 262
           }
         }
       ],
@@ -17251,7 +21250,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 203
+            "index": 263
           }
         }
       ],
@@ -17289,7 +21288,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 204
+            "index": 264
           }
         }
       ],
@@ -17376,7 +21375,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 205
+            "index": 265
           }
         }
       ],
@@ -17415,7 +21414,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 206
+            "index": 266
           }
         },
         {
@@ -17433,7 +21432,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 210
+            "index": 270
           }
         }
       ],
@@ -17463,7 +21462,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 207
+            "index": 267
           }
         },
         {
@@ -17485,7 +21484,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 208
+            "index": 268
           }
         }
       ],
@@ -17530,7 +21529,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 209
+            "index": 269
           }
         }
       ],
@@ -17556,7 +21555,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 211
+            "index": 271
           }
         },
         {
@@ -17574,7 +21573,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 212
+            "index": 272
           }
         },
         {
@@ -17596,7 +21595,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 213
+            "index": 273
           }
         }
       ],
@@ -17640,7 +21639,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 214
+            "index": 274
           }
         }
       ],
@@ -17717,7 +21716,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 215
+            "index": 275
           }
         }
       ],
@@ -17798,7 +21797,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 216
+            "index": 276
           }
         }
       ],
@@ -17828,7 +21827,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 218
+            "index": 278
           }
         }
       ],
@@ -17964,7 +21963,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 219
+            "index": 279
           }
         },
         {
@@ -18099,7 +22098,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 220
+            "index": 280
           }
         }
       ],
@@ -18138,7 +22137,7 @@
           ],
           "source": {
             "file": "policy/rules.edn",
-            "index": 221
+            "index": 281
           }
         }
       ],
@@ -21289,29 +25288,97 @@
       "predicate": "implementation-deny",
       "clauses": [
         {
-          "type": "fact",
-          "scope": "entity",
-          "entity": {
-            "var": "?t"
-          },
-          "attribute": "refinement-complete",
-          "value": {
-            "lit": false
-          },
-          "phrase": "refinement evidence completeness",
-          "many": false
-        },
-        {
-          "type": "call",
-          "predicate": "issue",
-          "args": [
-            {
-              "var": "?t"
-            }
+          "type": "or",
+          "join": null,
+          "alternatives": [
+            [
+              {
+                "type": "fact",
+                "scope": "entity",
+                "entity": {
+                  "var": "?t"
+                },
+                "attribute": "refinement-complete",
+                "value": {
+                  "lit": false
+                },
+                "phrase": "refinement evidence completeness",
+                "many": false
+              },
+              {
+                "type": "call",
+                "predicate": "issue",
+                "args": [
+                  {
+                    "var": "?t"
+                  }
+                ]
+              }
+            ],
+            [
+              {
+                "type": "call",
+                "predicate": "issue",
+                "args": [
+                  {
+                    "var": "?t"
+                  }
+                ]
+              },
+              {
+                "type": "fact",
+                "scope": "entity",
+                "entity": {
+                  "var": "?t"
+                },
+                "attribute": "force-operation",
+                "value": {
+                  "var": "?op"
+                },
+                "phrase": "workflow operation a force request applies to",
+                "many": false
+              },
+              {
+                "type": "compare",
+                "op": "not=",
+                "args": [
+                  {
+                    "var": "?op"
+                  },
+                  {
+                    "lit": "resume"
+                  }
+                ]
+              },
+              {
+                "type": "not",
+                "join": null,
+                "body": [
+                  {
+                    "type": "call",
+                    "predicate": "force-owned-retry",
+                    "args": [
+                      {
+                        "var": "?t"
+                      }
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "call",
+                "predicate": "refinement-unknown",
+                "args": [
+                  {
+                    "var": "?t"
+                  }
+                ]
+              }
+            ]
           ]
         }
       ],
-      "calls": ["issue"]
+      "calls": ["issue", "force-owned-retry", "refinement-unknown"]
     },
     {
       "id": "D-DENY-INVENTORY-UNKNOWN",
@@ -25685,6 +29752,27 @@
       "ruleSet": "rules"
     },
     {
+      "name": "force-denials",
+      "find": ["?t", "?code"],
+      "inputs": ["$", "%"],
+      "clauses": [
+        {
+          "type": "call",
+          "predicate": "force-denial",
+          "args": [
+            {
+              "var": "?t"
+            },
+            {
+              "var": "?code"
+            }
+          ]
+        }
+      ],
+      "calls": ["force-denial"],
+      "ruleSet": "rules"
+    },
+    {
       "name": "other-claims",
       "find": ["?t", "?other"],
       "inputs": ["$", "%"],
@@ -25811,17 +29899,17 @@
     }
   ],
   "coverage": {
-    "decisions": 57,
-    "predicates": 118,
-    "alternatives": 254,
+    "decisions": 64,
+    "predicates": 131,
+    "alternatives": 314,
     "denials": 12,
     "obligations": 18,
-    "queries": 26,
+    "queries": 27,
     "keyQueries": 4,
-    "evidence": 51,
+    "evidence": 57,
     "overrides": 5,
     "constants": 14,
-    "attributes": 135,
-    "clauses": 1458
+    "attributes": 142,
+    "clauses": 1747
   }
 }

@@ -248,6 +248,7 @@ export function readSources(
       "decisions",
       "denials",
       "denial-purposes",
+      "force-denial-texts",
     ]);
     // A duty's role affinity (#651): an ordering key, never a membership gate.
     const affinity = (v: unknown, where: string): DecisionRule["affinity"] => {
@@ -399,6 +400,13 @@ export function readSources(
           need(decisionsFile, "denials", "policy/decisions.edn"),
           "policy/decisions.edn :denials",
         ).map(([k, v]) => [k, text(v, `policy/decisions.edn :denials "${k}"`)]),
+      ),
+      // #1021: readable explanations for force-only denial IDs (not pickup denials).
+      forceDenialTexts: Object.fromEntries(
+        named(
+          need(decisionsFile, "force-denial-texts", "policy/decisions.edn"),
+          "policy/decisions.edn :force-denial-texts",
+        ).map(([k, v]) => [k, text(v, `policy/decisions.edn :force-denial-texts "${k}"`)]),
       ),
       ...(decisionsFile.has("denial-purposes")
         ? {

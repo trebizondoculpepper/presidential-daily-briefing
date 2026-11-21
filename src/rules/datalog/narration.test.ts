@@ -23,7 +23,7 @@ describe("rule-attached literal purposes (#578)", () => {
     const bundle = buildPolicy();
     const model = compileEnglish(bundle);
     const doc = rulesDocument(declaredRulesContext(), {}, model);
-    expect(doc.narration).toMatchObject({ total: 69, supplied: 69, missing: [] });
+    expect(doc.narration).toMatchObject({ total: 76, supplied: 76, missing: [] });
     for (const definition of bundle.definitions) {
       expect(model.decisions.find((r) => r.id === definition.id)?.purpose).toBe(definition.purpose);
       expect(doc.decisions.find((r) => r.id === definition.id)?.purpose).toBe(definition.purpose);
@@ -67,8 +67,8 @@ describe("rule-attached literal purposes (#578)", () => {
     const before = rulesDocument(declaredRulesContext(), {}, older);
     const after = rulesDocument(declaredRulesContext(), {}, annotated);
     expect(before.schemaVersion).toBe(after.schemaVersion);
-    expect(before.narration).toMatchObject({ total: 69, supplied: 0 });
-    expect(before.narration.missing).toHaveLength(69);
+    expect(before.narration).toMatchObject({ total: 76, supplied: 0 });
+    expect(before.narration.missing).toHaveLength(76);
     // #1121 changes this deliberately: the rendered listing now carries the authored purpose
     // beside the formal conditions instead of omitting it.
     expect(rulesText(before)).not.toBe(rulesText(after));

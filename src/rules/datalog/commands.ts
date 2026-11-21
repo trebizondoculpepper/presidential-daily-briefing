@@ -50,4 +50,7 @@ export const commandKinds: Record<string, string> = {
   "unassign-refuse-permission-denied": "detail",
   "unassign-refuse-permission-unknown": "detail",
   "unassign-refuse-evidence": "detail",
+  // #1021: force decisions are rendered to the caller before any dispatch, not queued.
+  "force-allow": "detail",
+  "force-refuse": "detail",
 };

@@ -124,6 +124,14 @@ const audience: Record<
   "D-UNASSIGN-ALLOW": { role: "human", kind: "any" },
   "D-UNASSIGN-ALLOW-OVERRIDE": { role: "human", kind: "any" },
   "D-UNASSIGN-ALLOW-RESPONSIBILITY": { role: "human", kind: "any" },
+  // #1021: force decisions are made for an acting agent on an issue (claim, resume, rework).
+  "D-FORCE-REFUSE-UNSUPPORTED": { role: "agents", kind: "issue" },
+  "D-FORCE-REFUSE-REASON": { role: "agents", kind: "issue" },
+  "D-FORCE-REFUSE-AGENT": { role: "agents", kind: "issue" },
+  "D-FORCE-REFUSE-STALE": { role: "agents", kind: "issue" },
+  "D-FORCE-REFUSE-TECHNICAL": { role: "agents", kind: "issue" },
+  "D-FORCE-NO-DENIAL": { role: "agents", kind: "issue" },
+  "D-FORCE-OVERRIDE": { role: "agents", kind: "issue" },
 };
 const roles = ["implementer", "designer", "human"] as const;
 

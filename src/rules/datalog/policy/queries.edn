@@ -45,6 +45,8 @@
  [:find ?t ?r :in $ % :where (implementation-permit ?t) (implementation-deny ?t ?r)]
  :claim-denials
  [:find ?t ?code :in $ % :where (claim-deny ?t ?code)]
+ :force-denials
+ [:find ?t ?code :in $ % :where (force-denial ?t ?code)]
  :other-claims
  [:find ?t ?other :in $ % :where [?t "kind" "issue"] (own-issue ?other) [(not= ?t ?other)] (not [?other "claim-activity" "waiting"])]
  :active-count

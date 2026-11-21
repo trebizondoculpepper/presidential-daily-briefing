@@ -36,6 +36,8 @@
 ;; Repository-level recovery is context, never a fabricated owned issue.
 [(foreground ?t) [?t "ownership-inventory" true]]
 [(foreground ?t) (open ?t) (addressed ?t)]
+;; #1021: a force request is always answered, even for a closed subject (refused as closed).
+[(foreground ?t) [?t "force-request" true]]
 ;; Human input is waiting whatever the ticket's parking: the human view sees parked work (#457).
 [(foreground ?t) (open ?t) [1 "role" "human"]]
 ;; #413: a claim the live read found released since the snapshot is no longer the viewer's.
@@ -97,6 +99,117 @@
 ;; gates ordinary pickups; adoption is the documented exception.
 [(claim-deny ?t ?code) (issue ?t) (not (available ?t)) (not (adoptable ?t)) [(str "CLAIM-NOT-READY") ?code]]
 [(implementation-denied ?t) (implementation-deny ?t ?r)]
+;; #1021 (doc/design/human-force-overrides.md): an explicit human-directed workflow override. The
+;; host asserts the request, operation, reason validity, revision freshness and whether the agent
+;; is known; human direction is asserted by the trusted local CLI, never inferred from a client or
+;; agent name. Native admission stays the decision source: force lists every claim denial and
+;; overrides only workflow-policy ones. Missing evidence, another owner's claim and an incomplete
+;; inventory are technical or authority facts that force cannot invent or displace. The reason's
+;; content is never graded. Supported operations are claim, resume and rework (shared admission);
+;; other operations are refused here until their own native decision and execution path exist.
+[(force-supported ?t) [?t "force-operation" "claim"]]
+[(force-supported ?t) [?t "force-operation" "resume"]]
+[(force-supported ?t) [?t "force-operation" "rework"]]
+;; Resume and rework continue the caller's own retained claim (#1197 review): there the claim
+;; denial is the precondition, not a denial. Any other owner's claim stays non-overridable.
+[(force-continuation ?t) [?t "force-operation" "resume"]]
+[(force-continuation ?t) [?t "force-operation" "rework"]]
+[(force-other-owner ?t) [?t "owner" ?o] [1 "agent" ?a] [(not= ?o ?a)]]
+;; A claim the live read found released since the snapshot is not retained (#413, #1197 review).
+;; A claim of a ticket the caller already holds exclusively is the idempotent no-op/repair path
+;; of planClaim (claims.ts), not another owner's claim (#1197 review).
+[(force-own-continuation ?t) [?t "force-operation" "claim"] [1 "agent" ?a] [?t "owner" ?a] (not (force-other-owner ?t)) (not [?t "claim-activity" "not-owned"])]
+[(force-own-continuation ?t) [?t "force-operation" "resume"] [1 "agent" ?a] [?t "owner" ?a] (not (force-other-owner ?t)) (not [?t "claim-activity" "not-owned"])]
+;; Rework reacquires submitted work through ticket responsibility (doc/design/delivery-lifecycle.md
+;; "Rework authority", #1197 review): the caller is responsible, the claim may already be released,
+;; and no other agent owns it. A caller still holding the claim reworks it too.
+[(force-own-continuation ?t) [?t "force-operation" "rework"] [1 "agent" ?a] [?t "responsible" ?a] (not (force-other-owner ?t))]
+;; Legacy rework authority (deliverables.ts reworkAuthority: the caller's trusted v1 done handoff),
+;; asserted by the host as evidence; it admits rework without being delivery responsibility.
+[(force-own-continuation ?t) [?t "force-operation" "rework"] [1 "agent" ?a] [?t "legacy-rework-agent" ?a] (not (force-other-owner ?t))]
+[(force-own-continuation ?t) [?t "force-operation" "rework"] [1 "agent" ?a] [?t "owner" ?a] (not (force-other-owner ?t)) (not [?t "claim-activity" "not-owned"])]
+;; Which pickup denials each operation actually applies (#1197 reviews), mirroring normal admission:
+;; claim applies them all; rework (claims.ts) skips readiness and its own open PR; resume
+;; (retained.ts planClaimResume) checks only native blockers and their evidence among them.
+;; An already-held exclusive claim returns planClaim's no-op/repair before any acquisition check.
+;; An already-held exclusive claim (claim or rework retry) and an already-active resume take their
+;; normal no-op paths before any acquisition or blocker check (claims.ts planClaimFor, retained.ts
+;; planClaimResume; #1197 reviews).
+[(force-owned-retry ?t) [?t "force-operation" "claim"] [1 "agent" ?a] [?t "owner" ?a] (not (force-other-owner ?t)) (not [?t "claim-activity" "not-owned"])]
+[(force-owned-retry ?t) [?t "force-operation" "rework"] [1 "agent" ?a] [?t "owner" ?a] (not (force-other-owner ?t)) (not [?t "claim-activity" "not-owned"])]
+[(force-already-active ?t) [?t "force-operation" "resume"] (force-own-continuation ?t) (not [?t "claim-activity" _])]
+[(force-already-active ?t) [?t "force-operation" "resume"] (force-own-continuation ?t) [?t "claim-activity" "active"]]
+[(force-denial ?t ?r) [?t "force-operation" "claim"] (not (force-owned-retry ?t)) (claim-deny ?t ?r) [(not= ?r "D-DENY-CLAIM")]]
+;; ...except incomplete labels, which planClaim refuses first: they cannot rule out another owner.
+[(force-denial ?t ?r) (force-owned-retry ?t) (claim-deny ?t ?r) [(= ?r "D-DENY-LABELS-UNKNOWN")]]
+[(force-denial ?t ?r) [?t "force-operation" "rework"] (not (force-owned-retry ?t)) (claim-deny ?t ?r) [(not= ?r "D-DENY-CLAIM")] [(not= ?r "CLAIM-NOT-READY")] [(not= ?r "D-DENY-OPEN-PR")]]
+[(force-denial ?t ?r) [?t "force-operation" "resume"] (not (force-already-active ?t)) (claim-deny ?t ?r) [(= ?r "D-DENY-BLOCKER")]]
+[(force-denial ?t ?r) [?t "force-operation" "resume"] (not (force-already-active ?t)) (claim-deny ?t ?r) [(= ?r "D-DENY-NATIVE-UNKNOWN")]]
+[(force-denial ?t ?r) (claim-deny ?t ?r) [(= ?r "D-DENY-CLAIM")] (not (force-own-continuation ?t))]
+;; A continuation of the caller's claim is still checked against an incomplete claim inventory
+;; (#1197 review): the unclaimed-pickup inventory denials do not cover a claimed ticket, so the
+;; continuation derives it here and force cannot authorize resuming against unknown ownership.
+;; An absent inventory fact is "not read", never complete (#1197 review): only an explicit true passes.
+[(force-inventory-read ?t) [?t "kind" _] [1 "owned-claims-complete" true]]
+;; Every forced operation needs an explicitly complete claim inventory (#1197 review).
+[(force-denial ?t ?r) [?t "force-request" true] (not (force-already-active ?t)) (not (force-owned-retry ?t)) (not (force-inventory-read ?t)) [(str "CLAIM-INVENTORY-UNKNOWN") ?r]]
+;; ...but an owned retry with any other observed own claim still needs a complete inventory
+;; (planClaimFor refuses incomplete inventory whenever ownOther is non-empty, #1197 review).
+[(force-denial ?t ?r) (force-owned-retry ?t) (not (force-inventory-read ?t)) (own-issue ?o) [(not= ?t ?o)] [(str "CLAIM-INVENTORY-UNKNOWN") ?r]]
+;; Normal admission refuses while the caller holds other active claims (claims.ts/retained.ts
+;; admissionFor, #1197 review): known active work is a workflow denial a human may override;
+;; another claim whose activity is unknown is missing evidence.
+[(force-denial ?t ?r) [?t "force-request" true] (not (force-already-active ?t)) (own-issue ?o) [(not= ?t ?o)] (not [?o "claim-activity" _]) [(str "FORCE-OTHER-ACTIVE-CLAIM") ?r]]
+[(force-denial ?t ?r) [?t "force-request" true] (not (force-already-active ?t)) (own-issue ?o) [(not= ?t ?o)] [?o "claim-activity" "active"] [(str "FORCE-OTHER-ACTIVE-CLAIM") ?r]]
+[(force-denial ?t ?r) [?t "force-request" true] (not (force-already-active ?t)) (own-issue ?o) [(not= ?t ?o)] [?o "claim-activity" "resume-required"] [(str "FORCE-OTHER-ACTIVE-CLAIM") ?r]]
+;; Resuming past a still-open wait (retained.ts BLOCKER_OPEN, D-OWN-WAIT) is a workflow override.
+[(force-denial ?t ?r) [?t "force-operation" "resume"] [?t "claim-activity" "waiting"] [(str "FORCE-WAIT-OPEN") ?r]]
+;; Every trusted v2 question still unresolved on the claim blocks resume (retained.ts QUESTION_OPEN),
+;; independently of routing labels or the bound wait (#1197 review).
+[(force-denial ?t ?r) [?t "force-operation" "resume"] (not (force-already-active ?t)) [?t "question-record" ?q] [?q "record-trust" "trusted"] [?q "record-version" 2] [?q "record-outcome" "none"] [(str "FORCE-QUESTION-OPEN") ?r]]
+;; A closed ticket is never claimed or resumed (claims.ts TICKET_CLOSED); force cannot reopen it.
+[(force-denial ?t ?r) [?t "force-request" true] [?t "state" ?st] [(not= ?st "OPEN")] [(str "FORCE-TICKET-CLOSED") ?r]]
+;; Unverifiable v2 question authority or resolution is missing evidence (retained.ts EVIDENCE_INCOMPLETE);
+;; legacy v1 questions keep label-based resolution and are skipped, as resume skips them.
+[(force-denial ?t ?r) [?t "force-operation" "resume"] (not (force-already-active ?t)) [?t "question-record" ?q] [?q "record-trust" "unverified"] [?q "record-version" 2] [(str "FORCE-QUESTION-UNKNOWN") ?r]]
+[(force-denial ?t ?r) [?t "force-operation" "resume"] (not (force-already-active ?t)) [?t "question-record" ?q] [?q "record-trust" "trusted"] [?q "record-version" 2] [?q "record-outcome" "unknown"] [(str "FORCE-QUESTION-UNKNOWN") ?r]]
+[(force-denial ?t ?r) [?t "force-request" true] (not (force-already-active ?t)) (own-issue ?o) [(not= ?t ?o)] [?o "claim-activity" "unknown"] [(str "FORCE-OTHER-ACTIVITY-UNKNOWN") ?r]]
+;; Unknown refinement evidence is technical, even where a known refinement hold is a workflow denial.
+[(force-denial ?t ?r) (issue ?t) [?t "force-operation" ?op] [(not= ?op "resume")] (not (force-owned-retry ?t)) (refinement-unknown ?t) [(str "D-DENY-REFINEMENT-UNKNOWN") ?r]]
+;; An owned retry needs readable claim history (planClaimFor refuses incomplete claim/comment history
+;; before its no-op or repair); only an explicit complete history passes (#1197 review).
+[(force-history-read ?t) [?t "kind" _] [?t "claim-history-complete" true]]
+[(force-denial ?t ?r) (force-owned-retry ?t) (not (force-history-read ?t)) [(str "FORCE-HISTORY-UNKNOWN") ?r]]
+;; ...and a trusted matching claim marker: readable history alone does not establish authority
+;; (planClaimFor MARKER_UNVERIFIED, #1197 review). Only an explicit trusted marker passes.
+[(force-marker-trusted ?t) [?t "kind" _] [?t "claim-marker-trust" "trusted"]]
+;; A marker verified absent (complete history, none found) is planClaimFor's comment-repair path.
+[(force-marker-trusted ?t) [?t "kind" _] [?t "claim-marker-trust" "absent"] (force-history-read ?t)]
+[(force-denial ?t ?r) (force-owned-retry ?t) (not (force-marker-trusted ?t)) [(str "FORCE-MARKER-UNVERIFIED") ?r]]
+;; Resume and rework continue only the caller's own retained claim; without it there is nothing to
+;; continue, and force cannot make the caller the owner.
+[(force-denial ?t ?r) [?t "force-operation" "resume"] (not (force-own-continuation ?t)) [(str "FORCE-NOT-RETAINED") ?r]]
+;; Unknown retained activity is missing evidence (retained.ts EVIDENCE_INCOMPLETE, #1197 review).
+[(force-denial ?t ?r) [?t "force-operation" "resume"] [?t "claim-activity" "unknown"] [(str "FORCE-ACTIVITY-UNKNOWN") ?r]]
+[(force-denial ?t ?r) [?t "force-operation" "rework"] (not (force-own-continuation ?t)) [(str "FORCE-NOT-RESPONSIBLE") ?r]]
+[(force-technical ?t) (force-denial ?t ?r) [(= ?r "D-DENY-CLAIM")]]
+[(force-technical ?t) (force-denial ?t ?r) [(= ?r "D-DENY-LABELS-UNKNOWN")]]
+[(force-technical ?t) (force-denial ?t ?r) [(= ?r "D-DENY-NATIVE-UNKNOWN")]]
+[(force-technical ?t) (force-denial ?t ?r) [(= ?r "D-DENY-CLOSING-UNKNOWN")]]
+[(force-technical ?t) (force-denial ?t ?r) [(= ?r "D-DENY-INVENTORY-UNKNOWN")]]
+[(force-technical ?t) (force-denial ?t ?r) [(= ?r "D-DENY-REFINEMENT-UNKNOWN")]]
+[(force-technical ?t) (force-denial ?t ?r) [(= ?r "CLAIM-INVENTORY-UNKNOWN")]]
+[(force-technical ?t) (force-denial ?t ?r) [(= ?r "FORCE-NOT-RETAINED")]]
+[(force-technical ?t) (force-denial ?t ?r) [(= ?r "FORCE-NOT-RESPONSIBLE")]]
+[(force-technical ?t) (force-denial ?t ?r) [(= ?r "FORCE-ACTIVITY-UNKNOWN")]]
+[(force-technical ?t) (force-denial ?t ?r) [(= ?r "FORCE-OTHER-ACTIVITY-UNKNOWN")]]
+[(force-technical ?t) (force-denial ?t ?r) [(= ?r "FORCE-TICKET-CLOSED")]]
+[(force-technical ?t) (force-denial ?t ?r) [(= ?r "FORCE-QUESTION-UNKNOWN")]]
+[(force-technical ?t) (force-denial ?t ?r) [(= ?r "FORCE-HISTORY-UNKNOWN")]]
+[(force-technical ?t) (force-denial ?t ?r) [(= ?r "FORCE-MARKER-UNVERIFIED")]]
+[(force-denied ?t) (force-denial ?t ?r)]
+;; Every precondition of an admissible request, in one place so each outcome is exclusive.
+[(force-ready ?t) [?t "force-request" true] (force-supported ?t) [?t "force-reason" "valid"] [?t "force-agent" "known"] [?t "force-revision" "current"]]
 [(eligible ?t) (implementation-permit ?t) (not (adoptable ?t)) (not (implementation-denied ?t))]
 [(design-eligible ?t) (issue ?t) (open ?t) [?t "label" "status:needs-design"] [?t "labels-complete" true] (platform-ok ?t) (closing-complete ?t) (not (claimed ?t)) (not (has-closing ?t)) (not [?t "label" "design:decision-needed"])]
 [(possible ?t) (available ?t) (not (claimed ?t)) (not (prerequisite ?t)) (not (blocked ?t)) (not (has-closing ?t))]
