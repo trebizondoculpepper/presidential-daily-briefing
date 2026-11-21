@@ -119,11 +119,13 @@ contacting PDB.
    is why "do not call `session.interrupt`" is not enough by itself.
 2. On an eligible idle, run one bounded PDB read (`pdb --json` or the MCP briefing) with a hard
    timeout and a re-entry guard; never a background watcher and never a second concurrent waiter.
-3. Deduplicate **delivered work**, not just concurrent callbacks. Store a fingerprint of the
-   actionable set (for example a hash of the ordered ticket numbers and their states) in plugin
-   storage and skip the prompt when the fingerprint is unchanged since the last delivered prompt.
-   The reference plugin's `holding` flag only excludes overlapping callbacks and keeps no such
-   memory.
+3. Deduplicate **delivered work**, not just concurrent callbacks, and do not invent the
+   fingerprint: consume the shared decision and fingerprint that `src/rebrief/core.ts` already
+   computes, which covers the relevant action, policy and evidence changes (a changed CI result or
+   new review evidence on the same open PR is a new continuation; a coarse ticket-number hash would
+   miss it). Store that fingerprint in plugin storage and skip the prompt when it is unchanged
+   since the last delivered prompt. The reference plugin's `holding` flag only excludes overlapping
+   callbacks and keeps no such memory.
 4. If the fingerprint changed and the read reports actionable work, call `session.prompt` with a
    short, sanitized summary (counts and ticket numbers, no bodies, no credentials, no paths) and
    record the new fingerprint.
