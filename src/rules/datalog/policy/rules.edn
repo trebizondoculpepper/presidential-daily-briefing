@@ -147,6 +147,9 @@
 [(force-denial ?t ?r) [?t "force-operation" "resume"] [?t "question-record" ?q] [?q "record-trust" "trusted"] [?q "record-version" 2] [?q "record-outcome" "none"] [(str "FORCE-QUESTION-OPEN") ?r]]
 ;; A closed ticket is never claimed or resumed (claims.ts TICKET_CLOSED); force cannot reopen it.
 [(force-denial ?t ?r) [?t "force-request" true] [?t "state" ?st] [(not= ?st "OPEN")] [(str "FORCE-TICKET-CLOSED") ?r]]
+;; Unverifiable question authority or resolution is missing evidence (retained.ts EVIDENCE_INCOMPLETE).
+[(force-denial ?t ?r) [?t "force-operation" "resume"] [?t "question-record" ?q] [?q "record-trust" "unverified"] [(str "FORCE-QUESTION-UNKNOWN") ?r]]
+[(force-denial ?t ?r) [?t "force-operation" "resume"] [?t "question-record" ?q] [?q "record-trust" "trusted"] [?q "record-outcome" "unknown"] [(str "FORCE-QUESTION-UNKNOWN") ?r]]
 [(force-denial ?t ?r) [?t "force-request" true] (own-issue ?o) [(not= ?t ?o)] [?o "claim-activity" "unknown"] [(str "FORCE-OTHER-ACTIVITY-UNKNOWN") ?r]]
 ;; Unknown refinement evidence is technical, even where a known refinement hold is a workflow denial.
 [(force-denial ?t ?r) (issue ?t) (refinement-unknown ?t) [(str "D-DENY-REFINEMENT-UNKNOWN") ?r]]
@@ -168,6 +171,7 @@
 [(force-technical ?t) (force-denial ?t ?r) [(= ?r "FORCE-ACTIVITY-UNKNOWN")]]
 [(force-technical ?t) (force-denial ?t ?r) [(= ?r "FORCE-OTHER-ACTIVITY-UNKNOWN")]]
 [(force-technical ?t) (force-denial ?t ?r) [(= ?r "FORCE-TICKET-CLOSED")]]
+[(force-technical ?t) (force-denial ?t ?r) [(= ?r "FORCE-QUESTION-UNKNOWN")]]
 [(force-denied ?t) (force-denial ?t ?r)]
 ;; Every precondition of an admissible request, in one place so each outcome is exclusive.
 [(force-ready ?t) [?t "force-request" true] (force-supported ?t) [?t "force-reason" "valid"] [?t "force-agent" "known"] [?t "force-revision" "current"]]
