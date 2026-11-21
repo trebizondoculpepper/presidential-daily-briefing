@@ -83,9 +83,21 @@ describe("committed-with-error is a real write (#1195 review)", () => {
   it("keeps the committed state when only cleanup fails", async () => {
     // The write outcome is rendered by the onboarding receipt; a committed write must never be
     // reported as "not-written" because the caller has to know the file changed.
-    const { reportStatusFor } = await import("../briefing/onboardcli.js");
+    const { reportStatusFor, fileReportOf } = await import("../briefing/onboardcli.js");
     expect(reportStatusFor("committed-with-error")).toBe("committed-with-error");
     expect(reportStatusFor("written")).toBe("written");
     expect(reportStatusFor("not-written")).toBe("not-written");
+    // A successful write whose cleanup failed keeps its diagnostics in the receipt.
+    expect(
+      fileReportOf({
+        file: "rules.md",
+        status: "written",
+        cleanup: ["lock rules.md.lock could not be released (EBUSY)"],
+      }),
+    ).toEqual({
+      file: "rules.md",
+      status: "written",
+      notes: ["lock rules.md.lock could not be released (EBUSY)"],
+    });
   });
 });

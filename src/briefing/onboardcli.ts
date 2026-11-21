@@ -141,10 +141,10 @@ export async function runOnboard(
       }
     } else {
       const rules = await installRulesFile(root, markdown);
-      files.push(reportOf(rules));
+      files.push(fileReportOf(rules));
       if (rules.status === "written" || rules.status === "kept") {
         install = await installCoordinationSection(root, doc.persistentSection);
-        files.push(reportOf(install));
+        files.push(fileReportOf(install));
       } else {
         files.push({
           file: plannedAgents.file,
@@ -186,7 +186,11 @@ export async function runOnboard(
     return code;
   }
   await output(onboardingText(doc));
-  for (const file of files) stderr(`pdb: ${fileLine(file, dryRun)}\n`);
+  for (const file of files) {
+    stderr(`pdb: ${fileLine(file, dryRun)}\n`);
+    // Cleanup diagnostics (for example a lock that could not be released) are never dropped.
+    for (const note of file.notes ?? []) stderr(`pdb: ${note}\n`);
+  }
   return code;
 }
 
@@ -199,6 +203,8 @@ export interface FileReport {
    */
   status: "written" | "would-write" | "kept" | "committed-with-error" | "not-written";
   reason?: string;
+  /** Cleanup diagnostics from a successful or partial write: never dropped (reviewed #1195). */
+  notes?: string[];
 }
 
 /** Map a write outcome to the per-file receipt status; partial writes stay partial. */
@@ -212,15 +218,20 @@ export function reportStatusFor(status: string): FileReport["status"] {
         : "not-written";
 }
 
-const reportOf = (outcome: {
+/** One write outcome as a per-file receipt, keeping the reason and every cleanup note. */
+export function fileReportOf(outcome: {
   file: string | null;
   status: "written" | "kept" | "not-written" | "committed-with-error";
   reason?: string;
-}): FileReport => ({
-  file: outcome.file ?? RULES_FILE_NAME,
-  status: reportStatusFor(outcome.status),
-  ...("reason" in outcome && outcome.reason ? { reason: outcome.reason } : {}),
-});
+  cleanup?: string[];
+}): FileReport {
+  return {
+    file: outcome.file ?? RULES_FILE_NAME,
+    status: reportStatusFor(outcome.status),
+    ...("reason" in outcome && outcome.reason ? { reason: outcome.reason } : {}),
+    ...(outcome.cleanup?.length ? { notes: [...outcome.cleanup] } : {}),
+  };
+}
 
 /** The generated rules markdown for a verified project, from the shared English document. */
 async function generatedRulesMarkdown(
