@@ -28,6 +28,7 @@ import {
 } from "./manifest.js";
 import {
   installOriMcp,
+  oriMcpEntryKey,
   oriInstallSnapshotChanged,
   oriMcpTargetPath,
   readOriInstallSnapshot,
@@ -242,15 +243,23 @@ async function prepareIdentity(
             : String(error);
       return { entry: null, created: false, refused: message, retry: null };
     }
+    // #583: the installer writes the server key `pdb`, so Ori names this client `ori-pdb` and its
+    // entry is `ori.pdb` (ori-mcp-acceptance.md). With no Ori entry yet, or with that one among
+    // several, that is the entry; other existing entries are never borrowed or guessed between.
+    const own = `ori.${oriMcpEntryKey}`;
     if (resolution.status === "unresolved") {
-      return {
-        entry: null,
-        created: false,
-        refused: `${resolution.message} No identity was borrowed: the Ori install resolves the Ori entry.`,
-        retry: `pdb config set identity.triage_role implementer --entry ori --repo ${scope.repository}`,
-      };
-    }
-    targetEntry = resolution.entry;
+      const candidates = resolution.candidates;
+      if (args.harness === null && (candidates.length === 0 || candidates.includes(own)))
+        targetEntry = own;
+      else
+        return {
+          entry: null,
+          created: false,
+          refused: `${resolution.message} No identity was borrowed: the Ori install resolves the Ori entry.`,
+          // A runnable next step: install for a named entry (the retry never loops back here).
+          retry: `pdb install ori --entry ${candidates[0] ?? own}${args.role ? ` --role ${args.role}` : ""} --repo ${scope.repository}`,
+        };
+    } else targetEntry = resolution.entry;
   }
   // With an explicit --role, reuse the shared identity setup so a fresh checkout can initialize
   // the entry (attended-installer-delivery.md "reuse shared identity resolution/allocation", as
@@ -354,7 +363,10 @@ async function prepareIdentity(
         entry: targetEntry,
         created: false,
         refused: detail,
-        retry: `pdb config set identity.name NAME --entry ${targetEntry}`,
+        // Without a role the read-only install cannot create the entry; re-run with one (#583).
+        retry: record.entryExists
+          ? `pdb config set identity.name NAME --entry ${targetEntry}`
+          : `pdb install ori --entry ${targetEntry} --role implementer --repo ${scope.repository}`,
       };
     }
     return {
