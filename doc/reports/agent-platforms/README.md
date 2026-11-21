@@ -12,4 +12,12 @@ Platform research feeds synthesis #20. Reports distinguish the researcher's actu
 - [Ori Code stop hooks](ori-stop-hooks.md) (#388): no native stop hook. Mid-turn `steer` continues a turn; a steer at the natural stop was dropped. The workable adapter is an external watcher that resumes the same session with a new turn after `turn.succeeded`.
 - [Ori Code stop-hook prototype](ori-stop-hook-prototype.md) (#400): native continuation observed — a natural `turn.succeeded` → shared `pdb rebrief` core returns the specific briefing → the adapter resumes the **same session** and the model echoes the delivery nonce and the brief's repo/agent prefix (the full action id echo was not confirmed, so delivery is not over-claimed). Reuses the shared core; no hook installed.
 
-Other platform report paths are listed in #20; an unmerged report is not represented as delivered by this index.
+- [Codex Stop hooks](codex-stop-hooks.md), the [Codex Stop-hook prototype](codex-stop-hook-prototype.md), [Codex natural-stop semantics](codex-natural-stop-semantics.md) and [Codex thread binding](codex-thread-binding.md).
+- [Claude Code Stop hooks](claude-code-stop-hooks.md): the same-turn continuation observed in print mode.
+- [Ori installer acceptance](ori-install-acceptance.md) (#583).
+- [OpenCode MCP acceptance](opencode-mcp-acceptance.md) and the [OpenCode idle wake-up report](../opencode-idle-wakeup.md) (#23).
+- [Antigravity](antigravity.md) (#264) and [Antigravity natural-stop semantics](antigravity-natural-stop-semantics.md); [Gemini CLI](gemini-cli.md) is history, replaced by Antigravity.
+- [GitHub Copilot](github-copilot.md) (#227), [Cursor](cursor.md) (#228) and [Pi](pi.md) (#231): desk research; no session of these clients was run.
+- [Cline](cline.md) (#229) and [Goose](goose.md) (#230): historical reference only, excluded from active integration by owner decision.
+
+The cross-platform synthesis is the [integration plan](integration-plan.md) (#20).
