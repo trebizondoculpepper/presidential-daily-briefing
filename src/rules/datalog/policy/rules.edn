@@ -153,6 +153,9 @@
 [(force-inventory-read ?t) [?t "kind" _] [1 "owned-claims-complete" true]]
 ;; Every forced operation needs an explicitly complete claim inventory (#1197 review).
 [(force-denial ?t ?r) [?t "force-request" true] (not (force-already-active ?t)) (not (force-owned-retry ?t)) (not (force-inventory-read ?t)) [(str "CLAIM-INVENTORY-UNKNOWN") ?r]]
+;; ...but an owned retry with any other observed own claim still needs a complete inventory
+;; (planClaimFor refuses incomplete inventory whenever ownOther is non-empty, #1197 review).
+[(force-denial ?t ?r) (force-owned-retry ?t) (not (force-inventory-read ?t)) (own-issue ?o) [(not= ?t ?o)] [(str "CLAIM-INVENTORY-UNKNOWN") ?r]]
 ;; Normal admission refuses while the caller holds other active claims (claims.ts/retained.ts
 ;; admissionFor, #1197 review): known active work is a workflow denial a human may override;
 ;; another claim whose activity is unknown is missing evidence.
