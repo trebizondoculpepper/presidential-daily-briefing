@@ -241,7 +241,7 @@ describe("English policy compiler (#416)", () => {
         ),
       ),
     ).toEqual([
-      'policy/rules.edn[36] blocked[0]: attribute "open-blockers" has no phrase in schema.edn :lexicon',
+      'policy/rules.edn[37] blocked[0]: attribute "open-blockers" has no phrase in schema.edn :lexicon',
       'policy/decisions.edn D-OWN-HELD-BACK :witnesses "heldBack"[0] or-join[1].and[0]: attribute "open-blockers" has no phrase in schema.edn :lexicon',
 
       'policy/schema.edn :eligibility-witnesses "openBlockers"[0]: attribute "open-blockers" has no phrase in schema.edn :lexicon',

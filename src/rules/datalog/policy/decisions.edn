@@ -793,4 +793,6 @@
   "CLAIM-INVENTORY-UNKNOWN" "The caller's claim inventory is incomplete: unseen active claims cannot be ruled out."
   "FORCE-OTHER-ACTIVE-CLAIM" "The caller already holds another active claim; normal admission takes one active claim at a time."
   "FORCE-WAIT-OPEN" "The retained claim still waits on an open blocker or question, so normal resume would refuse it."
+  "FORCE-QUESTION-OPEN" "A trusted question recorded on the claim is still unresolved, so normal resume would refuse it."
+  "FORCE-TICKET-CLOSED" "The ticket is closed; it is never claimed or resumed, and force cannot reopen it."
   "FORCE-OTHER-ACTIVITY-UNKNOWN" "The caller holds another claim whose activity could not be read, so whether it is active is unknown."}}

@@ -36,6 +36,8 @@
 ;; Repository-level recovery is context, never a fabricated owned issue.
 [(foreground ?t) [?t "ownership-inventory" true]]
 [(foreground ?t) (open ?t) (addressed ?t)]
+;; #1021: a force request is always answered, even for a closed subject (refused as closed).
+[(foreground ?t) [?t "force-request" true]]
 ;; Human input is waiting whatever the ticket's parking: the human view sees parked work (#457).
 [(foreground ?t) (open ?t) [1 "role" "human"]]
 ;; #413: a claim the live read found released since the snapshot is no longer the viewer's.
@@ -140,6 +142,11 @@
 [(force-denial ?t ?r) [?t "force-request" true] (own-issue ?o) [(not= ?t ?o)] [?o "claim-activity" "resume-required"] [(str "FORCE-OTHER-ACTIVE-CLAIM") ?r]]
 ;; Resuming past a still-open wait (retained.ts BLOCKER_OPEN, D-OWN-WAIT) is a workflow override.
 [(force-denial ?t ?r) [?t "force-operation" "resume"] [?t "claim-activity" "waiting"] [(str "FORCE-WAIT-OPEN") ?r]]
+;; Every trusted v2 question still unresolved on the claim blocks resume (retained.ts QUESTION_OPEN),
+;; independently of routing labels or the bound wait (#1197 review).
+[(force-denial ?t ?r) [?t "force-operation" "resume"] [?t "question-record" ?q] [?q "record-trust" "trusted"] [?q "record-version" 2] [?q "record-outcome" "none"] [(str "FORCE-QUESTION-OPEN") ?r]]
+;; A closed ticket is never claimed or resumed (claims.ts TICKET_CLOSED); force cannot reopen it.
+[(force-denial ?t ?r) [?t "force-request" true] [?t "state" ?st] [(not= ?st "OPEN")] [(str "FORCE-TICKET-CLOSED") ?r]]
 [(force-denial ?t ?r) [?t "force-request" true] (own-issue ?o) [(not= ?t ?o)] [?o "claim-activity" "unknown"] [(str "FORCE-OTHER-ACTIVITY-UNKNOWN") ?r]]
 ;; Unknown refinement evidence is technical, even where a known refinement hold is a workflow denial.
 [(force-denial ?t ?r) (issue ?t) (refinement-unknown ?t) [(str "D-DENY-REFINEMENT-UNKNOWN") ?r]]
@@ -160,6 +167,7 @@
 [(force-technical ?t) (force-denial ?t ?r) [(= ?r "FORCE-NOT-RESPONSIBLE")]]
 [(force-technical ?t) (force-denial ?t ?r) [(= ?r "FORCE-ACTIVITY-UNKNOWN")]]
 [(force-technical ?t) (force-denial ?t ?r) [(= ?r "FORCE-OTHER-ACTIVITY-UNKNOWN")]]
+[(force-technical ?t) (force-denial ?t ?r) [(= ?r "FORCE-TICKET-CLOSED")]]
 [(force-denied ?t) (force-denial ?t ?r)]
 ;; Every precondition of an admissible request, in one place so each outcome is exclusive.
 [(force-ready ?t) [?t "force-request" true] (force-supported ?t) [?t "force-reason" "valid"] [?t "force-agent" "known"] [?t "force-revision" "current"]]

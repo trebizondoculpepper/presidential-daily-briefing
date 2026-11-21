@@ -182,4 +182,19 @@
    :viewer {:role "implementer" :agent "me"}
    :facts [{:e 1 "forward-complete" true "owned-claims-complete" true}
            {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "reverse-complete" true "native-complete" true "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "status:in-progress" "labels-complete" true "open-blockers" 0 "owner" "me" "claim-activity" "waiting" "wait-reason" "question" "force-request" true "force-operation" "resume" "force-reason" "valid" "force-agent" "known" "force-revision" "current"}]
-   :expect {:actions [{:subject 100 :rule "D-OWN-WAIT" :kind "wait-claim" :band 8} {:subject 100 :rule "D-FORCE-OVERRIDE" :kind "force-allow" :band 1 :why "Workflow override requested for resume, overriding: FORCE-WAIT-OPEN. Overrides may only be used under explicit human direction. Inform your human which rules were overridden and what happened."}] :denials #{}}}]}
+   :expect {:actions [{:subject 100 :rule "D-OWN-WAIT" :kind "wait-claim" :band 8} {:subject 100 :rule "D-FORCE-OVERRIDE" :kind "force-allow" :band 1 :why "Workflow override requested for resume, overriding: FORCE-WAIT-OPEN. Overrides may only be used under explicit human direction. Inform your human which rules were overridden and what happened."}] :denials #{}}}
+
+  {:id "f26-closed-ticket-refused"
+   :doc "A closed ticket is never claimed; force cannot reopen it"
+   :viewer {:role "implementer" :agent "me"}
+   :facts [{:e 1 "forward-complete" true "owned-claims-complete" true}
+           {:e 100 "kind" "issue" "state" "CLOSED" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "reverse-complete" true "native-complete" true "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "status:ready" "labels-complete" true "open-blockers" 0 "force-request" true "force-operation" "claim" "force-reason" "valid" "force-agent" "known" "force-revision" "current"}]
+   :expect {:actions [{:subject 100 :rule "D-FORCE-REFUSE-TECHNICAL" :kind "force-refuse" :band 1 :why "Not overridable: FORCE-TICKET-CLOSED. Force cannot supply missing evidence or displace another owner's claim; nothing was changed."}] :denials #{}}}
+
+  {:id "f27-resume-with-unresolved-question"
+   :doc "An unresolved trusted question blocks resume even without routing labels or a bound wait"
+   :viewer {:role "implementer" :agent "me"}
+   :facts [{:e 1 "forward-complete" true "owned-claims-complete" true}
+           {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "reverse-complete" true "native-complete" true "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "status:in-progress" "labels-complete" true "open-blockers" 0 "owner" "me" "claim-activity" "resume-required" "wait-reason" "cleared" "question-record" 300 "force-request" true "force-operation" "resume" "force-reason" "valid" "force-agent" "known" "force-revision" "current"}
+           {:e 300 "record-trust" "trusted" "record-version" 2 "record-outcome" "none" "record-to" "human"}]
+   :expect {:actions [{:subject 100 :rule "D-OWN-RESUME" :kind "resume-claim" :band 3} {:subject 100 :rule "D-FORCE-OVERRIDE" :kind "force-allow" :band 1 :why "Workflow override requested for resume, overriding: FORCE-QUESTION-OPEN. Overrides may only be used under explicit human direction. Inform your human which rules were overridden and what happened."}] :denials #{}}}]}
