@@ -120,10 +120,10 @@
 [(force-own-continuation ?t) [?t "force-operation" "rework"] [1 "agent" ?a] [?t "responsible" ?a] (not (force-other-owner ?t))]
 [(force-own-continuation ?t) [?t "force-operation" "rework"] [1 "agent" ?a] [?t "owner" ?a] (not (force-other-owner ?t))]
 [(force-denial ?t ?r) (claim-deny ?t ?r) [(not= ?r "D-DENY-CLAIM")] [(not= ?r "CLAIM-NOT-READY")] [(not= ?r "D-DENY-OPEN-PR")]]
-;; Rework is explicitly admitted without readiness and with its own open PR (claims.ts rework
+;; Resume and rework are explicitly admitted without readiness and with their own open PR (claims.ts rework
 ;; checks, #1197 review): those are not denials of a rework, so nothing is reported as overridden.
-[(force-denial ?t ?r) (claim-deny ?t ?r) [(= ?r "CLAIM-NOT-READY")] (not [?t "force-operation" "rework"])]
-[(force-denial ?t ?r) (claim-deny ?t ?r) [(= ?r "D-DENY-OPEN-PR")] (not [?t "force-operation" "rework"])]
+[(force-denial ?t ?r) (claim-deny ?t ?r) [(= ?r "CLAIM-NOT-READY")] (not (force-continuation ?t))]
+[(force-denial ?t ?r) (claim-deny ?t ?r) [(= ?r "D-DENY-OPEN-PR")] (not (force-continuation ?t))]
 [(force-denial ?t ?r) (claim-deny ?t ?r) [(= ?r "D-DENY-CLAIM")] (not (force-own-continuation ?t))]
 ;; A continuation of the caller's claim is still checked against an incomplete claim inventory
 ;; (#1197 review): the unclaimed-pickup inventory denials do not cover a claimed ticket, so the
@@ -137,6 +137,9 @@
 ;; another claim whose activity is unknown is missing evidence.
 [(force-denial ?t ?r) [?t "force-request" true] (own-issue ?o) [(not= ?t ?o)] (not [?o "claim-activity" _]) [(str "FORCE-OTHER-ACTIVE-CLAIM") ?r]]
 [(force-denial ?t ?r) [?t "force-request" true] (own-issue ?o) [(not= ?t ?o)] [?o "claim-activity" "active"] [(str "FORCE-OTHER-ACTIVE-CLAIM") ?r]]
+[(force-denial ?t ?r) [?t "force-request" true] (own-issue ?o) [(not= ?t ?o)] [?o "claim-activity" "resume-required"] [(str "FORCE-OTHER-ACTIVE-CLAIM") ?r]]
+;; Resuming past a still-open wait (retained.ts BLOCKER_OPEN, D-OWN-WAIT) is a workflow override.
+[(force-denial ?t ?r) [?t "force-operation" "resume"] [?t "claim-activity" "waiting"] [(str "FORCE-WAIT-OPEN") ?r]]
 [(force-denial ?t ?r) [?t "force-request" true] (own-issue ?o) [(not= ?t ?o)] [?o "claim-activity" "unknown"] [(str "FORCE-OTHER-ACTIVITY-UNKNOWN") ?r]]
 ;; Unknown refinement evidence is technical, even where a known refinement hold is a workflow denial.
 [(force-denial ?t ?r) (issue ?t) (refinement-unknown ?t) [(str "D-DENY-REFINEMENT-UNKNOWN") ?r]]

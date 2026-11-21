@@ -792,4 +792,5 @@
   "CLAIM-NOT-READY" "The ticket is not ready to pick up (neither status:ready nor status:incomplete)."
   "CLAIM-INVENTORY-UNKNOWN" "The caller's claim inventory is incomplete: unseen active claims cannot be ruled out."
   "FORCE-OTHER-ACTIVE-CLAIM" "The caller already holds another active claim; normal admission takes one active claim at a time."
+  "FORCE-WAIT-OPEN" "The retained claim still waits on an open blocker or question, so normal resume would refuse it."
   "FORCE-OTHER-ACTIVITY-UNKNOWN" "The caller holds another claim whose activity could not be read, so whether it is active is unknown."}}
