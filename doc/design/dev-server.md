@@ -24,10 +24,16 @@ Installed `pdb serve` stays exactly as it is for normal use.
   2. **Backend** — the existing `pdb serve` entry executed from source (`tsx`), supervised: on a
      watched edit the child is restarted. Server module replacement is explicitly out of scope
      until it is shown to be simpler and safe.
+- **One origin for the browser**: the dev asset server proxies the API half (`/api` and `/mcp`) to
+  the supervised backend, so pages keep same-origin requests, links built from the server origin and
+  the existing CSP/Origin rules. The proxy is a development-only Vite `server.proxy` entry; the two
+  ports are an implementation detail the browser never sees.
 - **Reuse, never reimplement**: API behaviour continues to come from the same services, native
   policy and startup/close boundaries as `pdb serve`. The dev server must not add a
-  development-only collector, policy engine, ranker or cache. It passes the same flags
-  (`--repo`, `--role`, `--entry`) as the installed command.
+  development-only collector, policy engine, ranker or cache. It passes `--repo` and the port only:
+  it never passes an identity-selecting flag (`--entry`, `--harness`, `--agent`, `--role`) and never
+  creates or repairs an identity. A checkout without a recorded identity gets the same refusal and
+  guidance as `pdb serve`, because `dev` is not an onboarding command.
 
 ## Ports, binding and lifecycle
 

@@ -10,9 +10,12 @@ it when the reviewed contract is implemented.
 npx vp dev spike/dev-server --config spike/dev-server/vite.config.ts
 
 # 2. Supervised backend from a local module, on 5198
-PDB_SPIKE_PORT=5198 node spike/dev-server/supervise.mjs \
-  spike/dev-server/server.ts spike/dev-server/server.ts
+PDB_SPIKE_PORT=5198 node --import tsx spike/dev-server/supervise.ts \
+  spike/dev-server/server.ts spike/dev-server
 
 # 3. The same supervisor running the real `pdb serve` from source, on 5197
-node spike/dev-server/supervise.mjs spike/dev-server/serve-entry.ts src
+node --import tsx spike/dev-server/supervise.ts spike/dev-server/serve-entry.ts src
+
+# 4. Prove HMR: connect to the HMR socket, edit the component, record the update
+node spike/dev-server/hmr-probe.mjs spike/dev-server/src/Counter.svelte
 ```

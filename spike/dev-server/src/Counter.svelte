@@ -2,4 +2,4 @@
   import { counter } from "./store.svelte.js";
 </script>
 
-<button onclick={() => counter.count++}>clicked {counter.count} times — spike</button>
+<button onclick={() => counter.count++}>clicked {counter.count} times — spike-manual</button>

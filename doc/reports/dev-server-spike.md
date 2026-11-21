@@ -13,12 +13,12 @@ inside the pinned toolchain, not a framework survey.
 
 ## Environment
 
-| Item      | Value                                                                                                                                          |
-| --------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
-| Tool      | `vp` (vite-plus) 1.5.0, Vite core `@voidzero-dev/vite-plus-core` 1.5.0                                                                         |
-| Svelte    | `svelte` 5.58.0, `@sveltejs/vite-plugin-svelte` 7.3.1                                                                                          |
-| Node      | 26.7.0 (macOS, arm64)                                                                                                                          |
-| Prototype | `spike/dev-server/` (`index.html`, `src/Counter.svelte`, `src/store.svelte.ts`, `src/main.ts`, `server.ts`, `supervise.mjs`, `serve-entry.ts`) |
+| Item      | Value                                                                                                                                                                                                        |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Tool      | `vp` (vite-plus) 1.5.0, Vite core `@voidzero-dev/vite-plus-core` 1.5.0                                                                                                                                       |
+| Svelte    | `svelte` 5.58.0, `@sveltejs/vite-plugin-svelte` 7.3.1                                                                                                                                                        |
+| Node      | 26.7.0 (macOS, arm64)                                                                                                                                                                                        |
+| Prototype | `spike/dev-server/` (`index.html`, `src/Counter.svelte`, `src/store.svelte.ts`, `src/main.ts`, `server.ts`, `supervise.ts` — strict-checked by the root `tsconfig.json` — `serve-entry.ts`, `hmr-probe.mjs`) |
 
 `vp dev` is the built-in dev server (arguments forwarded to Vite); `vp run dev` is the task runner
 that would invoke a `dev` script. The distinction matters for the contract: the HMR proof uses
@@ -35,7 +35,7 @@ curl -s http://127.0.0.1:5199/src/Counter.svelte | head -1
 # import { createHotContext as __vite__createHotContext } from "/@vite/client";import.meta.hot = ...
 ```
 
-A headless probe (`/tmp/hmr-probe.mjs`, reproduced by the steps below) connects to the HMR socket
+A headless probe (`spike/dev-server/hmr-probe.mjs`, run as shown in its README) connects to the HMR socket
 (`ws://127.0.0.1:5199/`, subprotocol `vite-hmr`), edits the component, and records what arrives:
 
 ```json
@@ -48,7 +48,7 @@ A headless probe (`/tmp/hmr-probe.mjs`, reproduced by the steps below) connects 
 ```
 
 So a component edit produced a real HMR `update` for the module with **no `full-reload` message**,
-205 ms after the write.
+203 ms after the write.
 
 ### Which UI state survives (checked in a real browser)
 
@@ -71,8 +71,8 @@ page-local component state survives an edit.
 Two supervised proofs on disposable loopback ports (never 4372, never the user's running server):
 
 ```sh
-PDB_SPIKE_PORT=5198 node spike/dev-server/supervise.mjs \
-  spike/dev-server/server.ts spike/dev-server/server.ts
+PDB_SPIKE_PORT=5198 node --import tsx spike/dev-server/supervise.ts \
+  spike/dev-server/server.ts spike/dev-server
 curl -s http://127.0.0.1:5198/api/answer
 # {"answer":"v1","escaped":"&lt;b&gt;&amp;"}      ← escapeHtml comes from src/serve/rules-page.ts
 # edit `answer` to "v2"
@@ -83,7 +83,7 @@ curl -s http://127.0.0.1:5198/api/answer
 The same supervisor runs the real backend from source:
 
 ```sh
-node spike/dev-server/supervise.mjs spike/dev-server/serve-entry.ts src
+node --import tsx spike/dev-server/supervise.ts spike/dev-server/serve-entry.ts src
 # pdb serve 0.1.0 listening on http://127.0.0.1:5197/
 ```
 
@@ -153,7 +153,7 @@ These are single observations on one machine, not a benchmark suite.
 - State survival was verified for the two edit shapes above only; other component changes (props,
   store shape, `$props` signature) may behave differently.
 - Restart timing was measured on macOS; Windows/FreeBSD were not exercised.
-- The supervisor is 40 lines and demonstrates the mechanism, not a production-grade runner (no
+- The supervisor is a small script and demonstrates the mechanism, not a production-grade runner (no
   debounce coalescing beyond 150 ms, no failure backoff, no source-map-aware stack mapping).
 - No CSP/Host/Origin hardening was implemented; the prototype serves a disposable page. The
   contract states what must be decided before production.
