@@ -131,6 +131,11 @@ These are single observations on one machine, not a benchmark suite.
   `SIGTERM` is asynchronous and a fast replacement would race the old process for the port. Verified
   with a child that delays exit by 700 ms: one `restart` line, one new `slow child on 5195`, no
   `EADDRINUSE`. A 3 s SIGKILL guard bounds a child that ignores the signal.
+- **Shutdown vs restart**: shutdown sets a stopping flag before anything else, so a signal that
+  arrives while a restart waits for the old child cannot spawn a replacement that shutdown would
+  orphan. Verified: terminating during a pending restart left no supervisor, no child and no
+  listener. A child killed externally (`signalCode`, `exitCode` null) is still recognised as
+  exited, so the next edit restarts it (verified with `kill -KILL` + edit: a new listener came up).
 - **Failed edits**: a TypeScript error keeps the last good backend process only if the supervisor
   refuses to restart on a failed start; the prototype currently restarts on every write and logs
   `backend exited 1`. The contract requires "keep the last good process, report the error, retry on

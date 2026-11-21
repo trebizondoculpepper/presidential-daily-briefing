@@ -16,6 +16,10 @@ if (!entry || !watchPath) {
 let child = null;
 let restarts = 0;
 let restarting = false;
+/** Set once shutdown starts: nothing may be spawned afterwards (reviewed #1200 finding). */
+let stopping = false;
+/** A child that was killed by a signal has `exitCode` null but `signalCode` set. */
+const hasExited = (process) => process.exitCode !== null || process.signalCode !== null;
 const start = () => {
   child = spawn(process.execPath, ["--import", "tsx", entry], { stdio: "inherit" });
   const spawned = child;
@@ -36,10 +40,14 @@ const restart = () => {
   console.log(`[supervise] restart ${restarts} (pid ${child?.pid ?? "none"} -> new)`);
   const old = child;
   const spawnNext = () => {
+    if (stopping) {
+      restarting = false;
+      return;
+    }
     start();
     restarting = false;
   };
-  if (!old || old.exitCode !== null) return spawnNext();
+  if (!old || hasExited(old)) return spawnNext();
   const guard = setTimeout(() => {
     console.error("[supervise] old backend ignored SIGTERM; killing it");
     old.kill("SIGKILL");
@@ -62,7 +70,9 @@ let exiting = false;
 const shutdown = (signal) => {
   if (exiting) return;
   exiting = true;
-  if (!child || child.exitCode !== null) process.exit(0);
+  // Cancel any restart in flight before it can spawn a replacement that shutdown would orphan.
+  stopping = true;
+  if (!child || hasExited(child)) process.exit(0);
   child.once("exit", () => process.exit(0));
   child.kill(signal);
   // Never hang forever if the child ignores the signal.
