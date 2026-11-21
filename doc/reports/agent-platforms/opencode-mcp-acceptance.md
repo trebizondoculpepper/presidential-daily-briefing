@@ -17,21 +17,21 @@ runtime behaviour.
 
 ## Checklist and results
 
-| #   | Check                                   | Result        | Evidence                                                                                                                                                                                                                                                                 |
-| --- | --------------------------------------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 1   | Server startup and discovery            | **supported** | `opencode mcp list` → `✓ pdb connected`; the tool catalog gained `triage_briefing`, `triage_issue`, `triage_dependencies`, `triage_discussion`, `triage_events`                                                                                                          |
-| 2   | Briefing (actions)                      | **supported** | `triage_briefing {repo, limit: 3}` → `status: complete`, `view: briefing`, 3 ranked actions, `presentation.bytes` 16,383 of a 16,384 budget with explicit `omitted` counts                                                                                               |
-| 3   | Issue intake                            | **supported** | `triage_issue {number: 23}` → `status: complete`, `subject: {type: issue, number: 23}`, 5,331 bytes, no truncated fields                                                                                                                                                 |
-| 4   | Dependencies                            | **supported** | `triage_dependencies {number: 23}` → `status: complete`, 4,343 bytes, `presentation.next: null`                                                                                                                                                                          |
-| 5   | Discussion view                         | **supported** | `triage_discussion {limit: 3}` → `status: complete`, 4,711 bytes                                                                                                                                                                                                         |
-| 6   | Repository briefing mode                | **supported** | `triage_briefing {mode: "briefing", last: "24h"}` → `view: repository-briefing`, `status: complete`, 16,040 bytes                                                                                                                                                        |
-| 7   | Missing identity diagnostic             | **supported** | server launched without `--project`: `identitySource: "unresolved"`, `identityDiagnostic: "No local project is selected; the server launch directory was not consulted. Select a local startup project with --project PATH, or use an explicit local --agent override."` |
-| 8   | Explicit agent override                 | **supported** | `triage_briefing {agent: "sandra_lopes", role: "implementer"}` → `identitySource: "tool"`, `agent: "sandra_lopes"`, no diagnostic                                                                                                                                        |
-| 9   | Persistent local name and `triage_role` | **supported** | server launched with `--project <checkout> --entry opencode` → `identitySource: "entry"`, `entry: "opencode"`, `agent: "sandra_lopes"`, `triageRole: "implementer"`, `identityStore: "pdb"`                                                                              |
-| 10  | Invalid input diagnostic                | **supported** | `triage_briefing {repo: "not-a-repo"}` → `Input validation error: … repo must be owner/name`                                                                                                                                                                             |
-| 11  | Cancellation / protocol cleanliness     | **not run**   | this harness exposes no way to abort an in-flight MCP tool call; the server's own cancellation path is covered by its protocol tests, not by this client                                                                                                                 |
+| #   | Check                                   | Result        | Evidence                                                                                                                                                                                                                                                                                                                          |
+| --- | --------------------------------------- | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | Server startup and discovery            | **supported** | `opencode mcp list` → `✓ pdb connected`; the tool catalog gained `triage_briefing`, `triage_issue`, `triage_dependencies`, `triage_discussion`, `triage_events`                                                                                                                                                                   |
+| 2   | Briefing (actions)                      | **supported** | `triage_briefing {repo, limit: 3}` → `status: complete`, `view: briefing`, 3 ranked actions, `presentation.bytes` 16,383 of a 16,384 budget with explicit `omitted` counts                                                                                                                                                        |
+| 3   | Issue intake                            | **supported** | `triage_issue {number: 23}` → `status: complete`, `subject: {type: issue, number: 23}`, 5,331 bytes, no truncated fields                                                                                                                                                                                                          |
+| 4   | Dependencies                            | **supported** | `triage_dependencies {number: 23}` → `status: complete`, 4,343 bytes, `presentation.next: null`                                                                                                                                                                                                                                   |
+| 5   | Discussion view                         | **supported** | `triage_discussion {limit: 3}` → `status: complete`, 4,711 bytes                                                                                                                                                                                                                                                                  |
+| 6   | Repository briefing mode                | **supported** | `triage_briefing {mode: "briefing", last: "24h"}` → `view: repository-briefing`, `status: complete`, 16,040 bytes                                                                                                                                                                                                                 |
+| 7   | Missing identity diagnostic             | **supported** | server launched without `--project`: `identitySource: "unresolved"`, `identityDiagnostic: "No local project is selected; the server launch directory was not consulted. Select a local startup project with --project PATH, or use an explicit local --agent override."`                                                          |
+| 8   | Explicit agent override                 | **supported** | `triage_briefing {agent: "sandra_lopes", role: "implementer"}` → `identitySource: "tool"`, `agent: "sandra_lopes"`, no diagnostic                                                                                                                                                                                                 |
+| 9   | Persistent local name and `triage_role` | **supported** | prerequisite: `pdb setup identity --role implementer --entry opencode` in the checkout (writes `pdb.toml`, never committed); then the server launched with `--project <checkout> --entry opencode` → `identitySource: "entry"`, `entry: "opencode"`, `agent: "sandra_lopes"`, `triageRole: "implementer"`, `identityStore: "pdb"` |
+| 10  | Invalid input diagnostic                | **supported** | `triage_briefing {repo: "not-a-repo"}` → `Input validation error: … repo must be owner/name`                                                                                                                                                                                                                                      |
+| 11  | Cancellation / protocol cleanliness     | **not run**   | this harness exposes no way to abort an in-flight MCP tool call; the server's own cancellation path is covered by its protocol tests, not by this client                                                                                                                                                                          |
 
-## Technical finding: `opencode mcp add` writes a shape this client ignores
+## Technical finding: `opencode mcp add` writes a shape this client ignores ([#1203](https://github.com/trebizondoculpepper/presidential-daily-briefing/issues/1203))
 
 `opencode mcp add pdb -- node …/dist/mcp.mjs --repo …` reports success and writes:
 
@@ -45,7 +45,7 @@ entry to `mcp.pdb` made the server connect immediately and the tool catalog upda
 session. This is a client-side defect worth a focused follow-up ticket; the workaround is to write
 the flat shape.
 
-## Environment limitation: the shared service is bound to one location
+## Environment limitation: the shared service is bound to one location ([#1204](https://github.com/trebizondoculpepper/presidential-daily-briefing/issues/1204))
 
 The background service reports `location.directory: /Users/salimfadhley`, so a project-scoped
 `opencode.json` in another directory (a disposable `/tmp` checkout) is not loaded by it, and
@@ -75,7 +75,9 @@ opencode mcp list            # expect: ✓ pdb connected
 #    triage_discussion {repo, limit: 3}
 #    triage_briefing {repo, mode: "briefing", last: "24h"}
 
-# 5. Identity: launch with --project <checkout> --entry <key> and expect
+# 5. Identity: create the entry once with
+#    pdb setup identity --role implementer --entry <key>   (writes pdb.toml, never committed)
+#    then launch with --project <checkout> --entry <key> and expect
 #    identitySource "entry" with the recorded name and triageRole.
 ```
 
@@ -84,6 +86,8 @@ opencode mcp list            # expect: ✓ pdb connected
 OpenCode is a **supported** MCP client for PDB's read-only surface: discovery, briefing, issue,
 dependency, discussion and repository-briefing calls all returned complete, bounded results, and
 identity resolution behaves as documented for unresolved, explicit and persisted cases. Two
-follow-ups are worth filing: the `opencode mcp add` shape defect, and the fact that a project-scoped
-config is not loaded by the shared service when it is bound to another location. Cancellation was
+follow-ups are filed: [#1203](https://github.com/trebizondoculpepper/presidential-daily-briefing/issues/1203)
+for the `opencode mcp add` shape defect, and
+[#1204](https://github.com/trebizondoculpepper/presidential-daily-briefing/issues/1204) for the
+project-scoped config the shared service ignores when it is bound to another location. Cancellation was
 not exercised because this harness offers no abort surface for an in-flight tool call.
