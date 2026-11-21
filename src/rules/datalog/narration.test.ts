@@ -67,15 +67,16 @@ describe("rule-attached literal purposes (#578)", () => {
     const before = rulesDocument(declaredRulesContext(), {}, older);
     const after = rulesDocument(declaredRulesContext(), {}, annotated);
     expect(before.schemaVersion).toBe(after.schemaVersion);
-    expect(rulesText(before)).toBe(rulesText(after));
     expect(before.narration).toMatchObject({ total: 69, supplied: 0 });
     expect(before.narration.missing).toHaveLength(69);
-    expect(rulesText(after)).not.toContain(bundle.definitions[0].purpose);
-    // #1121: the formal Markdown listing carries the authored purpose when one is supplied, and
-    // says so plainly when it is not.
+    // #1121 changes this deliberately: the rendered listing now carries the authored purpose
+    // beside the formal conditions instead of omitting it.
+    expect(rulesText(before)).not.toBe(rulesText(after));
+    expect(rulesText(before)).toContain("no purpose was supplied");
+    expect(rulesText(after)).not.toContain("no purpose was supplied");
+    expect(rulesText(after)).toContain(`In plain English: ${bundle.definitions[0].purpose}`);
+    // The formal listing stays a formal listing: it does not become the narration surface.
     expect(rulesFormalText(before)).toBe(rulesFormalText(after));
-    expect(rulesFormalText(before)).toContain("no purpose was supplied");
-    expect(rulesFormalText(after)).toContain(`In plain English: ${bundle.definitions[0].purpose}`);
   });
 
   it.each([
