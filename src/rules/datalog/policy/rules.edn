@@ -183,6 +183,8 @@
 ;; ...and a trusted matching claim marker: readable history alone does not establish authority
 ;; (planClaimFor MARKER_UNVERIFIED, #1197 review). Only an explicit trusted marker passes.
 [(force-marker-trusted ?t) [?t "kind" _] [?t "claim-marker-trust" "trusted"]]
+;; A marker verified absent (complete history, none found) is planClaimFor's comment-repair path.
+[(force-marker-trusted ?t) [?t "kind" _] [?t "claim-marker-trust" "absent"] (force-history-read ?t)]
 [(force-denial ?t ?r) (force-owned-retry ?t) (not (force-marker-trusted ?t)) [(str "FORCE-MARKER-UNVERIFIED") ?r]]
 ;; Resume and rework continue only the caller's own retained claim; without it there is nothing to
 ;; continue, and force cannot make the caller the owner.
