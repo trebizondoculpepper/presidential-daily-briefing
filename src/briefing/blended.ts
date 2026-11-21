@@ -26,7 +26,9 @@ export type ActionKind =
   | "resume-claim"
   | "review-owned-work"
   | "inspect-ownership"
-  | "wait-claim";
+  | "wait-claim"
+  // #1098: refinement work (native D-REFINE family) reaches the briefing.
+  | "refine";
 export type BlendedRole = "implementer" | "designer";
 /**
  * 1 addressed, 2 PR follow-up, 3 designer duties and owned-work review/resume, 4 easy win,

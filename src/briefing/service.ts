@@ -42,6 +42,7 @@ import { deliveryRead } from "../workflow/deliveryread.js";
 import type { DeliveryRead } from "../workflow/deliveryread.js";
 import { markerTrust } from "../workflow/delivery.js";
 import { readSnapshotResponsibility } from "../workflow/responsibility.js";
+import { readSnapshotRefinements } from "../workflow/refinementread.js";
 import type { TrustDecision } from "../workflow/delivery.js";
 import { ReadMeter } from "../github/readplan.js";
 import { collectShortlist } from "../github/shortlist.js";
@@ -251,6 +252,10 @@ async function presentBriefingFor(
       : redacted;
   // Trusted delivery responsibility (#182 over #190 records) from the comments already collected.
   const responsibility = await readSnapshotResponsibility(snapshot, trust, signal);
+  // #1098: refinement facts from the collected records, so designer refinement actions and
+  // pickup denials reach the briefing; unread trust leaves them unread (no rule applies).
+  // Offline reads have no trust: unknown authority keeps the facts incomplete, so the hold stays.
+  const refinements = await readSnapshotRefinements(snapshot, trust ?? unknownTrust, signal);
   options = { ...options, responsible: responsibility.responsible };
   let experimental:
     | Awaited<ReturnType<(typeof import("../rules/datalog/datalog.js"))["evaluateDatalog"]>>
@@ -315,6 +320,7 @@ async function presentBriefingFor(
           ...responsibility.unknownPrs,
         ],
         releaseDirections: responsibility.releaseDirections,
+        refinements,
         ...datalogReviewFacts(snapshot),
         checkRequiredness: datalogCheckFacts(snapshot),
         limit: Number.MAX_SAFE_INTEGER,
