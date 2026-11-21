@@ -676,7 +676,89 @@
    :when [[1 "role" "human"] [?t "unassign-subject" true] [1 "trusted-human-context" true] [1 "permission" "allow"] [?t "claim-present" false] [?t "responsibility-present" true] [?t "claim-history-complete" true]]
    :why "Release only agent:{agent}'s continuing responsibility (#1018): no claim label is present, but delivery responsibility remains; clear it while preserving all human assignees, readiness labels, blockers, questions and other agents' claims."
    :codes ["unassign" "allow" "responsibility"]
-   :witnesses {"agent" [[?t "unassign-agent" ?value]]}}]
+   :witnesses {"agent" [[?t "unassign-agent" ?value]]}}
+
+  {:id "D-FORCE-REFUSE-UNSUPPORTED"
+   :purpose "Refuse a workflow override for an operation without a native override decision and execution path."
+   :kind "force-refuse"
+   :band 1
+   :preference 1
+   :affinity "shared"
+   :owned false
+   :when [[1 "role" ?role] [(not= ?role "human")] (issue ?t) [?t "force-request" true] [?t "force-operation" ?op] (not (force-supported ?t))]
+   :why "Workflow override is not supported for {operation}; nothing was changed. Supported: claim, resume and rework."
+   :codes ["force" "refuse" "unsupported"]
+   :witnesses {"operation" [[?t "force-operation" ?value]]}}
+
+  {:id "D-FORCE-REFUSE-REASON"
+   :purpose "Refuse a workflow override whose reason is empty, whitespace-only or over the size bound, before any mutation."
+   :kind "force-refuse"
+   :band 1
+   :preference 1
+   :affinity "shared"
+   :owned false
+   :when [[1 "role" ?role] [(not= ?role "human")] (issue ?t) [?t "force-request" true] (force-supported ?t) [?t "force-reason" ?r] [(not= ?r "valid")]]
+   :why "A workflow override needs a non-empty reason of at most 4,096 bytes ({reason}); nothing was changed."
+   :codes ["force" "refuse" "reason"]
+   :witnesses {"reason" [[?t "force-reason" ?value]]}}
+
+  {:id "D-FORCE-REFUSE-AGENT"
+   :purpose "Refuse a workflow override when the acting agent is unknown; force never invents or borrows an identity."
+   :kind "force-refuse"
+   :band 1
+   :preference 1
+   :affinity "shared"
+   :owned false
+   :when [[1 "role" ?role] [(not= ?role "human")] (issue ?t) [?t "force-request" true] (force-supported ?t) [?t "force-reason" "valid"] [?t "force-agent" "unknown"]]
+   :why "The acting agent is unknown, so no claim can be recorded; force does not invent or borrow an identity. Nothing was changed."
+   :codes ["force" "refuse" "agent"]}
+
+  {:id "D-FORCE-REFUSE-STALE"
+   :purpose "Refuse a workflow override made against a stale subject or ownership revision; a new decision is needed."
+   :kind "force-refuse"
+   :band 1
+   :preference 1
+   :affinity "shared"
+   :owned false
+   :when [[1 "role" ?role] [(not= ?role "human")] (issue ?t) [?t "force-request" true] (force-supported ?t) [?t "force-reason" "valid"] [?t "force-agent" "known"] [?t "force-revision" "stale"]]
+   :why "The ticket or its ownership changed since this override was decided; read it again and make a new decision. Nothing was changed."
+   :codes ["force" "refuse" "stale"]}
+
+  {:id "D-FORCE-REFUSE-TECHNICAL"
+   :purpose "Refuse a workflow override when a denial is missing evidence, another owner's claim or an incomplete inventory, which force cannot override."
+   :kind "force-refuse"
+   :band 1
+   :preference 1
+   :affinity "shared"
+   :owned false
+   :when [[1 "role" ?role] [(not= ?role "human")] (issue ?t) (force-ready ?t) (force-technical ?t)]
+   :why "Not overridable: {rules}. Force cannot supply missing evidence or displace another owner's claim; nothing was changed."
+   :codes ["force" "refuse" "technical"]
+   :witnesses {"rules" [(claim-deny ?t ?value)]}}
+
+  {:id "D-FORCE-NO-DENIAL"
+   :purpose "Record that a forced operation needed no override because native admission already allows it."
+   :kind "force-allow"
+   :band 1
+   :preference 1
+   :affinity "shared"
+   :owned false
+   :when [[1 "role" ?role] [(not= ?role "human")] (issue ?t) (force-ready ?t) (not (force-denied ?t))]
+   :why "No rule denied {operation}, so nothing is overridden; proceed as a normal {operation}."
+   :codes ["force" "allow" "no-denial"]
+   :witnesses {"operation" [[?t "force-operation" ?value]]}}
+
+  {:id "D-FORCE-OVERRIDE"
+   :purpose "Admit a human-directed override of workflow-policy denials, listing every overridden rule for the audit and the human."
+   :kind "force-allow"
+   :band 1
+   :preference 1
+   :affinity "shared"
+   :owned false
+   :when [[1 "role" ?role] [(not= ?role "human")] (issue ?t) (force-ready ?t) (force-denied ?t) (not (force-technical ?t))]
+   :why "Workflow override requested for {operation}, overriding: {rules}. Overrides may only be used under explicit human direction. Inform your human which rules were overridden and what happened."
+   :codes ["force" "allow" "override"]
+   :witnesses {"operation" [[?t "force-operation" ?value]] "rules" [(claim-deny ?t ?value)]}}]
  :denials
  {"D-DENY-CLAIM" "Someone already claims the ticket."
   "D-DENY-PREREQUISITE" "A prerequisite label (design, question, blocked or parked) is present."

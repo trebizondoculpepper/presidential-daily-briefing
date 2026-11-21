@@ -97,6 +97,27 @@
 ;; gates ordinary pickups; adoption is the documented exception.
 [(claim-deny ?t ?code) (issue ?t) (not (available ?t)) (not (adoptable ?t)) [(str "CLAIM-NOT-READY") ?code]]
 [(implementation-denied ?t) (implementation-deny ?t ?r)]
+;; #1021 (doc/design/human-force-overrides.md): an explicit human-directed workflow override. The
+;; host asserts the request, operation, reason validity, revision freshness and whether the agent
+;; is known; human direction is asserted by the trusted local CLI, never inferred from a client or
+;; agent name. Native admission stays the decision source: force lists every claim denial and
+;; overrides only workflow-policy ones. Missing evidence, another owner's claim and an incomplete
+;; inventory are technical or authority facts that force cannot invent or displace. The reason's
+;; content is never graded. Supported operations are claim, resume and rework (shared admission);
+;; other operations are refused here until their own native decision and execution path exist.
+[(force-supported ?t) [?t "force-operation" "claim"]]
+[(force-supported ?t) [?t "force-operation" "resume"]]
+[(force-supported ?t) [?t "force-operation" "rework"]]
+[(force-technical ?t) (claim-deny ?t ?r) [(= ?r "D-DENY-CLAIM")]]
+[(force-technical ?t) (claim-deny ?t ?r) [(= ?r "D-DENY-LABELS-UNKNOWN")]]
+[(force-technical ?t) (claim-deny ?t ?r) [(= ?r "D-DENY-NATIVE-UNKNOWN")]]
+[(force-technical ?t) (claim-deny ?t ?r) [(= ?r "D-DENY-CLOSING-UNKNOWN")]]
+[(force-technical ?t) (claim-deny ?t ?r) [(= ?r "D-DENY-INVENTORY-UNKNOWN")]]
+[(force-technical ?t) (claim-deny ?t ?r) [(= ?r "D-DENY-REFINEMENT-UNKNOWN")]]
+[(force-technical ?t) (claim-deny ?t ?r) [(= ?r "CLAIM-INVENTORY-UNKNOWN")]]
+[(force-denied ?t) (claim-deny ?t ?r)]
+;; Every precondition of an admissible request, in one place so each outcome is exclusive.
+[(force-ready ?t) [?t "force-request" true] (force-supported ?t) [?t "force-reason" "valid"] [?t "force-agent" "known"] [?t "force-revision" "current"]]
 [(eligible ?t) (implementation-permit ?t) (not (adoptable ?t)) (not (implementation-denied ?t))]
 [(design-eligible ?t) (issue ?t) (open ?t) [?t "label" "status:needs-design"] [?t "labels-complete" true] (platform-ok ?t) (closing-complete ?t) (not (claimed ?t)) (not (has-closing ?t)) (not [?t "label" "design:decision-needed"])]
 [(possible ?t) (available ?t) (not (claimed ?t)) (not (prerequisite ?t)) (not (blocked ?t)) (not (has-closing ?t))]
