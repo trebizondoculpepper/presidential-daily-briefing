@@ -116,6 +116,9 @@
 [(force-continuation ?t) [?t "force-operation" "rework"]]
 [(force-other-owner ?t) [?t "owner" ?o] [1 "agent" ?a] [(not= ?o ?a)]]
 ;; A claim the live read found released since the snapshot is not retained (#413, #1197 review).
+;; A claim of a ticket the caller already holds exclusively is the idempotent no-op/repair path
+;; of planClaim (claims.ts), not another owner's claim (#1197 review).
+[(force-own-continuation ?t) [?t "force-operation" "claim"] [1 "agent" ?a] [?t "owner" ?a] (not (force-other-owner ?t)) (not [?t "claim-activity" "not-owned"])]
 [(force-own-continuation ?t) [?t "force-operation" "resume"] [1 "agent" ?a] [?t "owner" ?a] (not (force-other-owner ?t)) (not [?t "claim-activity" "not-owned"])]
 ;; Rework reacquires submitted work through ticket responsibility (doc/design/delivery-lifecycle.md
 ;; "Rework authority", #1197 review): the caller is responsible, the claim may already be released,
@@ -125,13 +128,13 @@
 ;; asserted by the host as evidence; it admits rework without being delivery responsibility.
 [(force-own-continuation ?t) [?t "force-operation" "rework"] [1 "agent" ?a] [?t "legacy-rework-agent" ?a] (not (force-other-owner ?t))]
 [(force-own-continuation ?t) [?t "force-operation" "rework"] [1 "agent" ?a] [?t "owner" ?a] (not (force-other-owner ?t)) (not [?t "claim-activity" "not-owned"])]
-[(force-denial ?t ?r) (claim-deny ?t ?r) [(not= ?r "D-DENY-CLAIM")] [(not= ?r "CLAIM-NOT-READY")] [(not= ?r "D-DENY-OPEN-PR")] [(not= ?r "D-DENY-PLATFORM")]]
-;; Platform is a new-acquisition check: resume never applies it (retained.ts), claim and rework do.
-[(force-denial ?t ?r) (claim-deny ?t ?r) [(= ?r "D-DENY-PLATFORM")] (not [?t "force-operation" "resume"])]
-;; Resume and rework are explicitly admitted without readiness and with their own open PR (claims.ts rework
-;; checks, #1197 review): those are not denials of a rework, so nothing is reported as overridden.
-[(force-denial ?t ?r) (claim-deny ?t ?r) [(= ?r "CLAIM-NOT-READY")] (not (force-continuation ?t))]
-[(force-denial ?t ?r) (claim-deny ?t ?r) [(= ?r "D-DENY-OPEN-PR")] (not (force-continuation ?t))]
+;; Which pickup denials each operation actually applies (#1197 reviews), mirroring normal admission:
+;; claim applies them all; rework (claims.ts) skips readiness and its own open PR; resume
+;; (retained.ts planClaimResume) checks only native blockers and their evidence among them.
+[(force-denial ?t ?r) [?t "force-operation" "claim"] (claim-deny ?t ?r) [(not= ?r "D-DENY-CLAIM")]]
+[(force-denial ?t ?r) [?t "force-operation" "rework"] (claim-deny ?t ?r) [(not= ?r "D-DENY-CLAIM")] [(not= ?r "CLAIM-NOT-READY")] [(not= ?r "D-DENY-OPEN-PR")]]
+[(force-denial ?t ?r) [?t "force-operation" "resume"] (claim-deny ?t ?r) [(= ?r "D-DENY-BLOCKER")]]
+[(force-denial ?t ?r) [?t "force-operation" "resume"] (claim-deny ?t ?r) [(= ?r "D-DENY-NATIVE-UNKNOWN")]]
 [(force-denial ?t ?r) (claim-deny ?t ?r) [(= ?r "D-DENY-CLAIM")] (not (force-own-continuation ?t))]
 ;; A continuation of the caller's claim is still checked against an incomplete claim inventory
 ;; (#1197 review): the unclaimed-pickup inventory denials do not cover a claimed ticket, so the
