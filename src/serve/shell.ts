@@ -290,6 +290,13 @@ export function renderToolbar(context: ShellContext): string {
     )
     .join(" ");
   const destination = page.id === "ticket" ? pageById("work") : page;
+  // A global-or-project page (e.g. Configuration, Diagnostics) also offers the Global scope in
+  // its project menu, so a selected project can always be cleared through the UI, never only by
+  // editing the URL.
+  const globalSupported = page.scope === "global-or-project";
+  const globalLink = globalSupported
+    ? `<li><a href="${htmlEscape(pageHref(destination, { ...selection, repository: null }, page))}"${carryAttribute(destination)}${!selection.repository ? ' aria-current="true"' : ""}>Global</a></li>`
+    : "";
   const projects = context.served
     .map((s) => {
       const selected = { ...selection, repository: s.repository };
@@ -311,7 +318,7 @@ export function renderToolbar(context: ShellContext): string {
   // navigation on the row below, then page content. Controls sit above the content they affect.
   const projectMenu = `<details class="project-menu"><summary>${htmlEscape(
     selection.repository ? selection.repository : "Change project",
-  )}</summary><ul>${projects || "<li>No projects are served. Start pdb serve with --repo or --project.</li>"}</ul></details>`;
+  )}</summary><ul>${globalLink}${projects || "<li>No projects are served. Start pdb serve with --repo or --project.</li>"}</ul></details>`;
   return `<header class="shell-toolbar"><a class="skip-link" href="#content">Skip to content</a><div class="shell-context"><a class="product" href="${htmlEscape(pageHref(pageById("work"), selection, page))}"${carryAttribute(pageById("work"))}>Presidential Daily Briefing</a>${projectMenu}${indicator ? `<span>${htmlEscape(indicator)}</span>` : ""}<p class="working-for" data-working-for role="status" aria-live="polite">Working for: loading…</p></div><div class="shell-menus"><nav class="wide-pages" aria-label="Pages">${links}</nav><details class="narrow-pages"><summary>Pages: ${htmlEscape(pageById(active).label)}</summary><nav aria-label="Pages">${links}</nav></details></div></header>`;
 }
 export function shellStart(
