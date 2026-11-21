@@ -116,6 +116,35 @@ describe("shared project selection", () => {
       expect(redirects).toEqual([]);
     }
   });
+  it("still remembers an explicit selection on an opt-out page (#818)", async () => {
+    // The opt-out only stops automatic restoration; an explicit ?repo=B is still remembered so
+    // an unscoped project page later restores it.
+    const writes: string[] = [];
+    await runInNewContext(projectSelectionScript(), {
+      URL,
+      window: {
+        location: {
+          href: "http://localhost/configuration?repo=c/d",
+          replace: (v: string) => void v,
+        },
+        localStorage: {
+          getItem: () => "a/b",
+          setItem: (_k: string, v: string) => writes.push(v),
+        },
+      },
+      document: {
+        querySelector: (selector: string) =>
+          selector === "[data-project-selection='none']" ? ({} as Element) : null,
+      },
+      fetch: async () => ({
+        ok: true,
+        json: async () => ({
+          repositories: [{ repository: "a/b" }, { repository: "c/d" }],
+        }),
+      }),
+    });
+    expect(writes).toEqual(["c/d"]);
+  });
 });
 
 describe("Working for header (#669)", () => {

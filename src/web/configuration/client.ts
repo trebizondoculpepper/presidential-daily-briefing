@@ -115,6 +115,7 @@ export function configurationLoader(
     } catch {
       body = null;
     }
+    if (mine !== generation) return;
     const parsed = parseConfigurationResponse(body);
     if (!parsed) {
       apply({

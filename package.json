@@ -43,7 +43,9 @@
     "dist/web/timing.js",
     "dist/web/timing.css",
     "dist/web/overview.js",
-    "dist/web/overview.css"
+    "dist/web/overview.css",
+    "dist/web/configuration.js",
+    "dist/web/configuration.css"
   ],
   "type": "module",
   "publishConfig": {

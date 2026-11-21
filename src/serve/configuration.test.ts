@@ -105,7 +105,24 @@ describe("configuration view (#818)", () => {
 });
 
 describe("configuration read API (#818)", () => {
+  const globalDir = "/api-global";
   const served = [{ repository: "owner/a", project: "/work/a" }];
+  const memoryFs = (files: Record<string, string> = {}) => {
+    const store = new Map(Object.entries(files));
+    const fs: ConfigFileSystem = {
+      readText: async (path) => store.get(path) ?? null,
+      writeText: async (path, text) => void store.set(path, text),
+      rename: async (from, to) => {
+        store.set(to, store.get(from)!);
+        store.delete(from);
+      },
+      remove: async (path) => void store.delete(path),
+      makeDirectory: async () => undefined,
+    };
+    return fs;
+  };
+  // Injected boundaries: never read a real user configuration in tests.
+  const runtime = () => ({ env: { PDB_CONFIG_DIR: globalDir }, globalFs: memoryFs() });
   const select = (
     list: readonly { repository: string; project?: string }[],
     repo: string | undefined,
@@ -118,7 +135,7 @@ describe("configuration read API (#818)", () => {
   };
 
   it("reads Global by default, accepting only the page's own parameter once", async () => {
-    const read = await readConfiguration(new URLSearchParams(), served, {}, select);
+    const read = await readConfiguration(new URLSearchParams(), served, runtime(), select);
     expect(read.ok).toBe(true);
     if (!read.ok) return;
     expect(read.selected).toBeNull();
@@ -127,7 +144,7 @@ describe("configuration read API (#818)", () => {
       new URLSearchParams({ role: "implementer" }),
       new URLSearchParams("repo=a&repo=b"),
     ]) {
-      const refused = await readConfiguration(bad, served, {}, select);
+      const refused = await readConfiguration(bad, served, runtime(), select);
       expect(refused.ok).toBe(false);
     }
   });
@@ -136,7 +153,7 @@ describe("configuration read API (#818)", () => {
     const read = await readConfiguration(
       new URLSearchParams({ repo: "owner/a" }),
       served,
-      {},
+      runtime(),
       select,
     );
     expect(read.ok).toBe(true);
@@ -149,7 +166,7 @@ describe("configuration read API (#818)", () => {
     const refused = await readConfiguration(
       new URLSearchParams({ repo: "someone/else" }),
       served,
-      {},
+      runtime(),
       select,
     );
     expect(refused.ok).toBe(false);

@@ -76,10 +76,21 @@ export interface ConfigurationRuntime {
   readonly env?: NodeJS.ProcessEnv;
   readonly globalFs?: GlobalConfigFileSystem;
   readonly repositoryFs?: ConfigFileSystem;
+  /** The verified per-OS-user config directory serve already resolved (#805), when available. */
+  readonly globalDir?: string;
 }
 
-/** Production boundaries: the real per-OS-user config directory and node filesystem. */
-export const defaultConfigurationRuntime = (): ConfigurationRuntime => ({});
+/**
+ * Production boundaries derived from the serve runtime: when the runtime's verified global
+ * configuration boundary is present, the page reads exactly that directory and filesystem, so
+ * the served set, saved registrations and the page never disagree. Fall back to the process
+ * environment and node filesystem otherwise.
+ */
+export const defaultConfigurationRuntime = (globalConfig?: {
+  readonly dir: string;
+  readonly fs?: ConfigFileSystem;
+}): ConfigurationRuntime =>
+  globalConfig ? { globalDir: globalConfig.dir, globalFs: globalConfig.fs } : {};
 
 /**
  * The read the API route returns: the selected view, or a refusal (unknown parameter, a
@@ -111,7 +122,7 @@ const row = (
 export async function globalConfiguration(
   runtime: ConfigurationRuntime = {},
 ): Promise<ConfigurationView> {
-  const dir = globalConfigDirectory(runtime.env ?? process.env);
+  const dir = runtime.globalDir ?? globalConfigDirectory(runtime.env ?? process.env);
   const warnings: string[] = [];
   let config: Awaited<ReturnType<typeof loadGlobalConfig>> | null = null;
   try {

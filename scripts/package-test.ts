@@ -59,6 +59,9 @@ const expected = [
   "dist/web/timing.js",
   "dist/web/work.css",
   "dist/web/work.js",
+  // #818: the built Configuration page assets (vite.web.config.ts), served by pdb serve.
+  "dist/web/configuration.css",
+  "dist/web/configuration.js",
   "package.json",
   "third-party/README.md",
   "third-party/datascript-LICENSE",

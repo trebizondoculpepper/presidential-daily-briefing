@@ -574,7 +574,7 @@ export async function startServe(
         const read = await readConfiguration(
           context.url.searchParams,
           served,
-          runtime.configuration ?? defaultConfigurationRuntime(),
+          runtime.configuration ?? defaultConfigurationRuntime(runtime.globalConfig),
           selectRepository,
         );
         if (!read.ok) throw new HttpFailure(read.status, read.code, read.message);
