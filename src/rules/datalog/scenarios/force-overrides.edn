@@ -122,4 +122,18 @@
    :facts [{:e 1 "forward-complete" true "owned-claims-complete" true}
            {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "reverse-complete" true "native-complete" true "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "status:ready" "labels-complete" true "open-blockers" 0 "refinement" 200 "force-request" true "force-operation" "claim" "force-reason" "valid" "force-agent" "known" "force-revision" "current"}
            {:e 200 "refinement-state" "unknown"}]
-   :expect {:actions [{:subject 100 :rule "D-FORCE-REFUSE-TECHNICAL" :kind "force-refuse" :band 1 :why "Not overridable: D-DENY-REFINEMENT; D-DENY-REFINEMENT-UNKNOWN. Force cannot supply missing evidence or displace another owner's claim; nothing was changed."} {:subject 100 :rule "D-REFINE-INCOMPLETE" :kind "refine" :band 4}] :denials #{[100 "D-DENY-REFINEMENT"]}}}]}
+   :expect {:actions [{:subject 100 :rule "D-FORCE-REFUSE-TECHNICAL" :kind "force-refuse" :band 1 :why "Not overridable: D-DENY-REFINEMENT; D-DENY-REFINEMENT-UNKNOWN. Force cannot supply missing evidence or displace another owner's claim; nothing was changed."} {:subject 100 :rule "D-REFINE-INCOMPLETE" :kind "refine" :band 4}] :denials #{[100 "D-DENY-REFINEMENT"]}}}
+
+  {:id "f18-rework-by-responsible-agent"
+   :doc "Rework reacquires submitted work through ticket responsibility; no retained claim is needed"
+   :viewer {:role "implementer" :agent "me"}
+   :facts [{:e 1 "forward-complete" true "owned-claims-complete" true}
+           {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "reverse-complete" true "native-complete" true "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "status:ready" "labels-complete" true "open-blockers" 1 "responsible" "me" "force-request" true "force-operation" "rework" "force-reason" "valid" "force-agent" "known" "force-revision" "current"}]
+   :expect {:actions [{:subject 100 :rule "D-FORCE-OVERRIDE" :kind "force-allow" :band 1 :why "Workflow override requested for rework, overriding: D-DENY-BLOCKER. Overrides may only be used under explicit human direction. Inform your human which rules were overridden and what happened."}] :denials #{[100 "D-DENY-BLOCKER"]}}}
+
+  {:id "f19-rework-without-responsibility-refused"
+   :doc "Rework needs the caller's ticket responsibility or claim; force cannot grant it"
+   :viewer {:role "implementer" :agent "me"}
+   :facts [{:e 1 "forward-complete" true "owned-claims-complete" true}
+           {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "reverse-complete" true "native-complete" true "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "status:ready" "labels-complete" true "open-blockers" 0 "force-request" true "force-operation" "rework" "force-reason" "valid" "force-agent" "known" "force-revision" "current"}]
+   :expect {:actions [{:subject 100 :rule "D-FORCE-REFUSE-TECHNICAL" :kind "force-refuse" :band 1 :why "Not overridable: FORCE-NOT-RESPONSIBLE. Force cannot supply missing evidence or displace another owner's claim; nothing was changed."} {:subject 100 :rule "D-ORDINARY" :kind "implement" :band 6}] :denials #{}}}]}
