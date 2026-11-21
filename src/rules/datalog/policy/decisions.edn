@@ -795,5 +795,6 @@
   "FORCE-WAIT-OPEN" "The retained claim still waits on an open blocker or question, so normal resume would refuse it."
   "FORCE-QUESTION-OPEN" "A trusted question recorded on the claim is still unresolved, so normal resume would refuse it."
   "FORCE-QUESTION-UNKNOWN" "A question recorded on the claim could not be verified or its resolution is unknown, so whether it is still open is unknown."
+  "FORCE-HISTORY-UNKNOWN" "The caller's claim history on the ticket could not be read completely, so a retry cannot verify or repair it."
   "FORCE-TICKET-CLOSED" "The ticket is closed; it is never claimed or resumed, and force cannot reopen it."
   "FORCE-OTHER-ACTIVITY-UNKNOWN" "The caller holds another claim whose activity could not be read, so whether it is active is unknown."}}

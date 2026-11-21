@@ -172,7 +172,11 @@
 [(force-denial ?t ?r) [?t "force-operation" "resume"] (not (force-already-active ?t)) [?t "question-record" ?q] [?q "record-trust" "trusted"] [?q "record-version" 2] [?q "record-outcome" "unknown"] [(str "FORCE-QUESTION-UNKNOWN") ?r]]
 [(force-denial ?t ?r) [?t "force-request" true] (not (force-already-active ?t)) (own-issue ?o) [(not= ?t ?o)] [?o "claim-activity" "unknown"] [(str "FORCE-OTHER-ACTIVITY-UNKNOWN") ?r]]
 ;; Unknown refinement evidence is technical, even where a known refinement hold is a workflow denial.
-[(force-denial ?t ?r) (issue ?t) [?t "force-operation" ?op] [(not= ?op "resume")] (refinement-unknown ?t) [(str "D-DENY-REFINEMENT-UNKNOWN") ?r]]
+[(force-denial ?t ?r) (issue ?t) [?t "force-operation" ?op] [(not= ?op "resume")] (not (force-owned-retry ?t)) (refinement-unknown ?t) [(str "D-DENY-REFINEMENT-UNKNOWN") ?r]]
+;; An owned retry needs readable claim history (planClaimFor refuses incomplete claim/comment history
+;; before its no-op or repair); only an explicit complete history passes (#1197 review).
+[(force-history-read ?t) [?t "kind" _] [?t "claim-history-complete" true]]
+[(force-denial ?t ?r) (force-owned-retry ?t) (not (force-history-read ?t)) [(str "FORCE-HISTORY-UNKNOWN") ?r]]
 ;; Resume and rework continue only the caller's own retained claim; without it there is nothing to
 ;; continue, and force cannot make the caller the owner.
 [(force-denial ?t ?r) [?t "force-operation" "resume"] (not (force-own-continuation ?t)) [(str "FORCE-NOT-RETAINED") ?r]]
@@ -192,6 +196,7 @@
 [(force-technical ?t) (force-denial ?t ?r) [(= ?r "FORCE-OTHER-ACTIVITY-UNKNOWN")]]
 [(force-technical ?t) (force-denial ?t ?r) [(= ?r "FORCE-TICKET-CLOSED")]]
 [(force-technical ?t) (force-denial ?t ?r) [(= ?r "FORCE-QUESTION-UNKNOWN")]]
+[(force-technical ?t) (force-denial ?t ?r) [(= ?r "FORCE-HISTORY-UNKNOWN")]]
 [(force-denied ?t) (force-denial ?t ?r)]
 ;; Every precondition of an admissible request, in one place so each outcome is exclusive.
 [(force-ready ?t) [?t "force-request" true] (force-supported ?t) [?t "force-reason" "valid"] [?t "force-agent" "known"] [?t "force-revision" "current"]]
