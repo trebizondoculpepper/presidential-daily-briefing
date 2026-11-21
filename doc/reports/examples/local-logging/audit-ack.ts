@@ -15,7 +15,7 @@ if (!dir) throw new Error("usage: audit-ack.ts DIR [COUNT]");
 /** The rotator stream the transport writes to; the package keeps it on the instance. */
 interface RotatorStream {
   on(event: "error", listener: (error: NodeJS.ErrnoException) => void): void;
-  once(event: "close", listener: () => void): void;
+  on(event: "rotate" | "close", listener: () => void): void;
   end(): void;
 }
 
@@ -34,7 +34,17 @@ const audit = (record: object): Promise<string> =>
     stream.on("error", (error) => {
       failed = error.code ?? String(error);
     });
-    stream.once("close", () => resolve(failed ? `FAILED:${failed}` : "ACK"));
+    // A UTC-midnight rollover between construction and the write opens a new file: the rotator
+    // bubbles `close` from every stream, so wait until each stream opened here has closed, not
+    // just the first (the old, empty one), before acknowledging (#1199 review).
+    let open = 1;
+    stream.on("rotate", () => {
+      open += 1;
+    });
+    stream.on("close", () => {
+      open -= 1;
+      if (open === 0) resolve(failed ? `FAILED:${failed}` : "ACK");
+    });
     transport.log?.(
       { level: "info", message: "audit", [MESSAGE]: JSON.stringify(record) },
       () => {},
