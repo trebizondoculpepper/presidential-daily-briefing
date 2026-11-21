@@ -47,5 +47,55 @@ describe("force denials (#1021 review)", () => {
     expect(decision.why.text.split(". Force")[0]!.split("; ")).toHaveLength(8);
     for (const id of ["CLAIM-NOT-READY", "D-DENY-OPEN-PR", "D-DENY-REFINEMENT-UNKNOWN"])
       expect(ids).toContain(id);
+    // Every force denial carries an authored readable explanation (#1197 review).
+    expect(result.forceDenials.filter((d) => d.text === null)).toEqual([]);
+  });
+
+  it("explains the force-only denials of unowned continuations and unknown activity", () => {
+    const run = (op: string, extra: [number, string, string | number | boolean][]) =>
+      evaluatePolicy({
+        viewer: { role: "implementer", agent: "me", platform: "", order: "impact" },
+        datoms: [
+          [1, "owned-claims-complete", true],
+          [1, "forward-complete", true],
+          [100, "kind", "issue"],
+          [100, "state", "OPEN"],
+          [100, "number", 1],
+          [100, "target", "https://github.com/o/r/issues/1"],
+          [100, "created", 0],
+          [100, "labels-complete", true],
+          [100, "native-complete", true],
+          [100, "reverse-complete", true],
+          [100, "open-blockers", 0],
+          [100, "blocking-complete", true],
+          [100, "head", "not-a-pr"],
+          [100, "label", "status:ready"],
+          [100, "impact-state", "current"],
+          [100, "impact-size", "M"],
+          [100, "complexity-state", "current"],
+          [100, "complexity-size", "M"],
+          [100, "force-request", true],
+          [100, "force-operation", op],
+          [100, "force-reason", "valid"],
+          [100, "force-agent", "known"],
+          [100, "force-revision", "current"],
+          ...extra,
+        ],
+      }).forceDenials;
+    const texts = [
+      ...run("resume", []),
+      ...run("rework", []),
+      ...run("resume", [
+        [100, "owner", "me"],
+        [100, "claim-activity", "unknown"],
+        [100, "wait-reason", "claim history unreadable"],
+      ]),
+    ];
+    expect(texts.map((d) => d.ruleId).sort()).toEqual([
+      "FORCE-ACTIVITY-UNKNOWN",
+      "FORCE-NOT-RESPONSIBLE",
+      "FORCE-NOT-RETAINED",
+    ]);
+    for (const d of texts) expect(d.text).toMatch(/\w/);
   });
 });

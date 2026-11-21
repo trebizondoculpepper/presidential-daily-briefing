@@ -114,6 +114,8 @@ export interface PolicyBundle {
   sortClauses: string;
   definitions: DecisionRule[];
   denials: Record<string, string>;
+  /** #1021: readable explanations for force-only denial IDs (FORCE-*, CLAIM-*). */
+  forceDenialTexts: Record<string, string>;
   /** Optional literal purposes keyed by declared denial ID. */
   denialPurposes?: Record<string, string>;
   /** Named queries as canonical EDN, keyed by their queries.edn keyword without the colon. */

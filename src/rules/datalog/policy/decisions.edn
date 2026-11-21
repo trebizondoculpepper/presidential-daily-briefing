@@ -784,4 +784,10 @@
   "D-DENY-REFINEMENT" "Keep work that needs refinement out of pickup, whatever its estimate or readiness label says."
   "D-DENY-REESTIMATE" "Return resolved refinement to estimation instead of admitting it straight to implementation."
   "D-DENY-REFINEMENT-UNKNOWN" "Fail closed when refinement evidence could not be read completely."
-  "D-DENY-INVENTORY-UNKNOWN" "Withhold new implementation pickup while the viewer's claim inventory is incomplete."}}
+  "D-DENY-INVENTORY-UNKNOWN" "Withhold new implementation pickup while the viewer's claim inventory is incomplete."}
+ :force-denial-texts
+ {"FORCE-NOT-RETAINED" "Resume was requested, but the caller holds no retained claim on the ticket."
+  "FORCE-NOT-RESPONSIBLE" "Rework was requested, but the caller neither owns the claim nor is responsible for the ticket."
+  "FORCE-ACTIVITY-UNKNOWN" "The retained claim's activity could not be read, so whether it may resume is unknown."
+  "CLAIM-NOT-READY" "The ticket is not ready to pick up (neither status:ready nor status:incomplete)."
+  "CLAIM-INVENTORY-UNKNOWN" "The caller's claim inventory is incomplete: unseen active claims cannot be ruled out."}}

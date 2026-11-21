@@ -108,7 +108,7 @@ export interface PolicyResult {
    * #1021: every force denial per subject (uncapped, sorted), so a host reports each overridden or
    * refusing rule even when the decision's explanation text is bounded.
    */
-  forceDenials: { subject: number; ruleId: string }[];
+  forceDenials: { subject: number; ruleId: string; text: string | null }[];
   /**
    * Applicable native action obligations (#1113), in policy/obligations.edn source order, with
    * the fact that matched: the caller-supplied claim-role (or "none" for an unrestricted duty).
@@ -234,7 +234,14 @@ export function evaluatePolicy(input: PolicyFacts, options: PolicyOptions = {}):
     ruleId: String(rule),
   }));
   const forceDenials = query(db, queries["force-denials"])
-    .map(([id, rule]) => ({ subject: Number(id), ruleId: String(rule) }))
+    .map(([id, rule]) => ({
+      subject: Number(id),
+      ruleId: String(rule),
+      text:
+        (bundle.denials as Record<string, string>)[String(rule)] ??
+        (bundle.forceDenialTexts as Record<string, string> | undefined)?.[String(rule)] ??
+        null,
+    }))
     .sort(
       (a, b) => a.subject - b.subject || (a.ruleId < b.ruleId ? -1 : a.ruleId > b.ruleId ? 1 : 0),
     );

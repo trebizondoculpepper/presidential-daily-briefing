@@ -136,6 +136,8 @@
 ;; Resume and rework continue only the caller's own retained claim; without it there is nothing to
 ;; continue, and force cannot make the caller the owner.
 [(force-denial ?t ?r) [?t "force-operation" "resume"] (not (force-own-continuation ?t)) [(str "FORCE-NOT-RETAINED") ?r]]
+;; Unknown retained activity is missing evidence (retained.ts EVIDENCE_INCOMPLETE, #1197 review).
+[(force-denial ?t ?r) [?t "force-operation" "resume"] [?t "claim-activity" "unknown"] [(str "FORCE-ACTIVITY-UNKNOWN") ?r]]
 [(force-denial ?t ?r) [?t "force-operation" "rework"] (not (force-own-continuation ?t)) [(str "FORCE-NOT-RESPONSIBLE") ?r]]
 [(force-technical ?t) (force-denial ?t ?r) [(= ?r "D-DENY-CLAIM")]]
 [(force-technical ?t) (force-denial ?t ?r) [(= ?r "D-DENY-LABELS-UNKNOWN")]]
@@ -146,6 +148,7 @@
 [(force-technical ?t) (force-denial ?t ?r) [(= ?r "CLAIM-INVENTORY-UNKNOWN")]]
 [(force-technical ?t) (force-denial ?t ?r) [(= ?r "FORCE-NOT-RETAINED")]]
 [(force-technical ?t) (force-denial ?t ?r) [(= ?r "FORCE-NOT-RESPONSIBLE")]]
+[(force-technical ?t) (force-denial ?t ?r) [(= ?r "FORCE-ACTIVITY-UNKNOWN")]]
 [(force-denied ?t) (force-denial ?t ?r)]
 ;; Every precondition of an admissible request, in one place so each outcome is exclusive.
 [(force-ready ?t) [?t "force-request" true] (force-supported ?t) [?t "force-reason" "valid"] [?t "force-agent" "known"] [?t "force-revision" "current"]]
