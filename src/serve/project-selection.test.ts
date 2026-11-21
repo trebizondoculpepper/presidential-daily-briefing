@@ -85,6 +85,37 @@ describe("shared project selection", () => {
       "http://localhost/?repo=a%2Fb",
     ]);
   });
+  it("keeps the page's own scope when a page opts out of project selection (#818)", async () => {
+    // A page whose main element declares data-project-selection="none" (the Configuration page)
+    // is not auto-redirected to a sole or remembered project: it shows Global by default.
+    for (const saved of [null, "c/d"]) {
+      const redirects: string[] = [];
+      await runInNewContext(projectSelectionScript(), {
+        URL,
+        window: {
+          location: {
+            href: "http://localhost/configuration",
+            replace: (v: string) => redirects.push(v),
+          },
+          localStorage: { getItem: () => saved, setItem: () => undefined },
+        },
+        document: {
+          querySelector: (selector: string) =>
+            selector === "[data-project-selection='none']" ? ({} as Element) : null,
+        },
+        fetch: async () => ({
+          ok: true,
+          json: async () => ({
+            repositories:
+              saved === null
+                ? [{ repository: "a/b" }]
+                : [{ repository: "a/b" }, { repository: "c/d" }],
+          }),
+        }),
+      });
+      expect(redirects).toEqual([]);
+    }
+  });
 });
 
 describe("Working for header (#669)", () => {

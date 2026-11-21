@@ -103,6 +103,17 @@ export const servedPages: readonly ServedPage[] = [
     carries: [],
     shipped: true,
   },
+  // Configuration (#818): API-first; reads /api/v1/configuration. Global by default; a served
+  // project's repository settings follow the shared selection. Read-only in this slice.
+  {
+    id: "configuration",
+    path: "/configuration",
+    label: "Configuration",
+    scope: "global-or-project",
+    parameters: ["repo"],
+    carries: [],
+    shipped: true,
+  },
   {
     id: "rules",
     path: "/rules",

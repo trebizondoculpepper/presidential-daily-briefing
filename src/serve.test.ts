@@ -493,6 +493,7 @@ describe("shared HTML route binding (#605)", () => {
         "/setup",
         "/quotas",
         "/quotas?repo=example/one",
+        "/configuration",
       ]) {
         const reply = await call(running.port, path);
         expect(reply.status).toBe(200);
@@ -508,6 +509,7 @@ describe("shared HTML route binding (#605)", () => {
         "/setup?role=implementer&role=designer",
         "/rules?repo=",
         "/quotas?extra=x",
+        "/configuration?tab=doctor",
       ]) {
         const reply = await call(running.port, path);
         expect(reply.status).toBe(400);

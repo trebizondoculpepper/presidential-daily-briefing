@@ -23,6 +23,7 @@ import type {
 } from "../github/github.js";
 import type { Clock } from "../mcp/polling.js";
 import type { RulesPageRuntime } from "./rules-page.js";
+import type { ConfigurationRuntime } from "./configuration.js";
 import type { ApplicationState } from "./appstate.js";
 
 /** The gh account every collection runs as: host and login only, never a token. */
@@ -108,6 +109,8 @@ export interface ServeRuntime {
   read?: ServeReadRuntime;
   /** Local read-only git/file boundaries of the rules page (#392); absent means the real ones. */
   rulesPage?: RulesPageRuntime;
+  /** Local read-only config boundaries of the Configuration page (#818); absent means the real ones. */
+  configuration?: ConfigurationRuntime;
   /** Built frontend assets (#853); tests inject them, production reads dist/web. */
   webAssets?: import("./webassets.js").WebAssetReader;
   /** Read-only Doctor probes; run scope/root and cancellation are fixed by the server. */

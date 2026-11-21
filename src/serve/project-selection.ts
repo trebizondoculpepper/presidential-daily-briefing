@@ -72,6 +72,14 @@ export async function restoreProjectSelection(): Promise<void> {
     } catch {
       // Browser privacy settings may disable persistence; ordinary navigation still works.
     }
+    // A page can declare it does not auto-select a project (#818): it keeps its own default
+    // scope (for example the Configuration page shows Global), and a project is chosen only by
+    // an explicit link. The shared header is still filled above.
+    if (
+      typeof document !== "undefined" &&
+      document.querySelector("[data-project-selection='none']")
+    )
+      return;
     if (url.searchParams.has("repo")) {
       if (url.searchParams.getAll("repo").length !== 1) return;
       const selected = canonical(url.searchParams.get("repo"));
