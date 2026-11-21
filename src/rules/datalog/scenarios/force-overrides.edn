@@ -300,4 +300,11 @@
    :facts [{:e 1 "forward-complete" true "owned-claims-complete" true}
            {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "reverse-complete" true "native-complete" true "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "status:ready" "labels-complete" true "open-blockers" 0 "owner" "me" "claim-history-complete" true "refinement" 200 "force-request" true "force-operation" "rework" "force-reason" "valid" "force-agent" "known" "force-revision" "current"}
            {:e 200 "refinement-state" "unknown"}]
-   :expect {:actions [{:subject 100 :rule "D-OWN-HELD-BACK" :kind "inspect" :band 3} {:subject 100 :rule "D-FORCE-NO-DENIAL" :kind "force-allow" :band 1 :why "No rule denied rework, so nothing is overridden; proceed as a normal rework."}] :denials #{[100 "D-DENY-CLAIM"] [100 "D-DENY-REFINEMENT"]}}}]}
+   :expect {:actions [{:subject 100 :rule "D-OWN-HELD-BACK" :kind "inspect" :band 3} {:subject 100 :rule "D-FORCE-NO-DENIAL" :kind "force-allow" :band 1 :why "No rule denied rework, so nothing is overridden; proceed as a normal rework."}] :denials #{[100 "D-DENY-CLAIM"] [100 "D-DENY-REFINEMENT"]}}}
+
+  {:id "f42-owned-retry-without-complete-inventory"
+   :doc "An owned retry with no observed other claims does not need a complete inventory (planClaimFor)"
+   :viewer {:role "implementer" :agent "me"}
+   :facts [{:e 1 "forward-complete" true "owned-claims-complete" false}
+           {:e 100 "kind" "issue" "state" "OPEN" "number" 1 "target" "https://github.com/o/r/issues/1" "created" 1767225600000 "reverse-complete" true "native-complete" true "blocking-complete" true "impact-state" "current" "impact-size" "M" "complexity-state" "current" "complexity-size" "M" "head" "not-a-pr" "label" "status:ready" "labels-complete" true "open-blockers" 0 "owner" "me" "claim-history-complete" true "force-request" true "force-operation" "claim" "force-reason" "valid" "force-agent" "known" "force-revision" "current"}]
+   :expect {:actions [{:subject 100 :rule "D-OWN" :kind "continue-implementation" :band 6} {:subject 100 :rule "D-FORCE-NO-DENIAL" :kind "force-allow" :band 1 :why "No rule denied claim, so nothing is overridden; proceed as a normal claim."}] :denials #{[100 "D-DENY-CLAIM"]}}}]}

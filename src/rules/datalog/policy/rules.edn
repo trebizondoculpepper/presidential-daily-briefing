@@ -152,7 +152,7 @@
 ;; An absent inventory fact is "not read", never complete (#1197 review): only an explicit true passes.
 [(force-inventory-read ?t) [?t "kind" _] [1 "owned-claims-complete" true]]
 ;; Every forced operation needs an explicitly complete claim inventory (#1197 review).
-[(force-denial ?t ?r) [?t "force-request" true] (not (force-already-active ?t)) (not (force-inventory-read ?t)) [(str "CLAIM-INVENTORY-UNKNOWN") ?r]]
+[(force-denial ?t ?r) [?t "force-request" true] (not (force-already-active ?t)) (not (force-owned-retry ?t)) (not (force-inventory-read ?t)) [(str "CLAIM-INVENTORY-UNKNOWN") ?r]]
 ;; Normal admission refuses while the caller holds other active claims (claims.ts/retained.ts
 ;; admissionFor, #1197 review): known active work is a workflow denial a human may override;
 ;; another claim whose activity is unknown is missing evidence.

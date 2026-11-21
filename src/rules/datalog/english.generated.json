@@ -1,8 +1,8 @@
 {
   "modelVersion": 3,
   "policyVersion": 1,
-  "rulesHash": "57a7301ce31b2a73827eb950cd477158a5c3bc570fb3efe19e3c79fa848bed07",
-  "narrationHash": "877110dd0ca1a2191e067429a463fe6ecd9c35b87fa8baeae255e3c85e7c6501",
+  "rulesHash": "70bc5aee7ee32fdf95703c8e5b6801313586b09ed670a52be1c5aa2a2b7ce8c8",
+  "narrationHash": "28f6743cc184016053dca0cc532dfecfb7c9d2b5af74331d6ba5bab3690027ea",
   "sources": [
     "policy/schema.edn",
     "policy/rules.edn",
@@ -10794,6 +10794,21 @@
                 {
                   "type": "call",
                   "predicate": "force-already-active",
+                  "args": [
+                    {
+                      "var": "?t"
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "not",
+              "join": null,
+              "body": [
+                {
+                  "type": "call",
+                  "predicate": "force-owned-retry",
                   "args": [
                     {
                       "var": "?t"
@@ -29666,6 +29681,6 @@
     "overrides": 5,
     "constants": 14,
     "attributes": 141,
-    "clauses": 1728
+    "clauses": 1730
   }
 }
