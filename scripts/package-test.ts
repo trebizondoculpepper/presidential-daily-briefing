@@ -846,7 +846,7 @@ try {
   const runtimeChunks = new Set<string>();
   const visit = async (file: string): Promise<void> => {
     for (const match of (await readFile(join(root, file), "utf8")).matchAll(
-      /(?:\bfrom\s*|\bimport\s*(?:\(\s*)?)["']\.\/((?:datalog|engine|requiredchecks|english-render)-[A-Za-z0-9_-]+\.mjs)["']/g,
+      /(?:\bfrom\s*|\bimport\s*(?:\(\s*)?)["']\.\/((?:datalog|engine|requiredchecks|english-render|rules-command)-[A-Za-z0-9_-]+\.mjs)["']/g,
     )) {
       const child = `dist/${match[1]}`;
       if (runtimeChunks.has(child)) continue;
